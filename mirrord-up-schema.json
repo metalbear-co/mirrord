@@ -9,6 +9,7 @@
       "$ref": "#/$defs/CommonConfig",
       "default": {
         "accept_invalid_certificates": null,
+        "baggage": null,
         "context": null,
         "operator": null,
         "telemetry": null
@@ -82,6 +83,14 @@
             "boolean",
             "null"
           ]
+        },
+        "baggage": {
+          "description": "Sets the OpenTelemetry baggage value for every service. The `BAGGAGE` environment\nvariable takes precedence.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-mirrord-plan": "team"
         },
         "context": {
           "description": "Kube context to use for all services, from your kubeconfig.\n\nA service's own `context` takes precedence, and `mirrord up --context` takes precedence\nover both. When none is set, the global config's `kube_context` is used, then the\nkubeconfig's current context.",

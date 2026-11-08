@@ -117,6 +117,14 @@ jobs:
           push: false
           outputs: type=docker,dest=/tmp/ci-runner-image.tar
           cache-from: type=registry,ref=ghcr.io/metalbear-co/ci-runner:buildcache-${{ matrix.platform }}
+      # The Blacksmith builder's GC policy is time-based with no size ceiling, so every build's
+      # one-off `apps` layers pile up on the sticky disk until they age out. Cap the cache
+      # explicitly. Keep this above the size of the cache mounts the Dockerfile relies on, or
+      # every build recompiles from scratch.
+      - name: Trim the build cache
+        if: ${{ inputs.blacksmith }}
+        continue-on-error: true
+        run: docker buildx prune --force --max-used-space 40GB
       - name: Upload the CI runner image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

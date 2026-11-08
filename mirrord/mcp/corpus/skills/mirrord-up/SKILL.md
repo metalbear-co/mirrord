@@ -7,7 +7,7 @@ description: >
   or managing multiple mirrord sessions' lifecycle in one command.
 metadata:
   author: MetalBear
-  version: "1.10"
+  version: "1.11"
 ---
 
 # mirrord up Skill
@@ -231,9 +231,9 @@ When `true`, `mirrord up` doesn't launch this service unless it is named on the 
 
 1. Set up queue splitting for the target and enable the relevant queue-splitting feature in the mirrord operator, per the target's `MirrordSplitConfig` (see the Queue Splitting guide, linked from the official docs).
 2. Start `mirrord up` with a session key, e.g. `mirrord up --key checkout-debug`.
-3. Messages intended for the session must contain `mirrord-session=checkout-debug`. This is matched in broker-specific message metadata (Kafka headers, RabbitMQ headers, SQS message attributes, Google Cloud Pub/Sub attributes, Azure Service Bus application properties, Temporal headers) or, for Redis Pub/Sub and BullMQ, in the message payload.
+3. Messages intended for the session must contain `mirrord-session=checkout-debug`. This is matched in broker-specific message metadata (Kafka headers, RabbitMQ headers, SQS message attributes, Google Cloud Pub/Sub attributes, Azure Service Bus application properties, NATS JetStream headers, Temporal headers) or, for Redis Pub/Sub and BullMQ, in the message payload.
 
-Supported brokers: Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, Redis Pub/Sub, Temporal, and BullMQ.
+Supported brokers: Kafka, Amazon SQS, RabbitMQ, Google Cloud Pub/Sub, Azure Service Bus, NATS JetStream, Redis Pub/Sub, Temporal, and BullMQ. Core NATS pub/sub is split only when a service's `config_patch` sets it in `feature.split_queues`, which then replaces the automatic splits.
 
 > RabbitMQ splitting in `mirrord up` requires an operator that supports it. Against an older operator the session still runs, with RabbitMQ splitting disabled and a warning printed for the affected service.
 
