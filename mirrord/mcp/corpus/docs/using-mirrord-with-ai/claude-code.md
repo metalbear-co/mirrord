@@ -45,16 +45,24 @@ For other install methods, see [Installing the mirrord CLI](../installing-mirror
 
 Check the install with `mirrord --version`, and check cluster access with `kubectl get pods -n <namespace>`.
 
-## 2. Add the mirrord skills to Claude Code
+## 2. Add mirrord to Claude Code
 
-In Claude Code, run:
+Register the [mirrord MCP server](./mcp-server.md), then restart Claude Code:
+
+```sh
+claude mcp add --scope user mirrord -- mirrord mcp
+```
+
+The server gives Claude Code the mirrord skills for your installed version: how to find a target, write a valid `mirrord.json`, run a session, and use the features for shared clusters. It also validates every config Claude Code writes against your version's schema.
+
+You can also install the skills as a Claude Code plugin. In Claude Code, run:
 
 ```
 /plugin marketplace add metalbear-co/skills
 /plugin install mirrord@mirrord-skills
 ```
 
-The plugin gives Claude Code skills for mirrord: how to find a target, write a valid `mirrord.json`, run a session, and use the features for shared clusters. Claude Code loads the right skill when your prompt needs it. See [Agent Skills for mirrord](./ai-skills-plugin.md) for the full list.
+See [Agent Skills for mirrord](./ai-skills-plugin.md) for the full list of skills.
 
 ## 3. Tell Claude Code how to test in this repository
 
@@ -147,6 +155,7 @@ For other errors, see [Common Issues](../troubleshooting/common-issues.md).
 
 ## Related
 
+- [mirrord MCP Server](./mcp-server.md)
 - [Agent Skills for mirrord](./ai-skills-plugin.md)
 - [Configure AI agents to use mirrord](./the-meta-prompt.md) (the meta-prompt)
 - [metalbear.com/agents.md](https://metalbear.com/agents.md), instructions written for agents

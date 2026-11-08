@@ -844,32 +844,52 @@ pub struct CommonFieldsRef<'a> {
 }
 
 impl BranchDatabaseSpec {
+    /// Every dialect whose options the spec sets, in [`DatabaseDialect`] order.
+    pub fn configured_dialects(&self) -> impl Iterator<Item = DialectConfig<'_>> {
+        DatabaseDialect::VARIANTS
+            .iter()
+            .filter_map(|dialect| match dialect {
+                DatabaseDialect::Postgres => {
+                    self.postgres_options.as_ref().map(DialectConfig::Postgres)
+                }
+                DatabaseDialect::Mysql => self.mysql_options.as_ref().map(DialectConfig::Mysql),
+                DatabaseDialect::Mariadb => {
+                    self.mariadb_options.as_ref().map(DialectConfig::Mariadb)
+                }
+                DatabaseDialect::Dynamodb => {
+                    self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb)
+                }
+                DatabaseDialect::Mongodb => {
+                    self.mongodb_options.as_ref().map(DialectConfig::Mongodb)
+                }
+                DatabaseDialect::Mssql => self.mssql_options.as_ref().map(DialectConfig::Mssql),
+                DatabaseDialect::Redis => self.redis_options.as_ref().map(DialectConfig::Redis),
+                DatabaseDialect::Spanner => {
+                    self.spanner_options.as_ref().map(DialectConfig::Spanner)
+                }
+                DatabaseDialect::Clickhouse => self
+                    .clickhouse_options
+                    .as_ref()
+                    .map(DialectConfig::Clickhouse),
+                DatabaseDialect::Cockroachdb => self
+                    .cockroachdb_options
+                    .as_ref()
+                    .map(DialectConfig::Cockroachdb),
+                DatabaseDialect::S3 => self.s3_options.as_ref().map(DialectConfig::S3),
+                DatabaseDialect::Turbopuffer => self
+                    .turbopuffer_options
+                    .as_ref()
+                    .map(DialectConfig::Turbopuffer),
+                DatabaseDialect::Generic => {
+                    self.generic_options.as_ref().map(DialectConfig::Generic)
+                }
+            })
+    }
+
     /// Validate and extract the dialect config from the spec.
     /// Exactly one dialect option field must be set.
     pub fn dialect(&self) -> Result<DialectConfig<'_>, DialectValidationError> {
-        let mut dialects = [
-            self.postgres_options.as_ref().map(DialectConfig::Postgres),
-            self.mysql_options.as_ref().map(DialectConfig::Mysql),
-            self.mariadb_options.as_ref().map(DialectConfig::Mariadb),
-            self.dynamodb_options.as_ref().map(DialectConfig::Dynamodb),
-            self.mongodb_options.as_ref().map(DialectConfig::Mongodb),
-            self.mssql_options.as_ref().map(DialectConfig::Mssql),
-            self.redis_options.as_ref().map(DialectConfig::Redis),
-            self.spanner_options.as_ref().map(DialectConfig::Spanner),
-            self.clickhouse_options
-                .as_ref()
-                .map(DialectConfig::Clickhouse),
-            self.cockroachdb_options
-                .as_ref()
-                .map(DialectConfig::Cockroachdb),
-            self.s3_options.as_ref().map(DialectConfig::S3),
-            self.turbopuffer_options
-                .as_ref()
-                .map(DialectConfig::Turbopuffer),
-            self.generic_options.as_ref().map(DialectConfig::Generic),
-        ]
-        .into_iter()
-        .flatten();
+        let mut dialects = self.configured_dialects();
 
         let config = dialects.next().ok_or(DialectValidationError::NoneSet)?;
         if dialects.next().is_some() {
@@ -976,6 +996,9 @@ pub struct SqlBranchCopyConfig {
     /// it replaces the operator's dump defaults. An empty list means no dump args.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dump_args: Option<Vec<String>>,
+    /// Tables the copy leaves out, by name or `*`/`?` pattern. Honored for MySQL and MariaDB.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_tables: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, strum_macros::AsRefStr)]
@@ -993,6 +1016,7 @@ impl Default for SqlBranchCopyConfig {
             mode: SqlBranchCopyMode::Empty,
             items: None,
             dump_args: None,
+            exclude_tables: Vec::new(),
         }
     }
 }
@@ -1174,16 +1198,19 @@ impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                exclude_tables: Vec::new(),
             },
             PgBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                exclude_tables: Vec::new(),
             },
             PgBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
+                exclude_tables: Vec::new(),
             },
         }
     }
@@ -1192,20 +1219,34 @@ impl From<PgBranchCopyConfig> for SqlBranchCopyConfig {
 impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: MysqlBranchCopyConfig) -> Self {
         match config {
-            MysqlBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
+            MysqlBranchCopyConfig::Empty {
+                tables,
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
-            MysqlBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
+            MysqlBranchCopyConfig::Schema {
+                tables,
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
-            MysqlBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
+            MysqlBranchCopyConfig::All {
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
         }
     }
@@ -1214,20 +1255,34 @@ impl From<MysqlBranchCopyConfig> for SqlBranchCopyConfig {
 impl From<MariadbBranchCopyConfig> for SqlBranchCopyConfig {
     fn from(config: MariadbBranchCopyConfig) -> Self {
         match config {
-            MariadbBranchCopyConfig::Empty { tables, dump_args } => SqlBranchCopyConfig {
+            MariadbBranchCopyConfig::Empty {
+                tables,
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
-            MariadbBranchCopyConfig::Schema { tables, dump_args } => SqlBranchCopyConfig {
+            MariadbBranchCopyConfig::Schema {
+                tables,
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args,
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
-            MariadbBranchCopyConfig::All { dump_args } => SqlBranchCopyConfig {
+            MariadbBranchCopyConfig::All {
+                dump_args,
+                exclude_tables,
+            } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args,
+                exclude_tables: exclude_tables.unwrap_or_default(),
             },
         }
     }
@@ -1240,16 +1295,19 @@ impl From<MssqlBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             MssqlBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             MssqlBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
         }
     }
@@ -1262,16 +1320,19 @@ impl From<CockroachdbBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             CockroachdbBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             CockroachdbBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
         }
     }
@@ -1284,16 +1345,19 @@ impl From<ClickhouseBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             ClickhouseBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             ClickhouseBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
         }
     }
@@ -1306,16 +1370,19 @@ impl From<SpannerBranchCopyConfig> for SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Empty,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             SpannerBranchCopyConfig::Schema { tables } => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::Schema,
                 items: convert_item_copy_configs(tables),
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
             SpannerBranchCopyConfig::All => SqlBranchCopyConfig {
                 mode: SqlBranchCopyMode::All,
                 items: None,
                 dump_args: None,
+                exclude_tables: Vec::new(),
             },
         }
     }
@@ -1493,11 +1560,13 @@ mod tests {
                 },
             )])),
             dump_args: Some(vec![]),
+            exclude_tables: Some(vec!["staging_*".to_owned()]),
         });
 
         assert!(matches!(copy.mode, SqlBranchCopyMode::Empty));
         assert!(copy.items.is_some());
         assert_eq!(copy.dump_args, Some(vec![]));
+        assert_eq!(copy.exclude_tables, ["staging_*"]);
     }
 
     /// Spanner's source locators parse from their flat wire keys, `database` is deliberately not a

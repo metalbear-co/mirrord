@@ -29,6 +29,11 @@ pub enum AllEntries {
     All,
 }
 
+/// `reason` of the operator's error response when the requested
+/// [`ResolveSplitConfigDbBranchesRequest::copy_mode`] is missing from an entry's
+/// `copy.allowedModes`.
+pub const COPY_MODE_NOT_ALLOWED_REASON: &str = "CopyModeNotAllowed";
+
 /// Request body for `POST /splitconfigdbbranches`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolveSplitConfigDbBranchesRequest {
@@ -41,6 +46,25 @@ pub struct ResolveSplitConfigDbBranchesRequest {
     /// `dbBranches` the session is ignoring.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<SplitConfigDbBranchesRequest>,
+    /// Replaces the `copy.mode` of every resolved entry that has copy modes. A mode missing
+    /// from an entry's `copy.allowedModes` is refused. Sent only to operators with
+    /// [`NewOperatorFeature::DbBranchesSplitConfigCopyMode`](crate::crd::NewOperatorFeature).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_mode: Option<SplitConfigCopyMode>,
+}
+
+/// A copy mode a session requests for its `dbBranches` entries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitConfigCopyMode {
+    Empty,
+    Schema,
+    All,
+
+    /// A mode a newer client asks for, so an operator that doesn't know it can still read the
+    /// request and refuse the mode instead of the whole request. Never sent.
+    #[serde(other, skip_serializing)]
+    Unknown,
 }
 
 /// Response of `POST /splitconfigdbbranches`.

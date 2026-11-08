@@ -20,7 +20,8 @@
 # places.
 #
 # 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
-# 2. The local `.github/actions/e2e-setup/action.yaml`, where you should add the compilation call.
+# 2. `scripts/prepare_e2e.sh`, where you should add the compilation call. It builds the apps into the CI runner
+#    image; the CI section of `AGENTS.md` says when that image is rebuilt.
 #
 # Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
 # while forgetting (1) nets you a message saying that the service could not be reached/found.
@@ -28,8 +29,6 @@
 # Caveats:
 #
 # You cannot use `workspace` dependencies in the test app, it fails to build, must fully specify the dependency.
-#
-# Related to (2): If you modify `mirrord-ci/actions.yaml`, you'll be affecting every PR!
 name: CI
 
 on:
@@ -151,9 +150,11 @@ jobs:
             package.json
             pnpm-lock.yaml
             pnpm-workspace.yaml
+            .github/workflows/build-ci-runner.yaml
           files_ignore: |
             tests/src/**
             tests/README.md
+            tests/AGENTS.md
       - name: get install script changes
         id: changed-install-script
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -193,6 +194,8 @@ jobs:
         with:
           files: |
             mirrord/protocol/**
+          files_ignore: |
+            mirrord/protocol/**/*.md
       - name: get protocol toml changes
         id: changed-protocol-toml
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -356,6 +359,50 @@ jobs:
           shared-key: mirrord
       - run: cargo xtask corpus check
 
+  # The next release PR bumps the corpus pins to upstream HEAD, so this checks the config blocks in
+  # the skills repo at HEAD against the schemas of this PR, to fail a schema change that breaks
+  # them here rather than on the release PR. A change the skills repo can only follow once it ships,
+  # such as renaming an option, can't pass: add the `skip-corpus-upstream` label, re-run the failed
+  # jobs, and update the skills repo before the next release. The label is read when the job runs,
+  # since a re-run gets the labels of the original event. The merge queue doesn't run it, as a PR
+  # in the queue has already passed it or been labeled to skip it.
+  corpus_upstream_check:
+    needs: [plan]
+    if: ${{ github.event_name == 'pull_request' && (needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true') }}
+    runs-on: ${{ needs.plan.outputs.runner_4 }}
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check for the skip label
+        id: skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          if grep -qx skip-corpus-upstream <<< "$labels"; then
+            echo "Skipped by the skip-corpus-upstream label."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          cache: false
+      - name: Rust cache
+        if: ${{ steps.skip.outputs.skip != 'true' }}
+        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+        with:
+          shared-key: mirrord
+      - if: ${{ steps.skip.outputs.skip != 'true' }}
+        run: cargo xtask corpus check-upstream
+
   install_script:
     needs: [plan]
     if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
@@ -391,7 +438,6 @@ jobs:
     uses: ./.github/workflows/build-cli-image.yaml
     with:
       runner: ${{ needs.plan.outputs.runner_8 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
 
   # ── tests ───────────────────────────────────────────────────────────
 
@@ -511,6 +557,7 @@ jobs:
         windows_tests,
         install_script,
         corpus_check,
+        corpus_upstream_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:

@@ -460,7 +460,8 @@ operator:
         server: "https://api.cluster-a.example.com:6443"
         caData: "LS0tLS1CRUdJTi..."
         bearerToken: "eyJhbGciOiJS..."
-        isDefault: true
+        # Namespace where the mirrord operator runs on this cluster (default: mirrord)
+        # namespace: mirrord
 
       # EKS IAM authentication
       us-west-1:
@@ -501,7 +502,7 @@ The cluster key names in the `clusters` map should match the real cluster names.
 
 ### Where Data Is Stored
 
-When you provide cluster configuration in the Helm values, the chart splits it into two places. Non-sensitive configuration (`server`, `caData`, `authType`, `region`, `isDefault`, `namespace`) goes into the ConfigMap (`clusters-config.yaml`). Sensitive credentials (`bearerToken`, `tls.crt`, `tls.key`) go into a Secret (`mirrord-cluster-<name>`).
+When you provide cluster configuration in the Helm values, the chart splits it into two places. Non-sensitive configuration (`server`, `caData`, `authType`, `region`, `namespace`) goes into the ConfigMap (`clusters-config.yaml`). `namespace` is the namespace where the mirrord operator runs on that cluster (default `mirrord`), not a workload namespace. The Default cluster is set only by `defaultCluster`. The per-cluster `isDefault` field is deprecated and ignored. Use `defaultCluster`. Sensitive credentials (`bearerToken`, `tls.crt`, `tls.key`) go into a Secret (`mirrord-cluster-<name>`).
 
 For EKS IAM and AKS Workload Identity clusters, no Secret is created - everything is in the ConfigMap since authentication is through IAM/Entra ID, not stored credentials.
 
@@ -649,7 +650,7 @@ A: No. The developer experience is identical to single-cluster. Developers run `
 A: Yes. Set `managementOnly: false` (the Helm chart default is `true`) so the Primary participates as a workload cluster, and set `managementOnly: true` only if the Primary has no application pods. See [Management-Only Mode](multi-cluster.md#management-only-mode) for what the setting changes.
 
 **Q: Can I run some sessions on the Primary only?**
-A: Yes. A session started with `multi_cluster: false` stays on the Primary and runs as a regular single-cluster session, with the Primary's local queue splitting and database branching.
+A: Yes, if the Primary runs workloads (`managementOnly: false`). A session started with `multi_cluster: false` stays on the Primary and runs as a regular single-cluster session, with the Primary's local queue splitting and database branching. With `managementOnly: true`, `multi_cluster: false` is not supported.
 
 **Q: Which resources can I exclude from syncing to the member clusters?**
 A: Label a `MirrordSplitConfig` or `MirrordPropertyList` with `operator.metalbear.co/skip-mc-sync: "true"` to keep the operator from syncing it. This is useful when your GitOps tool already applies the resource on every cluster. The operator skips it silently.

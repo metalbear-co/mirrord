@@ -175,6 +175,10 @@ enum CorpusCommand {
     /// config blocks in the skills repo at its pinned commit validate against this build's schemas
     /// (needs `uv`)
     Check,
+
+    /// Fail unless the config blocks in the skills repo at upstream HEAD, which the next release
+    /// ships, validate against this build's schemas (needs `uv`)
+    CheckUpstream,
 }
 
 fn parse_platform(s: &str) -> Result<Platform, String> {
@@ -230,6 +234,7 @@ fn main() -> Result<()> {
         Commands::Corpus { command } => match command {
             CorpusCommand::Sync { bump } => tasks::corpus::sync(bump)?,
             CorpusCommand::Check => tasks::corpus::check()?,
+            CorpusCommand::CheckUpstream => tasks::corpus::check_upstream()?,
         },
 
         Commands::BuildUi => {

@@ -122,6 +122,7 @@ pub async fn run_wizard(default_output: PathBuf) -> Result<(), InitError> {
 
     let cfg = UpConfig {
         common: CommonConfig::default(),
+        modes: Default::default(),
         services,
     };
     let rendered = render_yaml(&cfg)?;
@@ -204,7 +205,7 @@ async fn prompt_service(
         ServiceConfig {
             target,
             env: EnvConfig::default(),
-            default_mode,
+            default_mode: default_mode.into(),
             http_filter,
             ignore_ports,
             skip: false,
@@ -527,6 +528,7 @@ fn render_yaml(cfg: &UpConfig) -> Result<String, InitError> {
     // that sets only its required field.
     let defaults = serde_yaml::to_value(UpConfig {
         common: CommonConfig::default(),
+        modes: Default::default(),
         services: HashMap::new(),
     })?;
     remove_defaults(&mut value, &defaults);
@@ -647,7 +649,7 @@ mod tests {
                 r#override: Some([("FOO".to_owned(), "bar".to_owned())].into_iter().collect()),
                 ..Default::default()
             },
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig {
                 header_filter: Some("x-session: me".to_owned()),
                 ..Default::default()
@@ -674,7 +676,9 @@ mod tests {
                 accept_invalid_certificates: Some(true),
                 telemetry: None,
                 context: None,
+                baggage: Some("mirrord-session=abc".into()),
             },
+            modes: Default::default(),
             services: [("api".into(), sample_service())].into_iter().collect(),
         };
         let rendered = render_yaml(&cfg).unwrap();
@@ -690,6 +694,10 @@ mod tests {
         assert_eq!(parsed.common.operator, Some(false));
         assert_eq!(parsed.common.accept_invalid_certificates, Some(true));
         assert_eq!(parsed.common.telemetry, None);
+        assert_eq!(
+            parsed.common.baggage.as_deref(),
+            Some("mirrord-session=abc")
+        );
         assert_eq!(parsed.services["api"], sample_service());
     }
 
@@ -697,6 +705,7 @@ mod tests {
     fn omits_common_when_all_default() {
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), sample_service())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -714,7 +723,7 @@ mod tests {
         let svc = ServiceConfig {
             target: TargetConfig::UNSPECIFIED,
             env: EnvConfig::default(),
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig {
                 header_filter: Some("x-session: me".to_owned()),
                 ..Default::default()
@@ -733,6 +742,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -768,7 +778,7 @@ mod tests {
         let svc = ServiceConfig {
             target: TargetConfig::UNSPECIFIED,
             env: EnvConfig::default(),
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: [9090, 9091, 15090].into_iter().collect(),
             skip: false,
@@ -784,6 +794,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
@@ -817,7 +828,7 @@ mod tests {
                 namespace: Some("staging".into()),
             }),
             env: EnvConfig::default(),
-            default_mode: ServiceMode::default(),
+            default_mode: ServiceMode::default().into(),
             http_filter: HttpFilterConfig::default(),
             ignore_ports: BTreeSet::new(),
             skip: false,
@@ -833,6 +844,7 @@ mod tests {
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
+            modes: Default::default(),
             services: [("svc".into(), svc.clone())].into_iter().collect(),
         };
         let out = render_yaml(&cfg).unwrap();
