@@ -74,7 +74,7 @@ When generating the key, an org admin also chooses **identity sharing** (ticked 
 | `replicas` | `1` | Leader + standby replicas for HA. |
 | `port` | `443` | Change to `3000`/`8443` if 443 is restricted; ensure node reachability. Binds `[::]` with `0.0.0.0` fallback. |
 | `requests` / `limits` | `100m/100Mi` · `500m/200Mi` | ~200 concurrent sessions at defaults; raise for more. |
-| `clusterName` | unset | Friendly cluster label in telemetry / license server. |
+| `clusterName` | unset | Friendly cluster label. A self-hosted License Server always receives it. On operator `3.227.0`+ it's sent to the mirrord cloud only when identity sharing is enabled for the cloud API key, and then shown in the Clusters view at app.metalbear.com — without identity sharing, clusters there are listed by `cluster_id` only. Older operators always send it. |
 | `logLevel` | `mirrord=info,operator=info,kube_runtime=warn` | stdout log filter. |
 | `jsonLog` | `false` | JSON stdout logs. |
 | `otelLogExportUrl` / `otelTraceExportUrl` / `otelLogLevel` | unset | OTel export (independent of stdout). As of operator `3.186.0`, both URLs may reference vars set in `operator.extraEnv` via `$(VAR_NAME)` syntax. |

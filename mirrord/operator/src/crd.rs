@@ -926,6 +926,11 @@ pub enum NewOperatorFeature {
     /// whether a primary streams the whole setup or just its own cluster.
     MultiClusterSubscribe,
 
+    /// This primary is management-only: it links the workload clusters but runs none itself, so a
+    /// session forced onto it (`multi_cluster: false`, a label target) has nothing to run against.
+    /// Lets the CLI refuse such a session with the cause instead of failing on target resolution.
+    MultiClusterManagementOnly,
+
     ServerlessSessionsManager,
 
     /// Reporting is available on Free so locally rejected demand can be observed without granting
@@ -960,6 +965,11 @@ pub enum NewOperatorFeature {
     /// operator ignores the mode and seeds each branch with the entry's own.
     DbBranchesSplitConfigCopyMode,
 
+    /// This operator leaves the tables named in `feature.db_branches[].copy.exclude_tables` out
+    /// of a MySQL or MariaDB branch copy. Gated so the CLI fails fast: an older operator's CRD schema prunes
+    /// `excludeTables`, and the copy would then fail on the very tables the user excluded when
+    /// they disappear mid-dump.
+    MysqlBranchExcludeTables,
     /// This operator runs a Redis branch as a one node Redis Cluster when
     /// `feature.db_branches[].cluster` is set. Gated so the CLI fails fast: an older operator's
     /// CRD schema prunes `redisOptions.cluster` and brings up a standalone server, which a
@@ -1045,6 +1055,7 @@ impl NewOperatorFeature {
             | Self::DbBranchSecretManagerExtract
             | Self::DbBranchSsmParameter
             | Self::DbBranchDedicatedNamespace
+            | Self::MysqlBranchExcludeTables
             | Self::RedisClusterBranching => Some("feature.db_branches"),
             Self::PreviewEnv
             | Self::PreviewTlsDelivery
@@ -1055,9 +1066,10 @@ impl NewOperatorFeature {
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
-            Self::MultiClusterPrimary | Self::MultiClusterRemote | Self::MultiClusterSubscribe => {
-                Some("multi_cluster")
-            }
+            Self::MultiClusterPrimary
+            | Self::MultiClusterRemote
+            | Self::MultiClusterSubscribe
+            | Self::MultiClusterManagementOnly => Some("multi_cluster"),
             Self::ProxyApi
             | Self::SessionManagement
             | Self::LayerReconnect
@@ -1158,6 +1170,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::SubscribeEventOptions => "subscribe event options",
             NewOperatorFeature::MultiClusterSubscribe => "multi-cluster subscribe",
+            NewOperatorFeature::MultiClusterManagementOnly => {
+                "multi-cluster management-only primary"
+            }
             NewOperatorFeature::QueueSplittingWithComposedFilters => {
                 "queue splitting with composable message filters"
             }
@@ -1178,6 +1193,7 @@ impl Display for NewOperatorFeature {
                 "DB branches in a dedicated namespace per key"
             }
             NewOperatorFeature::RedisClusterBranching => "Redis Cluster branching",
+            NewOperatorFeature::MysqlBranchExcludeTables => "MySQL/MariaDB branch table exclusions",
             NewOperatorFeature::SplitConfigQueueFilters => {
                 "queue filters set on the target's MirrordSplitConfig"
             }
@@ -1279,6 +1295,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::MultiClusterRemote
             | NewOperatorFeature::MultiClusterPrimary
             | NewOperatorFeature::MultiClusterSubscribe
+            | NewOperatorFeature::MultiClusterManagementOnly
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader
             | NewOperatorFeature::CopyTargetFilterIsolation
@@ -1298,6 +1315,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::DbBranchesSplitConfigCopyMode
             | NewOperatorFeature::DbBranchSecretManagerExtract
             | NewOperatorFeature::DbBranchSsmParameter
+            | NewOperatorFeature::MysqlBranchExcludeTables
             | NewOperatorFeature::SplitConfigQueueFilters
             | NewOperatorFeature::Unknown => &[],
         }

@@ -289,6 +289,11 @@ fn plans() {
             "services.api.target.path.stateful_set",
             OptionPlan::Team,
         ),
+        (
+            ConfigFormat::MirrordUpYaml,
+            "common.baggage",
+            OptionPlan::Team,
+        ),
     ] {
         assert_eq!(explain_path(format, path).plan, Some(plan), "{path}");
     }

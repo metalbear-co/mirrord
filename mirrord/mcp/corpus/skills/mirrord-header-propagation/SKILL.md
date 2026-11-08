@@ -15,7 +15,7 @@ description: >
   services or queue consumers.
 metadata:
   author: MetalBear
-  version: "1.1"
+  version: "1.2"
 ---
 
 # mirrord Header Propagation Skill
@@ -46,6 +46,7 @@ A flow is covered when a request carrying `baggage: mirrord-session=alice` at th
 | SNS → SQS | SNS message attribute | needs `sns: "true"` on the queue, or raw message delivery |
 | GCP Pub/Sub | message attribute | `baggage` (`message_filter`) — **check the actual attribute name**, see below |
 | Azure Service Bus | application property | `baggage` (`message_filter`) |
+| NATS (JetStream, Core Pub/Sub) | message header | `baggage` (`message_filter`) |
 | Redis Pub/Sub, BullMQ | **no metadata** — top-level JSON field in the payload | `baggage` (top-level field) |
 | Temporal | activity/workflow header | `header.baggage` (`message_filter`) |
 | S3 upload → SQS | object user metadata `x-amz-meta-baggage` | `jq_filter` on `.S3Metadata.baggage` with `s3_event: "true"` |

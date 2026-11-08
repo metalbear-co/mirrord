@@ -185,6 +185,27 @@ pub fn check() -> Result<()> {
     Ok(())
 }
 
+/// Runs the config check of every corpus that has one at upstream HEAD rather than at its pin. The
+/// release PR bumps the pins to HEAD, so a schema change that breaks a config block there fails
+/// its own PR instead of the next release PR. The vendored files aren't compared, since they
+/// follow the pins.
+pub fn check_upstream() -> Result<()> {
+    for corpus in CORPORA {
+        let Some(script) = corpus.config_check else {
+            continue;
+        };
+        let head = Pin {
+            repo: corpus.repo.to_owned(),
+            commit: upstream_head(corpus.repo)?,
+            synced_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        };
+        let checkout = fetch(&head)?;
+        check_configs(&head, checkout.path(), script)?;
+    }
+
+    Ok(())
+}
+
 /// Runs `script` from `checkout`, which holds the commit of `pin`, against `mirrord-schema.json`
 /// and `mirrord-up-schema.json` at the root of this repo. The `schema_file_is_up_to_date` tests of
 /// mirrord-config and mirrord-up keep those equal to the schemas that the build generates. The

@@ -1145,6 +1145,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for MySQL and MariaDB `exclude_tables`: an older operator's CRD schema
+        // prunes `excludeTables`, and the copy would then fail on the very tables the user
+        // excluded when another service drops them mid-dump.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| !branch_config.exclude_tables().is_empty())
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::MysqlBranchExcludeTables)?;
+        }
+
         // Same fail-fast for `namespace`: an older operator's CRD schema prunes
         // `dedicatedNamespaceKey`, so the branch would silently run in the target's namespace.
         let dedicated_namespace = layer_config
@@ -1454,6 +1468,13 @@ where
                         requested,
                         api_namespace,
                     )?;
+                    if let Some(warning) = database_branches::exclude_tables_mismatch_warning(
+                        branch,
+                        requested,
+                        api_namespace,
+                    ) {
+                        subtask.warning(&warning);
+                    }
                 }
             }
 
@@ -1521,6 +1542,13 @@ where
                         requested,
                         api_namespace,
                     )?;
+                    if let Some(warning) = database_branches::exclude_tables_mismatch_warning(
+                        branch,
+                        requested,
+                        api_namespace,
+                    ) {
+                        subtask.warning(&warning);
+                    }
                 }
             }
 
