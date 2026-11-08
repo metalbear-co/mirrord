@@ -996,12 +996,12 @@ pub enum NewOperatorFeature {
     /// run an empty image.
     PreviewCodeSync,
 
-    /// This operator understands the queue split role a multi-cluster primary writes on its child
-    /// session when a `MirrordSplitConfig` names a `consumerCluster`: the consumer cluster runs
-    /// the queue split and owns its resources, the others run plain sessions. A primary refuses a
-    /// workload cluster that does not advertise it. An older operator knows no role: as a
-    /// bystander it gets no queues, so it runs a plain session or refuses under `requireFilter`,
-    /// and as a non-Default consumer it fails looking for the Default's temporary resources.
+    /// This operator understands the queue split role a multi-cluster primary writes on the child
+    /// `MirrordClusterSession` it creates when a `MirrordSplitConfig` names a `consumerCluster`:
+    /// the consumer cluster (the Default) runs the queue split, a bystander checks its
+    /// `splitQueues` policy against the session's queues and then runs a plain session. A primary
+    /// refuses a workload cluster that does not advertise it, since an older operator knows no
+    /// role and would split the session's queues like every cluster does without a consumer.
     MultiClusterQueueSplitRole,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
