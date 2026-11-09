@@ -101,7 +101,7 @@ pub enum SyncFrame {
     Error { message: String },
 
     /// Sidecar to operator, and operator to CLI: what the supervisor of the app container
-    /// reported about the install and the app, sent on connect and whenever it changes.
+    /// reported about `prepare` and the app, sent on connect and whenever it changes.
     Supervisor(SupervisorReport),
 
     /// Operator to CLI: the CLI can't push for now, for the reason in `reason`. The connection
@@ -293,23 +293,23 @@ pub struct EntryCounts {
 pub enum RejectReason {
     /// An incremental push named a base generation that the volume no longer holds. The CLI
     /// should send a full push instead.
-    #[strum(to_string = "the push was based on a generation that the volume no longer holds")]
+    #[strum(to_string = "the sync was based on a generation that the volume no longer holds")]
     StaleBase,
 
     /// The sidecar isn't ready for a push yet: it waits for the code volume, or copies the
     /// image's files to it.
-    #[strum(to_string = "the preview pod's sync sidecar isn't ready for a push yet")]
+    #[strum(to_string = "the preview pod's sync sidecar isn't ready for a sync yet")]
     NotReady,
 
     /// The push breaks the protocol, for example with a path that leaves its entry.
-    #[strum(to_string = "the push is invalid: {0}")]
+    #[strum(to_string = "the sync is invalid: {0}")]
     Invalid(String),
 
     /// Applying the push at this path would destroy paths that the rules ignore, such as a file
     /// that replaces an ignored directory, or a directory with ignored paths in it.
     #[strum(
-        to_string = "`{0}` would replace a directory that the push's rules ignore, or that holds \
-                     ignored paths, which a push never deletes; ignore `{0}`, or remove that \
+        to_string = "`{0}` would replace a directory that the sync's rules ignore, or that holds \
+                     ignored paths, which a sync never deletes; ignore `{0}`, or remove that \
                      directory in the preview pod"
     )]
     Conflict(String),
@@ -319,7 +319,7 @@ pub enum RejectReason {
     Space,
 
     /// The push is larger than the sidecar accepts.
-    #[strum(to_string = "the push is too large: {0}")]
+    #[strum(to_string = "the sync is too large: {0}")]
     Limit(String),
 
     /// The sidecar failed to read or write the volume.
@@ -340,13 +340,13 @@ pub enum SidecarState {
     #[strum(to_string = "waiting for the previous pod to release the code volume")]
     WaitingForVolume,
 
-    /// The sidecar copies the image's files at each `remote` and `install.persist` path to the
+    /// The sidecar copies the image's files at each `remote` and `prepare.persist` path to the
     /// code volume.
     #[strum(to_string = "copying the image's files to the code volume")]
     Seeding,
 
     /// The volume has no push yet.
-    #[strum(to_string = "waiting for the first push")]
+    #[strum(to_string = "waiting for the first sync")]
     AwaitingFirstPush,
 
     /// The volume holds the push of generation `generation`.
@@ -359,39 +359,39 @@ pub enum SidecarState {
     Failed { message: String },
 }
 
-/// What the supervisor, the first process of the app container, reports about the install
-/// command and the app. The supervisor sends it to the sidecar on their Unix socket, as JSON, and
+/// What the supervisor, the first process of the app container, reports about `prepare` and the
+/// app. The supervisor sends it to the sidecar on their Unix socket, as JSON, and
 /// the sidecar sends it on as [`SyncFrame::Supervisor`]. Once released, it may only grow, as
 /// [`SyncFrame`] says.
 #[derive(Encode, Decode, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct SupervisorReport {
-    pub install: InstallReport,
+    pub prepare: PrepareReport,
     pub app: AppReport,
 
-    /// The generation of the last push that the supervisor acted on: it ran the install that the
+    /// The generation of the last push that the supervisor acted on: it ran the `prepare` that the
     /// push needed, and the app that it started or restarted for the push, as the session's
     /// settings say, has started. `None` before it acted on a push. Once this reaches the
-    /// generation of a CLI's push, the supervisor is done with that push, and `install` says
-    /// whether its install failed.
+    /// generation of a CLI's push, the supervisor is done with that push, and `prepare` says
+    /// whether its `prepare` failed.
     pub handled: Option<u64>,
 }
 
-/// The last run of `install.command`. The error sits beside the state rather than in
-/// [`InstallState::Failed`], so that the state stays one word in the session's status, as
+/// The last run of `prepare.command`. The error sits beside the state rather than in
+/// [`PrepareState::Failed`], so that the state stays one word in the session's status, as
 /// `kubectl` shows it.
 #[derive(
     Encode, Decode, Serialize, Deserialize, JsonSchema, Debug, Clone, Default, PartialEq, Eq,
 )]
 #[serde(rename_all = "camelCase")]
-pub struct InstallReport {
-    pub state: InstallState,
+pub struct PrepareReport {
+    pub state: PrepareState,
 
-    /// Why the last install failed, with the end of its output. `None` unless `state` is
-    /// [`InstallState::Failed`].
+    /// Why the last `prepare` failed, with the end of its output. `None` unless `state` is
+    /// [`PrepareState::Failed`].
     pub error: Option<String>,
 }
 
-/// Where the install stands. Once released, it may only grow, as [`SyncFrame`] says. Its
+/// Where `prepare` stands. Once released, it may only grow, as [`SyncFrame`] says. Its
 /// `Display` is the wording of `mirrord preview sync` and `mirrord preview status`.
 #[derive(
     Encode,
@@ -409,17 +409,18 @@ pub struct InstallReport {
 )]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "lowercase")]
-pub enum InstallState {
-    /// No install ran in this container yet: the supervisor waits for the sidecar's first
-    /// answer, or the volume's install is up to date, or the session has no `install`.
+pub enum PrepareState {
+    /// `prepare` didn't run in this container yet: the supervisor waits for the sidecar's first
+    /// answer, or what the last `prepare` wrote on the volume is up to date, or the session has
+    /// no `prepare`.
     #[default]
     #[strum(to_string = "not run")]
     NotRun,
     Running,
     Succeeded,
 
-    /// The last install failed. The app keeps running on the earlier install, or doesn't start
-    /// when no install ever succeeded, and the next push runs the install again.
+    /// The last `prepare` failed. The app keeps running on what the last successful `prepare`
+    /// wrote, or doesn't start when none succeeded, and the next push runs `prepare` again.
     Failed,
 
     /// A state that a newer supervisor or operator reports, which this version doesn't know.
@@ -465,13 +466,13 @@ pub struct AppReport {
 #[strum(serialize_all = "lowercase")]
 pub enum AppState {
     /// The app hasn't started yet: the supervisor waits for the sidecar's first answer, or the
-    /// first install is running or failed.
+    /// first `prepare` is running or failed.
     #[default]
     #[strum(to_string = "not started")]
     NotStarted,
     Running,
 
-    /// The app starts again: it stops to start on a new push or install, or it exited on its own
+    /// The app starts again: it stops to start on a new push or after `prepare`, or it exited on its own
     /// and the supervisor starts it again after a backoff.
     Restarting,
 
