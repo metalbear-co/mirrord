@@ -9,6 +9,7 @@
       "$ref": "#/$defs/CommonConfig",
       "default": {
         "accept_invalid_certificates": null,
+        "baggage": null,
         "context": null,
         "operator": null,
         "telemetry": null
@@ -82,6 +83,14 @@
             "boolean",
             "null"
           ]
+        },
+        "baggage": {
+          "description": "Sets the OpenTelemetry baggage value for every service. The `BAGGAGE` environment\nvariable takes precedence.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-mirrord-plan": "team"
         },
         "context": {
           "description": "Kube context to use for all services, from your kubeconfig.\n\nA service's own `context` takes precedence, and `mirrord up --context` takes precedence\nover both. When none is set, the global config's `kube_context` is used, then the\nkubeconfig's current context.",
@@ -240,44 +249,6 @@
         }
       ]
     },
-    "InstallConfig": {
-      "description": "The command that installs a service's dependencies in its preview pod.",
-      "type": "object",
-      "properties": {
-        "command": {
-          "description": "The command to run, as a list of the program and its arguments, e.g. `[\"npm\", \"ci\"]`. It\nruns in the preview's container before the app starts, and again after a push that\nchanges a file that `on_change` matches.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "directory": {
-          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nDefaults to `sync.run.directory`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "on_change": {
-          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync.files` entry. The preview pod reads every file that a glob matches after\neach push, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every push. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "persist": {
-          "description": "The absolute paths in the container that `command` writes to outside every `sync`\n`remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the\nvolume that holds the pushed code, so the installed files survive a restart of the pod. A\npath under a `remote` is on that volume already and needs no entry.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "command"
-      ]
-    },
     "JobTarget": {
       "type": "object",
       "properties": {
@@ -381,6 +352,44 @@
         "pod"
       ],
       "x-mirrord-plan": "oss"
+    },
+    "PrepareConfig": {
+      "description": "The command that prepares a service's synced code in its preview pod.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command to run, as a list of the program and its arguments, e.g. `[\"npm\", \"ci\"]`. It\nruns in the preview's container before the app starts, and again after a sync that\nchanges a file that `triggered_by` matches. The app restarts once it succeeds.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "directory": {
+          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "persist": {
+          "description": "The absolute paths in the container that `command` writes to outside every `sync`\n`remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the\nvolume that holds the synced code, so the files that `command` wrote survive a restart of\nthe pod. A path under a `remote` is on that volume already and needs no entry.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "triggered_by": {
+          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync.files` entry. The preview pod reads every file that a glob matches after\neach sync, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every sync. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
     },
     "QueueSplitMode": {
       "description": "How a custom mode splits the service's queues.",
@@ -729,7 +738,7 @@
           "default": false
         },
         "sync": {
-          "description": "How `mirrord preview sync` previews the service with local code: the local directories\nthat it pushes into the service's preview pod, and how the pod runs them. The preview runs\nthe image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.\nFor example:\n\n```yaml\nsync:\n  files:\n    - local: frontend\n      remote: /app\n  run:\n    command: [\"npm\", \"run\", \"dev\"]\n    directory: /app\n  install:\n    command: [\"npm\", \"ci\"]\n    on_change: [\"frontend/package-lock.json\"]\n  restart_on_change: false\n```\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "description": "How `mirrord preview sync` previews the service with local code: the local directories\nthat it syncs into the service's preview pod, and how the pod runs them. The preview runs\nthe image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.\nFor example:\n\n```yaml\nsync:\n  files:\n    - local: frontend\n      remote: /app\n  prepare:\n    command: [\"npm\", \"ci\"]\n    directory: /app\n    triggered_by: [\"frontend/package-lock.json\"]\n  run:\n    command: [\"npm\", \"run\", \"dev\"]\n    directory: /app\n```\n\n`mirrord up` and `mirrord preview up` ignore this.",
           "anyOf": [
             {
               "$ref": "#/$defs/SyncConfig"
@@ -843,32 +852,33 @@
       "type": "object",
       "properties": {
         "files": {
-          "description": "The local directories to push into the preview pod.",
+          "description": "The local directories to sync into the preview pod.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/SyncEntry"
           }
         },
-        "install": {
-          "description": "The command that installs the app's dependencies in the preview pod.",
+        "prepare": {
+          "description": "The command that prepares the synced code for the app in the preview pod, such as an\ninstall of its dependencies. Needs `run`.",
           "anyOf": [
             {
-              "$ref": "#/$defs/InstallConfig"
+              "$ref": "#/$defs/PrepareConfig"
             },
             {
               "type": "null"
             }
           ]
         },
-        "restart_on_change": {
-          "description": "Whether the preview pod restarts the app after each push. Set it to `false` for a dev\nserver that reloads changed files on its own. Defaults to `true`.",
-          "type": "boolean",
-          "default": true
-        },
         "run": {
-          "description": "How the preview pod runs the app on the pushed code.",
-          "$ref": "#/$defs/SyncRunConfig",
-          "default": {}
+          "description": "How the preview pod runs the app on the synced code. Without it, the preview's container\nruns its own command, which suits an image that serves the synced files as they change,\nsuch as nginx.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyncRunConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -877,22 +887,22 @@
       ]
     },
     "SyncEntry": {
-      "description": "One local directory that `mirrord preview sync` pushes into a preview pod.",
+      "description": "One local directory that `mirrord preview sync` syncs into a preview pod.",
       "type": "object",
       "properties": {
         "ignore": {
-          "description": "More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,\ne.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that\na `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an\nignored directory, as in git.",
+          "description": "More paths that a sync leaves out, written as the lines of a `.gitignore` in `local`,\ne.g. `coverage/`. They take precedence over git's rules, so a `!` line syncs a file that\na `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an\nignored directory, as in git.",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "local": {
-          "description": "The local directory to push. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores\nand the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as\nthe image's files or what the install wrote, and every other path in `remote` holds the\nlocal tree.",
+          "description": "The local directory to sync. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. A sync leaves out `.git`, `.jj`, the paths that git ignores\nand the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as\nthe image's files or what `prepare` wrote, and every other path in `remote` holds the\nlocal tree.",
           "type": "string"
         },
         "remote": {
-          "description": "The absolute path in the preview's container that holds the pushed directory. A push makes\nit a mirror of `local`, so it deletes what the image has there, except at the paths that\nthe push leaves out (see `local`).",
+          "description": "The absolute path in the preview's container that holds the synced directory. A sync makes\nit a mirror of `local`, so it deletes what the image has there, except at the paths that\nthe sync leaves out (see `local`).",
           "type": "string"
         }
       },
@@ -902,29 +912,49 @@
         "remote"
       ]
     },
+    "SyncRestart": {
+      "description": "When the preview pod restarts the app. A successful `prepare` always restarts it, because the\napp must run on what `prepare` wrote.",
+      "oneOf": [
+        {
+          "description": "Only after `prepare` runs.",
+          "type": "string",
+          "const": "on_prepare"
+        },
+        {
+          "description": "After every sync.",
+          "type": "string",
+          "const": "on_sync"
+        }
+      ]
+    },
     "SyncRunConfig": {
       "description": "How the preview pod of a service with `sync` runs the app.",
       "type": "object",
       "properties": {
         "command": {
-          "description": "The command that runs the app in the preview's container, as a list of the program and\nits arguments, e.g. `[\"npm\", \"run\", \"dev\"]`. Defaults to `run.command`.",
-          "type": [
-            "array",
-            "null"
-          ],
+          "description": "The command that runs the app in the preview's container, as a list of the program and\nits arguments, e.g. `[\"npm\", \"run\", \"dev\"]`. It replaces the container's own command.",
+          "type": "array",
           "items": {
             "type": "string"
           }
         },
         "directory": {
-          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.",
+          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.\nA directory that the image doesn't have is created as the app's user, so an app that\ndoesn't run as root needs a parent directory that it can write to.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "restart": {
+          "description": "When the preview pod restarts the app: `on_prepare` restarts it only after `prepare`\nruns, which suits a dev server that reloads changed files on its own, and `on_sync`\nrestarts it after every sync. Defaults to `on_prepare`.",
+          "$ref": "#/$defs/SyncRestart",
+          "default": "on_prepare"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
     },
     "Target": {
       "oneOf": [

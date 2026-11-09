@@ -313,6 +313,11 @@ pub struct CommonConfig {
     /// over both. When none is set, the global config's `kube_context` is used, then the
     /// kubeconfig's current context.
     pub(crate) context: Option<Arc<str>>,
+
+    /// Sets the OpenTelemetry baggage value for every service. The `BAGGAGE` environment
+    /// variable takes precedence.
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
+    pub(crate) baggage: Option<String>,
 }
 
 impl CommonConfig {
@@ -323,6 +328,7 @@ impl CommonConfig {
             accept_invalid_certificates: self.accept_invalid_certificates,
             operator: self.operator,
             telemetry: self.telemetry,
+            baggage: self.baggage.clone(),
             ..Default::default()
         }
         .generate_config(context)
@@ -659,7 +665,7 @@ pub struct ServiceConfig {
     pub(crate) run: RunConfig,
 
     /// How `mirrord preview sync` previews the service with local code: the local directories
-    /// that it pushes into the service's preview pod, and how the pod runs them. The preview runs
+    /// that it syncs into the service's preview pod, and how the pod runs them. The preview runs
     /// the image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.
     /// For example:
     ///
@@ -668,13 +674,13 @@ pub struct ServiceConfig {
     ///   files:
     ///     - local: frontend
     ///       remote: /app
+    ///   prepare:
+    ///     command: ["npm", "ci"]
+    ///     directory: /app
+    ///     triggered_by: ["frontend/package-lock.json"]
     ///   run:
     ///     command: ["npm", "run", "dev"]
     ///     directory: /app
-    ///   install:
-    ///     command: ["npm", "ci"]
-    ///     on_change: ["frontend/package-lock.json"]
-    ///   restart_on_change: false
     /// ```
     ///
     /// `mirrord up` and `mirrord preview up` ignore this.
@@ -687,92 +693,107 @@ pub struct ServiceConfig {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncConfig {
-    /// The local directories to push into the preview pod.
+    /// The local directories to sync into the preview pod.
     pub files: Vec<SyncEntry>,
 
-    /// How the preview pod runs the app on the pushed code.
-    #[serde(default)]
-    pub run: SyncRunConfig,
-
-    /// The command that installs the app's dependencies in the preview pod.
+    /// The command that prepares the synced code for the app in the preview pod, such as an
+    /// install of its dependencies. Needs `run`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub install: Option<InstallConfig>,
+    pub prepare: Option<PrepareConfig>,
 
-    /// Whether the preview pod restarts the app after each push. Set it to `false` for a dev
-    /// server that reloads changed files on its own. Defaults to `true`.
-    #[serde(default = "default_restart_on_change")]
-    pub restart_on_change: bool,
+    /// How the preview pod runs the app on the synced code. Without it, the preview's container
+    /// runs its own command, which suits an image that serves the synced files as they change,
+    /// such as nginx.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<SyncRunConfig>,
 }
 
-fn default_restart_on_change() -> bool {
-    true
-}
-
-/// How the preview pod of a service with `sync` runs the app.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
+/// The command that prepares a service's synced code in its preview pod.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SyncRunConfig {
-    /// The command that runs the app in the preview's container, as a list of the program and
-    /// its arguments, e.g. `["npm", "run", "dev"]`. Defaults to `run.command`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<Vec<String>>,
+pub struct PrepareConfig {
+    /// The command to run, as a list of the program and its arguments, e.g. `["npm", "ci"]`. It
+    /// runs in the preview's container before the app starts, and again after a sync that
+    /// changes a file that `triggered_by` matches. The app restarts once it succeeds.
+    pub command: Vec<String>,
 
     /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
     /// When not set, `command` runs in the working directory of the container, which is `/` for
     /// an image without a `WORKDIR`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
-}
-
-/// The command that installs a service's dependencies in its preview pod.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct InstallConfig {
-    /// The command to run, as a list of the program and its arguments, e.g. `["npm", "ci"]`. It
-    /// runs in the preview's container before the app starts, and again after a push that
-    /// changes a file that `on_change` matches.
-    pub command: Vec<String>,
-
-    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
-    /// Defaults to `sync.run.directory`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub directory: Option<String>,
 
     /// The files whose changes run `command` again, as globs relative to the directory that
     /// contains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the
     /// `local` of a `sync.files` entry. The preview pod reads every file that a glob matches after
-    /// each push, including the files that `command` wrote, so a glob with `**` over a
-    /// directory such as `node_modules` hashes every match on every push. Name the files, such
+    /// each sync, including the files that `command` wrote, so a glob with `**` over a
+    /// directory such as `node_modules` hashes every match on every sync. Name the files, such
     /// as `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub on_change: Vec<PathBuf>,
+    pub triggered_by: Vec<PathBuf>,
 
     /// The absolute paths in the container that `command` writes to outside every `sync`
     /// `remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the
-    /// volume that holds the pushed code, so the installed files survive a restart of the pod. A
-    /// path under a `remote` is on that volume already and needs no entry.
+    /// volume that holds the synced code, so the files that `command` wrote survive a restart of
+    /// the pod. A path under a `remote` is on that volume already and needs no entry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub persist: Vec<String>,
 }
 
-/// One local directory that `mirrord preview sync` pushes into a preview pod.
+/// How the preview pod of a service with `sync` runs the app.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SyncRunConfig {
+    /// The command that runs the app in the preview's container, as a list of the program and
+    /// its arguments, e.g. `["npm", "run", "dev"]`. It replaces the container's own command.
+    pub command: Vec<String>,
+
+    /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
+    /// When not set, `command` runs in the working directory of the container, which is `/` for
+    /// an image without a `WORKDIR`.
+    /// A directory that the image doesn't have is created as the app's user, so an app that
+    /// doesn't run as root needs a parent directory that it can write to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+
+    /// When the preview pod restarts the app: `on_prepare` restarts it only after `prepare`
+    /// runs, which suits a dev server that reloads changed files on its own, and `on_sync`
+    /// restarts it after every sync. Defaults to `on_prepare`.
+    #[serde(default)]
+    pub restart: SyncRestart,
+}
+
+/// When the preview pod restarts the app. A successful `prepare` always restarts it, because the
+/// app must run on what `prepare` wrote.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncRestart {
+    /// Only after `prepare` runs.
+    #[default]
+    OnPrepare,
+
+    /// After every sync.
+    OnSync,
+}
+
+/// One local directory that `mirrord preview sync` syncs into a preview pod.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncEntry {
-    /// The local directory to push. A relative path is resolved against the directory that
-    /// contains `mirrord-up.yaml`. The push leaves out `.git`, `.jj`, the paths that git ignores
+    /// The local directory to sync. A relative path is resolved against the directory that
+    /// contains `mirrord-up.yaml`. A sync leaves out `.git`, `.jj`, the paths that git ignores
     /// and the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as
-    /// the image's files or what the install wrote, and every other path in `remote` holds the
+    /// the image's files or what `prepare` wrote, and every other path in `remote` holds the
     /// local tree.
     pub local: PathBuf,
 
-    /// The absolute path in the preview's container that holds the pushed directory. A push makes
+    /// The absolute path in the preview's container that holds the synced directory. A sync makes
     /// it a mirror of `local`, so it deletes what the image has there, except at the paths that
-    /// the push leaves out (see `local`).
+    /// the sync leaves out (see `local`).
     pub remote: String,
 
-    /// More paths that the push leaves out, written as the lines of a `.gitignore` in `local`,
-    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line pushes a file that
+    /// More paths that a sync leaves out, written as the lines of a `.gitignore` in `local`,
+    /// e.g. `coverage/`. They take precedence over git's rules, so a `!` line syncs a file that
     /// a `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an
     /// ignored directory, as in git.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -829,6 +850,7 @@ pub const COMMON_LAYER_PATHS: &[(&str, &str)] = &[
     ("operator", "operator"),
     ("telemetry", "telemetry"),
     ("context", "kube_context"),
+    ("baggage", "baggage"),
 ];
 
 /// The settings of a service in a `mirrord-up.yaml` that [`ServiceConfig::assemble`] copies into
@@ -2027,7 +2049,7 @@ pub enum PreviewImageError {
     NoImages,
 
     /// Every service lacks `sync`, or has `sync` and `skip` but no image, so `mirrord preview
-    /// sync` has nothing to push.
+    /// sync` has nothing to sync.
     #[error(
         "no service to sync: no service has `sync`, or every service with `sync` is marked \
          `skip: true` and has no image"
@@ -2059,6 +2081,7 @@ impl CollectAnalytics for &CommonConfig {
             operator,
             telemetry,
             context,
+            baggage,
         } = self;
 
         analytics.add(
@@ -2068,6 +2091,7 @@ impl CollectAnalytics for &CommonConfig {
         analytics.add("operator", operator.is_some());
         analytics.add("telemetry", telemetry.is_some());
         analytics.add("context", context.is_some());
+        analytics.add("baggage", baggage.is_some());
     }
 }
 
@@ -2250,6 +2274,7 @@ mod tests {
             "accept_invalid_certificates" => "true",
             "operator" | "telemetry" => "false",
             "context" => "my-context",
+            "baggage" => "mirrord-session=abc",
             "target" => "{ path: deployment/api }",
             "env" => "{ include: A }",
             "default_mode" => "mirror",
@@ -2323,6 +2348,7 @@ mod tests {
               operator: false
               telemetry: false
               context: "minikube"
+              baggage: "mirrord-session=abc"
             services:
               my-svc:
                 run:
@@ -2335,7 +2361,8 @@ mod tests {
                 accept_invalid_certificates: Some(true),
                 operator: Some(false),
                 telemetry: Some(false),
-                context: Some("minikube".into())
+                context: Some("minikube".into()),
+                baggage: Some("mirrord-session=abc".into()),
             }
         );
     }
@@ -3890,6 +3917,7 @@ mod tests {
                     "operator": false,
                     "telemetry": false,
                     "context": false,
+                    "baggage": false,
                 },
                 "config_fields_used": {
                     "target": 0,
@@ -3954,6 +3982,7 @@ mod tests {
             common:
               accept_invalid_certificates: true
               telemetry: false
+              baggage: "secret-baggage"
             services:
               svc:
                 run:
@@ -3968,6 +3997,8 @@ mod tests {
         );
         assert_eq!(result["common_fields_used"]["operator"], false);
         assert_eq!(result["common_fields_used"]["telemetry"], true);
+        assert_eq!(result["common_fields_used"]["baggage"], true);
+        assert!(result.to_string().contains("secret-baggage").not());
     }
 
     #[test]

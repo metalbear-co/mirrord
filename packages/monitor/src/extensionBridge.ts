@@ -1,19 +1,6 @@
+import { isFirefox, sendToExtension } from './extensionTransport'
 import { emitUserBlocked } from './analytics'
 
-interface ChromeRuntime {
-  runtime?: {
-    sendMessage: (
-      extensionId: string,
-      message: unknown,
-      callback: (response: unknown) => void,
-    ) => void
-    lastError?: { message?: string }
-  }
-}
-
-declare const chrome: ChromeRuntime | undefined
-
-const EXTENSION_ID = 'bijejadnnfgjkfdocgocklekjhnhkhkf'
 const PING_TIMEOUT_MS = 250
 const REQUEST_TIMEOUT_MS = 1500
 
@@ -31,43 +18,11 @@ const NOT_INSTALLED: ExtensionState = {
   supportsBridge: false,
 }
 
-function getChromeRuntime(): NonNullable<ChromeRuntime['runtime']> | null {
-  if (typeof chrome === 'undefined') return null
-  const runtime = chrome.runtime
-  if (!runtime || typeof runtime.sendMessage !== 'function') return null
-  return runtime
-}
-
 function send<T = unknown>(
   message: unknown,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T | null> {
-  const runtime = getChromeRuntime()
-  if (!runtime) return Promise.resolve(null)
-  return new Promise((resolve) => {
-    let settled = false
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      resolve(null)
-    }, timeoutMs)
-    try {
-      runtime.sendMessage(EXTENSION_ID, message, (response: unknown) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        if (runtime.lastError) {
-          resolve(null)
-          return
-        }
-        resolve(response as T)
-      })
-    } catch {
-      settled = true
-      clearTimeout(timer)
-      resolve(null)
-    }
-  })
+  return sendToExtension<T>(message, timeoutMs)
 }
 
 export async function pingExtension(): Promise<ExtensionState> {
@@ -155,5 +110,11 @@ export async function leaveViaExtension(): Promise<{
   return { ok: response.ok ?? false, error: response.error }
 }
 
-export const CHROME_WEB_STORE_URL =
+const CHROME_WEB_STORE_URL =
   'https://chromewebstore.google.com/detail/mirrord/bijejadnnfgjkfdocgocklekjhnhkhkf'
+
+const FIREFOX_ADDONS_URL = 'https://addons.mozilla.org/firefox/addon/mirrord/'
+
+export const EXTENSION_INSTALL_URL = isFirefox()
+  ? FIREFOX_ADDONS_URL
+  : CHROME_WEB_STORE_URL

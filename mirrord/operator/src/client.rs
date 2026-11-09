@@ -67,9 +67,9 @@ use crate::{
         database_branches::{
             CreatedBranches, DatabaseBranchParams, TARGET_NAMESPACE_ANNOTATION,
             UnifiedDatabaseBranchParams, create_branches, create_mongodb_branches,
-            create_mysql_branches, create_pg_branches, ensure_branch_migrations,
-            list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
-            list_reusable_pg_branches, ownership_label_selector,
+            create_mysql_branches, create_pg_branches, destroy_branch_hint,
+            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches, ownership_label_selector,
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
@@ -1145,6 +1145,20 @@ where
                 .require_feature(NewOperatorFeature::DbBranchProfiles)?;
         }
 
+        // Same fail-fast for MySQL and MariaDB `exclude_tables`: an older operator's CRD schema
+        // prunes `excludeTables`, and the copy would then fail on the very tables the user
+        // excluded when another service drops them mid-dump.
+        if layer_config
+            .feature
+            .db_branches
+            .iter()
+            .any(|branch_config| !branch_config.exclude_tables().is_empty())
+        {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::MysqlBranchExcludeTables)?;
+        }
+
         // Same fail-fast for `namespace`: an older operator's CRD schema prunes
         // `dedicatedNamespaceKey`, so the branch would silently run in the target's namespace.
         let dedicated_namespace = layer_config
@@ -1419,9 +1433,8 @@ where
                 return Err(OperatorApiError::BranchCreationFailed {
                     operation: OperatorOperation::DbBranching,
                     message: format!(
-                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. Delete it \
-                         with `mirrord db-branches -n {api_namespace} destroy {name}` and start \
-                         the session again."
+                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. {}",
+                        destroy_branch_hint(Some(api_namespace), &name)
                     ),
                 });
             }
@@ -1454,6 +1467,13 @@ where
                         requested,
                         api_namespace,
                     )?;
+                    if let Some(warning) = database_branches::exclude_tables_mismatch_warning(
+                        branch,
+                        requested,
+                        api_namespace,
+                    ) {
+                        subtask.warning(&warning);
+                    }
                 }
             }
 
@@ -1521,6 +1541,13 @@ where
                         requested,
                         api_namespace,
                     )?;
+                    if let Some(warning) = database_branches::exclude_tables_mismatch_warning(
+                        branch,
+                        requested,
+                        api_namespace,
+                    ) {
+                        subtask.warning(&warning);
+                    }
                 }
             }
 
