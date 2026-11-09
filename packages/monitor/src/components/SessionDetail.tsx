@@ -6,7 +6,7 @@ import type {
   PortSubscription,
   ProcessInfo,
 } from '../types'
-import { api } from '../api'
+import { api, failureFields } from '../api'
 import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray, formatHostPort } from '../utils'
@@ -92,6 +92,7 @@ export default function SessionDetail({
         emitUserBlocked('snapshot_fetch_failed', {
           session_id: session.session_id,
           error,
+          ...failureFields(err),
         })
       }
     }
