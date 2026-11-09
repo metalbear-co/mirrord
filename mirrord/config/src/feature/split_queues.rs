@@ -1034,10 +1034,7 @@ pub enum QueueSplittingVerificationError {
         /// The absolute paths of the directories imports were looked up in, in order.
         include_directories: Vec<PathBuf>,
     },
-    #[error(
-        "{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {errors}. Check that \
-         the file and everything it imports are reachable through `include_directories`"
-    )]
+    #[error("{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {errors}")]
     ProtobufCompile {
         queue_name: String,
         schema_file: PathBuf,
