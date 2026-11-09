@@ -345,27 +345,23 @@ impl HttpFilterConfig {
         }
     }
 
-    /// The filter of a shared session: this filter, or a `baggage` header that carries
-    /// `mirrord-session=<key>`, because share-ingress tags every request it forwards with that
-    /// member. The configured filter stays whole, so requests that match it still arrive.
+    /// The filter of a shared session: this filter, or the `baggage` header
+    /// `mirrord-session=<key>`, which share-ingress puts on every request it forwards. The
+    /// configured filter stays whole, so requests that match it still arrive.
     pub fn for_shared_session(&self, key: &str) -> Result<HttpFilter, HttpFilterParseError> {
-        // - `^baggage: `: the agent matches a header as `<lower-case name>: <value>`, and a
-        //   `MirrordPolicy` header filter is a regex matched against this pattern, so the pattern
-        //   keeps this prefix and `mirrord-session=<value>` as they are, for a policy written for
-        //   the documented filter, `^baggage: .*mirrord-session=<key>.*$`.
-        // - `(?:.*,[ \t]*)?`: the member starts the list or follows a comma.
-        // - `(?-i:...)`: the agent matches headers case-insensitively, but a baggage member name
-        //   and its value are case-sensitive.
-        // - `[ \t]*(?:[;,].*)?$`: the member ends at the value, before its `;` properties or the
-        //   `,` of the next member, so the key `ab` doesn't match `mirrord-session=abc`.
+        // share-ingress replaces the `baggage` header of every request it forwards with exactly
+        // `baggage: mirrord-session=<key>`, so the filter matches that whole header and nothing
+        // else. Services that a shared service calls in turn are reached through their own
+        // sessions' filters, not this one.
         //
-        // share-ingress sends exactly `baggage: mirrord-session=<key>` to the shared target, so
-        // `^baggage: mirrord-session=<key>$` would do for it. The next shared service in a chain
-        // gets whatever `baggage` the upstream app forwards, where tracing middleware often adds
-        // other members.
+        // The agent matches a header as `<lower-case name>: <value>`, case-insensitively, but a
+        // baggage member name and its value are case-sensitive, hence `(?-i:...)`. The pattern
+        // keeps `^baggage: ` and `mirrord-session=<key>` as they are, because a `MirrordPolicy`
+        // header filter is a regex matched against this pattern, and one written for the
+        // documented filter, `^baggage: .*mirrord-session=<key>.*$`, must accept it.
         let value = regex::escape(key);
         let session = HttpFilter::Header(Filter::new(format!(
-            r"^baggage: (?:.*,[ \t]*)?(?-i:mirrord-session={value})[ \t]*(?:[;,].*)?$"
+            r"^baggage: (?-i:mirrord-session={value})$"
         ))?);
         if self.is_filter_set() {
             Ok(HttpFilter::Composite {

@@ -622,13 +622,15 @@ pub struct LayerConfig {
     /// ```
     ///
     /// A session started with [`share`](#root-share) doesn't need that `header_filter`, because
-    /// it filters on its key on its own: it steals the HTTP requests that carry
-    /// `mirrord-session=<key>` in the W3C `baggage` header, because share-ingress adds that member
-    /// to every request it forwards. A custom `http_filter` still applies, so a shared session
-    /// steals a request that matches the filter or that carries the key. Without a custom filter,
-    /// a shared session steals only the requests that carry the key, not the whole port.
-    /// `http_filter.ports` still limits the ports. A session without `share` keeps its configured
-    /// filter.
+    /// it filters on its key on its own: it steals the HTTP requests whose W3C `baggage` header is
+    /// exactly `mirrord-session=<key>`, because share-ingress sets that header on every request
+    /// it forwards, replacing any `baggage` the request had. A custom `http_filter` still applies,
+    /// so a shared session steals a request that matches the filter or that carries the key.
+    /// Without a custom filter, a shared session steals only the requests that carry the key, not
+    /// the whole port. `http_filter.ports` still limits the ports. A session without `share`
+    /// keeps its configured filter, so a service that the shared service calls, such as
+    /// `payments` behind a shared `web`, runs without `share` and with the `header_filter` above,
+    /// which also matches a `baggage` header that carries other members.
     ///
     /// The key of a shared session may hold only printable ASCII characters other than a space,
     /// `"`, `%`, `,`, `;` and `\`, because share-ingress sends it as it is in `baggage`, where

@@ -57,9 +57,10 @@ fn assert_fixture_session(filter: HttpFilter, custom: Option<HttpFilter>) {
     let regex = session_regex(filter, custom);
     for (header, expected) in [
         ("baggage: mirrord-session=dev.[A]+", true),
+        ("BAGGAGE: mirrord-session=dev.[A]+", true),
         (
-            "BAGGAGE: other=1, mirrord-session=dev.[A]+;prop=yes, next=2",
-            true,
+            "baggage: other=1, mirrord-session=dev.[A]+;prop=yes, next=2",
+            false,
         ),
         ("baggage: mirrord-session=dev.%5BA%5D%2B", false),
         ("baggage: mirrord-session=dev.[a]+", false),
@@ -338,9 +339,9 @@ async fn filter_ports_preserves_custom_ast_and_mapping(
     assert_fixture_session(filter, Some(custom));
 }
 
-/// A shared session's subscription must select exactly the requests whose `baggage` carries its
-/// key as it is, which is how share-ingress tags them, and keep keys apart: a longer key, the key
-/// as another member's value, a key with regex metacharacters, and another case.
+/// A shared session's subscription must select exactly the requests whose `baggage` header is
+/// `mirrord-session=<key>`, which is how share-ingress tags them, and keep keys apart: a longer
+/// key, a key with regex metacharacters, another case, and the key among other members.
 /// This fake-agent harness checks the generated regex, not cluster request routing.
 #[rstest]
 #[case("alice")]
@@ -383,27 +384,24 @@ async fn filter_ports_session_key_wire_contract(#[case] key: &str) {
     };
     let custom_regex = fancy_regex::Regex::new(&format!("(?i){path}")).unwrap();
     let session = session_regex(filter, Some(custom));
-    // `selected_key` is the key that the header carries as a whole `mirrord-session` member, or
-    // `None` when it carries none.
+    // `selected_key` is the key of the header that share-ingress writes, `baggage:
+    // mirrord-session=<key>`, or `None` for any other header.
     for (header, selected_key) in [
         ("baggage: mirrord-session=alice", Some("alice")),
-        ("baggage: mirrord-session=alice;debug", Some("alice")),
-        ("baggage: mirrord-session=alice,debug=1", Some("alice")),
-        (
-            "BAGGAGE: upstream=1, mirrord-session=alice;prop=yes, next=2",
-            Some("alice"),
-        ),
-        ("baggage: upstream=1,mirrord-session=Alice", Some("Alice")),
+        ("BAGGAGE: mirrord-session=alice", Some("alice")),
         ("baggage: mirrord-session=Alice", Some("Alice")),
         ("baggage: mirrord-session=alice.*", Some("alice.*")),
-        ("baggage: mirrord-session=alice-suffix", None),
-        ("baggage: mirrord-session=alice ", Some("alice")),
-        ("baggage: mirrord-session= alice", None),
-        ("baggage: mirrord-session=a=b;p=1", Some("a=b")),
-        ("baggage: mirrord-session=a", None),
-        ("baggage: mirrord-session=;debug, next=2", Some("")),
+        ("baggage: mirrord-session=a=b", Some("a=b")),
         ("baggage: mirrord-session=", Some("")),
-        ("baggage: other=alice;mirrord-session=alice", None),
+        ("baggage: mirrord-session=alice-suffix", None),
+        ("baggage: mirrord-session=a", None),
+        ("baggage: mirrord-session=alice ", None),
+        ("baggage: mirrord-session= alice", None),
+        // share-ingress replaces the header, so a shared session doesn't look for its key among
+        // other members or properties.
+        ("baggage: mirrord-session=alice;debug", None),
+        ("baggage: mirrord-session=alice,debug=1", None),
+        ("baggage: upstream=1,mirrord-session=alice", None),
         ("baggage: other=mirrord-session=alice", None),
         ("baggage: Mirrord-session=alice", None),
         ("baggage: mirrord-session =alice", None),
