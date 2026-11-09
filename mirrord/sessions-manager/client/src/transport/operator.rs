@@ -97,7 +97,7 @@ fn operator_assignments_uri(
     subscription: &AssignmentSubscription,
 ) -> Result<String, SessionsManagerClientError> {
     let resource = match subscription {
-        AssignmentSubscription::Agent(_) => "serverlessagentassignments",
+        AssignmentSubscription::Agent { .. } => "serverlessagentassignments",
         AssignmentSubscription::Intproxy { .. } => "serverlessclientassignments",
     };
     let environment = slug::slugify(&scope.environment);
@@ -198,10 +198,13 @@ mod tests {
                     environment: "Staging EU".to_owned(),
                     service: "payments".to_owned(),
                 },
-                &AssignmentSubscription::Agent(AgentIdentity {
-                    replica_id: "pod-a".to_owned().into(),
-                    agent_instance_id: Uuid::nil(),
-                }),
+                &AssignmentSubscription::Agent {
+                    identity: AgentIdentity {
+                        replica_id: "pod-a".to_owned().into(),
+                        agent_instance_id: Uuid::nil(),
+                    },
+                    metadata: None,
+                },
             )
             .await
     }
@@ -437,10 +440,13 @@ mod tests {
             environment: "Staging EU".to_owned(),
             service: "API #1".to_owned(),
         };
-        let subscription = AssignmentSubscription::Agent(AgentIdentity {
-            replica_id: "pod-a".to_owned().into(),
-            agent_instance_id: Uuid::nil(),
-        });
+        let subscription = AssignmentSubscription::Agent {
+            identity: AgentIdentity {
+                replica_id: "pod-a".to_owned().into(),
+                agent_instance_id: Uuid::nil(),
+            },
+            metadata: None,
+        };
 
         assert_eq!(
             operator_assignments_uri(&scope, &subscription).unwrap(),

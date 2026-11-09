@@ -161,7 +161,10 @@ impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
             subscriber: ControlPlaneSubscriber::new(
                 transport,
                 scope,
-                AssignmentSubscription::Agent(identity),
+                AssignmentSubscription::Agent {
+                    identity,
+                    metadata: None,
+                },
                 true,
             ),
             assignments: AssignmentRegistry::default(),

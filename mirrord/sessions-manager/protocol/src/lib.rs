@@ -13,8 +13,8 @@
 //! defined by `mirrord-protocol`.
 
 pub use control_plane::{
-    AgentIdentity, AssignmentId, AssignmentRole, AssignmentSubscription, ControlPlaneEventName,
-    IntproxyIdentity, ReplicaId, ServiceScope,
+    AgentIdentity, AgentMetadata, AssignmentId, AssignmentRole, AssignmentSubscription,
+    ControlPlaneEventName, IntproxyIdentity, ReplicaId, ServiceScope,
 };
 pub use data_plane::{
     DataPlaneAuthorization, DataPlaneEndpoint, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
@@ -34,6 +34,10 @@ pub struct ConnectionAssignment {
     pub assignment_id: AssignmentId,
     pub data_plane_endpoint: DataPlaneEndpoint,
     pub authorization: DataPlaneAuthorization,
+    /// The [`AgentMetadata`] the paired agent registered with. Set only on intproxy assignments,
+    /// and only by a sessions-manager that supports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_metadata: Option<AgentMetadata>,
 }
 
 #[cfg(test)]
@@ -48,6 +52,7 @@ mod tests {
             assignment_id: "assignment-1".to_owned().into(),
             data_plane_endpoint: DataPlaneEndpoint::new(Uri::from_static("/sm/ws/123")).unwrap(),
             authorization: DataPlaneAuthorization::new("Bearer secret".to_owned()),
+            agent_metadata: None,
         };
 
         assert_eq!(
@@ -62,6 +67,7 @@ mod tests {
             assignment_id: "assignment-1".to_owned().into(),
             data_plane_endpoint: DataPlaneEndpoint::new(Uri::from_static("/sm/ws/123")).unwrap(),
             authorization: DataPlaneAuthorization::new("Bearer secret".to_owned()),
+            agent_metadata: None,
         };
 
         assert!(!format!("{assignment:?}").contains("secret"));
