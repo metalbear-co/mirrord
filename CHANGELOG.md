@@ -8,6 +8,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.285.0](https://github.com/metalbear-co/mirrord/tree/3.285.0) - 2026-11-04
+
+
+### Added
+
+- Added `common.baggage` to `mirrord-up.yaml`, which sets the `baggage` option
+  for every service.
+- Added `exclude_tables` to the MySQL and MariaDB database branch copy config
+  to leave tables out of the copy by name or pattern.
+- Split queue entries without a filter now use the filter set on the target's
+  `MirrordSplitConfig`.
+
+
+### Fixed
+
+- Clear error for `multi_cluster: false` and label targets on a management-only
+  multi-cluster Primary.
+- The configuration schema accepts a Redis branch in `feature.db_branches`
+  without `location`, which defaults to `remote`.
+
 ## [3.284.0](https://github.com/metalbear-co/mirrord/tree/3.284.0) - 2026-11-02
 
 

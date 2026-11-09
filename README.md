@@ -22,6 +22,8 @@ mirrord ships as a VS Code extension, IntelliJ plugin, and CLI tool. [Read more]
 
 **Adopted by**: monday.com, SurveyMonkey, Cadence, CoLab, Daylight Security, Zooplus, and [others](./ADOPTERS.md).
 
+Or maybe you're just looking for the [KubeCon Salt Lake City raffle password](#kubecon-salt-lake-city-raffle).
+
 # Contents
 
 - [Contents](#contents)
@@ -213,6 +215,11 @@ Join our [Slack](https://metalbear.com/slack) for questions, support and fun.
 We always appreciate hearing how mirrord has made a difference for our users.  
 Check out our [ADOPTERS.md](./ADOPTERS.md) to see how others are using mirrord —  
 and [open a pull request](https://github.com/metalbear-co/mirrord/pulls) to add your organization if you’d like to share how mirrord has been useful to you.
+
+## KubeCon Salt Lake City Raffle
+
+The password is: **"Grandfather's watch is running 5 minutes late."**
+Say it to one of our team members at Booth #352.
 
 ## Code of Conduct
 

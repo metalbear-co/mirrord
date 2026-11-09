@@ -1,10 +1,17 @@
 {
   "effort": "apex",
   "disabledLabels": ["no-greptile"],
+  "excludeAuthors": ["cubby-mb[bot]"],
   "rules": [
     {
       "id": "review-logical-change",
       "rule": "Review the logical change, not only the diff. Before commenting on lines, reconstruct what the pull request is supposed to accomplish from its title, description, and the issue it references, then check the implementation against that intent. Raise a top-level comment when a requirement or acceptance criterion stated in the issue or the description is not implemented. End each such comment with a short direction to the PR author: either fix it in this PR or create a follow-up issue, and inform the product team about any scope changes.",
+      "severity": "high"
+    },
+    {
+      "id": "operator-agnostic-protocol",
+      "rule": "mirrord-protocol is primarily the protocol between the mirrord CLI (layer and intproxy) and the agent, and we try hard to keep it operator agnostic. Flag any new message or variant that only the operator sends or handles. Ask the PR author to justify it in the description: why it can't reuse existing messages, and why it can't live in the operator's own API instead. Accept a convincing justification; without one, suggest a more generic message or moving the logic to the operator.",
+      "scope": ["mirrord/protocol/**"],
       "severity": "high"
     },
     {

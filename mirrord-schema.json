@@ -2399,7 +2399,10 @@
                   "type": "string",
                   "const": "local"
                 }
-              }
+              },
+              "required": [
+                "location"
+              ]
             },
             {
               "description": "Configuration for a remote Redis branch.",

@@ -1,0 +1,1 @@
+`mirrord dump` without `--ports` now dumps only the ports declared on the target container, skipping other containers in the pod and non-TCP ports. Sessions where those ports aren't known, such as copy target and multi-cluster, now need `--ports`.
