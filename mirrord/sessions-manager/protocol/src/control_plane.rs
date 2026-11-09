@@ -28,7 +28,14 @@ pub enum ControlPlaneEventName {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum AssignmentSubscription {
-    Agent(AgentIdentity),
+    Agent {
+        #[serde(flatten)]
+        identity: AgentIdentity,
+        /// Describes the agent's platform to the intproxies it pairs with. Not part of the
+        /// registration's identity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<AgentMetadata>,
+    },
     Intproxy {
         #[serde(flatten)]
         identity: IntproxyIdentity,
@@ -154,4 +161,16 @@ string_id!(
     /// the id from the hosting platform's metadata (e.g. the ECS task ARN) and then the hostname.
     /// It must be unique among concurrently running replicas of a service; nothing verifies this.
     ReplicaId
+);
+string_id!(
+    /// What an agent tells the intproxies it pairs with about the platform it serves, such as
+    /// `platform=aws-lambda&invocation_port=8080` for a Lambda function's hub, so the CLI can
+    /// prepare the local process for that platform.
+    ///
+    /// Opaque to sessions-manager: it stores the value with the agent's registration and copies
+    /// it into the [`crate::ConnectionAssignment`] of each intproxy paired with that agent,
+    /// without parsing it. A sessions-manager that predates it ignores the parameter, and the
+    /// session still works without it, so a client must treat its absence as "no platform
+    /// specifics".
+    AgentMetadata
 );

@@ -182,10 +182,13 @@ mod tests {
     #[test]
     fn serializes_agent_subscription() {
         assert_eq!(
-            query_pairs(AssignmentSubscription::Agent(AgentIdentity {
-                replica_id: "pod-a".to_owned().into(),
-                agent_instance_id: Uuid::nil(),
-            })),
+            query_pairs(AssignmentSubscription::Agent {
+                identity: AgentIdentity {
+                    replica_id: "pod-a".to_owned().into(),
+                    agent_instance_id: Uuid::nil(),
+                },
+                metadata: None
+            }),
             HashMap::from([
                 ("role".to_owned(), "agent".to_owned()),
                 ("replica_id".to_owned(), "pod-a".to_owned()),
