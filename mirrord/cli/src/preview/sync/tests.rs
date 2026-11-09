@@ -34,7 +34,8 @@ use tokio_tungstenite::{
 };
 
 use super::{
-    Connect, ServiceSync, Stop, SyncActivity, SyncDriver, WATCH_DEBOUNCE, WATCH_MAX_DELAY,
+    Connect, HandledBy, ServiceSync, Stop, SyncActivity, SyncDriver, WATCH_DEBOUNCE,
+    WATCH_MAX_DELAY,
 };
 use crate::error::CliError;
 
@@ -244,13 +245,13 @@ fn start(
     mpsc::UnboundedReceiver<Operator>,
     tokio::sync::watch::Receiver<SyncActivity>,
 ) {
-    start_with(entries, true, watch)
+    start_with(entries, HandledBy::Supervisor, watch)
 }
 
-/// [`start`], for a pod whose app a supervisor runs only when `supervised` is set.
+/// [`start`], for a pod that reports on a push as `handled_by` says.
 fn start_with(
     entries: Vec<SyncEntry>,
-    supervised: bool,
+    handled_by: HandledBy,
     watch: bool,
 ) -> (
     JoinHandle<CliError>,
@@ -277,7 +278,7 @@ fn start_with(
     let (driver, activity) = SyncDriver::with_connect(
         connect,
         entries.into(),
-        supervised,
+        handled_by,
         watch,
         ProgressTracker::null(),
     )
@@ -774,7 +775,8 @@ async fn a_push_into_a_pod_without_a_supervisor_counts_as_handled_once_applied()
     let local = tempfile::tempdir().unwrap();
     write(local.path(), "index.html", "v1");
 
-    let (sync, mut operators, mut activity) = start_with(vec![entry(local.path())], false, false);
+    let (sync, mut operators, mut activity) =
+        start_with(vec![entry(local.path())], HandledBy::Volume, false);
     let mut operator = next_connection(&mut operators).await;
     operator.pair_and_apply(1).await;
 

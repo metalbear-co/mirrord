@@ -204,6 +204,16 @@ fn lexically_normal(path: &Path) -> PathBuf {
     normal
 }
 
+/// What tells the CLI that the preview pod is done with a push.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HandledBy {
+    /// The supervisor that `spec.sync.run` starts reports it.
+    Supervisor,
+
+    /// Nothing in the pod reports it, so a push counts once the volume holds it.
+    Volume,
+}
+
 /// What the sync of a session did so far, which `mirrord preview sync` reads while it waits for the
 /// session, to tell progress from a stall.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -273,10 +283,8 @@ pub(super) struct SyncDriver<S> {
     activity: watch::Sender<SyncActivity>,
     progress: ProgressTracker,
 
-    /// Whether a supervisor runs the app in the preview pod, as `spec.sync.run` asks for. Without
-    /// one, nothing in the pod reports on a push, so a push counts as handled once the volume
-    /// holds it.
-    supervised: bool,
+    /// What tells the CLI that the preview pod is done with a push.
+    handled_by: HandledBy,
 
     /// The id of the next push. The ids of one CLI start at a random number, so that they
     /// don't repeat the ids of an earlier CLI, whose pushes the operator and the sidecar may
@@ -402,15 +410,15 @@ impl From<OperatorApiError> for Stop {
 
 impl SyncDriver<UpgradedConnection> {
     /// The driver of the sync of the session `name` in `namespace`, which pushes `entries`, the
-    /// service's `sync` entries in the order of the session's `spec.sync`, into a pod whose app a
-    /// supervisor runs when `supervised` is set. With `watch_files`, it creates the watcher here,
-    /// and each listing then watches the directories that it reads.
+    /// service's `sync` entries in the order of the session's `spec.sync`, into a pod that reports
+    /// on a push as `handled_by` says. With `watch_files`, it creates the watcher here, and each
+    /// listing then watches the directories that it reads.
     pub(super) fn new(
         operator_api: Arc<OperatorApi<MaybeClientCert>>,
         namespace: String,
         name: String,
         entries: Vec<SyncEntry>,
-        supervised: bool,
+        handled_by: HandledBy,
         watch_files: bool,
         progress: ProgressTracker,
     ) -> CliResult<(Self, watch::Receiver<SyncActivity>)> {
@@ -426,7 +434,7 @@ impl SyncDriver<UpgradedConnection> {
             })
         });
 
-        Self::with_connect(connect, entries.into(), supervised, watch_files, progress)
+        Self::with_connect(connect, entries.into(), handled_by, watch_files, progress)
     }
 }
 
@@ -434,7 +442,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     fn with_connect(
         connect: Connect<S>,
         entries: Arc<[SyncEntry]>,
-        supervised: bool,
+        handled_by: HandledBy,
         watch_files: bool,
         progress: ProgressTracker,
     ) -> CliResult<(Self, watch::Receiver<SyncActivity>)> {
@@ -462,7 +470,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             watcher,
             activity,
             progress,
-            supervised,
+            handled_by,
             next_push_id: rand::random(),
             applied_pushes: 0,
             pairing: Pairing::Waiting,
@@ -912,10 +920,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
 
         self.activity.send_modify(|activity| {
             activity.busy = busy;
-            activity.handled = if self.supervised {
-                self.supervisor.handled
-            } else {
-                self.generation
+            activity.handled = match self.handled_by {
+                HandledBy::Supervisor => self.supervisor.handled,
+                HandledBy::Volume => self.generation,
             };
             activity.prepare_failed = self.supervisor.install.state == InstallState::Failed;
             activity.paused = self.pairing == Pairing::Paused;

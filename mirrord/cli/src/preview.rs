@@ -262,8 +262,8 @@ struct PreparedSync {
     /// The service's `sync` entries, in the order of `spec.sync`.
     entries: Vec<SyncEntry>,
 
-    /// Whether a supervisor runs the app in the preview pod, which `spec.sync.run` asks for.
-    supervised: bool,
+    /// What tells the CLI that the preview pod is done with a sync.
+    handled_by: sync::HandledBy,
 
     /// The client of the sync websocket, with the user's certificate if the user has one.
     api: OperatorApi<MaybeClientCert>,
@@ -579,9 +579,10 @@ impl PreparedPreview {
         }
 
         let (sync_entries, sync_config) = sync.map(|sync| (sync.entries, sync.config)).unzip();
-        let supervised = sync_config
-            .as_ref()
-            .is_some_and(|config| config.run.is_some());
+        let handled_by = match sync_config.as_ref().and_then(|config| config.run.as_ref()) {
+            Some(_) => sync::HandledBy::Supervisor,
+            None => sync::HandledBy::Volume,
+        };
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -614,7 +615,7 @@ impl PreparedPreview {
             None => None,
             Some(entries) => Some(PreparedSync {
                 entries,
-                supervised,
+                handled_by,
                 api: operator_api
                     .clone()
                     .with_client_certificate(&mut analytics, progress, &layer_config)
@@ -966,7 +967,7 @@ async fn wait_until_started(
         None => (None, None),
         Some(PreparedSync {
             entries,
-            supervised,
+            handled_by,
             api: sync_api,
         }) => {
             // The driver creates the watcher of `--watch`, which can fail after this run created
@@ -976,7 +977,7 @@ async fn wait_until_started(
                 session_namespace.to_owned(),
                 session_name.to_owned(),
                 entries,
-                supervised,
+                handled_by,
                 watch_files,
                 progress.subtask("syncing the local code"),
             ) {
