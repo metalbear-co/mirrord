@@ -44,6 +44,9 @@ pub struct TcpStealerTask {
     disconnected_clients: FuturesUnordered<ChannelClosedFuture>,
     /// For tracking http requests whose bodies are being buffered
     ongoing_requests: JoinSet<(RedirectedHttp, SettledFilters)>,
+    /// Bumped whenever a client's subscriptions change, so that filter answers taken before the
+    /// change are not reused for the filters that replaced them.
+    subscriptions_generation: u64,
 }
 
 impl TcpStealerTask {
@@ -54,6 +57,7 @@ impl TcpStealerTask {
             clients: Default::default(),
             disconnected_clients: Default::default(),
             ongoing_requests: Default::default(),
+            subscriptions_generation: 0,
         }
     }
 
@@ -69,7 +73,13 @@ impl TcpStealerTask {
 
                 Some(result) = self.subscriptions.next() => {
                     let (traffic, subscription) = result?;
-                    Self::handle_stolen_traffic(&self.clients, traffic, subscription, &mut self.ongoing_requests).await;
+                    Self::handle_stolen_traffic(
+                        &self.clients,
+                        traffic,
+                        subscription,
+                        &mut self.ongoing_requests,
+                        self.subscriptions_generation,
+                    ).await;
                 }
 
                 Some(client_id) = self.disconnected_clients.next() => {
@@ -149,6 +159,7 @@ impl TcpStealerTask {
         traffic: StolenTraffic,
         subscription: &PortSubscription,
         ongoing: &mut JoinSet<(RedirectedHttp, SettledFilters)>,
+        subscriptions_generation: u64,
     ) {
         let protocol_version_req = match &traffic {
             StolenTraffic::Tcp { conn, .. } => Self::protocol_version_req_tcp(subscription, conn),
@@ -243,8 +254,12 @@ impl TcpStealerTask {
         };
 
         let (parts, body) = http.parts_and_body();
-        match Self::decide(filters, SettledFilters::new(), parts, body).await {
-            StealDecision::BufferBody(settled) => {
+        match Self::decide(filters, HashMap::new(), parts, body).await {
+            StealDecision::BufferBody(answers) => {
+                let settled = SettledFilters {
+                    generation: subscriptions_generation,
+                    answers,
+                };
                 ongoing.spawn(async move {
                     if let Err(error) = http.buffer_body().await {
                         tracing::debug!(?error, "failed to buffer request body");
@@ -264,14 +279,16 @@ impl TcpStealerTask {
     /// cannot settle that filter. The filters that did answer keep their answer, so buffering
     /// costs no second round of `header_jq` evaluations. After a buffering attempt the body is
     /// complete, given up on, or broken for good, so the remaining filters always come back with a
-    /// final answer. A filter that could not be run does not steal: the request goes where it
-    /// would have gone without that client.
+    /// final answer. A filter that could not be run is settled by
+    /// [`HttpFilter::undecided_matches`]: a plain filter does not steal, a negated one does.
     ///
     /// `filters` is read afresh on each call: a client that unsubscribed while the body was
     /// buffering does not get the request, and one that subscribed meanwhile gets its filter run.
+    /// The caller drops `settled` answers taken under an older [`SettledFilters::generation`], so a
+    /// client that swapped its filter meanwhile gets the new filter run as well.
     async fn decide<T: Read + Copy>(
         filters: &HashMap<ClientId, HttpFilter>,
-        mut settled: SettledFilters,
+        mut settled: HashMap<ClientId, bool>,
         parts: &mut Parts,
         body: RequestBody<T>,
     ) -> StealDecision {
@@ -286,8 +303,11 @@ impl TcpStealerTask {
                 MatchResult::Match => {
                     settled.insert(*client_id, true);
                 }
-                MatchResult::NoMatch | MatchResult::Undecided => {
+                MatchResult::NoMatch => {
                     settled.insert(*client_id, false);
+                }
+                MatchResult::Undecided => {
+                    settled.insert(*client_id, filter.undecided_matches(body));
                 }
                 MatchResult::NeedsBody => needs_body = true,
             }
@@ -399,6 +419,7 @@ impl TcpStealerTask {
                 self.subscriptions
                     .add(command.client_id, port, filter)
                     .await?;
+                self.subscriptions_generation += 1;
 
                 let _ = client
                     .message_tx
@@ -408,6 +429,7 @@ impl TcpStealerTask {
 
             Command::PortUnsubscribe(port) => {
                 self.subscriptions.remove(command.client_id, port);
+                self.subscriptions_generation += 1;
             }
         }
 
@@ -418,10 +440,19 @@ impl TcpStealerTask {
     fn handle_client_disconnected(&mut self, client_id: ClientId) {
         self.clients.remove(&client_id);
         self.subscriptions.remove_all(client_id);
+        self.subscriptions_generation += 1;
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
     async fn handle_buffered_http(&mut self, mut http: RedirectedHttp, settled: SettledFilters) {
+        // A subscription change while the body was buffering means an answer may belong to a
+        // filter that is no longer there, so every filter runs again.
+        let answers = if settled.generation == self.subscriptions_generation {
+            settled.answers
+        } else {
+            HashMap::new()
+        };
+
         let Some(subscription) = self
             .subscriptions
             .get(http.info().original_destination.port())
@@ -445,7 +476,7 @@ impl TcpStealerTask {
 
         let protocol_version_req = Self::protocol_version_req_http(subscription, &http);
         let (parts, body) = http.parts_and_body();
-        match Self::decide(filters, settled, parts, body).await {
+        match Self::decide(filters, answers, parts, body).await {
             StealDecision::Matched(matched) => {
                 Self::finish_stealing(&self.clients, matched, http, protocol_version_req).await
             }
@@ -461,9 +492,15 @@ impl TcpStealerTask {
     }
 }
 
-/// What each client's filter answered about one request, `true` meaning it steals. Filters that
-/// still need the body are missing.
-type SettledFilters = HashMap<ClientId, bool>;
+/// What each client's filter answered about one request while its body is being buffered.
+#[derive(Debug)]
+struct SettledFilters {
+    /// [`TcpStealerTask::subscriptions_generation`] when the answers were taken. An answer holds
+    /// only for the filter that gave it, so a subscription change since makes them all stale.
+    generation: u64,
+    /// `true` means the client steals. Filters that still need the body are missing.
+    answers: HashMap<ClientId, bool>,
+}
 
 /// Outcome of running the clients' filters over a stolen request.
 #[derive(Debug, PartialEq, Eq)]
@@ -471,8 +508,9 @@ enum StealDecision {
     /// Clients whose filter matches, in filter map order. The first connected one with a good
     /// enough protocol version gets the request, the rest are told another user took it.
     Matched(Vec<ClientId>),
-    /// Some filter can only decide once the body is buffered. Carries the answers of the others.
-    BufferBody(SettledFilters),
+    /// Some filter can only decide once the body is buffered. Carries the answers of the others,
+    /// `true` meaning the client steals.
+    BufferBody(HashMap<ClientId, bool>),
 }
 
 impl fmt::Debug for TcpStealerTask {
@@ -497,7 +535,7 @@ mod test {
     use hyper::Request;
     use mirrord_protocol::tcp::{self, Filter, JsonPathQuery};
 
-    use super::{SettledFilters, StealDecision, TcpStealerTask};
+    use super::{StealDecision, TcpStealerTask};
     use crate::http::filter::{HttpFilter, RequestBody};
 
     fn tenant_header_filter() -> HttpFilter {
@@ -542,7 +580,7 @@ mod test {
 
         let decision = TcpStealerTask::decide(
             &filters,
-            SettledFilters::new(),
+            HashMap::new(),
             &mut parts,
             RequestBody::<&[u8]>::Pending,
         )
