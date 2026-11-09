@@ -405,9 +405,11 @@ jobs:
 
   # A change to the public API of a crate the operator uses blocks the next bump of the mirrord
   # dependencies in the operator, until someone adapts the operator to it. This compiles the operator
-  # with the crates of this PR, through `check-mirrord-compat.yaml` in the operator repo, whose logs
-  # are private, since compiler errors quote the operator's code. That workflow checks the operator
-  # branch named like the branch of this PR when there is one, and `main` otherwise.
+  # with the crates of this PR merged into `main`, the commit the other jobs build, so a PR that
+  # doesn't contain a change that already merged isn't judged without it. It runs through
+  # `check-mirrord-compat.yaml` in the operator repo, whose logs are private, since compiler errors
+  # quote the operator's code. That workflow checks the operator branch named like the branch of this
+  # PR when there is one, and `main` otherwise.
   #
   # The operator branch merges after this PR, so while it is open, operator `main` doesn't compile
   # with mirrord `main`, and other PRs fail this check. They can add the `skip-operator-check` label
@@ -451,7 +453,7 @@ jobs:
           workflow: check-mirrord-compat.yaml
           workflow_inputs: |
             {
-              "mirrord_commit": "${{ github.event.pull_request.head.sha }}",
+              "mirrord_commit": "${{ github.sha }}",
               "mirrord_branch": ${{ toJSON(github.head_ref) }}
             }
           workflow_timeout_seconds: 600
@@ -486,7 +488,7 @@ jobs:
             exit 0
           fi
           echo "::error::The operator check failed: $RUN_URL." \
-            "If the operator doesn't compile with the mirrord crates of this PR, push an operator branch" \
+            "If the operator doesn't compile with this PR merged into main, push an operator branch" \
             "named like this PR's branch that fixes it, and re-run the failed jobs." \
             "If operator main is already broken by an earlier mirrord PR, add the skip-operator-check label instead."
 

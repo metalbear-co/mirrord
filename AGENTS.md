@@ -143,8 +143,9 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 - An older CLI must keep working against a newer operator, so new behavior is opt-in and no client has to change. The
   rules this puts on the shared CRD types are in `mirrord/operator/AGENTS.md`.
 - The operator uses the mirrord crates as a library, pinned to a mirrord commit. A pull request that breaks its build
-  fails `operator_compat_check` in `ci.yaml` until the operator has a branch with the same name that fixes it. Merge the
-  pull request first, then that branch, with its mirrord dependencies bumped to the merge commit.
+  once merged into `main` fails `operator_compat_check` in `ci.yaml` until the operator has a branch with the same name
+  that fixes it. Merge the pull request first, then that branch, with its mirrord dependencies bumped to the merge
+  commit.
 
 ## Related Repositories
 
