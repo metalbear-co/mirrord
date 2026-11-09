@@ -32,7 +32,7 @@ use crate::{
 mod tests;
 
 /// How often a caller that waits for the credential store's lock tries to take it again.
-const LOCK_RETRY: Duration = Duration::from_millis(50);
+const LOCK_RETRY: Duration = Duration::from_millis(5);
 
 /// "~/.mirrord"
 static CREDENTIALS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
