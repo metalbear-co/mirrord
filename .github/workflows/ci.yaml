@@ -473,17 +473,21 @@ jobs:
           run_timeout_seconds: 3600
           poll_interval_ms: 10000
 
+      # A failed label lookup already explains itself in its own log.
       - name: Explain the failure
-        if: ${{ failure() && steps.skip.outputs.skip != 'true' }}
+        if: ${{ failure() && steps.skip.outcome == 'success' && steps.skip.outputs.skip != 'true' }}
         env:
+          DISPATCH: ${{ steps.dispatch.outcome }}
           RUN_URL: ${{ steps.dispatch.outputs.run_url }}
         run: |
-          if [ -z "$RUN_URL" ]; then
-            echo "::error::The operator check didn't start. The \"Start the operator check\" step says why."
+          if [ "$DISPATCH" != success ]; then
+            echo "::error::The operator check didn't start, or its run wasn't found." \
+              "The \"Start the operator check\" step says why."
             exit 0
           fi
-          echo "::error::The operator doesn't compile with the mirrord crates of this PR: $RUN_URL." \
-            "Push an operator branch named like this PR's branch that fixes it, and re-run the failed jobs." \
+          echo "::error::The operator check failed: $RUN_URL." \
+            "If the operator doesn't compile with the mirrord crates of this PR, push an operator branch" \
+            "named like this PR's branch that fixes it, and re-run the failed jobs." \
             "If operator main is already broken by an earlier mirrord PR, add the skip-operator-check label instead."
 
   install_script:
