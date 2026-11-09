@@ -262,6 +262,10 @@ struct PreparedPreview {
 struct PreparedSync {
     /// The service's `sync` entries, in the order of `spec.sync`.
     entries: Vec<SyncEntry>,
+
+    /// What tells the CLI that the preview pod is done with a sync.
+    handled_by: sync::HandledBy,
+
     /// The client of the sync websocket, with the user's certificate if the user has one.
     api: OperatorApi<MaybeClientCert>,
 }
@@ -663,6 +667,10 @@ impl PreparedPreview {
         }
 
         let (sync_entries, sync_config) = sync.map(|sync| (sync.entries, sync.config)).unzip();
+        let handled_by = match sync_config.as_ref().and_then(|config| config.run.as_ref()) {
+            Some(_) => sync::HandledBy::Supervisor,
+            None => sync::HandledBy::Volume,
+        };
         let spec = PreviewSessionSpec {
             image,
             key: layer_config.key.as_str().to_owned(),
@@ -706,6 +714,7 @@ impl PreparedPreview {
             None => None,
             Some(entries) => Some(PreparedSync {
                 entries,
+                handled_by,
                 api: operator_api
                     .clone()
                     .with_client_certificate(&mut analytics, progress, &layer_config)
@@ -730,8 +739,8 @@ impl PreparedPreview {
     /// Creates the session, replacing the preview under the same key and target, and waits for
     /// it to be ready. A session with `sync` and no image of its own reuses the live session under
     /// the same key and target when its spec is the same (see [`reusable_session`]). Once a
-    /// session with `sync` is ready, its sync has pushed the local code, and the preview pod's
-    /// supervisor is done with that push. With `watch_files`, also returns the sync's task, which
+    /// session with `sync` is ready, its sync has pushed the local code, and the preview pod is
+    /// done with that push. With `watch_files`, also returns the sync's task, which
     /// keeps pushing the changes; without it, the sync stops once the session is ready.
     async fn start(
         self,
@@ -999,7 +1008,7 @@ struct Started {
 
 /// Waits for the session `session_name` in `session_namespace` to reach `Ready` or `Idle`, and,
 /// with `sync`, runs its sync meanwhile, which pushes the local code. A session with `sync` only
-/// counts as started once the preview pod's supervisor is done with the first push.
+/// counts as started once the preview pod is done with the first push.
 ///
 /// Emits periodic warnings while the start takes long, so that the user knows that the command
 /// hasn't hung. A session that doesn't start within `creation_timeout`, which for a session with
@@ -1057,6 +1066,7 @@ async fn wait_until_started(
         None => (None, None),
         Some(PreparedSync {
             entries,
+            handled_by,
             api: sync_api,
         }) => {
             // The driver creates the watcher of `--watch`, which can fail after this run created
@@ -1066,8 +1076,9 @@ async fn wait_until_started(
                 session_namespace.to_owned(),
                 session_name.to_owned(),
                 entries,
+                handled_by,
                 watch_files,
-                progress.subtask("pushing the local code"),
+                progress.subtask("syncing the local code"),
             ) {
                 Ok(driver) => driver,
                 Err(error) => return Err(fail(error, &mut subtask).await),
@@ -1089,8 +1100,9 @@ async fn wait_until_started(
     let mut started = None;
     let (share_host, idle) = loop {
         // The `Ready` of a reused session predates the push, and the volume holds the push
-        // before the supervisor ran its install and restarted the app, so the first push only
-        // counts once the supervisor is done with it. The `changed` arm below only wakes the
+        // before the supervisor ran `prepare` and restarted the app, so the first push only
+        // counts once the preview pod is done with it, as `SyncActivity::handled` says: once the
+        // supervisor reports it, or, without `run`, once the volume holds it. The `changed` arm below only wakes the
         // loop, so the loop hands each activity that it reads to the deadline here, and the
         // deadline sees every change of the sync's work.
         let first_push_handled = match &mut activity {
@@ -1100,9 +1112,9 @@ async fn wait_until_started(
                 deadline.on_activity(&activity);
                 match activity.first_push {
                     Some(first_push) if activity.handled >= Some(first_push) => {
-                        if activity.install_failed {
+                        if activity.prepare_failed {
                             return Err(
-                                fail(CliError::PreviewSyncInstallFailed, &mut subtask).await
+                                fail(CliError::PreviewSyncPrepareFailed, &mut subtask).await
                             );
                         }
                         true
@@ -1452,7 +1464,7 @@ fn reusable_session<'a>(
 
 /// The creation timeout of a preview session. For a session with `sync`, it measures time without
 /// progress: each report of progress starts the timeout again, and while the preview pod does
-/// work whose length the CLI can't predict, such as an install, the timeout doesn't run at all.
+/// work whose length the CLI can't predict, such as `prepare`, the timeout doesn't run at all.
 /// For any other session, nothing reports progress, so it measures the time since its start.
 struct ProgressDeadline {
     timeout: Duration,
@@ -1754,8 +1766,8 @@ async fn preview_status(
 }
 
 /// The code sync of a session in `mirrord preview status`, one line per fact: whether a CLI is
-/// attached, when the last push was applied and its generation, the install with the last line of its
-/// error, the app, and why idle mode is off.
+/// attached, when the last sync was applied and its generation, the state of `prepare` with the
+/// last line of its error, the app, and why idle mode is off.
 fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
     let mut lines = Vec::new();
 
@@ -1771,22 +1783,22 @@ fn describe_sync_status(sync: &PreviewSyncStatus) -> String {
                 .map(|ago| format!("{ago} ago"))
                 .unwrap_or_else(|_| "just now".to_owned());
             lines.push(match generation {
-                Some(generation) => format!("last push {ago} (generation {generation})"),
-                None => format!("last push {ago}"),
+                Some(generation) => format!("last sync {ago} (generation {generation})"),
+                None => format!("last sync {ago}"),
             });
         }
         (None, Some(generation)) => lines.push(format!("holds generation {generation}")),
-        (None, None) => lines.push("no push yet".to_owned()),
+        (None, None) => lines.push("no sync yet".to_owned()),
     }
 
-    if let Some(install) = &sync.install {
-        let last_error_line = install.error.as_deref().and_then(|error| {
+    if let Some(prepare) = &sync.prepare {
+        let last_error_line = prepare.error.as_deref().and_then(|error| {
             error
                 .lines()
                 .rev()
                 .find(|line| line.trim().is_empty().not())
         });
-        lines.extend(sync::describe_install(install, last_error_line));
+        lines.extend(sync::describe_prepare(prepare, last_error_line));
     }
 
     if let Some(app) = &sync.app {
@@ -2967,7 +2979,7 @@ mod tests {
             "ttlSecs": 3600,
             "sync": {
                 "entries": [{ "remote": "/app" }],
-                "runCommand": ["npm", "run", "dev"],
+                "run": { "command": ["npm", "run", "dev"] },
             },
         }))
         .unwrap()
@@ -3070,7 +3082,7 @@ mod tests {
     }
 
     /// The creation timeout of a session with `sync` measures time without progress: it doesn't
-    /// run while the preview pod is busy, such as during an install, and each report of progress
+    /// run while the preview pod is busy, such as while `prepare` runs, and each report of progress
     /// starts it again.
     #[tokio::test(start_paused = true)]
     async fn the_creation_timeout_counts_time_without_progress() {
@@ -3088,7 +3100,7 @@ mod tests {
             progress: 1,
             ..Default::default()
         });
-        // A long install: no timeout at all while it runs.
+        // A long `prepare`: no timeout at all while it runs.
         tokio::time::advance(Duration::from_secs(600)).await;
         assert!(
             expires_within(&deadline, Duration::from_secs(600))
@@ -3262,10 +3274,8 @@ mod tests {
                 entries: vec![PreviewSyncEntry {
                     remote: "/app".to_owned(),
                 }],
-                run_command: vec!["npm".to_owned(), "start".to_owned()],
-                working_dir: None,
-                install: None,
-                restart_on_change: true,
+                run: None,
+                prepare: None,
             },
         };
         let existing_dir = sync(local.path().to_owned());

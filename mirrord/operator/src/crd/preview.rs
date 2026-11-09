@@ -35,14 +35,15 @@ use crate::crd::queue_filter::{MessageFilter, QueueType, message_filter_crd_sche
 pub mod sync_config;
 pub mod view;
 pub use sync_config::{
-    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall,
+    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncPrepare,
+    PreviewSyncRestart, PreviewSyncRun,
 };
 use uuid::Uuid;
 
 use super::{db_branching::core::ConnectionSource, session::SessionTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
-use crate::sync::{AppReport, InstallReport, SidecarState};
+use crate::sync::{AppReport, PrepareReport, SidecarState};
 
 /// This resource represents a preview environment created by the `mirrord preview start` command.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -173,8 +174,8 @@ pub struct PreviewSessionSpec {
     #[serde(default, skip_serializing_if = "Not::not")]
     pub auto_queue_splitting: bool,
 
-    /// Code sync settings. When set, the CLI pushes its local tree into the preview pod. `image`
-    /// may then be empty, and the preview runs the target's image with the pushed code. Sent
+    /// Code sync settings. When set, the CLI syncs its local tree into the preview pod. `image`
+    /// may then be empty, and the preview runs the target's image with the synced code. Sent
     /// only to operators advertising `PreviewCodeSync`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<PreviewSyncConfig>,
@@ -529,27 +530,28 @@ pub struct PreviewSyncStatus {
     #[serde(default)]
     pub sidecar_error: Option<String>,
 
-    /// Whether a `mirrord preview sync` is connected to the operator to push code to the
+    /// Whether a `mirrord preview sync` is connected to the operator to sync code into the
     /// preview.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_attached: Option<bool>,
 
-    /// The generation of the last push that the code volume holds. Each push that the sidecar
+    /// The generation of the last sync that the code volume holds. Each sync that the sidecar
     /// applies adds one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<u64>,
 
-    /// When the sidecar last applied a push.
+    /// When the sidecar last applied a sync.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_synced_at: Option<MicroTime>,
 
-    /// The last run of `install.command` in the preview pod, while a sidecar that relays the
+    /// The last run of `prepare.command` in the preview pod, while a sidecar that relays the
     /// supervisor's report is connected.
     #[serde(default)]
-    pub install: Option<InstallReport>,
+    pub prepare: Option<PrepareReport>,
 
     /// The app, the process of `run.command` in the preview pod, while a sidecar that relays the
-    /// supervisor's report is connected.
+    /// supervisor's report is connected. `None` without `run`, because the container then runs
+    /// its own command and no supervisor reports on it.
     #[serde(default)]
     pub app: Option<AppReport>,
 }
@@ -570,10 +572,10 @@ pub enum PreviewSyncSidecarState {
     /// The sidecar copies the image's files to the code volume.
     Seeding,
 
-    /// The code volume holds no push yet.
+    /// The code volume holds no sync yet.
     AwaitingFirstPush,
 
-    /// The code volume holds the push of [`PreviewSyncStatus::generation`].
+    /// The code volume holds the sync of [`PreviewSyncStatus::generation`].
     Synced,
 
     /// The sidecar can't go on, for the reason in [`PreviewSyncStatus::sidecar_error`].
@@ -608,7 +610,7 @@ pub enum PreviewCodeStorageKind {
     Pvc,
 
     /// An `emptyDir` in the pod. The code is deleted with the pod, so the session never scales to
-    /// zero, and a replaced pod waits for another push.
+    /// zero, and a replaced pod waits for another sync.
     EmptyDir,
 
     /// For future compatibility.
@@ -894,13 +896,13 @@ mod tests {
     use crate::crd::session::KubeResourceTarget;
 
     /// The operator writes the status with a merge patch, which keeps a field that the patch
-    /// leaves out, so a sync status without the supervisor's report writes `install` and `app` as
+    /// leaves out, so a sync status without the supervisor's report writes `prepare` and `app` as
     /// `null`, which clears the ones that the status holds.
     #[test]
     fn a_sync_status_without_a_report_clears_the_stored_one() {
         let status = serde_json::to_value(PreviewSyncStatus::default()).unwrap();
 
-        assert_eq!(status.get("install"), Some(&serde_json::Value::Null));
+        assert_eq!(status.get("prepare"), Some(&serde_json::Value::Null));
         assert_eq!(status.get("app"), Some(&serde_json::Value::Null));
     }
 
