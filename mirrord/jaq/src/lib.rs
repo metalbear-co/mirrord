@@ -108,24 +108,24 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
     })
 }
 
-/// Runs `jq_code` against `payload` and reports whether the program produced `true`.
-///
-/// `time_limit` bounds the program, not the runtime around it: the clock starts once a blocking
-/// thread has picked the evaluation up. Started at the call instead, the wait for that thread
-/// counts against the budget, and on a busy host a program as small as `.priority == "high"`
-/// reports [`JqError::Timeout`]. The operator treats that as a runaway program: the message is
-/// routed as unmatched and the session that owns the filter is torn down.
-///
-/// A program that never finishes still fails with [`JqError::Timeout`] once the limit passes
-/// from its start; its thread keeps running, as `spawn_blocking` cannot be cancelled. A pool
-/// that hands out no thread within `THREAD_WAIT_LIMIT` fails the same way, so a starved host
-/// shows up as an error rather than as a caller that waits forever.
 /// How long an evaluation waits for a blocking thread before it gives up. The pool normally
 /// hands one over in microseconds, and a wait this long means the host is starved; failing then
 /// keeps the caller from stalling without a trace.
 #[cfg(feature = "eval")]
 const THREAD_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Runs `jq_code` against `payload` and reports whether the program produced `true`.
+///
+/// `time_limit` bounds the program, not the runtime around it: the clock starts the instant a
+/// blocking thread picks the evaluation up. Started at the call instead, the wait for that
+/// thread counts against the budget, and on a busy host a program as small as
+/// `.priority == "high"` reports [`JqError::Timeout`]. The operator treats that as a runaway
+/// program: the message is routed as unmatched and the session that owns the filter is torn down.
+///
+/// A program that never finishes still fails with [`JqError::Timeout`] once the limit passes
+/// from its start; its thread keeps running, as `spawn_blocking` cannot be cancelled. A pool
+/// that hands out no thread within `THREAD_WAIT_LIMIT` fails the same way, so a starved host
+/// shows up as an error rather than as a caller that waits forever.
 #[cfg(feature = "eval")]
 pub async fn evaluate_jq(
     jq_code: &str,
@@ -134,10 +134,11 @@ pub async fn evaluate_jq(
 ) -> Result<bool> {
     let filter = compile_jq(jq_code)?;
     let owned_json_value = payload.clone();
-    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    // Blocking worker --the instant it starts running the program--> task waiting in evaluate_jq.
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel::<tokio::time::Instant>();
     let jaq_run_handle = tokio::task::spawn_blocking(move || {
         // A receiver that is already gone only means the caller stopped waiting.
-        let _ = started_tx.send(());
+        let _ = started_tx.send(tokio::time::Instant::now());
         let inputs = jaq_core::RcIter::new(core::iter::empty());
         let mut out = filter.run((
             jaq_core::Ctx::new([], &inputs),
@@ -153,19 +154,22 @@ pub async fn evaluate_jq(
         .unwrap_or(false)
     });
 
-    // A closed channel means the task ended before it could report in; the join below says how.
-    if tokio::time::timeout(THREAD_WAIT_LIMIT, started_rx)
-        .await
-        .is_err()
-    {
-        return Err(JqError::Timeout {
-            jq_code: jq_code.to_owned(),
-            input: payload.clone(),
-            timeout: THREAD_WAIT_LIMIT,
-        });
-    }
+    let started_at = match tokio::time::timeout(THREAD_WAIT_LIMIT, started_rx).await {
+        Ok(Ok(started_at)) => started_at,
+        // The worker was dropped before it ran, so the join below says how it ended.
+        Ok(Err(_closed)) => tokio::time::Instant::now(),
+        Err(_elapsed) => {
+            return Err(JqError::Timeout {
+                jq_code: jq_code.to_owned(),
+                input: payload.clone(),
+                timeout: THREAD_WAIT_LIMIT,
+            });
+        }
+    };
 
-    match tokio::time::timeout(time_limit, jaq_run_handle).await {
+    // The deadline counts from the worker's own start, so a caller that resumes late does not
+    // hand the program extra time.
+    match tokio::time::timeout_at(started_at + time_limit, jaq_run_handle).await {
         Err(..) => Err(JqError::Timeout {
             jq_code: jq_code.to_owned(),
             input: payload.clone(),
@@ -336,9 +340,13 @@ mod tests {
     }
 
     /// A busy blocking pool must not count against a program's time limit. With one blocking
-    /// thread and that thread held for longer than the limit, the evaluation starts late and
-    /// used to report a timeout for a program that runs in microseconds; the operator then
-    /// dropped the message and tore down the session that owned the filter.
+    /// thread and that thread held past the limit, the evaluation starts late and used to report
+    /// a timeout for a program that runs in microseconds; the operator then dropped the message
+    /// and tore down the session that owned the filter.
+    ///
+    /// The thread is held until this test lets go, and the evaluation is checked to be pending
+    /// past twice its limit first, so the test cannot pass by the evaluation sneaking in before
+    /// the thread was taken.
     #[cfg(feature = "eval")]
     #[test]
     fn a_wait_for_a_blocking_thread_is_not_the_programs_time() {
@@ -350,18 +358,30 @@ mod tests {
 
         runtime.block_on(async {
             let limit = std::time::Duration::from_millis(200);
-            let busy = tokio::task::spawn_blocking(move || std::thread::sleep(limit * 3));
-            // The sleeper owns the one blocking thread before the evaluation asks for it.
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // Test --let go of the thread--> blocker holding the one blocking thread.
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let busy = tokio::task::spawn_blocking(move || {
+                // Bounded so a failed assertion below does not hang the runtime's shutdown.
+                let _ = release_rx.recv_timeout(std::time::Duration::from_secs(5));
+            });
 
             let payload = serde_json::json!({"priority": "high"});
-            let result = evaluate_jq(r#".priority == "high""#, &payload, limit).await;
+            let mut evaluation =
+                std::pin::pin!(evaluate_jq(r#".priority == "high""#, &payload, limit));
 
+            let early = tokio::time::timeout(limit * 2, evaluation.as_mut()).await;
+            assert!(
+                early.is_err(),
+                "the evaluation must wait for the thread instead of ending, got {early:?}"
+            );
+
+            release_tx.send(()).expect("the blocker is waiting");
+            let result = evaluation.await;
             assert!(
                 matches!(result, Ok(true)),
                 "the program must run once the thread frees up, got {result:?}"
             );
-            busy.await.expect("the sleeper finishes");
+            busy.await.expect("the blocker finishes");
         });
     }
 
