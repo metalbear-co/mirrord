@@ -325,12 +325,14 @@ impl MirrordClient {
 
         // The server hands a request matching several clients' filters to whichever it checks
         // first, so a filter this wide quietly takes traffic away from everyone else on the port.
+        // Preview pods subscribe with exactly this filter on purpose, on every port and again on
+        // each resubscribe, so this stays at debug rather than warning about every one of them.
         if let Some(used_filter @ HttpFilter::Not(..)) = &filter {
-            tracing::warn!(
+            tracing::debug!(
                 port,
                 filter = %used_filter,
-                "the `not (...)` filter is too inclusive: it matches every request on the port \
-                 except the excluded ones, so it overlaps every other filter on this port",
+                "the `not (...)` filter matches every request on the port except the excluded \
+                 ones, so it overlaps every other filter on this port",
             );
         }
 
