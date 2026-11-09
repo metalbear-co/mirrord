@@ -939,7 +939,7 @@
           }
         },
         "directory": {
-          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.",
+          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.\nA directory that the image doesn't have is created as the app's user, so an app that\ndoesn't run as root needs a parent directory that it can write to.",
           "type": [
             "string",
             "null"

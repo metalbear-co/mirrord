@@ -751,6 +751,8 @@ pub struct SyncRunConfig {
     /// The absolute working directory of `command` in the preview's container, e.g. `/app`.
     /// When not set, `command` runs in the working directory of the container, which is `/` for
     /// an image without a `WORKDIR`.
+    /// A directory that the image doesn't have is created as the app's user, so an app that
+    /// doesn't run as root needs a parent directory that it can write to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
 
