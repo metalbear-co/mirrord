@@ -934,7 +934,9 @@ impl KafkaPayloadProtobuf {
                     queue_name,
                     path: schema_path,
                 }
-            } else if error.is_file_not_found() {
+            // Of the not-found errors, only `FileNotIncluded` names no file. It's about the schema
+            // itself, which protox can't name when its path isn't UTF-8, so no import is missing.
+            } else if error.is_file_not_found() && error.file().is_some() {
                 QueueSplittingVerificationError::ProtobufImportNotFound {
                     queue_name,
                     schema_file: schema_file.to_owned(),
