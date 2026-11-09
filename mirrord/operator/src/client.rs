@@ -3634,6 +3634,7 @@ mod test {
         config::{ConfigContext, MirrordConfig},
         env_key::EnvKey,
         feature::{
+            database_branches::DatabaseBranchesConfig,
             network::incoming::ConcurrentSteal,
             split_queues::{QueueKind, QueueSplit, SplitQueuesConfig},
         },
@@ -3668,8 +3669,6 @@ mod test {
     /// operator that has the feature passes.
     #[test]
     fn targetless_db_branches_are_refused_from_the_config_and_spec_alone() {
-        use mirrord_config::feature::database_branches::DatabaseBranchesConfig;
-
         let spec = |features: &[&str]| -> crate::crd::MirrordOperatorSpec {
             serde_json::from_value(serde_json::json!({
                 "operator_version": "3.283.0",

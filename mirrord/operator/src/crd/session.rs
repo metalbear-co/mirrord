@@ -95,8 +95,14 @@ impl PodSetTarget {
 
 impl fmt::Display for KubeResourceTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The placeholder of a `mirrord preview up` service carries the service in `name`, which
+        // tells its session apart from the other previews without a target under the key.
         if self.is_targetless() {
-            return f.write_str("targetless");
+            f.write_str("targetless")?;
+            if !self.name.is_empty() {
+                write!(f, "/{}", self.name)?;
+            }
+            return Ok(());
         }
         write!(f, "{}/{}", self.kind, self.name)?;
         if !self.container.is_empty() {

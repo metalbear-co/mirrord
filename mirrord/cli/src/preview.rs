@@ -271,15 +271,19 @@ struct PreparedSync {
 }
 
 /// Drops what only a preview pod could use from the config and flags of a preview without a
-/// target, which the targetless config check already reported as ignored. Done before the
-/// feature check and the file reads of `prepare`, so an unused queue split is not held against
-/// the operator and an unused mount file is never opened. `auto_queue_splitting` is `mirrord up`
-/// asking the operator to split queues by default; with no pod to consume them it goes off too,
-/// otherwise the operator would set up splits for a session that never reads a message.
+/// target: every setting `verify_for_targetless_preview` reports as ignored, so the CR never
+/// carries what the user was just told is ignored. Done before the feature check and the file
+/// reads of `prepare`, so an unused queue split is not held against the operator and an unused
+/// mount or env file is never opened. `auto_queue_splitting` is `mirrord up` asking the operator
+/// to split queues by default; with no pod to consume them it goes off too, otherwise the
+/// operator would set up splits for a session that never reads a message.
 fn drop_pod_settings(layer_config: &mut LayerConfig, auto_queue_splitting: &mut bool) {
+    layer_config.feature.env = Default::default();
     layer_config.feature.split_queues = Default::default();
     layer_config.feature.kafka_branch = false;
     layer_config.feature.preview.image = None;
+    layer_config.feature.preview.replicas = PreviewSessionSpec::default_replicas();
+    layer_config.feature.preview.labels = Default::default();
     layer_config.feature.preview.secret_mounts.clear();
     layer_config.feature.preview.config_mounts.clear();
     *auto_queue_splitting = false;
@@ -341,7 +345,7 @@ impl PreparedPreview {
                 .db_branches
                 .any_provisioned_by_operator()
             {
-                return Err(CliError::PreviewTargetRequired);
+                return Err(CliError::PreviewTargetOrDbBranchesRequired);
             }
             if !sources.is_empty() {
                 return Err(manifests_need_a_target());
@@ -630,11 +634,7 @@ impl PreparedPreview {
             std::mem::take(&mut layer_config.feature.preview.secret_mounts),
             &mut secret_values,
         )?;
-        // Env vars go to the preview pod, so without one there is nothing to send and no env
-        // file to read.
-        let env = if targetless {
-            None
-        } else {
+        let env =
             PreviewEnvVarsConfig::from_config(&layer_config.feature.env).map_err(|error| {
                 CliError::EnvFileAccessError(
                     layer_config
@@ -645,8 +645,7 @@ impl PreparedPreview {
                         .unwrap_or_default(),
                     error,
                 )
-            })?
-        };
+            })?;
         let config_mounts = std::mem::take(&mut layer_config.feature.preview.config_mounts)
             .into_iter()
             .map(|m| m.resolve().map(Into::into))
@@ -676,14 +675,7 @@ impl PreparedPreview {
             key: layer_config.key.as_str().to_owned(),
             target: session_target,
             ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
-            // Both only shape the preview pods, which a session without a target has none of,
-            // and the config check already reported them as ignored, so the CR doesn't carry
-            // what the user was just told is ignored.
-            replicas: if targetless {
-                PreviewSessionSpec::default_replicas()
-            } else {
-                layer_config.feature.preview.replicas
-            },
+            replicas: layer_config.feature.preview.replicas,
             incoming,
             queue_splitting: PreviewQueueSplittingConfig::from_config(
                 &layer_config.feature.split_queues,
@@ -691,11 +683,7 @@ impl PreparedPreview {
             ),
             db_branching: None,
             env,
-            labels: if targetless {
-                None
-            } else {
-                PreviewLabelFilter::from_config(&layer_config.feature.preview.labels)
-            },
+            labels: PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
             config_mounts,
             secret_mounts,
             idle,
@@ -1856,7 +1844,14 @@ async fn preview_logs(
 
     // Reading every environment that shares a key is rarely what someone wants; a target
     // narrows it to the one they are actually debugging.
+    let up_service = args
+        .target
+        .as_deref()
+        .and_then(|target| split_targetless_service(target).1);
     let session_target = match &layer_config.target.path {
+        Some(Target::Targetless) if up_service.is_some() => {
+            Some(targetless_session_target(up_service))
+        }
         Some(config_target) => Some(
             resolve_config_target(
                 config_target,
@@ -1999,7 +1994,14 @@ async fn preview_stop(
 
     let mut subtask = progress.subtask("finding preview sessions");
 
+    let up_service = args
+        .target
+        .as_deref()
+        .and_then(|target| split_targetless_service(target).1);
     let session_target = match &layer_config.target.path {
+        Some(Target::Targetless) if up_service.is_some() => {
+            Some(targetless_session_target(up_service))
+        }
         Some(config_target) => Some(
             resolve_config_target(
                 config_target,
@@ -2384,13 +2386,25 @@ fn targetless_session_target(up_service: Option<&str>) -> SessionTarget {
 
 /// Whether `target`, as `stop`, `logs` or `status` resolved it from the config or `-t`, names
 /// `session`. The placeholder of a preview without a target may carry the `mirrord preview up`
-/// service in its name (see [`targetless_session_target`]), and a config without a target, or
-/// `-t targetless`, means every such preview under the key.
+/// service in its name (see [`targetless_session_target`]): a bare one, from a config without a
+/// target or `-t targetless`, means every such preview under the key, while one carrying a
+/// service, from `-t targetless/<service>`, means only that service's.
 fn session_has_target(session: &PreviewSession, target: &SessionTarget) -> bool {
-    if target.is_targetless() {
+    if target.is_targetless() && target.display_name().is_empty() {
         return session.spec.target.is_targetless();
     }
     session.spec.target == *target
+}
+
+/// Splits a `-t` value into the target the config parses and the `mirrord preview up` service a
+/// `targetless/<service>` value names. `Target` knows only a bare `targetless`, so `stop` and
+/// `logs` give the config the bare target and match sessions with
+/// [`targetless_session_target`] of the service instead.
+pub(crate) fn split_targetless_service(target: &str) -> (&str, Option<&str>) {
+    match target.split_once('/') {
+        Some(("targetless", service)) if service.is_empty().not() => ("targetless", Some(service)),
+        _ => (target, None),
+    }
 }
 
 /// What `start` and `diff` refuse `--resource` and `--chart` with when there is no target.
@@ -2866,17 +2880,20 @@ mod tests {
 
     use super::*;
 
-    /// `mirrord up` turns `auto_queue_splitting` on whenever the operator advertises
-    /// `PreviewAutoQueueSplitting`, and `prepare` clears the queue splits of a preview without a
-    /// target but used to pass that flag through. The session then asked the operator to split
-    /// queues by default for a preview with no pod to consume them. Everything only a pod could
-    /// use goes, the flag included.
+    /// A preview without a target sends nothing only a pod could use: `mirrord up` turns
+    /// `auto_queue_splitting` on whenever the operator advertises `PreviewAutoQueueSplitting`,
+    /// and that flag goes with the queue splits, otherwise the operator would split queues by
+    /// default for a preview with no pod to consume them. The env, replicas and labels the
+    /// config check reports as ignored go too, so the CR matches what the user was told.
     #[test]
     fn targetless_preview_never_asks_for_auto_queue_splitting() {
         let mut layer_config = LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
             .expect("the default config is valid");
         layer_config.feature.kafka_branch = true;
         layer_config.feature.preview.image = Some("myapp:v2".to_owned());
+        layer_config.feature.preview.replicas = 3;
+        layer_config.feature.env.r#override =
+            Some(HashMap::from([("A".to_owned(), "b".to_owned())]));
         let mut auto_queue_splitting = true;
 
         drop_pod_settings(&mut layer_config, &mut auto_queue_splitting);
@@ -2887,12 +2904,25 @@ mod tests {
         assert!(!layer_config.feature.split_queues.is_set());
         assert!(layer_config.feature.preview.secret_mounts.is_empty());
         assert!(layer_config.feature.preview.config_mounts.is_empty());
+        // What the CR gets from each of them.
+        assert_eq!(
+            PreviewEnvVarsConfig::from_config(&layer_config.feature.env).expect("no env file"),
+            None
+        );
+        assert_eq!(
+            layer_config.feature.preview.replicas,
+            PreviewSessionSpec::default_replicas()
+        );
+        assert_eq!(
+            PreviewLabelFilter::from_config(&layer_config.feature.preview.labels),
+            None
+        );
     }
 
     /// `preview diff -t targetless --resource m.yaml` takes the placeholder from
-    /// `resolve_config_target`. As a plain kube resource it went on to GET a `Targetless` named
-    /// `""` from the API server, and the user saw a `LiveRead` error about that object instead
-    /// of being told the manifests need a target, as `start` tells them.
+    /// `resolve_config_target`, and the placeholder names no workload to compare the manifests
+    /// with, so it is refused with the same error `start` gives, instead of being looked up as a
+    /// `Targetless` named `""` on the API server.
     #[test]
     fn manifests_are_refused_without_a_target() {
         for target in [
@@ -2904,12 +2934,11 @@ mod tests {
         }
     }
 
-    /// A placeholder named after the branch set let a rerun of a config leak its earlier session:
-    /// `preview start -k K` with a pg branch, then again with pg and redis, left the pg session
-    /// running until its TTL, both holding the same pg branch. The placeholder stands for the
-    /// config instead: `start` has one, so a rerun replaces whatever branches it had, and a
-    /// `mirrord preview up` service keeps its own, so two services without a target coexist
-    /// under one key while a service with a changed branch set replaces only itself.
+    /// The placeholder stands for the config, not for its branch set: `preview start -k K` with
+    /// a pg branch, then again with pg and redis, replaces the first session instead of leaving
+    /// it running until its TTL with the same pg branch. A `mirrord preview up` service has its
+    /// own placeholder, so two services without a target coexist under one key while a service
+    /// with a changed branch set replaces only itself.
     #[test]
     fn targetless_placeholder_stands_for_the_config_not_its_branches() {
         let start = targetless_session_target(None);
@@ -2925,8 +2954,9 @@ mod tests {
     }
 
     /// `preview stop -t targetless` (or a config with `target: "targetless"`) names no `mirrord
-    /// preview up` service, so it means every preview without a target under the key,
-    /// while a workload target still matches only its own sessions.
+    /// preview up` service, so it means every preview without a target under the key, while
+    /// `-t targetless/<service>` means only that service's, and a workload target still matches
+    /// only its own sessions.
     #[test]
     fn a_bare_targetless_target_matches_every_session_without_a_target() {
         let mut session = session(
@@ -2937,8 +2967,22 @@ mod tests {
         let workload = session.spec.target.clone();
         session.spec.target = targetless_session_target(Some("orders-db"));
 
+        assert_eq!(session.spec.target.to_string(), "targetless/orders-db");
+        assert_eq!(
+            split_targetless_service("targetless/orders-db"),
+            ("targetless", Some("orders-db"))
+        );
+        assert_eq!(split_targetless_service("targetless"), ("targetless", None));
+        assert_eq!(
+            split_targetless_service("deployment/orders"),
+            ("deployment/orders", None)
+        );
         assert!(session_has_target(&session, &SessionTarget::targetless()));
         assert!(session_has_target(&session, &session.spec.target.clone()));
+        assert!(!session_has_target(
+            &session,
+            &targetless_session_target(Some("cache-db"))
+        ));
         assert!(!session_has_target(&session, &workload));
 
         session.spec.target = workload.clone();
