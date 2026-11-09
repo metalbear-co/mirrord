@@ -63,7 +63,8 @@ pub enum MatchResult {
     /// The filter could not be run: a jq query that does not compile, panics or runs past the time
     /// limit, a regex that hits its backtrack limit, or a body that broke mid-transfer. This is
     /// not a verdict on the request, so `Not` passes it through unchanged instead of turning a
-    /// broken filter into "steal everything". The callers resolve it as no match.
+    /// broken filter into "steal everything". The callers resolve it with
+    /// [`HttpFilter::undecided_matches`].
     Undecided,
 }
 
@@ -201,6 +202,19 @@ impl TryFrom<&mirrord_protocol::tcp::HttpBodyFilter> for HttpBodyFilter {
 }
 
 impl HttpFilter {
+    /// Settles [`MatchResult::Undecided`] once the request has to go somewhere.
+    ///
+    /// A plain filter that could not run steals nothing: the request goes where it would have
+    /// gone without that client, and a broken filter never turns into "steal everything". A
+    /// negated filter is a preview pod's "everything but preview traffic", and there the safe side
+    /// is the other one: a request nobody could check is matched, so it goes back to the stable
+    /// pods instead of being served by preview code, the same side [`RequestBody::Unavailable`]
+    /// lands on. A body that broke mid-transfer matches nobody, since there is nothing left to
+    /// serve.
+    pub fn undecided_matches<T>(&self, body: RequestBody<T>) -> bool {
+        matches!(self, Self::Not(..)) && matches!(body, RequestBody::Failed).not()
+    }
+
     /// Checks whether the given request [`Parts`] match this filter.
     ///
     /// Headers decide as much as they can on their own: a composite short-circuits on a definite
@@ -251,7 +265,8 @@ impl HttpFilter {
             // Flips a definite answer only. "Needs the body" stays with the caller, since negating
             // "cannot look yet" would steal or mirror the request before its body is read, and
             // "undecided" stays undecided, since a filter that could not run says nothing about
-            // the request either way.
+            // the request either way; `undecided_matches` settles it where the request has to go
+            // somewhere.
             Self::Not(filter) => Box::pin(filter.matches(parts, body)).await.not(),
 
             // Since we require `body` to be Clone + Copy, each iteration creates a new version

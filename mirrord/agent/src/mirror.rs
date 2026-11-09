@@ -121,6 +121,9 @@ impl TcpMirrorApi {
                             let (parts, body) = http.parts_and_body();
                             match filter.matches(parts, body).await {
                                 MatchResult::Match => Ok(M::Http(http)),
+                                MatchResult::Undecided if filter.undecided_matches(body) => {
+                                    Ok(M::Http(http))
+                                }
                                 MatchResult::NoMatch
                                 | MatchResult::Undecided
                                 | MatchResult::NeedsBody => continue,
@@ -154,6 +157,9 @@ impl TcpMirrorApi {
                             let (parts, body) = http.parts_and_body();
                             match filter.matches(parts, body).await {
                                 MatchResult::Match => return Ok(M::Http(http)),
+                                MatchResult::Undecided if filter.undecided_matches(body) => {
+                                    return Ok(M::Http(http));
+                                }
                                 MatchResult::NoMatch | MatchResult::Undecided => continue,
                                 MatchResult::NeedsBody => {
                                     ongoing.spawn(async move {
@@ -331,7 +337,10 @@ mod test {
         Payload,
         tcp::{self, Filter, InternalHttpBodyFrame, JsonPathQuery},
     };
-    use tokio::{sync::broadcast, task::JoinSet};
+    use tokio::{
+        sync::{broadcast, oneshot},
+        task::JoinSet,
+    };
     use tokio_stream::wrappers::BroadcastStream;
 
     use super::TcpMirrorApi;
@@ -364,6 +373,10 @@ mod test {
     /// Buffers the request's body in the background and runs [`TcpMirrorApi::next`] over the
     /// result, the way the mirror does once a filter asked for the body. Returns the mirrored
     /// request, or `None` when the mirror dropped it.
+    ///
+    /// `next` only runs once buffering is over, however long it took, so the verdict seen here is
+    /// the one the filter gives on the final body. A dropped request leaves `next` with nothing
+    /// to yield, which shows as a timeout with the buffering task already consumed.
     async fn next_after_buffering(
         filter: HttpFilter,
         mut http: MirroredHttp,
@@ -372,17 +385,25 @@ mod test {
         let version = ClientProtocolVersion::default();
         let mut handle = idle_mirror_handle();
         let mut ongoing = JoinSet::new();
+        let (buffered_tx, buffered_rx) = oneshot::channel();
         ongoing.spawn(async move {
             let _ = http.buffer_body().await;
+            let _ = buffered_tx.send(());
             http
         });
+        buffered_rx.await.unwrap();
 
         let next = TcpMirrorApi::next(&mut handle, &mut ongoing, &version, &filters);
         match tokio::time::timeout(Duration::from_millis(500), next).await {
             Ok(Ok(MirroredTraffic::Http(http))) => Some(http),
             Ok(other) => panic!("expected a mirrored HTTP request, got {other:?}"),
-            // A dropped request leaves `next` with nothing to yield.
-            Err(_elapsed) => None,
+            Err(_elapsed) => {
+                assert!(
+                    ongoing.is_empty(),
+                    "the buffered request was neither mirrored nor dropped"
+                );
+                None
+            }
         }
     }
 
