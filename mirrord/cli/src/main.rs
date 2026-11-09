@@ -957,15 +957,21 @@ async fn exec(
         )
     }
 
-    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.params.as_env_vars())
+        .override_env_opt("MIRRORD_SHARE", args.share.then_some("true"));
     cfg_context = apply_test_env_overrides(cfg_context);
 
     let (config_file_path, mut config) = util::resolve_config(&mut cfg_context).await?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
-    config.share |= args.share;
-    // Before the local Redis branch starts, so a misconfigured share starts nothing.
-    config.verify_share()?;
+
+    // Before the local Redis branch starts, so a misconfigured session starts nothing.
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
+    }
+    result?;
 
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
@@ -1022,12 +1028,6 @@ async fn exec(
     analytics
         .get_mut()
         .add("key_length", config.key.analytics_len());
-
-    let result = config.verify(&mut cfg_context);
-    for warning in cfg_context.into_warnings() {
-        progress.warning(&warning);
-    }
-    result?;
 
     #[cfg(target_os = "macos")]
     if let Err(error) = prompt_sip_report(progress, watch.clone(), user_data.machine_id()).await {

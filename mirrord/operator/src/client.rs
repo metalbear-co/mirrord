@@ -2905,7 +2905,7 @@ impl OperatorApi<PreparedClientCert> {
     /// A session started with `share` gets an error instead of an automatic copy_target: the
     /// operator refuses to share a copied target, and the user must learn the cause that turned
     /// copy_target on, before mirrord creates the copy. An explicit copy_target is refused
-    /// earlier, by [`LayerConfig::verify_share`].
+    /// earlier, by [`LayerConfig::verify`].
     async fn should_copy_target<P: Progress>(
         &self,
         config: &LayerConfig,

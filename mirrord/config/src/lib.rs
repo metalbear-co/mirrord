@@ -674,7 +674,11 @@ pub struct LayerConfig {
     /// listens, after it stops listening, until the session ends after mirrord exits, and on
     /// target pods that the session's agent doesn't run on. The link lasts as long as the
     /// session; starting the session again creates a different link.
-    #[config(default = false, plan = Team)]
+    ///
+    /// `mirrord exec --share` turns it on, and so does the environment variable
+    /// `MIRRORD_SHARE=true`. Other commands, such as `mirrord dump` and `mirrord port-forward`,
+    /// refuse to run with it.
+    #[config(env = "MIRRORD_SHARE", default = false, plan = Team)]
     pub share: bool,
 
     /// ## traceparent {#root-traceparent}
@@ -1025,12 +1029,12 @@ impl LayerConfig {
         (self.share && self.feature.network.incoming.is_steal()).then(|| self.key.as_str())
     }
 
-    /// Verifies the settings of a session started with [`share`](Self::share).
+    /// Verifies the settings of a session started with [`share`](Self::share), as part of
+    /// [`Self::verify`].
     ///
-    /// [`Self::verify`] includes these checks. They also run on their own because they raise no
-    /// warnings: a caller can reject a misconfigured share before it starts anything, and still
-    /// report each warning of the later [`Self::verify`] once.
-    pub fn verify_share(&self) -> Result<(), ConfigError> {
+    /// Its errors are [`ConfigError::Share`], whose messages are written for the user, so the CLI
+    /// shows them as they are.
+    fn verify_share(&self) -> Result<(), ConfigError> {
         if self.share.not() {
             return Ok(());
         }
