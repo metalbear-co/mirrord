@@ -20,15 +20,17 @@ pub const LOCAL_SHARE_REJECTED_REASON: &str = "LocalShareRejected";
 /// into the connect URL, so its fields are a contract with the operator.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LocalShareRequest {
-    /// The port the user listed first in `feature.network.incoming.ports`, or `None` when the
-    /// user listed none and the operator picks the only port the target container declares.
-    pub entry_port: Option<u16>,
+    /// `feature.network.incoming.ports` in the order the user listed them. The operator opens the
+    /// first port in this list that it can steal and that a port of the target's Service leads
+    /// to. `None` when the user listed none, and the operator picks the only port the target
+    /// container declares.
+    pub allowed_ports: Option<Vec<u16>>,
     /// `feature.network.incoming.ignore_ports`, so the operator applies the same exclusions when
-    /// it picks the port.
+    /// it picks the port, also when `allowed_ports` is `None`.
     #[serde(default)]
     pub ignored_ports: Vec<u16>,
     /// `feature.network.incoming.http_filter.ports`, so the operator applies the same scope when
-    /// it picks the port.
+    /// it picks the port, also when `allowed_ports` is `None`.
     #[serde(default)]
     pub http_filter_ports: Option<Vec<u16>>,
 }
@@ -50,7 +52,7 @@ impl LocalShareRequest {
             ports
         });
         Some(Self {
-            entry_port: incoming.first_configured_port,
+            allowed_ports: incoming.ports.clone(),
             ignored_ports,
             http_filter_ports,
         })

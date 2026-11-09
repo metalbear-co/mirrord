@@ -10,10 +10,11 @@ use mirrord_config::{
     config::{ConfigContext, MirrordConfig},
 };
 
-/// The first listed port, which the link opens, survives `verify-config --resolved`, saving its
-/// output as a config file and loading it again, and the internal handoff to the layer.
+/// The order of `feature.network.incoming.ports`, which picks the port the link opens, survives
+/// `verify-config --resolved`, saving its output as a config file and loading it again, and the
+/// internal handoff to the layer.
 #[tokio::test]
-async fn local_share_resolved_config_keeps_first_port() {
+async fn local_share_resolved_config_keeps_port_order() {
     let scenario = tempfile::TempDir::new().unwrap();
     let tmpdir = scenario.path().to_str().unwrap();
     let mut file = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
@@ -28,8 +29,8 @@ async fn local_share_resolved_config_keeps_first_port() {
         .unwrap();
     assert!(config.share);
     assert_eq!(
-        config.feature.network.incoming.first_configured_port,
-        Some(9000)
+        config.feature.network.incoming.ports,
+        Some(vec![9000, 8080])
     );
     let output =
         mirrord_command::resolve_tokio_command(std::env::var("MIRRORD_TESTS_USE_BINARY").unwrap())
@@ -64,18 +65,14 @@ async fn local_share_resolved_config_keeps_first_port() {
         .unwrap();
     assert!(reloaded.share);
     assert_eq!(
-        reloaded.feature.network.incoming.first_configured_port,
-        Some(9000)
-    );
-    assert_eq!(
         reloaded.feature.network.incoming.ports,
-        Some([9000, 8080].into_iter().collect())
+        Some(vec![9000, 8080])
     );
     // Internal handoffs must retain generated metadata rather than project file settings.
     let handed_off = LayerConfig::decode(&reloaded.encode().unwrap()).unwrap();
     assert_eq!(
-        handed_off.feature.network.incoming.first_configured_port,
-        Some(9000)
+        handed_off.feature.network.incoming.ports,
+        Some(vec![9000, 8080])
     );
     assert_eq!(handed_off.key, reloaded.key);
 }

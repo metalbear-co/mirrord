@@ -197,21 +197,6 @@ async fn read_share_link(
         )
         .into());
     };
-    if share.entry_port == 0
-        || config
-            .feature
-            .network
-            .incoming
-            .first_configured_port
-            .is_some_and(|expected| expected != share.entry_port)
-    {
-        return Err(LocalShareError::Operator(format!(
-            "The operator registered the share link on port {}, which isn't the port this session shares.",
-            share.entry_port
-        ))
-        .into());
-    }
-
     Ok(LocalShareLink {
         url: share.url,
         entry_port: share.entry_port,

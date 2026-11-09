@@ -663,16 +663,17 @@ pub struct LayerConfig {
     /// `feature.network.incoming.mode` set to `"steal"`. Share links don't work with
     /// `feature.copy_target` yet.
     ///
-    /// The link opens the first port in `feature.network.incoming.ports`. Without that list, the
-    /// target container must declare exactly one port that mirrord steals. The link reaches the
-    /// target through the Kubernetes Service named after it, so the namespace must have a Service
-    /// with the target's name that exposes that port, such as Service `web` for target
-    /// `deployment/web`. mirrord prints the link before your application starts. Requests through
-    /// the link reach your application while it listens on that port, and the service running in
-    /// the cluster otherwise: before your application listens, after it stops listening, until
-    /// the session ends after mirrord exits, and on target pods that the session's agent doesn't
-    /// run on. The link lasts as long as the session; starting the session again creates a
-    /// different link.
+    /// The link reaches the target through the Kubernetes Service named after it, so the namespace
+    /// must have a Service with the target's name, such as Service `web` for target
+    /// `deployment/web`. The link opens the first port in `feature.network.incoming.ports` that
+    /// this Service exposes: with `ports = [3000, 9000]` and a Service that exposes only 9000, the
+    /// link opens 9000. Without that list, the target container must declare exactly one port
+    /// that mirrord steals, and the Service must expose it. mirrord prints the link before your
+    /// application starts. Requests through the link reach your application while it listens on
+    /// that port, and the service running in the cluster otherwise: before your application
+    /// listens, after it stops listening, until the session ends after mirrord exits, and on
+    /// target pods that the session's agent doesn't run on. The link lasts as long as the
+    /// session; starting the session again creates a different link.
     #[config(default = false, plan = Team)]
     pub share: bool,
 
@@ -745,18 +746,15 @@ impl LayerConfig {
     /// with `mirrord exec -f <file>`. `mirrord up` also merges its services' patches into this
     /// shape before it parses the result as a config file again.
     ///
-    /// The file schema has `deny_unknown_fields`, and it doesn't accept two things that the
-    /// resolved config holds, so this patches just the JSON instead of the config types:
+    /// The file schema has `deny_unknown_fields`, and it doesn't accept one thing that the resolved
+    /// config holds, so this patches just the JSON instead of the config types:
     /// - `key`: [`LayerConfig`] stores it as an [`EnvKey`], so normal serialization keeps whether
     ///   it was generated or provided. Config files only accept `key` as a plain string, so it is
     ///   replaced by its string. A `key_generated` field wouldn't work either: once the user saves
     ///   the output to a file, `mirrord exec` parses it as [`LayerFileConfig`], which rejects the
     ///   unknown field.
-    /// - `feature.network.incoming`: `first_configured_port` exists only in the resolved config, so
-    ///   it is removed. `ports` is written with the first configured port first, because
-    ///   [`share`](Self::share) opens that port, and the set that holds `ports` lost the order.
     ///
-    /// [`Self::encode`] doesn't use this: the layer and the proxies need those fields as they are.
+    /// [`Self::encode`] doesn't use this: the layer and the proxies need `key` as it is.
     pub fn as_file_config(&self) -> Result<serde_json::Value, serde_json::Error> {
         let mut value = serde_json::to_value(self)?;
         if let Some(object) = value.as_object_mut() {
@@ -764,18 +762,6 @@ impl LayerConfig {
                 "key".to_owned(),
                 serde_json::Value::String(self.key.as_str().to_owned()),
             );
-        }
-        if let Some(incoming) = value
-            .pointer_mut("/feature/network/incoming")
-            .and_then(serde_json::Value::as_object_mut)
-        {
-            incoming.remove("first_configured_port");
-            if let Some(ports) = &self.feature.network.incoming.ports {
-                let first = self.feature.network.incoming.first_configured_port;
-                let mut ports: Vec<_> = ports.iter().copied().collect();
-                ports.sort_unstable_by_key(|port| (Some(*port) != first, *port));
-                incoming.insert("ports".to_owned(), serde_json::to_value(ports)?);
-            }
         }
         Ok(value)
     }
@@ -1067,24 +1053,31 @@ impl LayerConfig {
                 "Share links aren't supported with copy_target yet.".to_owned(),
             ));
         }
-        if let Some(port) = incoming.first_configured_port {
-            let reason = if port == 0 {
-                Some("it is 0")
-            } else if incoming.ignore_ports.contains(&port) {
-                Some("feature.network.incoming.ignore_ports contains it")
-            } else if incoming
-                .http_filter
-                .ports
-                .as_ref()
-                .is_some_and(|ports| ports.contains(&port).not())
-            {
-                Some("feature.network.incoming.http_filter.ports doesn't contain it")
-            } else {
-                None
-            };
-            if let Some(reason) = reason {
+        if let Some(ports) = &incoming.ports {
+            let reasons: Vec<_> = ports
+                .iter()
+                .filter_map(|&port| {
+                    let reason = if port == 0 {
+                        "it is 0"
+                    } else if incoming.ignore_ports.contains(&port) {
+                        "feature.network.incoming.ignore_ports contains it"
+                    } else if incoming
+                        .http_filter
+                        .ports
+                        .as_ref()
+                        .is_some_and(|filter_ports| filter_ports.contains(&port).not())
+                    {
+                        "feature.network.incoming.http_filter.ports doesn't contain it"
+                    } else {
+                        return None;
+                    };
+                    Some(format!("port {port}, because {reason}"))
+                })
+                .collect();
+            if reasons.len() == ports.len() {
                 return Err(ConfigError::Share(format!(
-                    "The share link can't open port {port}, the first port in feature.network.incoming.ports, because {reason}. Put the port that the link should open first in feature.network.incoming.ports."
+                    "The share link can't open any port in feature.network.incoming.ports: {}. Add a port that the link can open to feature.network.incoming.ports.",
+                    reasons.join("; ")
                 )));
             }
         }

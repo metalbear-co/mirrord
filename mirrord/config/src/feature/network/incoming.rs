@@ -138,12 +138,13 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                first_configured_port: advanced
-                    .ports
-                    .as_ref()
-                    .and_then(|ports| ports.first())
-                    .copied(),
-                ports: advanced.ports.map(|ports| ports.into_iter().collect()),
+                ports: advanced.ports.map(|ports| {
+                    let mut seen = HashSet::with_capacity(ports.len());
+                    ports
+                        .into_iter()
+                        .filter(|port| seen.insert(*port))
+                        .collect()
+                }),
                 https_delivery: advanced.https_delivery,
                 tls_delivery: advanced.tls_delivery,
             },
@@ -530,12 +531,10 @@ pub struct IncomingConfig {
     ///
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
-    pub ports: Option<HashSet<u16>>,
-
-    /// The first port the user listed in `ports`. `ports` is a set, so it loses the order, and
-    /// [`share`](crate::LayerConfig::share) opens the first listed port.
-    #[serde(default)]
-    pub first_configured_port: Option<u16>,
+    ///
+    /// The order of the list matters to [`share`](#root-share), which opens the first port in it
+    /// that the target's Service exposes.
+    pub ports: Option<Vec<u16>>,
 
     /// ##### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
     ///
