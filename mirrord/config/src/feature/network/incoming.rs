@@ -138,13 +138,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                ports: advanced.ports.map(|ports| {
-                    let mut seen = HashSet::with_capacity(ports.len());
-                    ports
-                        .into_iter()
-                        .filter(|port| seen.insert(*port))
-                        .collect()
-                }),
+                ports: advanced.ports,
                 https_delivery: advanced.https_delivery,
                 tls_delivery: advanced.tls_delivery,
             },
