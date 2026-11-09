@@ -125,9 +125,10 @@ pub fn validate_config(
     }: ValidateConfigArgs,
 ) -> Result<ValidateConfigOutput, ValidateConfigError> {
     // Without symlinks, like the working directory `mirrord exec` reads, so that a config that
-    // mixes relative and absolute paths compiles the same way in both.
-    let directory =
-        directory.map(|directory| std::fs::canonicalize(&directory).unwrap_or(directory));
+    // mixes relative and absolute paths compiles the same way in both. `std::fs::canonicalize`
+    // would return a verbatim `\\?\C:\...` path on Windows, which protox never matches with an
+    // absolute `C:\...` path from the config.
+    let directory = directory.map(|directory| dunce::canonicalize(&directory).unwrap_or(directory));
     let issues = match format {
         ConfigFormat::MirrordJson => {
             // Isolated from this process's environment, which is the MCP client's rather than the

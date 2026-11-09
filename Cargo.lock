@@ -5714,6 +5714,7 @@ name = "mirrord-mcp"
 version = "3.284.0"
 dependencies = [
  "drain",
+ "dunce",
  "flate2",
  "json-patch",
  "jsonschema",
