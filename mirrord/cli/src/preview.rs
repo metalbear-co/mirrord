@@ -640,8 +640,8 @@ impl PreparedPreview {
     /// Creates the session, replacing the preview under the same key and target, and waits for
     /// it to be ready. A session with `sync` and no image of its own reuses the live session under
     /// the same key and target when its spec is the same (see [`reusable_session`]). Once a
-    /// session with `sync` is ready, its sync has pushed the local code, and the preview pod's
-    /// supervisor is done with that push. With `watch_files`, also returns the sync's task, which
+    /// session with `sync` is ready, its sync has pushed the local code, and the preview pod is
+    /// done with that push. With `watch_files`, also returns the sync's task, which
     /// keeps pushing the changes; without it, the sync stops once the session is ready.
     async fn start(
         self,
@@ -909,7 +909,7 @@ struct Started {
 
 /// Waits for the session `session_name` in `session_namespace` to reach `Ready` or `Idle`, and,
 /// with `sync`, runs its sync meanwhile, which pushes the local code. A session with `sync` only
-/// counts as started once the preview pod's supervisor is done with the first push.
+/// counts as started once the preview pod is done with the first push.
 ///
 /// Emits periodic warnings while the start takes long, so that the user knows that the command
 /// hasn't hung. A session that doesn't start within `creation_timeout`, which for a session with
@@ -1002,7 +1002,8 @@ async fn wait_until_started(
     let (share_host, idle) = loop {
         // The `Ready` of a reused session predates the push, and the volume holds the push
         // before the supervisor ran `prepare` and restarted the app, so the first push only
-        // counts once the supervisor is done with it. The `changed` arm below only wakes the
+        // counts once the preview pod is done with it, as `SyncActivity::handled` says: once the
+        // supervisor reports it, or, without `run`, once the volume holds it. The `changed` arm below only wakes the
         // loop, so the loop hands each activity that it reads to the deadline here, and the
         // deadline sees every change of the sync's work.
         let first_push_handled = match &mut activity {
