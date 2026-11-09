@@ -349,6 +349,9 @@ pub struct IncomingAdvancedFileConfig {
     /// List of ports to mirror/steal traffic from. Other ports will remain local.
     ///
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
+    ///
+    /// The order of the list matters to [`share`](#root-share), which opens the first port in it
+    /// that the target's Service exposes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<u16>>,
 

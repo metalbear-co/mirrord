@@ -4085,7 +4085,7 @@
         },
         "ports": {
           "title": "ports",
-          "description": "List of ports to mirror/steal traffic from. Other ports will remain local.\n\nMutually exclusive with [`ignore_ports`](###ignore_ports).",
+          "description": "List of ports to mirror/steal traffic from. Other ports will remain local.\n\nMutually exclusive with [`ignore_ports`](###ignore_ports).\n\nThe order of the list matters to [`share`](#root-share), which opens the first port in it\nthat the target's Service exposes.",
           "type": [
             "array",
             "null"
