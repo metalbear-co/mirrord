@@ -257,13 +257,15 @@ proxy log at {log}.\n{LOCAL_SHARE_NOTE}",
     Ok(())
 }
 
-/// What [`MirrordExecution::spawn_agent_and_intproxy`] started.
+/// The internal proxy that the application's layer connects to: one that
+/// [`MirrordExecution::spawn_agent_and_intproxy`] started, or one that is already running
+/// ([`MirrordExecution::setup_existing_intproxy`]).
 struct SpawnedIntproxy {
     /// Variables for the application: the target's environment and where the layer finds the
     /// internal proxy.
     env_vars: HashMap<String, String>,
-    /// The internal proxy process.
-    child: Child,
+    /// The internal proxy process, or `None` when the internal proxy was already running.
+    child: Option<Child>,
     /// Whether the agent connection goes through the mirrord operator.
     uses_operator: bool,
     /// The share link of a run started with `share`.
@@ -414,25 +416,17 @@ impl MirrordExecution {
 
         // Spawn agent and intproxy processes, unless MIRRORD_TEST_INTPROXY_ADDR is set and used
         // instead (test-only: skips agent connection and uses an existing intproxy).
-        let (mut env_vars, proxy_process, uses_operator, share_link) =
-            match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
-                Ok(addr) => (
-                    Self::setup_existing_intproxy(addr, config)?,
-                    None,
-                    false,
-                    None,
-                ),
-                _ => {
-                    let SpawnedIntproxy {
-                        env_vars,
-                        child,
-                        uses_operator,
-                        share_link,
-                    } = Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
-                        .await?;
-                    (env_vars, Some(child), uses_operator, share_link)
-                }
-            };
+        let SpawnedIntproxy {
+            mut env_vars,
+            child: proxy_process,
+            uses_operator,
+            share_link,
+        } = match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
+            Ok(addr) => Self::setup_existing_intproxy(addr, config)?,
+            _ => {
+                Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci).await?
+            }
+        };
 
         #[cfg(target_os = "macos")]
         {
@@ -763,12 +757,12 @@ impl MirrordExecution {
     ///
     /// Expects `MIRRORD_TEST_INTPROXY_ADDR` to be a valid socket address, encodes the
     /// resolved config, and returns env vars that point the layer at the given proxy.
-    /// No proxy process is spawned.
+    /// No proxy process is spawned, and no agent or operator is involved.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     fn setup_existing_intproxy(
         raw_intproxy_addr: String,
         config: &mut LayerConfig,
-    ) -> CliResult<HashMap<String, String>> {
+    ) -> CliResult<SpawnedIntproxy> {
         let intproxy_address: SocketAddr = raw_intproxy_addr.parse().map_err(|e| {
             CliError::InternalProxySpawnError(format!(
                 "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
@@ -782,7 +776,12 @@ impl MirrordExecution {
             MIRRORD_LAYER_INTPROXY_ADDR.into(),
             intproxy_address.to_string(),
         );
-        Ok(env_vars)
+        Ok(SpawnedIntproxy {
+            env_vars,
+            child: None,
+            uses_operator: false,
+            share_link: None,
+        })
     }
 
     /// Spawns the agent and the internal proxy, then returns env vars for the layer.
@@ -972,7 +971,7 @@ impl MirrordExecution {
 
         Ok(SpawnedIntproxy {
             env_vars,
-            child: proxy_process,
+            child: Some(proxy_process),
             uses_operator: connect_info.is_operator(),
             share_link,
         })
