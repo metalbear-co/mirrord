@@ -1156,19 +1156,18 @@ impl DatabaseBranchConfig {
         })
     }
 
-    /// True when the operator runs a pod for this branch. S3 and turbopuffer branches have none:
-    /// the operator clones a bucket or a namespace through the provider's API and reads the
-    /// connection values itself, under its own cloud identity.
+    /// True when the operator runs a pod for this branch, which is when it has [pod
+    /// settings](Self::pod). S3 and turbopuffer branches have none: the operator clones a bucket
+    /// or a namespace through the provider's API and reads the connection values itself, under
+    /// its own cloud identity. A local Redis branch has none either, and never reaches the
+    /// operator.
     ///
     /// Mirrors `BranchRuntime` in `operator-db-branching` (`Pod` against `External`), which
     /// decides the same thing for the operator's own targetless check. The two must stay in
     /// sync: an engine the operator provisions without a pod has to be pod-less here too, or
     /// the CLI refuses a branch the operator would provision.
     pub fn runs_branch_pod(&self) -> bool {
-        !matches!(
-            self,
-            DatabaseBranchConfig::S3(_) | DatabaseBranchConfig::Turbopuffer(_)
-        )
+        self.pod().is_some()
     }
 
     /// Why this branch cannot be provisioned without the target pod, or `None` when it can. A
@@ -1215,27 +1214,19 @@ impl DatabaseBranchConfig {
             })
         });
         // A bare `"url": "DATABASE_URL"` names a target env var too.
-        let urls_need_pod = self
-            .database()
-            .map(|database| &database.connection)
-            .into_iter()
-            .chain(self.additional_connections())
-            .any(|connection| match connection {
-                ConnectionSource::FlatUrl { .. } => true,
-                ConnectionSource::Url { url } => match url {
-                    TargetEnvironmentVariableSource::Env { value: None, .. }
-                    | TargetEnvironmentVariableSource::EnvFrom { .. } => true,
-                    TargetEnvironmentVariableSource::GcpSecretManager { .. }
-                    | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
-                    | TargetEnvironmentVariableSource::AwsSsmParameter { .. } => {
-                        borrows_pod_identity
-                    }
-                    TargetEnvironmentVariableSource::Env { value: Some(_), .. }
-                    | TargetEnvironmentVariableSource::Secret { .. } => false,
-                },
-                ConnectionSource::Params(_) => false,
-            });
-        if params_need_pod || urls_need_pod {
+        let flat_urls_need_pod = self
+            .all_connections()
+            .any(|connection| matches!(connection, ConnectionSource::FlatUrl { .. }));
+        let urls_need_pod = self.url_sources().any(|url| match url {
+            TargetEnvironmentVariableSource::Env { value: None, .. }
+            | TargetEnvironmentVariableSource::EnvFrom { .. } => true,
+            TargetEnvironmentVariableSource::GcpSecretManager { .. }
+            | TargetEnvironmentVariableSource::AwsSecretsManager { .. }
+            | TargetEnvironmentVariableSource::AwsSsmParameter { .. } => borrows_pod_identity,
+            TargetEnvironmentVariableSource::Env { value: Some(_), .. }
+            | TargetEnvironmentVariableSource::Secret { .. } => false,
+        });
+        if params_need_pod || flat_urls_need_pod || urls_need_pod {
             return Some(TargetPodNeed::ConnectionValues);
         }
         (borrows_pod_identity && self.iam_auth().is_some()).then_some(TargetPodNeed::IamAuth)
@@ -1336,8 +1327,17 @@ impl DatabaseBranchConfig {
             .filter_map(|database| database.connection.as_ref())
     }
 
-    /// Params of the branch's own connection plus those of its additional databases' app
-    /// connections. Capability gates look at all of them, since the operator resolves each.
+    /// The branch's own connection plus its additional databases' app connections. Capability
+    /// gates look at all of them, since the operator resolves each.
+    fn all_connections(&self) -> impl Iterator<Item = &ConnectionSource> {
+        self.database()
+            .map(|database| &database.connection)
+            .into_iter()
+            .chain(self.additional_connections())
+    }
+
+    /// Params of the branch's own connection (for S3 and turbopuffer, the only shape it has)
+    /// plus those of its additional databases' app connections.
     fn all_connection_params(&self) -> impl Iterator<Item = &ConnectionParamsVars> {
         self.connection_params().into_iter().chain(
             self.additional_connections()
@@ -1345,13 +1345,9 @@ impl DatabaseBranchConfig {
         )
     }
 
-    /// Typed `url` sources of the branch's own connection and of its additional databases'
-    /// app connections.
+    /// Typed `url` sources of every connection in [`Self::all_connections`].
     fn url_sources(&self) -> impl Iterator<Item = &TargetEnvironmentVariableSource> {
-        self.database()
-            .map(|database| &database.connection)
-            .into_iter()
-            .chain(self.additional_connections())
+        self.all_connections()
             .filter_map(ConnectionSource::url_source)
     }
 
@@ -3165,10 +3161,10 @@ mod tests {
     }
 
     /// A Spanner branch has no password: the operator always reads the app's emulator-host var
-    /// and Google credentials off the target pod. With only the connection sources checked, a
-    /// Secret-only Spanner branch passed here, the CLI created the branch and preview CRs, and
-    /// the operator failed the branch late with `MalformedResource`. The engine rule refuses it
-    /// before anything is created.
+    /// and Google credentials off the target pod. So it needs the pod whatever its connection
+    /// sources are, Secret-only included, and the CLI refuses it for a session without a target
+    /// before any branch or preview CR is created, instead of the operator failing the branch
+    /// late with `MalformedResource`.
     #[test]
     fn spanner_always_needs_the_target_pod() {
         let branch = serde_json::from_value::<DatabaseBranchConfig>(json!({

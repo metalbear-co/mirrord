@@ -250,6 +250,13 @@ impl FromMirrordConfig for TargetConfig {
     type Generator = TargetFileConfig;
 }
 
+impl TargetConfig {
+    /// `true` when the session runs without a target: no `path`, or `path: "targetless"`.
+    pub fn is_targetless(&self) -> bool {
+        matches!(self.path, None | Some(Target::Targetless))
+    }
+}
+
 impl TargetFileConfig {
     /// Get the target path from the env var, `Ok(None)` if not set, `Err` if invalid value.
     fn get_target_path_from_env(context: &mut ConfigContext) -> Result<Option<Target>> {

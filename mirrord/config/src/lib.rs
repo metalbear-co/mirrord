@@ -1457,13 +1457,14 @@ impl LayerConfig {
             context.add_warning(ignored("feature.network.incoming.http_filter.ports"));
         }
 
-        // A branch-only preview (branches, no target) sends no incoming, so its steal check runs
-        // on the config as it is sent, below, and no filter is ever used. The pod-bound settings
-        // themselves are checked in `verify_for_targetless_preview`, by the commands that start
-        // such a preview: a missing `-t` on `preview stop` or `status` is not a preview without a
-        // target.
-        let branch_only = matches!(self.target.path, None | Some(Target::Targetless))
-            && !self.feature.db_branches.is_empty();
+        // A branch-only preview (branches the operator provisions, no target) sends no incoming,
+        // so its steal check runs on the config as it is sent, below, and no filter is ever used.
+        // Decided the way `preview start` decides it: a local Redis branch alone makes no preview
+        // without a target. The pod-bound settings themselves are checked in
+        // `verify_for_targetless_preview`, by the commands that start such a preview: a missing
+        // `-t` on `preview stop` or `status` is not a preview without a target.
+        let branch_only =
+            self.target.is_targetless() && self.feature.db_branches.any_provisioned_by_operator();
 
         if matches!(self.feature.network.incoming.mode, IncomingMode::Steal)
             && !self.feature.network.incoming.http_filter.is_filter_set()
@@ -3206,11 +3207,11 @@ mod tests {
     }
 
     /// A preview without a target sends no `env`, `replicas` or `labels` to the operator, so the
-    /// start check reports them as ignored like every other pod-only setting; before, a config
-    /// with `feature.env.override` started without a word and the user assumed the env was
-    /// carried. A `configmap` param without a locator passes the target pod check, but the
-    /// operator refuses it after the session exists when the profile's `sourceConfigMap` is a
-    /// pod volume, so the check warns that it depends on the profile.
+    /// start check reports each of them as ignored like every other pod-only setting, and a
+    /// `feature.env.override` never goes unmentioned. A `configmap` param without a locator
+    /// passes the target pod check, but the operator refuses it after the session exists when
+    /// the profile's `sourceConfigMap` is a pod volume, so the check warns that it depends on the
+    /// profile.
     #[test]
     fn targetless_preview_warns_about_env_labels_and_profile_configmaps() {
         let config = ConfigType::Json.parse(
