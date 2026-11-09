@@ -1000,8 +1000,10 @@ pub enum NewOperatorFeature {
     /// `MirrordClusterSession` it creates when a `MirrordSplitConfig` names a `consumerCluster`:
     /// the consumer cluster (the Default) runs the queue split, a bystander checks its
     /// `splitQueues` policy against the session's queues and then runs a plain session. A primary
-    /// refuses a workload cluster that does not advertise it, since an older operator knows no
-    /// role and would split the session's queues like every cluster does without a consumer.
+    /// refuses a workload cluster that does not advertise it: an older operator knows no role, so
+    /// as a bystander it tries to split, finds none of the split resources the consumer holds and
+    /// fails the session with `MissingPrefilledSplitResources`, an error that points at the wrong
+    /// cluster.
     MultiClusterQueueSplitRole,
 
     /// This variant is what a client sees when the operator includes a feature the client is not
