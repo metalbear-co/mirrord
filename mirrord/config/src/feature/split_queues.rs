@@ -938,14 +938,14 @@ impl KafkaPayloadProtobuf {
                 QueueSplittingVerificationError::ProtobufImportNotFound {
                     queue_name,
                     schema_file: schema_file.to_owned(),
-                    error: error.to_string(),
-                    include_directories: includes.into_boxed_slice(),
+                    error,
+                    include_directories: includes,
                 }
             } else {
                 QueueSplittingVerificationError::ProtobufCompile {
                     queue_name,
                     schema_file: schema_file.to_owned(),
-                    errors: error.to_string(),
+                    errors: error,
                 }
             }
         })
@@ -1028,11 +1028,9 @@ pub enum QueueSplittingVerificationError {
     ProtobufImportNotFound {
         queue_name: String,
         schema_file: PathBuf,
-        error: String,
+        error: protox::Error,
         /// The absolute paths of the directories imports were looked up in, in order.
-        // A boxed slice rather than a `Vec`, because on Windows, where `PathBuf` is larger, a
-        // `Vec` makes `ConfigError` so large that clippy complains when it's used in `Err`.
-        include_directories: Box<[PathBuf]>,
+        include_directories: Vec<PathBuf>,
     },
     #[error(
         "{queue_name}.payload_protobuf: failed to compile `{schema_file}`: {errors}. Check that \
@@ -1041,7 +1039,7 @@ pub enum QueueSplittingVerificationError {
     ProtobufCompile {
         queue_name: String,
         schema_file: PathBuf,
-        errors: String,
+        errors: protox::Error,
     },
     #[error(
         "{queue_name}.payload_protobuf.descriptor_base64: not a valid base64-encoded \
