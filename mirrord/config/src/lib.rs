@@ -630,11 +630,10 @@ pub struct LayerConfig {
     /// `http_filter.ports` still limits the ports. A session without `share` keeps its configured
     /// filter.
     ///
-    /// In `baggage`, the key is written as percent-encoded UTF-8 with upper-case hex digits: `%`,
-    /// a space, and every byte that a baggage value can't hold are encoded. For example,
-    /// `alice;debug` becomes `mirrord-session=alice%3Bdebug`, and a space becomes `%20`. A shared
-    /// session matches only this spelling, which is the one share-ingress writes, so a service
-    /// that forwards the member must keep its value as it is.
+    /// The key of a shared session may hold only printable ASCII characters other than a space,
+    /// `"`, `%`, `,`, `;` and `\`, because share-ingress sends it as it is in `baggage`, where
+    /// the others would end the value or change its meaning: receivers percent-decode a value
+    /// with `%`. A service that forwards the member must keep its value as it is.
     ///
     /// The key itself is [templated](#root-templating-key), so instead of a literal it can be
     /// derived from another variable. Using `git_branch` gives each branch its own session
@@ -1056,6 +1055,18 @@ impl LayerConfig {
             return Err(ConfigError::Share(
                 "Share links aren't supported with copy_target yet.".to_owned(),
             ));
+        }
+        // share-ingress sends the key as it is in `baggage`, and the shared session's filter
+        // matches it as it is, so the key must be a valid baggage value that no receiver decodes.
+        if let Some(invalid) = self
+            .key
+            .as_str()
+            .chars()
+            .find(|c| c.is_ascii_graphic().not() || matches!(c, '"' | '%' | ',' | ';' | '\\'))
+        {
+            return Err(ConfigError::Share(format!(
+                "The session key can't be shared, because it contains {invalid:?}. A shared session's key may hold only printable ASCII characters other than a space, '\"', '%', ',', ';' and '\\'."
+            )));
         }
         if let Some(ports) = &incoming.ports {
             let reasons: Vec<_> = ports

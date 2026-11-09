@@ -339,18 +339,15 @@ async fn filter_ports_preserves_custom_ast_and_mapping(
 }
 
 /// A shared session's subscription must select exactly the requests whose `baggage` carries its
-/// key as `baggage_session_value` spells it, which is how share-ingress tags them, and keep
-/// arbitrary keys apart.
+/// key as it is, which is how share-ingress tags them, and keep keys apart: a longer key, the key
+/// as another member's value, a key with regex metacharacters, and another case.
 /// This fake-agent harness checks the generated regex, not cluster request routing.
 #[rstest]
 #[case("alice")]
-#[case("alice;debug")]
-#[case("alice,debug=1")]
-#[case("alice%3Bdebug")]
-#[case(" alice ")]
-#[case("café")]
-#[case("")]
 #[case("Alice")]
+#[case("alice.*")]
+#[case("a=b")]
+#[case("")]
 #[tokio::test]
 async fn filter_ports_session_key_wire_contract(#[case] key: &str) {
     let config = json!({
@@ -386,45 +383,32 @@ async fn filter_ports_session_key_wire_contract(#[case] key: &str) {
     };
     let custom_regex = fancy_regex::Regex::new(&format!("(?i){path}")).unwrap();
     let session = session_regex(filter, Some(custom));
-    // `selected_key` is the key that the header carries in the one spelling share-ingress writes,
-    // or `None` when the header carries no key in that spelling.
+    // `selected_key` is the key that the header carries as a whole `mirrord-session` member, or
+    // `None` when it carries none.
     for (header, selected_key) in [
         ("baggage: mirrord-session=alice", Some("alice")),
         ("baggage: mirrord-session=alice;debug", Some("alice")),
         ("baggage: mirrord-session=alice,debug=1", Some("alice")),
         (
-            "baggage: mirrord-session=alice%3Bdebug",
-            Some("alice;debug"),
+            "BAGGAGE: upstream=1, mirrord-session=alice;prop=yes, next=2",
+            Some("alice"),
         ),
-        (
-            "BAGGAGE: upstream=1, mirrord-session=alice%3Bdebug;prop=yes, next=2",
-            Some("alice;debug"),
-        ),
-        (
-            "baggage: mirrord-session=alice%2Cdebug=1",
-            Some("alice,debug=1"),
-        ),
-        (
-            "baggage: mirrord-session=alice%253Bdebug",
-            Some("alice%3Bdebug"),
-        ),
+        ("baggage: upstream=1,mirrord-session=Alice", Some("Alice")),
         ("baggage: mirrord-session=Alice", Some("Alice")),
+        ("baggage: mirrord-session=alice.*", Some("alice.*")),
         ("baggage: mirrord-session=alice-suffix", None),
         ("baggage: mirrord-session=alice ", Some("alice")),
         ("baggage: mirrord-session= alice", None),
-        ("baggage: mirrord-session=%20alice%20", Some(" alice ")),
-        ("baggage: mirrord-session=caf%C3%A9", Some("café")),
+        ("baggage: mirrord-session=a=b;p=1", Some("a=b")),
+        ("baggage: mirrord-session=a", None),
         ("baggage: mirrord-session=;debug, next=2", Some("")),
         ("baggage: mirrord-session=", Some("")),
         ("baggage: other=alice;mirrord-session=alice", None),
+        ("baggage: other=mirrord-session=alice", None),
         ("baggage: Mirrord-session=alice", None),
         ("baggage: mirrord-session =alice", None),
-        // Other spellings of a key don't match: lower-case hex digits, an encoded byte that a
-        // baggage value can hold, and a raw byte that it can't.
-        ("baggage: mirrord-session=alice%3bdebug", None),
+        // Receivers don't percent-decode the key, so an encoded spelling is another key.
         ("baggage: mirrord-session=%61lice", None),
-        ("baggage: mirrord-session=caf%c3%a9", None),
-        ("baggage: mirrord-session=café", None),
     ] {
         let matches = session.is_match(header).unwrap();
         assert_eq!(
