@@ -119,8 +119,9 @@ impl ConfigContext {
         self
     }
 
-    /// The absolute path of a path given in the config, which is relative to the directory set
-    /// with [`Self::invocation_directory`] or else to the working directory of this process.
+    /// Resolves a path from the config to an absolute path. A relative path is resolved from the
+    /// directory set with [`Self::invocation_directory`], or else from the working directory of
+    /// this process.
     ///
     /// The result is absolute in both cases, so code that compares paths with each other, such as
     /// protox matching a `.proto` file with its include directories, sees the same paths whether

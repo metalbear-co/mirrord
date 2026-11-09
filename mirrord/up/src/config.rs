@@ -1807,6 +1807,7 @@ impl UpConfig {
                         key.clone(),
                         resolved_targets,
                         up_context.clone(),
+                        // The working directory is the directory the command was started from.
                         None,
                         kind,
                     )

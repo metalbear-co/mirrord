@@ -1,1 +1,1 @@
-The paths of a Kafka `payload_protobuf` are made absolute before the schema is compiled, so an absolute and a relative path to the same file or directory are treated as the same. A config that mixed them could be accepted or rejected for shadowing differently than the same config with only relative paths.
+A Kafka `payload_protobuf` that gives a relative `schema_file` and an absolute `include_directories` entry, or the other way round, now compiles the same as one with only relative paths.
