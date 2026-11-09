@@ -301,7 +301,7 @@ pub enum SyncEvent {
     /// The sidecar's state.
     Sidecar(SidecarState),
 
-    /// What the preview pod's supervisor reports about the install and the app.
+    /// What the preview pod's supervisor reports about `prepare` and the app.
     Supervisor(SupervisorReport),
 }
 

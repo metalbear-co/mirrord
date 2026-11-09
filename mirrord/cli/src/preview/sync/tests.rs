@@ -18,7 +18,7 @@ use mirrord_operator::{
         PreviewSyncRestart, PreviewSyncRun,
     },
     sync::{
-        AppReport, AppState, InstallReport, InstallState, ManifestPath, PushMode, RejectReason,
+        AppReport, AppState, ManifestPath, PrepareReport, PrepareState, PushMode, RejectReason,
         SidecarState, SupervisorReport, SyncFrame, UnpairReason,
     },
 };
@@ -694,7 +694,7 @@ async fn a_replaced_sync_stops_without_reconnecting() {
 }
 
 /// `mirrord preview sync` runs no creation timeout while the preview pod is busy with work whose
-/// length the CLI can't predict, such as copying the image's files or an install, so the
+/// length the CLI can't predict, such as copying the image's files or `prepare`, so the
 /// activity says when the pod is busy, and counts every report of progress. The run succeeds only
 /// once the supervisor is done with the first push, so the activity says which push it handled.
 #[tokio::test]
@@ -735,20 +735,20 @@ async fn the_activity_reports_busy_work_and_counts_progress() {
     assert_eq!(pushed.first_push, Some(1));
     assert!(pushed.busy.not());
 
-    let installing = SupervisorReport {
-        install: InstallReport {
-            state: InstallState::Running,
+    let preparing = SupervisorReport {
+        prepare: PrepareReport {
+            state: PrepareState::Running,
             error: None,
         },
         app: AppReport::default(),
         handled: None,
     };
-    operator.send(SyncFrame::Supervisor(installing)).await;
+    operator.send(SyncFrame::Supervisor(preparing)).await;
     assert!(next(&mut activity).await.busy);
 
     let running = SupervisorReport {
-        install: InstallReport {
-            state: InstallState::Succeeded,
+        prepare: PrepareReport {
+            state: PrepareState::Succeeded,
             error: None,
         },
         app: AppReport {
@@ -759,10 +759,10 @@ async fn the_activity_reports_busy_work_and_counts_progress() {
         handled: Some(1),
     };
     operator.send(SyncFrame::Supervisor(running.clone())).await;
-    let installed = next(&mut activity).await;
-    assert!(installed.busy.not());
-    assert_eq!(installed.handled, Some(1));
-    assert!(installed.prepare_failed.not());
+    let prepared = next(&mut activity).await;
+    assert!(prepared.busy.not());
+    assert_eq!(prepared.handled, Some(1));
+    assert!(prepared.prepare_failed.not());
 
     sync.abort();
 }
@@ -814,7 +814,7 @@ async fn an_app_that_keeps_failing_to_start_is_no_progress() {
     .progress;
 
     let report = |state, restarts, handled| SupervisorReport {
-        install: InstallReport::default(),
+        prepare: PrepareReport::default(),
         app: AppReport {
             state,
             restarts,
@@ -935,11 +935,11 @@ async fn watch_reconnects_after_every_broken_connection() {
     sync.abort();
 }
 
-/// The creation timeout doesn't run while the install runs. Once the operator unpairs the CLI
-/// because the sidecar is gone, the pod that ran the install may be gone too, so the CLI must
+/// The creation timeout doesn't run while `prepare` runs. Once the operator unpairs the CLI
+/// because the sidecar is gone, the pod that ran `prepare` may be gone too, so the CLI must
 /// stop reporting the pod as busy, or the timeout would never run again if no pod comes back.
 #[tokio::test]
-async fn an_unpair_ends_the_busy_install() {
+async fn an_unpair_ends_the_busy_prepare() {
     let local = tempfile::tempdir().unwrap();
     write(local.path(), "app.js", "v1");
 
@@ -949,8 +949,8 @@ async fn an_unpair_ends_the_busy_install() {
 
     operator
         .send(SyncFrame::Supervisor(SupervisorReport {
-            install: InstallReport {
-                state: InstallState::Running,
+            prepare: PrepareReport {
+                state: PrepareState::Running,
                 error: None,
             },
             app: AppReport::default(),
@@ -978,10 +978,10 @@ async fn an_unpair_ends_the_busy_install() {
 }
 
 /// A broken connection delivers no `Unpaired`, and the CLI may not reach the operator again for
-/// a while, so the install that the connection reported running must stop keeping the creation
+/// a while, so the `prepare` that the connection reported running must stop keeping the creation
 /// timeout stopped too.
 #[tokio::test]
-async fn a_broken_connection_ends_the_busy_install() {
+async fn a_broken_connection_ends_the_busy_prepare() {
     let local = tempfile::tempdir().unwrap();
     write(local.path(), "app.js", "v1");
 
@@ -991,8 +991,8 @@ async fn a_broken_connection_ends_the_busy_install() {
 
     operator
         .send(SyncFrame::Supervisor(SupervisorReport {
-            install: InstallReport {
-                state: InstallState::Running,
+            prepare: PrepareReport {
+                state: PrepareState::Running,
                 error: None,
             },
             app: AppReport::default(),

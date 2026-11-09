@@ -43,7 +43,7 @@ use uuid::Uuid;
 use super::{db_branching::core::ConnectionSource, session::SessionTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
-use crate::sync::{AppReport, InstallReport, SidecarState};
+use crate::sync::{AppReport, PrepareReport, SidecarState};
 
 /// This resource represents a preview environment created by the `mirrord preview start` command.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
@@ -547,7 +547,7 @@ pub struct PreviewSyncStatus {
     /// The last run of `prepare.command` in the preview pod, while a sidecar that relays the
     /// supervisor's report is connected.
     #[serde(default)]
-    pub prepare: Option<InstallReport>,
+    pub prepare: Option<PrepareReport>,
 
     /// The app, the process of `run.command` in the preview pod, while a sidecar that relays the
     /// supervisor's report is connected. `None` without `run`, because the container then runs

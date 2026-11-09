@@ -1365,7 +1365,7 @@ fn reusable_session<'a>(
 
 /// The creation timeout of a preview session. For a session with `sync`, it measures time without
 /// progress: each report of progress starts the timeout again, and while the preview pod does
-/// work whose length the CLI can't predict, such as an install, the timeout doesn't run at all.
+/// work whose length the CLI can't predict, such as `prepare`, the timeout doesn't run at all.
 /// For any other session, nothing reports progress, so it measures the time since its start.
 struct ProgressDeadline {
     timeout: Duration,
@@ -2859,7 +2859,7 @@ mod tests {
     }
 
     /// The creation timeout of a session with `sync` measures time without progress: it doesn't
-    /// run while the preview pod is busy, such as during an install, and each report of progress
+    /// run while the preview pod is busy, such as while `prepare` runs, and each report of progress
     /// starts it again.
     #[tokio::test(start_paused = true)]
     async fn the_creation_timeout_counts_time_without_progress() {
@@ -2877,7 +2877,7 @@ mod tests {
             progress: 1,
             ..Default::default()
         });
-        // A long install: no timeout at all while it runs.
+        // A long `prepare`: no timeout at all while it runs.
         tokio::time::advance(Duration::from_secs(600)).await;
         assert!(
             expires_within(&deadline, Duration::from_secs(600))

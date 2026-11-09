@@ -29,7 +29,7 @@ use mirrord_operator::{
         PreviewSyncConfig, PreviewSyncEntry, PreviewSyncPrepare, PreviewSyncRestart, PreviewSyncRun,
     },
     sync::{
-        AppReport, InstallReport, InstallState, ManifestPath, PushMode, RejectReason, SidecarState,
+        AppReport, ManifestPath, PrepareReport, PrepareState, PushMode, RejectReason, SidecarState,
         SupervisorReport, UnpairReason, rules::IgnoreRules,
     },
 };
@@ -502,7 +502,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
             };
 
             // What the connection reported about the preview pod may no longer hold, such as an
-            // install that ran, which would keep the creation timeout stopped while the CLI
+            // `prepare` that ran, which would keep the creation timeout stopped while the CLI
             // can't hear of its end.
             self.sidecar = None;
             self.supervisor = SupervisorReport::default();
@@ -884,9 +884,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 if *report == self.supervisor {
                     return;
                 }
-                if report.install != self.supervisor.install
+                if report.prepare != self.supervisor.prepare
                     && let Some(message) =
-                        describe_prepare(&report.install, report.install.error.as_deref())
+                        describe_prepare(&report.prepare, report.prepare.error.as_deref())
                 {
                     self.progress.info(&message);
                 }
@@ -896,7 +896,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 }
 
                 // A failed restart only counts up the app's restarts.
-                let progressed = report.install.state != self.supervisor.install.state
+                let progressed = report.prepare.state != self.supervisor.prepare.state
                     || report.app.state != self.supervisor.app.state
                     || report.handled != self.supervisor.handled;
                 self.supervisor = report.clone();
@@ -912,7 +912,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
     /// of progress.
     fn publish(&self, progressed: bool) {
         let busy = self.pushing
-            || self.supervisor.install.state == InstallState::Running
+            || self.supervisor.prepare.state == PrepareState::Running
             || matches!(
                 self.sidecar,
                 Some(SidecarState::WaitingForVolume | SidecarState::Seeding)
@@ -924,7 +924,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + 'static> SyncDriver<S> {
                 HandledBy::Supervisor => self.supervisor.handled,
                 HandledBy::Volume => self.generation,
             };
-            activity.prepare_failed = self.supervisor.install.state == InstallState::Failed;
+            activity.prepare_failed = self.supervisor.prepare.state == PrepareState::Failed;
             activity.paused = self.pairing == Pairing::Paused;
             if progressed {
                 activity.progress += 1;
@@ -1391,13 +1391,13 @@ fn changes_the_tree(kind: &EventKind) -> bool {
 /// The state of `prepare` in the words of `mirrord preview sync` and `mirrord preview status`, or
 /// `None` when it didn't run. `error` is the part of its error to show, which starts on a line of
 /// its own when it has more than one line.
-pub(super) fn describe_prepare(prepare: &InstallReport, error: Option<&str>) -> Option<String> {
+pub(super) fn describe_prepare(prepare: &PrepareReport, error: Option<&str>) -> Option<String> {
     match (prepare.state, error) {
-        (InstallState::NotRun, _) => None,
-        (InstallState::Failed, Some(error)) if error.contains('\n') => {
+        (PrepareState::NotRun, _) => None,
+        (PrepareState::Failed, Some(error)) if error.contains('\n') => {
             Some(format!("prepare: failed:\n{error}"))
         }
-        (InstallState::Failed, Some(error)) => Some(format!("prepare: failed: {error}")),
+        (PrepareState::Failed, Some(error)) => Some(format!("prepare: failed: {error}")),
         (state, _) => Some(format!("prepare: {state}")),
     }
 }
