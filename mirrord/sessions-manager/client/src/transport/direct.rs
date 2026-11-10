@@ -20,7 +20,7 @@ use mirrord_operator_websocket::{
 };
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, ServiceScope, SessionList,
+    AGENT_METADATA_HEADER, AssignmentSubscription, ConnectionAssignment, ServiceScope, SessionList,
 };
 use reqwest::StatusCode;
 use tokio::time::Instant;
@@ -287,13 +287,16 @@ impl SessionsManagerTransport for DirectTransport {
         let credentials =
             with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
         let sent_authorization = credentials.contains_key(AUTHORIZATION);
-        let request = self
+        let mut request = self
             .http
             .get(endpoint)
             .query(subscription)
             .headers(credentials)
-            .header(ACCEPT, "text/event-stream")
-            .send();
+            .header(ACCEPT, "text/event-stream");
+        if let Some(metadata) = subscription.agent_metadata() {
+            request = request.header(AGENT_METADATA_HEADER, metadata.as_str());
+        }
+        let request = request.send();
         let response = with_deadline(Some(deadline), request).await??;
         self.check_refused(response.status(), sent_authorization)?;
         verify_event_stream(response.status(), response.headers())?;
