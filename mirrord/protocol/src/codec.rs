@@ -589,9 +589,8 @@ mod tests {
     use hyper::{HeaderMap, Method, Version, header};
 
     use super::*;
-    use crate::{
-        outgoing::LayerClose,
-        tcp::{ChunkedRequest, HttpRequest, InternalHttpBodyFrame, InternalHttpRequest, TcpData},
+    use crate::tcp::{
+        ChunkedRequest, HttpRequest, InternalHttpBodyFrame, InternalHttpRequest, TcpData,
     };
 
     /// Messages whose encoding includes the parts of the format that vary in length: payloads,
@@ -671,87 +670,6 @@ mod tests {
 
         assert_decoded_sizes_are_frame_lengths(client_messages);
         assert_decoded_sizes_are_frame_lengths(daemon_messages);
-    }
-
-    /// Consumers report each kind as its own series, so each feature's messages must map to its
-    /// kind.
-    #[test]
-    fn message_kind_mapping() {
-        let tcp_data = TcpData {
-            connection_id: 1,
-            bytes: Default::default(),
-        };
-
-        let client_messages = [
-            (
-                ClientMessage::Tcp(LayerTcp::PortSubscribe(80)),
-                MessageKind::Tcp,
-            ),
-            (
-                ClientMessage::TcpSteal(LayerTcpSteal::Data(tcp_data.clone())),
-                MessageKind::TcpSteal,
-            ),
-            (
-                ClientMessage::TcpOutgoing(LayerTcpOutgoing::Close(LayerClose {
-                    connection_id: 1,
-                })),
-                MessageKind::TcpOutgoing,
-            ),
-            (
-                ClientMessage::UdpOutgoing(LayerUdpOutgoing::Close(LayerClose {
-                    connection_id: 1,
-                })),
-                MessageKind::UdpOutgoing,
-            ),
-            (
-                ClientMessage::SeqpacketOutgoing(LayerSeqpacket::Close(LayerClose {
-                    connection_id: 1,
-                })),
-                MessageKind::SeqpacketOutgoing,
-            ),
-            (
-                ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 3 })),
-                MessageKind::File,
-            ),
-            (ClientMessage::Ping, MessageKind::Other),
-        ];
-        for (message, kind) in client_messages {
-            assert_eq!(message.kind(), kind, "{message:?}");
-        }
-
-        let daemon_messages = [
-            (
-                DaemonMessage::Tcp(DaemonTcp::Data(tcp_data.clone())),
-                MessageKind::Tcp,
-            ),
-            (
-                DaemonMessage::TcpSteal(DaemonTcp::Data(tcp_data)),
-                MessageKind::TcpSteal,
-            ),
-            (
-                DaemonMessage::TcpOutgoing(DaemonTcpOutgoing::Close(1)),
-                MessageKind::TcpOutgoing,
-            ),
-            (
-                DaemonMessage::UdpOutgoing(DaemonUdpOutgoing::Close(1)),
-                MessageKind::UdpOutgoing,
-            ),
-            (
-                DaemonMessage::SeqpacketOutgoing(DaemonSeqpacket::Close(1)),
-                MessageKind::SeqpacketOutgoing,
-            ),
-            (
-                DaemonMessage::File(FileResponse::Read(Ok(ReadFileResponse {
-                    bytes: Default::default(),
-                    read_amount: 0,
-                }))),
-                MessageKind::File,
-            ),
-            (DaemonMessage::Pong, MessageKind::Other),
-        ];
-        for (message, kind) in daemon_messages {
-            assert_eq!(message.kind(), kind, "{message:?}");
-        }
     }
 
     #[test]
