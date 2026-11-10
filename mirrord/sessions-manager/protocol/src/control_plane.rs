@@ -32,8 +32,14 @@ pub enum AssignmentSubscription {
         #[serde(flatten)]
         identity: AgentIdentity,
         /// Describes the agent's platform to the intproxies it pairs with. sessions-manager keys
-        /// the registration on `identity` alone and passes this on unread.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// the registration on `identity` alone and passes this on unread. A value it rejects is
+        /// dropped rather than failing the registration: a later agent may send more than this
+        /// version accepts, and must still pair, just without the metadata.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_lenient_agent_metadata"
+        )]
         metadata: Option<AgentMetadata>,
     },
     Intproxy {
@@ -173,10 +179,9 @@ string_id!(
 /// that forwards it advertises `ServerlessAgentMetadata`. The MetalBear Cloud sessions-manager
 /// advertises nothing, since it always runs current code.
 ///
-/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], and free of control characters. The rules
-/// are checked when an agent builds one and when sessions-manager deserializes one, so an agent
-/// can't build a value the server would reject, and end up retrying a registration that always
-/// fails.
+/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], and free of control characters, checked
+/// when an agent builds one. Both sides read it leniently, dropping a value they don't accept, so
+/// a version skew loses only the metadata, never the registration or the assignment.
 ///
 /// Its [`Debug`](std::fmt::Debug) prints only the length, since it describes the customer's
 /// platform and subscriptions and assignments get logged whole.
@@ -232,6 +237,38 @@ impl TryFrom<String> for AgentMetadata {
 impl From<AgentMetadata> for String {
     fn from(value: AgentMetadata) -> Self {
         value.0
+    }
+}
+
+/// Reads an [`AgentMetadata`] that this version may not accept, so that an agent and its intproxies
+/// keep working across versions with different rules. Anything that isn't a valid string reads as
+/// absent.
+pub(crate) fn deserialize_lenient_agent_metadata<'de, D>(
+    deserializer: D,
+) -> Result<Option<AgentMetadata>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Lenient {
+        Text(String),
+        Other(serde::de::IgnoredAny),
+    }
+
+    match Option::<Lenient>::deserialize(deserializer)? {
+        Some(Lenient::Text(value)) => match AgentMetadata::new(value) {
+            Ok(metadata) => Ok(Some(metadata)),
+            Err(error) => {
+                tracing::warn!(%error, "ignoring agent metadata this version doesn't accept");
+                Ok(None)
+            }
+        },
+        Some(Lenient::Other(_)) => {
+            tracing::warn!("ignoring agent metadata that isn't a string");
+            Ok(None)
+        }
+        None => Ok(None),
     }
 }
 
