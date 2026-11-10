@@ -52,8 +52,17 @@ fn deserialize_lenient_agent_metadata<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    let value = Option::<String>::deserialize(deserializer)?;
-    Ok(value.and_then(|value| AgentMetadata::new(value).ok()))
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Lenient {
+        Text(String),
+        Other(serde::de::IgnoredAny),
+    }
+
+    Ok(match Option::<Lenient>::deserialize(deserializer)? {
+        Some(Lenient::Text(value)) => AgentMetadata::new(value).ok(),
+        Some(Lenient::Other(_)) | None => None,
+    })
 }
 
 #[cfg(test)]

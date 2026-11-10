@@ -30,7 +30,9 @@ impl AgentClient {
     /// Spawns the control-plane task, so this must be called within a Tokio runtime.
     ///
     /// `cancellation` shuts the control plane down when fired, as does [`Self::shutdown`].
-    /// `metadata` is passed on to every intproxy this agent pairs with.
+    /// `metadata` is passed on to every intproxy this agent pairs with. It is fixed for the
+    /// client's lifetime, like the `agent_instance_id` each call generates, so sessions-manager
+    /// never sees one instance change its metadata.
     pub fn start<T: SessionsManagerTransport>(
         scope: ServiceScope,
         replica_id: ReplicaId,

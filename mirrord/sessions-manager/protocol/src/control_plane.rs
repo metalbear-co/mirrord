@@ -173,11 +173,14 @@ string_id!(
 /// that forwards it advertises `ServerlessAgentMetadata`. The MetalBear Cloud sessions-manager
 /// advertises nothing, since it always runs current code.
 ///
-/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], and free of `\n`, `\r` and `\0`, the
-/// characters sessions-manager rejects in any registration value. The rules are checked when an
-/// agent builds one and when sessions-manager deserializes one, so an agent can't build a value
-/// the server would reject, and end up retrying a registration that always fails.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], and free of control characters. The rules
+/// are checked when an agent builds one and when sessions-manager deserializes one, so an agent
+/// can't build a value the server would reject, and end up retrying a registration that always
+/// fails.
+///
+/// Its [`Debug`](std::fmt::Debug) prints only the length, since it describes the customer's
+/// platform and subscriptions and assignments get logged whole.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct AgentMetadata(String);
 
@@ -206,7 +209,7 @@ impl AgentMetadata {
             Err(InvalidAgentMetadata::Empty)
         } else if value.len() > Self::MAX_LEN {
             Err(InvalidAgentMetadata::TooLong)
-        } else if value.contains(['\n', '\r', '\0']) {
+        } else if value.chars().any(char::is_control) {
             Err(InvalidAgentMetadata::ControlCharacter)
         } else {
             Ok(Self(value))
@@ -229,6 +232,12 @@ impl TryFrom<String> for AgentMetadata {
 impl From<AgentMetadata> for String {
     fn from(value: AgentMetadata) -> Self {
         value.0
+    }
+}
+
+impl std::fmt::Debug for AgentMetadata {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "AgentMetadata(<{} bytes>)", self.0.len())
     }
 }
 
