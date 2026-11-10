@@ -35,34 +35,15 @@ pub struct ConnectionAssignment {
     /// The [`AgentMetadata`] the paired agent registered with. Set only on intproxy assignments,
     /// and only by a sessions-manager that supports it.
     ///
-    /// A value this client's [`AgentMetadata`] rejects reads as absent instead of failing the
-    /// assignment: a later sessions-manager may accept more, and a released client must keep
-    /// pairing with it.
+    /// A value this client's [`AgentMetadata`] rejects reads as absent, with a warning, instead of
+    /// failing the assignment: a later sessions-manager may accept more, and a released client
+    /// must keep pairing with it.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_lenient_agent_metadata"
+        deserialize_with = "control_plane::deserialize_lenient_agent_metadata"
     )]
     pub agent_metadata: Option<AgentMetadata>,
-}
-
-fn deserialize_lenient_agent_metadata<'de, D>(
-    deserializer: D,
-) -> Result<Option<AgentMetadata>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Lenient {
-        Text(String),
-        Other(serde::de::IgnoredAny),
-    }
-
-    Ok(match Option::<Lenient>::deserialize(deserializer)? {
-        Some(Lenient::Text(value)) => AgentMetadata::new(value).ok(),
-        Some(Lenient::Other(_)) | None => None,
-    })
 }
 
 #[cfg(test)]
