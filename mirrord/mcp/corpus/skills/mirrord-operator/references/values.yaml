@@ -987,6 +987,25 @@ operator:
   ##   imagePullPolicy: "IfNotPresent"
   ##   labels: { "role": "database" }
   ##   annotations: { "db.branch/owner-team": "platform" }
+  ##   # Where the branch database pod and the branch's copy and migration Job pods may run,
+  ##   # in plain Kubernetes shapes. Needed when every node is tainted, e.g. Karpenter
+  ##   # NodePools with a NoSchedule taint: without a matching toleration the branch pod
+  ##   # stays Pending and the session times out. Available on every `<db>BranchConfig`.
+  ##   tolerations:
+  ##     - key: "workload"
+  ##       operator: "Equal"
+  ##       value: "dev"
+  ##       effect: "NoSchedule"
+  ##   nodeSelector:
+  ##     karpenter.sh/nodepool: "dev-pool"
+  ##   affinity:
+  ##     nodeAffinity:
+  ##       requiredDuringSchedulingIgnoredDuringExecution:
+  ##         nodeSelectorTerms:
+  ##           - matchExpressions:
+  ##               - key: "kubernetes.io/arch"
+  ##                 operator: "In"
+  ##                 values: ["amd64"]
   ##   # How the branch pod's data and init (dump) volumes are backed. By default each
   ##   # branch gets its own PersistentVolumeClaims on the cluster's default StorageClass,
   ##   # deleted together with the branch; on clusters without a default StorageClass,
