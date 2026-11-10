@@ -5708,6 +5708,7 @@ name = "mirrord-mcp"
 version = "3.285.0"
 dependencies = [
  "drain",
+ "dunce",
  "flate2",
  "json-patch",
  "jsonschema",
@@ -5726,6 +5727,7 @@ dependencies = [
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tar",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "uuid",
