@@ -580,6 +580,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
             connect_info,
             route,
+            target_platform: Default::default(),
         });
 
         return Ok(ConnectData {

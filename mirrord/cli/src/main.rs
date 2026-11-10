@@ -308,6 +308,7 @@ use mirrord_progress::{
 use mirrord_progress::{LineMode, messages::EXEC_RUNNING_TASK};
 use mirrord_protocol_api::client::ProtocolConnector;
 use mirrord_protocol_io::Connection;
+use mirrord_sessions_manager_client::TargetPlatform;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use nix::errno::Errno;
 #[cfg(not(target_os = "windows"))]
@@ -348,6 +349,7 @@ mod internal_proxy;
 #[cfg(target_os = "linux")]
 mod is_static;
 mod kube;
+mod lambda;
 mod list;
 mod local_redis;
 mod logging;
@@ -498,16 +500,39 @@ async fn exec_process(
     // connection resets, and in the operator you'll get a websocket error.
     tokio::time::sleep(Duration::from_micros(1)).await;
 
+    // Put original executable in argv[0] even if actually running patched version.
+    let binary_args = std::iter::once(&args.binary)
+        .chain(args.binary_args.iter())
+        .map(Clone::clone)
+        .collect::<Vec<_>>();
+
+    // A Lambda target's invocations arrive as requests the user's runtime interface client can't
+    // take, so the local runtime adapter runs it instead.
+    #[cfg(not(target_os = "windows"))]
+    let (launched, binary_args) = match &execution_info.target_platform {
+        Some(TargetPlatform::AwsLambda(target)) => {
+            sub_progress.info("the target is an AWS Lambda function, running the command under the local Lambda runtime");
+            lambda::wrap_command(target, binary_args)?
+        }
+        None => (args.binary.clone(), binary_args),
+    };
+    #[cfg(target_os = "windows")]
+    if let Some(TargetPlatform::AwsLambda(_)) = &execution_info.target_platform {
+        sub_progress.warning(
+            "the target is an AWS Lambda function, run the command under `mirrord lambda runtime --` to receive its invocations",
+        );
+    }
+
     #[cfg(target_os = "macos")]
     let (_did_sip_patch, binary) = match execution_info.patched_path {
-        None => (false, args.binary.clone()),
+        None => (false, launched.clone()),
         Some(ref sip_result) => (true, sip_result.to_owned()),
     };
 
     // Known only now: `skip_sip` may have left a SIP-protected binary unpatched.
     #[cfg(target_os = "macos")]
     let no_layer = no_layer.or_else(|| {
-        (!_did_sip_patch && mirrord_sip::is_sip_protected(&args.binary))
+        (!_did_sip_patch && mirrord_sip::is_sip_protected(&launched))
             .then_some(NoLayer::UnpatchedSip)
     });
     #[cfg(target_os = "macos")]
@@ -520,7 +545,9 @@ async fn exec_process(
         });
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    let (_did_sip_patch, binary) = (false, launched);
+    #[cfg(target_os = "windows")]
     let (_did_sip_patch, binary) = (false, args.binary.clone());
 
     let mut env_vars = compose_exec_environment(
@@ -529,12 +556,6 @@ async fn exec_process(
         &execution_info.env_to_unset,
     );
     debug_hold.hand_to_program(&mut env_vars);
-
-    // Put original executable in argv[0] even if actually running patched version.
-    let binary_args = std::iter::once(&args.binary)
-        .chain(args.binary_args.iter())
-        .map(Clone::clone)
-        .collect::<Vec<_>>();
 
     sub_progress.success(Some("ready to launch process"));
 
@@ -1363,6 +1384,9 @@ fn main() -> miette::Result<()> {
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
             Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
+            Commands::Lambda(args) => match args.command {
+                LambdaCommand::Runtime(args) => lambda::runtime_command(args).await?,
+            },
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,

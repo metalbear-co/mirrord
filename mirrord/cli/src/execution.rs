@@ -5,7 +5,6 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    ops::Not,
     time::Duration,
 };
 
@@ -128,7 +127,20 @@ pub(crate) struct MirrordExecution {
 
     /// Whether this run uses mirrord operator.
     pub uses_operator: bool,
+
+    /// The platform the target's agent reported, which decides how the user's process is run.
+    #[serde(skip)]
+    pub target_platform: Option<TargetPlatform>,
 }
+
+/// What [`MirrordExecution::spawn_agent_and_intproxy`] returns: the environment for the layer, the
+/// intproxy process, whether the run uses the operator, and the platform the agent reported.
+type SpawnedSession = (
+    HashMap<String, String>,
+    Option<Child>,
+    bool,
+    Option<TargetPlatform>,
+);
 
 /// Struct that when dropped will cancel the token and wait on the join handle
 /// then update progress with the warnings returned.
@@ -274,9 +286,14 @@ impl MirrordExecution {
 
         // Spawn agent and intproxy processes, unless MIRRORD_TEST_INTPROXY_ADDR is set and used
         // instead (test-only: skips agent connection and uses an existing intproxy).
-        let (mut env_vars, proxy_process, uses_operator) =
+        let (mut env_vars, proxy_process, uses_operator, target_platform) =
             match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
-                Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
+                Ok(addr) => (
+                    Self::setup_existing_intproxy(addr, config)?,
+                    None,
+                    false,
+                    None,
+                ),
                 _ => {
                     Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
                         .await?
@@ -352,6 +369,18 @@ impl MirrordExecution {
                     extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
                 }
 
+                // A Lambda target runs this binary as the local runtime adapter in front of the
+                // user's command, so this binary is the one that has to load the layer. The
+                // adapter's own spawn of the user's command is patched by the layer's exec hooks.
+                let lambda_runtime = matches!(target_platform, Some(TargetPlatform::AwsLambda(_)))
+                    .then(std::env::current_exe)
+                    .transpose()
+                    .map_err(CliError::CliPathError)?;
+                let executable = lambda_runtime
+                    .as_deref()
+                    .map(|path| path.to_str())
+                    .unwrap_or(executable);
+
                 let result = executable
                     .and_then(|exe| {
                         sip_patch(
@@ -413,6 +442,7 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator,
+            target_platform,
         })
     }
 
@@ -597,6 +627,7 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator: connect_info.is_operator(),
+            target_platform: None,
         };
 
         Ok((execution, proxy_addr))
@@ -633,7 +664,8 @@ impl MirrordExecution {
     /// Establishes the agent connection, validates config against agent capabilities,
     /// fetches remote env vars (unless configured to load from process), and starts the
     /// internal proxy as a child process. Returns the environment map, child
-    /// intproxy process handle, and whether the run uses the operator.
+    /// intproxy process handle, whether the run uses the operator, and the platform the agent
+    /// reported about its target.
     #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn spawn_agent_and_intproxy(
@@ -641,7 +673,7 @@ impl MirrordExecution {
         progress: &mut ProgressTracker,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-    ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)> {
+    ) -> CliResult<SpawnedSession> {
         let branch_name = GIT_BRANCH.clone();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
@@ -660,7 +692,11 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
+        let target_platform = connector.target_platform();
         let mut client = connector.into_client().await?;
+        let target_platform = target_platform
+            .and_then(|platform| platform.lock().ok().and_then(|platform| platform.clone()));
+        tracing::debug!(?target_platform, "Connected to the agent");
 
         config
             .feature
@@ -775,8 +811,8 @@ impl MirrordExecution {
             proxy_process.wait().await.unwrap();
         }
 
-        let mut handshake = BufReader::new(stdout).lines();
-        let intproxy_address: SocketAddr = handshake
+        let intproxy_address: SocketAddr = BufReader::new(stdout)
+            .lines()
             .next_line()
             .await
             .map_err(|e| {
@@ -794,27 +830,6 @@ impl MirrordExecution {
                 ))
             })?;
 
-        // The target's platform is only a hint for how to run the user's process, so a missing or
-        // unreadable line leaves the session an ordinary one.
-        let target_platform = handshake
-            .next_line()
-            .await
-            .ok()
-            .flatten()
-            .filter(|line| line.is_empty().not())
-            .and_then(|line| {
-                serde_json::from_str::<TargetPlatform>(&line)
-                    .inspect_err(|error| {
-                        tracing::debug!(
-                            %error,
-                            line,
-                            "Ignoring an unreadable target platform from the proxy"
-                        );
-                    })
-                    .ok()
-            });
-        tracing::debug!(?target_platform, "Internal proxy is up");
-
         // The internal proxy is up, so its own guard owns the copies from here on. This process
         // has to let go of them: the IDE flow returns from here normally while the session carries
         // on, and a guard still held would delete the copies out from under it.
@@ -829,7 +844,12 @@ impl MirrordExecution {
             intproxy_address.to_string(),
         );
 
-        Ok((env_vars, Some(proxy_process), connect_info.is_operator()))
+        Ok((
+            env_vars,
+            Some(proxy_process),
+            connect_info.is_operator(),
+            target_platform,
+        ))
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using
