@@ -116,7 +116,7 @@ struct MessageGauges {
 impl MessageGauges {
     fn new(direction: &str) -> Self {
         let gauge = |kind: MessageKind| {
-            BUFFERED_MESSAGES_BYTES.with_label_values(&[direction, kind.as_str()])
+            BUFFERED_MESSAGES_BYTES.with_label_values(&[direction, <&str>::from(kind)])
         };
 
         Self {

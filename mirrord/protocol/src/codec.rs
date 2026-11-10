@@ -278,7 +278,12 @@ pub enum DaemonMessage {
 ///
 /// Only the features that can move a lot of data get their own kind, and every other message is
 /// [`MessageKind::Other`], so the kinds of one direction add up to its total.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum_macros::EnumIter)]
+///
+/// Converts into a `snake_case` name, used as a metric label value.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, strum_macros::EnumIter, strum_macros::IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
 pub enum MessageKind {
     Tcp,
     TcpSteal,
@@ -287,21 +292,6 @@ pub enum MessageKind {
     SeqpacketOutgoing,
     File,
     Other,
-}
-
-impl MessageKind {
-    /// A `snake_case` name for the kind, used as a metric label value.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Tcp => "tcp",
-            Self::TcpSteal => "tcp_steal",
-            Self::TcpOutgoing => "tcp_outgoing",
-            Self::UdpOutgoing => "udp_outgoing",
-            Self::SeqpacketOutgoing => "seqpacket_outgoing",
-            Self::File => "file",
-            Self::Other => "other",
-        }
-    }
 }
 
 impl ClientMessage {
