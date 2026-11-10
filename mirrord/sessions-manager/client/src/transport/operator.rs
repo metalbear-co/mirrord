@@ -7,8 +7,8 @@ use hyper::{Request, StatusCode, header::ACCEPT};
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade::connect_ws};
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
-    ServiceScope,
+    AGENT_METADATA_HEADER, AssignmentSubscription, ConnectionAssignment,
+    OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER, ServiceScope,
 };
 use tokio::time::Instant;
 
@@ -51,15 +51,15 @@ impl SessionsManagerTransport for OperatorTransport {
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
         let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
         let uri = operator_assignments_uri(scope, subscription)?;
-        // The path only: the query holds the subscription, an agent's metadata included.
         tracing::debug!(
-            path = uri.split_once('?').map_or(uri.as_str(), |(path, _)| path),
-            ?subscription,
+            %uri,
             "requesting operator-hosted sessions-manager assignments"
         );
-        let request = Request::get(uri)
-            .header(ACCEPT, "text/event-stream")
-            .body(kube::client::Body::empty())?;
+        let mut request = Request::get(uri).header(ACCEPT, "text/event-stream");
+        if let Some(metadata) = subscription.agent_metadata() {
+            request = request.header(AGENT_METADATA_HEADER, metadata.as_str());
+        }
+        let request = request.body(kube::client::Body::empty())?;
         let response = with_deadline(Some(deadline), self.client.send(request)).await??;
         if matches!(
             response.status(),

@@ -32,14 +32,14 @@ pub enum AssignmentSubscription {
         #[serde(flatten)]
         identity: AgentIdentity,
         /// Describes the agent's platform to the intproxies it pairs with. sessions-manager keys
-        /// the registration on `identity` alone and passes this on unread. A value it rejects is
-        /// dropped rather than failing the registration: a later agent may send more than this
-        /// version accepts, and must still pair, just without the metadata.
-        #[serde(
-            default,
-            skip_serializing_if = "Option::is_none",
-            deserialize_with = "deserialize_lenient_agent_metadata"
-        )]
+        /// the registration on `identity` alone and passes this on unread.
+        ///
+        /// Sent in [`AGENT_METADATA_HEADER`], not in the query: URLs end up in the logs of every
+        /// hop on the way, kube-apiserver's audit log and load balancers included. A server
+        /// reads it with [`AgentMetadata::lenient`], so a value it rejects is dropped rather than
+        /// failing the registration: a later agent may send more than this version accepts, and
+        /// must still pair, just without the metadata.
+        #[serde(skip)]
         metadata: Option<AgentMetadata>,
     },
     Intproxy {
@@ -183,8 +183,9 @@ string_id!(
 /// when an agent builds one. Both sides read it leniently, dropping a value they don't accept, so
 /// a version skew loses only the metadata, never the registration or the assignment.
 ///
-/// Its [`Debug`](std::fmt::Debug) prints only the length, since it describes the customer's
-/// platform and subscriptions and assignments get logged whole.
+/// It describes the customer's platform, so it has no `Display`, and its
+/// [`Debug`](std::fmt::Debug) prints only the length: subscriptions and assignments get logged
+/// whole. [`AgentMetadata::as_str`] is the one way to read the value.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct AgentMetadata(String);
@@ -205,7 +206,7 @@ pub enum InvalidAgentMetadata {
 
 impl AgentMetadata {
     /// It is a short platform descriptor, kept for the agent's lifetime and copied into every
-    /// assignment of its intproxies, so it is bounded well below the URI limit.
+    /// assignment of its intproxies, so it is bounded well below common header size limits.
     pub const MAX_LEN: usize = 1024;
 
     pub fn new(value: impl Into<String>) -> Result<Self, InvalidAgentMetadata> {
@@ -224,6 +225,29 @@ impl AgentMetadata {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Reads a value that this version may not accept, warning and returning `None` for one it
+    /// rejects, so that agents and intproxies keep working across versions with different rules.
+    pub fn lenient(value: impl Into<String>) -> Option<Self> {
+        Self::new(value)
+            .inspect_err(|error| {
+                tracing::warn!(%error, "ignoring agent metadata this version doesn't accept");
+            })
+            .ok()
+    }
+}
+
+/// The request header an agent registration carries its [`AgentMetadata`] in.
+pub const AGENT_METADATA_HEADER: &str = "x-mirrord-agent-metadata";
+
+impl AssignmentSubscription {
+    /// The metadata to send in [`AGENT_METADATA_HEADER`], for an agent that has any.
+    pub fn agent_metadata(&self) -> Option<&AgentMetadata> {
+        match self {
+            Self::Agent { metadata, .. } => metadata.as_ref(),
+            Self::Intproxy { .. } => None,
+        }
+    }
 }
 
 impl TryFrom<String> for AgentMetadata {
@@ -240,9 +264,8 @@ impl From<AgentMetadata> for String {
     }
 }
 
-/// Reads an [`AgentMetadata`] that this version may not accept, so that an agent and its intproxies
-/// keep working across versions with different rules. Anything that isn't a valid string reads as
-/// absent.
+/// Reads [`crate::ConnectionAssignment::agent_metadata`] with [`AgentMetadata::lenient`].
+/// Anything that isn't a string reads as absent too.
 pub(crate) fn deserialize_lenient_agent_metadata<'de, D>(
     deserializer: D,
 ) -> Result<Option<AgentMetadata>, D::Error>
@@ -257,13 +280,7 @@ where
     }
 
     match Option::<Lenient>::deserialize(deserializer)? {
-        Some(Lenient::Text(value)) => match AgentMetadata::new(value) {
-            Ok(metadata) => Ok(Some(metadata)),
-            Err(error) => {
-                tracing::warn!(%error, "ignoring agent metadata this version doesn't accept");
-                Ok(None)
-            }
-        },
+        Some(Lenient::Text(value)) => Ok(AgentMetadata::lenient(value)),
         Some(Lenient::Other(_)) => {
             tracing::warn!("ignoring agent metadata that isn't a string");
             Ok(None)
@@ -275,11 +292,5 @@ where
 impl std::fmt::Debug for AgentMetadata {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "AgentMetadata(<{} bytes>)", self.0.len())
-    }
-}
-
-impl std::fmt::Display for AgentMetadata {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
     }
 }
