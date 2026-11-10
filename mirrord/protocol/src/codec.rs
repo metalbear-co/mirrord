@@ -9,13 +9,10 @@ use std::{
 use actix_codec::{Decoder, Encoder};
 use bincode::{
     BorrowDecode, Decode, Encode,
-    enc::{
-        EncoderImpl,
-        write::{SizeWriter, Writer},
-    },
+    enc::{EncoderImpl, write::SizeWriter},
     error::{DecodeError, EncodeError},
 };
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use derive_more::{Deref, From, Into};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
@@ -581,17 +578,8 @@ fn encoded_size<M: Encode>(message: &M) -> Result<usize, EncodeError> {
 fn encode_reserved<M: Encode>(message: M, size: usize, dst: &mut BytesMut) -> io::Result<()> {
     dst.reserve(size);
 
-    /// Allows using [`BytesMut`] as bincode's [`Writer`].
-    struct WriterAdapter<'a>(&'a mut BytesMut);
-
-    impl Writer for WriterAdapter<'_> {
-        fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-            self.0.extend_from_slice(bytes);
-            Ok(())
-        }
-    }
-
-    bincode::encode_into_writer(message, WriterAdapter(dst), bincode::config::standard())
+    bincode::encode_into_std_write(message, &mut dst.writer(), bincode::config::standard())
+        .map(drop)
         .map_err(io::Error::other)
 }
 
