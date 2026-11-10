@@ -72,8 +72,11 @@ jobs:
             } catch (error) {
               const msg = `Failed to get latest release: ${error.message}`;
               core.warning(msg);
-              core.setOutput("ok", "false");
-              core.setOutput("error", msg);
+              // A 5xx or no answer means GitHub itself is down, which no release fix can help,
+              // so it warns without failing the run (and without paging).
+              const githubUnavailable = !error.status || error.status >= 500;
+              core.setOutput("ok", githubUnavailable ? "github_unavailable" : "false");
+              core.setOutput("error", githubUnavailable ? "" : msg);
               core.setOutput("tag", "");
               core.setOutput("html_url", "");
               core.setOutput("missing_required", "");
@@ -104,7 +107,7 @@ jobs:
             }
 
       - name: Fail on missing required assets
-        if: steps.check.outputs.ok != 'true'
+        if: steps.check.outputs.ok != 'true' && steps.check.outputs.ok != 'github_unavailable'
         run: exit 1
 
       - name: Log success
@@ -148,15 +151,25 @@ jobs:
           set -euo pipefail
           url="https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh"
 
+          # curl prints "returned error: <code>" or a connection error code. A 5xx or no answer
+          # means GitHub itself is down; a 4xx means something the release should have is missing.
+          github_down_pattern='returned error: 5[0-9][0-9]|curl: \((6|7|28|35|52|56)\)'
+          missing_pattern='returned error: 4[0-9][0-9]'
+
           # Downloads from GitHub occasionally fail transiently, so retry before declaring
           # failure; a genuinely broken installer or release fails every attempt.
           echo "Installing mirrord via curl|bash from: $url"
           for attempt in 1 2 3; do
-            if curl -fsSL "$url" | bash >/tmp/install_sh.log 2>&1; then
+            if { curl -fsSL "$url" | bash; } >/tmp/install_sh.log 2>&1; then
               break
             fi
             echo "----- installer output (attempt ${attempt}/3) -----"
             cat /tmp/install_sh.log || true
+            if [ "$attempt" -eq 3 ] && grep -qE "$github_down_pattern" /tmp/install_sh.log && ! grep -qE "$missing_pattern" /tmp/install_sh.log; then
+              echo "::warning::GitHub answered 5xx or not at all on every attempt, so the curl|bash install was not tested."
+              echo "ok=github_unavailable" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             if [ "$attempt" -eq 3 ]; then
               echo "ok=false" >> "$GITHUB_OUTPUT"
               echo "error=curl|bash installer failed 3 times from $url. See logs in this step." >> "$GITHUB_OUTPUT"
@@ -290,7 +303,7 @@ jobs:
           echo "error=" >> "$GITHUB_OUTPUT"
 
       - name: Fail on install errors
-        if: steps.curl.outputs.ok != 'true' || steps.brew.outputs.ok != 'true'
+        if: (steps.curl.outputs.ok != 'true' && steps.curl.outputs.ok != 'github_unavailable') || steps.brew.outputs.ok != 'true'
         run: exit 1
 
       - name: Log install success
@@ -359,14 +372,24 @@ jobs:
           printf '  - %s\n' "${urls[@]}"
 
           missing=()
+          github_unavailable=()
           for u in "${urls[@]}"; do
             # HEAD to avoid downloading full binaries
             if ! code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
               echo "URL appears unreachable after retries (HTTP ${code:-000}): $u"
               cat "$err_file"
-              missing+=("$u")
+              # A 5xx or no answer (000) means GitHub itself is down; only a 4xx means the
+              # asset is missing from the release.
+              case "${code:-000}" in
+                5??|000) github_unavailable+=("$u") ;;
+                *) missing+=("$u") ;;
+              esac
             fi
           done
+
+          if [ "${#github_unavailable[@]}" -gt 0 ]; then
+            echo "::warning::GitHub answered 5xx or not at all for: ${github_unavailable[*]}"
+          fi
 
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "Some URLs are missing or unreachable for version $ver:"
@@ -376,7 +399,7 @@ jobs:
             echo "error=Download URLs missing or unreachable for version $ver: ${missing[*]}" >> "$GITHUB_OUTPUT"
             printf 'missing_urls=%s\n' "$(IFS=','; echo "${missing[*]}")" >> "$GITHUB_OUTPUT"
           else
-            echo "All download URLs for version $ver are reachable."
+            echo "No download URL for version $ver is missing."
             echo "ok=true" >> "$GITHUB_OUTPUT"
             echo "error=" >> "$GITHUB_OUTPUT"
             echo "missing_urls=" >> "$GITHUB_OUTPUT"
@@ -421,14 +444,36 @@ jobs:
           failed="$(jq -r 'to_entries[] | select(.value.result != "success")
             | [.value.outputs | to_entries[] | select((.key | startswith("error")) and .value != "") | .value | gsub(" +"; " ")] as $errors
             | "• \(.key) (\(.value.result))\(if $errors == [] then "" else ": " + ($errors | join("; ")) end)"' <<<"$NEEDS")"
+          # A lost runner leaves its check "abandoned" and the checks after it "skipped", so no
+          # check ran and the run says nothing about the release.
+          if [ -n "$failed" ] && [ "$(jq '[.[] | select(.result == "failure")] | length' <<<"$NEEDS")" -eq 0 ]; then
+            echo "No check ran to completion (lost runner); not notifying."
+            echo "$failed"
+            exit 0
+          fi
           # Cancelled runs were superseded before finishing and say nothing about the status.
           # Branch and status are filtered here rather than with --branch/--status: the API's
           # filtered run listing intermittently returns runs that are days old as the latest.
           # One full API page misses the latest completed main run only if 100 newer runs (branch
           # dispatches or superseded runs) were created after it; then previous is empty and a
           # failure still alerts.
-          previous="$(gh run list --workflow releases-test.yaml --limit 100 --json headBranch,status,conclusion \
-            --jq '[.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure"))][0].conclusion // ""')"
+          # A failed run where no check job failed lost its runner and was never alerted on, so
+          # the lookup skips it; otherwise the next healthy run would announce a recovery.
+          previous=""
+          while read -r run_id conclusion; do
+            if [ "$conclusion" = success ]; then
+              previous=success
+              break
+            fi
+            failed_checks="$(gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
+              --jq '[.jobs[] | select(.name != "notify" and .conclusion == "failure")] | length')"
+            if [ "$failed_checks" -gt 0 ]; then
+              previous=failure
+              break
+            fi
+            echo "Run $run_id failed without a failed check (lost runner); looking further back."
+          done < <(gh run list --workflow releases-test.yaml --limit 100 --json databaseId,headBranch,status,conclusion \
+            --jq '.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure")) | "\(.databaseId) \(.conclusion)"')
           echo "Previous run status: ${previous:-none}"
           links="<$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID|Monitor run logs>${HTML_URL:+ · <$HTML_URL|Release page>}"
 

@@ -114,6 +114,13 @@ get_version() {
 
 install() {
   version=$(get_version "$1")
+  # The lookup prints nothing when GitHub does not answer, and downloading an empty version
+  # fails with a 404 that reads like a missing release.
+  if [ -z "$version" ]; then
+    echo "Could not look up the latest mirrord version on GitHub, which may be briefly unavailable."
+    echo "Try again in a few minutes, or name a release with VERSION=<version>."
+    exit 1
+  fi
   echo "Installing version $version"
   case "$(uname -s)" in
     Linux)
