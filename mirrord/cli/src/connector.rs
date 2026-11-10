@@ -161,7 +161,9 @@ impl SessionsManagerConnector {
         transport: T,
     ) -> Result<OperatorConnection, SessionsManagerClientError> {
         let client = IntproxyClient::with_transport(self.connect_info.clone(), transport)?;
-        Box::pin(client.connect(Duration::from_mins(10))).await
+        Box::pin(client.connect(Duration::from_mins(10)))
+            .await
+            .map(|connected| connected.connection)
     }
 }
 

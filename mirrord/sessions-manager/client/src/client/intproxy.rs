@@ -13,6 +13,7 @@ use crate::{
     control_plane::subscriber::ControlPlaneSubscriber,
     credentials::LoginTokenSource,
     error::SessionsManagerClientError,
+    platform::TargetPlatform,
     retry::{RetryBudget, with_deadline},
     transport::{DirectTransport, SessionsManagerEndpoint, SessionsManagerTransport},
 };
@@ -29,6 +30,15 @@ pub struct SessionsManagerConnectInfo {
     pub user_session_id: String,
     /// Optional replica constraint for routing this connection.
     pub replica_filter: Option<ReplicaId>,
+}
+
+/// A data-plane connection to the agent sessions-manager paired this intproxy with.
+#[derive(Debug)]
+pub struct IntproxyConnection {
+    pub connection: OperatorConnection<Client>,
+    /// What the paired agent reported about its target's platform, if anything this client
+    /// understands.
+    pub platform: Option<TargetPlatform>,
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.
@@ -78,7 +88,7 @@ impl<T: SessionsManagerTransport> IntproxyClient<T> {
     pub async fn connect(
         &self,
         timeout: Duration,
-    ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
+    ) -> Result<IntproxyConnection, SessionsManagerClientError> {
         let deadline = Instant::now() + timeout;
         self.retry(deadline, || self.connect_once(deadline)).await
     }
@@ -111,14 +121,28 @@ impl<T: SessionsManagerTransport> IntproxyClient<T> {
     async fn connect_once(
         &self,
         deadline: Instant,
-    ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
+    ) -> Result<IntproxyConnection, SessionsManagerClientError> {
         let assignment = self.next_assignment(deadline).await?;
+        let platform = assignment
+            .agent_metadata
+            .as_ref()
+            .and_then(TargetPlatform::from_metadata);
+        tracing::debug!(
+            agent_metadata = ?assignment.agent_metadata,
+            ?platform,
+            "Received an assignment from sessions-manager"
+        );
 
-        with_deadline(
+        let connection = with_deadline(
             Some(self.connect_deadline(deadline)),
             self.transport.connect_data_plane(assignment),
         )
-        .await?
+        .await??;
+
+        Ok(IntproxyConnection {
+            connection,
+            platform,
+        })
     }
 
     async fn next_assignment(

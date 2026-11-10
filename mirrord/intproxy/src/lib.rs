@@ -1169,6 +1169,7 @@ mod test {
         let agent_conn = AgentConnection {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            platform: None,
         };
 
         let (_, chaos_rx) = watch::channel(Default::default());
@@ -1292,6 +1293,7 @@ mod test {
         let agent_conn = AgentConnection {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            platform: None,
         };
 
         let (_, chaos_rx) = watch::channel(Default::default());
@@ -1409,6 +1411,7 @@ mod test {
         let agent_conn = AgentConnection {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            platform: None,
         };
 
         let (_, chaos_rx) = watch::channel(Default::default());
@@ -1474,6 +1477,7 @@ mod test {
             let agent_conn = AgentConnection {
                 connection,
                 reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+                platform: None,
             };
             let (_, chaos_rx) = watch::channel(Default::default());
             let mut proxy = IntProxy::new_with_connection(
@@ -1582,6 +1586,7 @@ mod test {
         let agent_conn = AgentConnection {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            platform: None,
         };
         let (_, chaos_rx) = watch::channel(Default::default());
         let (monitor_events, mut monitor_rx) = broadcast::channel(1);
