@@ -13,10 +13,11 @@ use crate::config::source::MirrordConfigSource;
 /// {
 ///   "ci": {
 ///     "output_dir": "/tmp/mirrord/",
+///     "lock_timeout_ms": 1000
 ///   }
 /// }
 /// ```
-#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(MirrordConfig, Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[config(map_to = "CiFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
 pub struct CiConfig {
@@ -26,6 +27,22 @@ pub struct CiConfig {
     ///
     /// Defaults to `/tmp/mirrord/`.
     pub output_dir: Option<PathBuf>,
+
+    /// ### ci.lock_timeout_ms {#ci-lock_timeout_ms}
+    ///
+    /// How long, in milliseconds, `mirrord ci start` and `mirrord ci container` wait before failing
+    /// when another `mirrord ci` command is using the file where mirrord records the processes that
+    /// `mirrord ci stop` ends.
+    ///
+    /// Sessions started at the same time take turns recording their processes in this file, so the
+    /// later sessions wait for the earlier ones. `mirrord ci stop` holds the file while it signals
+    /// processes and removes containers, so raise this value if you start sessions while
+    /// `mirrord ci stop` runs. `mirrord ci stop` itself doesn't wait: it fails at once if another
+    /// command holds the file.
+    ///
+    /// Defaults to `1000` milliseconds.
+    #[config(default = 1000)]
+    pub lock_timeout_ms: u64,
 }
 
 impl CollectAnalytics for &CiConfig {

@@ -5,6 +5,7 @@ use std::{
     io,
     ops::Not,
     path::{Path, PathBuf},
+    time::Duration,
 };
 #[cfg(not(target_os = "windows"))]
 use std::{fs::File, os::unix::process::ExitStatusExt, process::Stdio, time::SystemTime};
@@ -24,7 +25,11 @@ use mirrord_progress::{Progress, ProgressTracker};
 #[cfg(not(target_os = "windows"))]
 use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
-use tokio::{fs, io::AsyncWriteExt};
+use tokio::{
+    fs,
+    io::AsyncWriteExt,
+    time::{sleep, timeout},
+};
 #[cfg(not(target_os = "windows"))]
 use tokio::{
     fs::create_dir_all,
@@ -181,6 +186,8 @@ struct MirrordCiStore {
     user_process_groups: HashSet<u32>,
 }
 
+/// Exclusive lock on the CI state, held across every read-modify-write of it.
+///
 /// Keeping the same lock across a stop's read, signals, and ledger update prevents lock
 /// contention from leaving already-signalled numeric IDs available for a later retry.
 struct CiStoreLock {
@@ -192,28 +199,40 @@ impl MirrordCiStore {
     /// [`MirrordCi`].
     const MIRRORD_FOR_CI_TMP_FILE_PATH: &str = "mirrord/mirrord-for-ci.json";
 
+    /// How often [`Self::lock_file_waiting`] retries a held lock.
+    ///
+    /// A session holds the lock for only a few milliseconds (reading and rewriting the state file,
+    /// and for a background user command also spawning it), so waiters retry often. With a longer
+    /// interval, many waiters wake together and only about one gets the lock per tick, so a batch
+    /// of sessions started at once can run out of `ci.lock_timeout_ms`.
+    const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(5);
+
     fn default_path() -> PathBuf {
         temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)
     }
 
-    /// Saves this [`MirrordCiStore`] to the file at [`Self::MIRRORD_FOR_CI_TMP_FILE_PATH`],
-    /// creating a new file if it needed.
-    async fn write_to_file(&self) -> CiResult<()> {
-        self.write_to_path(&Self::default_path()).await
-    }
-
+    /// Opens the lock file that guards the state file at `file_path`, creating it if needed.
+    ///
     /// The lock has its own stable path because atomic replacement changes the state file's
     /// inode. Locking the state file itself would let another writer lock the replacement.
-    async fn lock_file(file_path: &Path) -> CiResult<CiStoreLock> {
+    async fn open_lock_file(file_path: &Path) -> io::Result<fs::File> {
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await?;
         }
-        let lock_file = fs::OpenOptions::new()
+        fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
             .open(file_path.with_extension("lock"))
-            .await?;
+            .await
+    }
+
+    /// Takes the lock without waiting.
+    ///
+    /// `mirrord ci stop` uses this so that it fails before signalling anything when another
+    /// process holds the lock, instead of acting on targets that may be about to change.
+    async fn lock_file(file_path: &Path) -> CiResult<CiStoreLock> {
+        let lock_file = Self::open_lock_file(file_path).await?;
         if lock_file.try_lock_exclusive()?.not() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::WouldBlock,
@@ -224,13 +243,63 @@ impl MirrordCiStore {
         Ok(CiStoreLock { _file: lock_file })
     }
 
-    /// Replace the state only after its contents are complete. A partial write must not erase
-    /// the cleanup targets from the previous successful invocation.
-    async fn write_to_path(&self, file_path: &Path) -> CiResult<()> {
-        let lock = Self::lock_file(file_path).await?;
-        self.write_locked(file_path, &lock).await
+    /// Takes the lock, waiting up to `lock_timeout` for another holder to release it.
+    ///
+    /// Sessions that start together all record their processes in the same state file, so a
+    /// held lock is expected and short-lived for them, rather than a reason to fail.
+    async fn lock_file_waiting(file_path: &Path, lock_timeout: Duration) -> CiResult<CiStoreLock> {
+        let lock_file = Self::open_lock_file(file_path).await?;
+        // `timeout` polls its future before it checks the deadline, so `ci.lock_timeout_ms = 0`
+        // still tries the lock once and fails only if another command holds it.
+        timeout(lock_timeout, async {
+            while lock_file.try_lock_exclusive()?.not() {
+                sleep(Self::LOCK_RETRY_INTERVAL).await;
+            }
+            io::Result::Ok(())
+        })
+        .await
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                format!(
+                    "timed out after {} ms waiting for another `mirrord ci` command to release \
+                     the CI state file; set `ci.lock_timeout_ms` to a larger value to wait longer",
+                    lock_timeout.as_millis()
+                ),
+            )
+        })??;
+        Ok(CiStoreLock { _file: lock_file })
     }
 
+    /// Reads the stored state, changes it with `apply`, and writes the result back.
+    ///
+    /// Fails with `WouldBlock` if the lock isn't free within `lock_timeout`.
+    async fn update(
+        file_path: &Path,
+        lock_timeout: Duration,
+        apply: impl FnOnce(&mut Self),
+    ) -> CiResult<()> {
+        let lock = Self::lock_file_waiting(file_path, lock_timeout).await?;
+        Self::update_locked(file_path, &lock, apply).await
+    }
+
+    /// [`Self::update`] for a caller that already holds the lock.
+    ///
+    /// The read happens under the same lock as the write: a session that read the state before
+    /// taking the lock could write back a copy that misses the cleanup targets another session
+    /// recorded in between, and `mirrord ci stop` would then leave those processes running.
+    async fn update_locked(
+        file_path: &Path,
+        lock: &CiStoreLock,
+        apply: impl FnOnce(&mut Self),
+    ) -> CiResult<()> {
+        let mut store = Self::read_from_file_or_default(file_path).await?;
+        apply(&mut store);
+        store.write_locked(file_path, lock).await
+    }
+
+    /// Replace the state only after its contents are complete. A partial write must not erase
+    /// the cleanup targets from the previous successful invocation.
     async fn write_locked(&self, file_path: &Path, _lock: &CiStoreLock) -> CiResult<()> {
         let contents = serde_json::to_vec(self)?;
         let parent = file_path.parent().ok_or_else(|| {
@@ -281,19 +350,12 @@ impl MirrordCiStore {
     }
 }
 
+/// Spawns `command` as the leader of a new process group, so that `mirrord ci stop` can end it
+/// together with its descendants by signalling the group, whose id is the child's pid.
 #[cfg(not(target_os = "windows"))]
-fn spawn_background_user_command(
-    command: &mut Command,
-    store: &mut MirrordCiStore,
-) -> io::Result<Child> {
+fn spawn_background_user_command(command: &mut Command) -> io::Result<Child> {
     command.process_group(0);
-    let child = command.spawn()?;
-
-    if let Some(process_group) = child.id() {
-        store.user_process_groups.insert(process_group);
-    }
-
-    Ok(child)
+    command.spawn()
 }
 
 /// Retains explicit CI metadata independently of the optional [`CiApiKey`].
@@ -323,7 +385,7 @@ impl MirrordCi {
     async fn create_run_output_dir<P: Progress>(
         progress: &P,
         binary_path: &Path,
-        CiConfig { output_dir }: &CiConfig,
+        CiConfig { output_dir, .. }: &CiConfig,
     ) -> CiResult<PathBuf> {
         let binary = binary_path
             .file_name()
@@ -351,6 +413,46 @@ impl MirrordCi {
         Ok(ci_run_output_dir)
     }
 
+    /// Spawns the user command, and records a background one in [`MirrordCiStore`] so that
+    /// `mirrord ci stop` can end it.
+    ///
+    /// A background command is spawned only once the CI state lock is held, and recorded under
+    /// that same lock: if the wait for the lock timed out after the spawn, the command would keep
+    /// running with no record, out of reach of `mirrord ci stop`. A foreground command ends with
+    /// this session, so it takes no lock and isn't recorded.
+    #[cfg(not(target_os = "windows"))]
+    async fn spawn_user_command<P: Progress>(
+        &self,
+        progress: &mut P,
+        command: &mut Command,
+        binary: &str,
+        binary_args: &[String],
+        store_path: &Path,
+        lock_timeout: Duration,
+    ) -> CiResult<Child> {
+        let spawn_failed = |fail: io::Error| {
+            progress.failure(Some(&fail.to_string()));
+            CiError::BinaryExecuteFailed(binary.to_owned(), binary_args.to_vec())
+        };
+
+        if self.ci_common_args.foreground {
+            return command.spawn().map_err(spawn_failed);
+        }
+
+        let lock = MirrordCiStore::lock_file_waiting(store_path, lock_timeout).await?;
+        // A background command inherits no descriptor for the lock file, because std opens files
+        // with `O_CLOEXEC`, so the lock is released when this session drops it.
+        let child = spawn_background_user_command(command).map_err(spawn_failed)?;
+        if let Some(process_group) = child.id() {
+            MirrordCiStore::update_locked(store_path, &lock, |store| {
+                store.user_process_groups.insert(process_group);
+            })
+            .await?;
+        }
+
+        Ok(child)
+    }
+
     /// Helper to access the [`CiApiKey`] when preparing the kube request headers.
     pub(super) fn api_key(&self) -> Option<&CiApiKey> {
         self.ci_api_key.as_ref()
@@ -358,14 +460,21 @@ impl MirrordCi {
 
     /// When intproxy starts, we need to retrieve its pid and store it in the `mirrord-for-ci.json`,
     /// so we can kill the intproxy later. Requiring the live shutdown owner prevents publishing
-    /// the pid before its SIGTERM handler is registered.
+    /// the pid before its SIGTERM handler is registered. Waits up to `ci.lock_timeout_ms` for the
+    /// CI state lock, and fails if another command holds it for longer.
     #[tracing::instrument(level = Level::TRACE, skip(_shutdown_handler), err)]
-    pub(super) async fn prepare_intproxy(_shutdown_handler: &IntProxyShutdown) -> CiResult<()> {
-        let mut mirrord_ci_store =
-            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
-        mirrord_ci_store.intproxy_pids.insert(std::process::id());
-
-        mirrord_ci_store.write_to_file().await
+    pub(super) async fn prepare_intproxy(
+        _shutdown_handler: &IntProxyShutdown,
+        ci_config: &CiConfig,
+    ) -> CiResult<()> {
+        MirrordCiStore::update(
+            &MirrordCiStore::default_path(),
+            Duration::from_millis(ci_config.lock_timeout_ms),
+            |store| {
+                store.intproxy_pids.insert(std::process::id());
+            },
+        )
+        .await
     }
 
     /// Prepares and runs the user binary with mirrord.
@@ -381,7 +490,7 @@ impl MirrordCi {
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
-        CiConfig { output_dir }: &CiConfig,
+        ci_config: &CiConfig,
     ) -> CiResult<()> {
         use nix::libc::{SIGINT, SIGKILL, SIGTERM};
 
@@ -391,17 +500,10 @@ impl MirrordCi {
             // when the last part is `..`
             .expect("failed to get file name of binary path")
             .to_string_lossy();
-        let mut mirrord_ci_store =
-            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
 
-        let ci_run_output_dir = Self::create_run_output_dir(
-            progress,
-            binary_path,
-            &CiConfig {
-                output_dir: output_dir.clone(),
-            },
-        )
-        .await?;
+        let lock_timeout = Duration::from_millis(ci_config.lock_timeout_ms);
+        let ci_run_output_dir =
+            Self::create_run_output_dir(progress, binary_path, ci_config).await?;
 
         let mut command = resolve_tokio_command(binary_path);
         command
@@ -412,24 +514,16 @@ impl MirrordCi {
             .stderr(File::create(ci_run_output_dir.join("stderr"))?)
             .kill_on_drop(false);
 
-        let spawn_result = if self.ci_common_args.foreground {
-            command.spawn()
-        } else {
-            spawn_background_user_command(&mut command, &mut mirrord_ci_store)
-        };
-        let mut child = match spawn_result {
-            Ok(child) => {
-                mirrord_ci_store.write_to_file().await?;
-                child
-            }
-            Err(fail) => {
-                progress.failure(Some(&fail.to_string()));
-                return Err(CiError::BinaryExecuteFailed(
-                    binary.to_string(),
-                    binary_args.to_vec(),
-                ));
-            }
-        };
+        let mut child = self
+            .spawn_user_command(
+                progress,
+                &mut command,
+                &binary,
+                binary_args,
+                &MirrordCiStore::default_path(),
+                lock_timeout,
+            )
+            .await?;
 
         let child_pid = child
             .id()
@@ -487,26 +581,16 @@ impl MirrordCi {
             .file_name()
             .expect("failed to get file name of binary path")
             .to_string_lossy();
-        let mut mirrord_ci_store =
-            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::default_path()).await?;
-
-        if let Some(extproxy_pid) = extproxy_pid {
-            mirrord_ci_store.extproxy_pids.insert(extproxy_pid);
-        }
-
-        if let Some(sidecar_pid) = sidecar_pid {
-            mirrord_ci_store.sidecar_pids.insert(sidecar_pid);
-        }
-
-        if let Some(sidecar_container) = sidecar_container {
-            mirrord_ci_store
-                .sidecar_containers
-                .insert(sidecar_container);
-        }
+        let lock_timeout = Duration::from_millis(ci_config.lock_timeout_ms);
 
         // external proxy and sidecar already have started, so we want to record these and be able
         // to delete them with `mirrord ci stop` even if the following code fails.
-        mirrord_ci_store.write_to_file().await?;
+        MirrordCiStore::update(&MirrordCiStore::default_path(), lock_timeout, |store| {
+            store.extproxy_pids.extend(extproxy_pid);
+            store.sidecar_pids.extend(sidecar_pid);
+            store.sidecar_containers.extend(sidecar_container);
+        })
+        .await?;
 
         let mut command = resolve_tokio_command(binary_path);
         command.args(binary_args).kill_on_drop(false);
@@ -527,24 +611,16 @@ impl MirrordCi {
                 .stderr(File::create(ci_output_dir.join("stderr"))?);
         }
 
-        let spawn_result = if self.ci_common_args.foreground {
-            command.spawn()
-        } else {
-            spawn_background_user_command(&mut command, &mut mirrord_ci_store)
-        };
-        let mut child = match spawn_result {
-            Ok(child) => {
-                mirrord_ci_store.write_to_file().await?;
-                child
-            }
-            Err(fail) => {
-                progress.failure(Some(&fail.to_string()));
-                return Err(CiError::BinaryExecuteFailed(
-                    binary.to_string(),
-                    binary_args.to_vec(),
-                ));
-            }
-        };
+        let mut child = self
+            .spawn_user_command(
+                progress,
+                &mut command,
+                &binary,
+                binary_args,
+                &MirrordCiStore::default_path(),
+                lock_timeout,
+            )
+            .await?;
 
         let child_pid = child
             .id()
@@ -597,7 +673,7 @@ impl MirrordCi {
         binary_path: &Path,
         binary_args: &[String],
         env_vars: &HashMap<String, String>,
-        CiConfig { output_dir }: &CiConfig,
+        ci_config: &CiConfig,
     ) -> CiResult<()> {
         unimplemented!("Not supported on windows.");
     }
@@ -649,10 +725,12 @@ impl MirrordCi {
 #[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use std::{
-        collections::HashSet, os::unix::process::ExitStatusExt, process::Stdio, time::Duration,
+        collections::HashSet, io, ops::Not, os::unix::process::ExitStatusExt, process::Stdio,
+        time::Duration,
     };
 
     use mirrord_command::resolve_tokio_command;
+    use mirrord_progress::ProgressTracker;
     use nix::{
         sys::signal::{Signal, killpg},
         unistd::{Pid, getpgid},
@@ -662,7 +740,9 @@ mod tests {
         time::timeout,
     };
 
-    use super::{MirrordCiStore, spawn_background_user_command};
+    use super::{CiCommonArgs, CiError, MirrordCi, MirrordCiStore, spawn_background_user_command};
+
+    const LOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
     #[test]
     fn ci_store_defaults_missing_fields() {
@@ -692,11 +772,22 @@ mod tests {
                     .is_err()
             );
             assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), contents);
+            assert!(
+                MirrordCiStore::update(&path, LOCK_TIMEOUT, |_| {})
+                    .await
+                    .is_err()
+            );
+            assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), contents);
         }
 
-        let mut store = MirrordCiStore::default();
-        store.intproxy_pids.insert(1234);
-        store.write_to_path(&path).await.unwrap();
+        // `MirrordCiStore::update` reads before it writes, so it rejects the damaged file; start
+        // from a missing one.
+        tokio::fs::remove_file(&path).await.unwrap();
+        MirrordCiStore::update(&path, LOCK_TIMEOUT, |store| {
+            store.intproxy_pids.insert(1234);
+        })
+        .await
+        .unwrap();
         assert_eq!(
             MirrordCiStore::read_from_file_or_default(&path)
                 .await
@@ -705,8 +796,9 @@ mod tests {
             HashSet::from([1234])
         );
 
-        store.intproxy_pids.clear();
-        store.write_to_path(&path).await.unwrap();
+        MirrordCiStore::update(&path, LOCK_TIMEOUT, |store| store.intproxy_pids.clear())
+            .await
+            .unwrap();
         assert!(
             MirrordCiStore::read_from_file_or_default(&path)
                 .await
@@ -719,13 +811,20 @@ mod tests {
     async fn ci_store_contested_write_preserves_existing_state() {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("ci-state.json");
-        let mut store = MirrordCiStore::default();
-        store.intproxy_pids.insert(1234);
-        store.write_to_path(&path).await.unwrap();
+        MirrordCiStore::update(&path, LOCK_TIMEOUT, |store| {
+            store.intproxy_pids.insert(1234);
+        })
+        .await
+        .unwrap();
 
         let lock = MirrordCiStore::lock_file(&path).await.unwrap();
-        let replacement = MirrordCiStore::default();
-        assert!(replacement.write_to_path(&path).await.is_err());
+        assert!(matches!(
+            MirrordCiStore::update(&path, Duration::from_millis(100), |store| {
+                *store = MirrordCiStore::default()
+            })
+            .await,
+            Err(CiError::IO(error)) if error.kind() == io::ErrorKind::WouldBlock
+        ));
         assert_eq!(
             MirrordCiStore::read_from_file_or_default(&path)
                 .await
@@ -736,16 +835,142 @@ mod tests {
         drop(lock);
     }
 
+    /// Sessions that start together contend for the lock; the later one must wait for it and keep
+    /// the targets the earlier one recorded.
     #[tokio::test]
-    async fn ci_process_group_background_spawn_records_leader_and_owns_descendant() {
-        let mut store = MirrordCiStore::default();
+    async fn ci_store_update_waits_for_lock_and_keeps_existing_state() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("ci-state.json");
+
+        let lock = MirrordCiStore::lock_file(&path).await.unwrap();
+        let holder_path = path.clone();
+        let holder = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let mut store = MirrordCiStore::default();
+            store.intproxy_pids.insert(1234);
+            store.write_locked(&holder_path, &lock).await.unwrap();
+            drop(lock);
+        });
+
+        MirrordCiStore::update(&path, LOCK_TIMEOUT, |store| {
+            store.intproxy_pids.insert(5678);
+        })
+        .await
+        .unwrap();
+        holder.await.unwrap();
+
+        assert_eq!(
+            MirrordCiStore::read_from_file_or_default(&path)
+                .await
+                .unwrap()
+                .intproxy_pids,
+            HashSet::from([1234, 5678])
+        );
+    }
+
+    /// A background user command runs only once its session holds the CI state lock, so a lock
+    /// timeout can't leave it running with no record for `mirrord ci stop`. A foreground command
+    /// ends with its session, so it neither waits for the lock nor is recorded.
+    #[tokio::test]
+    async fn ci_user_command_background_spawns_only_under_lock() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store_path = temp_dir.path().join("ci-state.json");
+        let sentinel = temp_dir.path().join("sentinel");
+        let script = format!("touch '{}'", sentinel.display());
+        let user_command = || {
+            let mut command = resolve_tokio_command("sh");
+            command.args(["-c", &script]).kill_on_drop(true);
+            command
+        };
+        let mut progress = ProgressTracker::null();
+        let background = MirrordCi {
+            ci_api_key: None,
+            ci_common_args: CiCommonArgs::default(),
+        };
+        let foreground = MirrordCi {
+            ci_api_key: None,
+            ci_common_args: CiCommonArgs {
+                foreground: true,
+                ..Default::default()
+            },
+        };
+
+        let lock = MirrordCiStore::lock_file(&store_path).await.unwrap();
+        let timed_out = background
+            .spawn_user_command(
+                &mut progress,
+                &mut user_command(),
+                "sh",
+                &[],
+                &store_path,
+                Duration::from_millis(100),
+            )
+            .await;
+        assert!(matches!(
+            timed_out,
+            Err(CiError::IO(error)) if error.kind() == io::ErrorKind::WouldBlock
+        ));
+        // A command spawned before the timeout would have had this long to create the sentinel.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(sentinel.exists().not());
+
+        let mut foreground_child = foreground
+            .spawn_user_command(
+                &mut progress,
+                &mut user_command(),
+                "sh",
+                &[],
+                &store_path,
+                Duration::from_millis(100),
+            )
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), foreground_child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            MirrordCiStore::read_from_file_or_default(&store_path)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        drop(lock);
+
+        let mut background_child = background
+            .spawn_user_command(
+                &mut progress,
+                &mut user_command(),
+                "sh",
+                &[],
+                &store_path,
+                LOCK_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        let background_pid = background_child.id().expect("spawned child has a pid");
+        assert_eq!(
+            MirrordCiStore::read_from_file_or_default(&store_path)
+                .await
+                .unwrap()
+                .user_process_groups,
+            HashSet::from([background_pid])
+        );
+        timeout(Duration::from_secs(5), background_child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn ci_process_group_background_spawn_leads_group_containing_descendant() {
         let mut command = resolve_tokio_command("sh");
         command
             .args(["-c", "sh -c 'sleep 30 & echo $!; wait' & wait"])
             .stdout(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut child = spawn_background_user_command(&mut command, &mut store).unwrap();
+        let mut child = spawn_background_user_command(&mut command).unwrap();
         let child_pid = child.id().expect("spawned child has a pid");
         let process_group = Pid::from_raw(child_pid as i32);
         let stdout = child.stdout.take().expect("stdout is piped");
@@ -759,7 +984,6 @@ mod tests {
         .unwrap();
         let descendant_pid = Pid::from_raw(descendant_pid.trim().parse().unwrap());
 
-        assert_eq!(store.user_process_groups, HashSet::from([child_pid]));
         assert_eq!(getpgid(Some(process_group)).unwrap(), process_group);
         assert_eq!(getpgid(Some(descendant_pid)).unwrap(), process_group);
 

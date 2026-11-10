@@ -1,0 +1,1 @@
+Fixed concurrent `mirrord ci start` and `mirrord ci container` sessions failing with "CI state file is locked by another writer". Sessions now wait for each other for up to `ci.lock_timeout_ms` (1 second by default), and `mirrord ci stop` can find the processes of every session.

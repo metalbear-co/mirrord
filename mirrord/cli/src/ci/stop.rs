@@ -317,6 +317,8 @@ mod tests {
         CiError, MirrordCiManagedContainer, MirrordCiStore, spawn_background_user_command,
     };
 
+    const LOCK_TIMEOUT: Duration = Duration::from_secs(1);
+
     /// Spawns `script` the same way a CI user command is spawned, recording its process group in
     /// `store`, and waits for the script to announce itself with a `ready` line.
     ///
@@ -334,7 +336,10 @@ mod tests {
             .kill_on_drop(true);
 
         let mut child =
-            spawn_background_user_command(&mut command, store).expect("failed to spawn script");
+            spawn_background_user_command(&mut command).expect("failed to spawn script");
+        store
+            .user_process_groups
+            .insert(child.id().expect("spawned child has a pid"));
         let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
         let mut ready = String::new();
         timeout(Duration::from_secs(5), stdout.read_line(&mut ready))
@@ -487,9 +492,9 @@ mod tests {
         let mut store = MirrordCiStore::default();
         let mut command = resolve_tokio_command("sh");
         command.args(["-c", "exit 0"]).kill_on_drop(true);
-        let mut child =
-            spawn_background_user_command(&mut command, &mut store).expect("failed to spawn");
+        let mut child = spawn_background_user_command(&mut command).expect("failed to spawn");
         let pid = child.id().expect("spawned child has a pid");
+        store.user_process_groups.insert(pid);
         timeout(Duration::from_secs(5), child.wait())
             .await
             .expect("script exits on its own")
@@ -535,7 +540,11 @@ mod tests {
         let mut store = MirrordCiStore::default();
         let (mut child, _stdout) =
             spawn_ready_script("echo ready; while :; do :; done", &mut store).await;
-        store.write_to_path(&store_path).await.unwrap();
+        MirrordCiStore::update(&store_path, LOCK_TIMEOUT, |persisted| {
+            *persisted = store.clone()
+        })
+        .await
+        .unwrap();
 
         let lock = MirrordCiStore::lock_file(&store_path).await.unwrap();
         let attempted_stop =
@@ -557,7 +566,10 @@ mod tests {
         let stop = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
             .await
             .unwrap();
-        assert!(store.write_to_path(&store_path).await.is_err());
+        assert!(matches!(
+            MirrordCiStore::update(&store_path, Duration::from_millis(100), |_| {}).await,
+            Err(CiError::IO(error)) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
         stop.handle().await.unwrap();
         timeout(Duration::from_secs(5), child.wait())
             .await
@@ -580,7 +592,11 @@ mod tests {
             container_id: "test-container".to_owned(),
         };
         store.sidecar_containers.insert(container.clone());
-        store.write_to_path(&store_path).await.unwrap();
+        MirrordCiStore::update(&store_path, LOCK_TIMEOUT, |persisted| {
+            *persisted = store.clone()
+        })
+        .await
+        .unwrap();
 
         let first = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
             .await
