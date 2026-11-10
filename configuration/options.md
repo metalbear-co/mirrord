@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-11-04T00:00:00.000Z
+lastmod: 2026-11-10T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -4719,14 +4719,19 @@ Base64-encoded serialized `FileDescriptorSet`, optionally gzip-compressed (plain
 `schema_file` for pre-compiled schemas; filled in automatically from `schema_file`
 during config resolution.
 
-Extra import roots for compiling `schema_file`. The file's own directory is always an
-import root.
+Extra directories to look for the files that `schema_file` imports in. They are searched
+in order, and then the directory of `schema_file`. A relative path is resolved like
+`schema_file`.
 
 Fully-qualified name of the payload's message type, e.g. `com.example.cdc.Record`.
 
-Path to the `.proto` file defining the payload's message type. Relative paths are
-resolved against the current working directory. Not needed when `descriptor_base64` is
-provided.
+Path to the `.proto` file defining the payload's message type. Not needed when
+`descriptor_base64` is provided.
+
+A relative path is resolved from the directory you run `mirrord exec` or `mirrord up`
+from, not from the directory of the config file. With `mirrord up`, it is also not
+resolved from the service's `run.directory`, because the schema is compiled before the
+service starts.
 
 ### feature.split_queues.{}.queue_id {#feature-split_queues-queue_id-queue_id}
 
