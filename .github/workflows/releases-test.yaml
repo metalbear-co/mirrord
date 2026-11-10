@@ -401,16 +401,21 @@ jobs:
           github_unavailable=()
           for u in "${urls[@]}"; do
             # HEAD to avoid downloading full binaries
-            if ! code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")"; then
-              echo "URL appears unreachable after retries (HTTP ${code:-000}): $u"
-              cat "$err_file"
-              # A 5xx or no answer (000) means GitHub itself is down; only a 4xx means the
-              # asset is missing from the release.
-              case "${code:-000}" in
-                5??|000) github_unavailable+=("$u") ;;
-                *) missing+=("$u") ;;
-              esac
+            code="$(curl -fsSIL "${retry_opts[@]}" -w '%{http_code}' -o /dev/null "$u" 2>"$err_file")" && rc=0 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              continue
             fi
+            echo "URL appears unreachable after retries (curl exit $rc, HTTP ${code:-000}): $u"
+            cat "$err_file"
+            # A 4xx means the asset is missing. A 5xx, or a connection error by curl's exit code
+            # (DNS, connect, timeout, TLS, empty reply, reset), means GitHub itself is down; the
+            # exit code also covers a redirect whose target host is unreachable, where curl still
+            # reports the redirect's 302. Anything else, such as a malformed URL, still fails.
+            case "$rc:${code:-000}" in
+              *:4??) missing+=("$u") ;;
+              *:5??|6:*|7:*|28:*|35:*|52:*|56:*) github_unavailable+=("$u") ;;
+              *) missing+=("$u") ;;
+            esac
           done
 
           if [ "${#github_unavailable[@]}" -gt 0 ]; then
@@ -509,11 +514,18 @@ jobs:
           # dispatches or superseded runs) were created after it; then previous is empty and a
           # failure still alerts.
           # Unknown runs are skipped, at most max_lookback of them (about 100 minutes of runs).
-          # Past that, or when the jobs API fails, previous stays empty: a failure still alerts
-          # and no recovery is announced.
+          # Past that, or when GitHub's API fails, previous stays empty: a failure still alerts,
+          # possibly a second time, because a repeated page costs less than a missed one, and no
+          # recovery is announced.
+          if ! runs="$(gh run list --workflow releases-test.yaml --limit 100 --json databaseId,headBranch,status,conclusion \
+            --jq '.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure")) | .databaseId')"; then
+            echo "Could not list previous runs; treating the previous status as unknown."
+            runs=""
+          fi
           max_lookback=20
           previous=""
           while read -r run_id; do
+            [ -n "$run_id" ] || continue
             if ! status="$(run_status "$run_id")"; then
               echo "Could not read the jobs of run $run_id; treating the previous status as unknown."
               break
@@ -525,8 +537,7 @@ jobs:
             echo "Run $run_id verified nothing (GitHub down or runner lost); looking further back."
             max_lookback=$((max_lookback - 1))
             [ "$max_lookback" -gt 0 ] || break
-          done < <(gh run list --workflow releases-test.yaml --limit 100 --json databaseId,headBranch,status,conclusion \
-            --jq '.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure")) | .databaseId')
+          done <<<"$runs"
           echo "Current run status: $current. Previous run status: ${previous:-none}"
           links="<$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID|Monitor run logs>${HTML_URL:+ · <$HTML_URL|Release page>}"
 
