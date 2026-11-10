@@ -933,6 +933,11 @@ pub enum NewOperatorFeature {
 
     ServerlessSessionsManager,
 
+    /// The operator's sessions-manager passes an agent's registration `metadata` on to the
+    /// intproxies paired with it. Without it, an intproxy gets no metadata even from an agent that
+    /// sent some, so the CLI can tell a dropped value from an agent that reports none.
+    ServerlessAgentMetadata,
+
     /// Reporting is available on Free so locally rejected demand can be observed without granting
     /// permission to use the rejected feature.
     LicenseGateReporting,
@@ -1075,7 +1080,9 @@ impl NewOperatorFeature {
             | Self::PreviewAutoQueueSplitting
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
-            Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
+            Self::LabelTargeting
+            | Self::ServerlessSessionsManager
+            | Self::ServerlessAgentMetadata => Some("target.path"),
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
@@ -1199,6 +1206,7 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::ServerlessAgentMetadata => "serverless agent metadata",
             NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
@@ -1298,7 +1306,8 @@ impl NewOperatorFeature {
                 &["operator.kafkaSplitting", "operator.kafkaBranching"]
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
-            NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
+            NewOperatorFeature::ServerlessSessionsManager
+            | NewOperatorFeature::ServerlessAgentMetadata => &["operator.sessionsManager"],
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
