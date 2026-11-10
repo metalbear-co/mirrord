@@ -585,6 +585,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         let mut connector = SessionsManagerConnector {
             connect_info,
             route,
+            target_platform: Default::default(),
             first_conn: None,
         };
         let conn = connector.connect().await.map_err(|error| match error {
