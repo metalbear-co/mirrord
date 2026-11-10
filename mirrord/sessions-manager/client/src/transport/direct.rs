@@ -20,7 +20,7 @@ use mirrord_operator_websocket::{
 };
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AGENT_METADATA_HEADER, AssignmentSubscription, ConnectionAssignment, ServiceScope,
+    AssignmentSubscription, ConnectionAssignment, ServiceScope,
 };
 use reqwest::StatusCode;
 use tokio::time::Instant;
@@ -252,8 +252,8 @@ impl SessionsManagerTransport for DirectTransport {
             .query(subscription)
             .headers(credentials)
             .header(ACCEPT, "text/event-stream");
-        if let Some(metadata) = subscription.agent_metadata() {
-            request = request.header(AGENT_METADATA_HEADER, metadata.as_str());
+        if let Some((name, value)) = subscription.agent_metadata_header() {
+            request = request.header(name, value);
         }
         let request = request.send();
         let response = with_deadline(Some(deadline), request).await??;

@@ -7,8 +7,8 @@ use hyper::{Request, StatusCode, header::ACCEPT};
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade::connect_ws};
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AGENT_METADATA_HEADER, AssignmentSubscription, ConnectionAssignment,
-    OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER, ServiceScope,
+    AssignmentSubscription, ConnectionAssignment, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
+    ServiceScope,
 };
 use tokio::time::Instant;
 
@@ -56,8 +56,8 @@ impl SessionsManagerTransport for OperatorTransport {
             "requesting operator-hosted sessions-manager assignments"
         );
         let mut request = Request::get(uri).header(ACCEPT, "text/event-stream");
-        if let Some(metadata) = subscription.agent_metadata() {
-            request = request.header(AGENT_METADATA_HEADER, metadata.as_str());
+        if let Some((name, value)) = subscription.agent_metadata_header() {
+            request = request.header(name, value);
         }
         let request = request.body(kube::client::Body::empty())?;
         let response = with_deadline(Some(deadline), self.client.send(request)).await??;
