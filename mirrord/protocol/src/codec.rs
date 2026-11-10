@@ -277,12 +277,7 @@ pub enum DaemonMessage {
 /// messages take.
 ///
 /// Only the features that can move a lot of data get their own kind, and every other message is
-/// [`MessageKind::Other`], so the kinds of one direction add up to its total. The agent and the
-/// operator both report buffered message bytes by kind, so the grouping lives here, where they
-/// cannot drift apart. It is not part of the wire format.
-///
-/// Its [`strum::IntoEnumIterator::iter`] lists every kind, generated from the variants, so code
-/// that has to visit each kind, such as removing a series per kind, cannot miss one.
+/// [`MessageKind::Other`], so the kinds of one direction add up to its total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum_macros::EnumIter)]
 pub enum MessageKind {
     Tcp,
