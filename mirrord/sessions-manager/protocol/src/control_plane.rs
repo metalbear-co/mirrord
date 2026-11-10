@@ -173,9 +173,10 @@ string_id!(
 /// that forwards it advertises `ServerlessAgentMetadata`. The MetalBear Cloud sessions-manager
 /// advertises nothing, since it always runs current code.
 ///
-/// Bounded by [`AgentMetadata::MAX_LEN`] and never empty, checked both when an agent builds one
-/// and when sessions-manager deserializes one. A value the server would reject therefore can't be
-/// built, so an agent can't end up retrying a registration that always fails.
+/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], and free of `\n`, `\r` and `\0`, the
+/// characters sessions-manager rejects in any registration value. The rules are checked when an
+/// agent builds one and when sessions-manager deserializes one, so an agent can't build a value
+/// the server would reject, and end up retrying a registration that always fails.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct AgentMetadata(String);
@@ -190,6 +191,8 @@ pub enum InvalidAgentMetadata {
         AgentMetadata::MAX_LEN
     )]
     TooLong,
+    #[error("agent metadata must not contain control characters")]
+    ControlCharacter,
 }
 
 impl AgentMetadata {
@@ -203,6 +206,8 @@ impl AgentMetadata {
             Err(InvalidAgentMetadata::Empty)
         } else if value.len() > Self::MAX_LEN {
             Err(InvalidAgentMetadata::TooLong)
+        } else if value.contains(['\n', '\r', '\0']) {
+            Err(InvalidAgentMetadata::ControlCharacter)
         } else {
             Ok(Self(value))
         }
