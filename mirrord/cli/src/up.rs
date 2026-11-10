@@ -179,7 +179,8 @@ pub(crate) async fn up_command(
     user_data: &UserData,
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
-        return Ok(run_wizard(output).await.map_err(Box::new)?);
+        let context = GlobalConfig::load().await.kube_context().map(str::to_owned);
+        return Ok(run_wizard(output, context).await.map_err(Box::new)?);
     }
 
     // No analytics: IDE extensions list on every refresh, and no session starts.
