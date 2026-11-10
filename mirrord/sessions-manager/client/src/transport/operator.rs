@@ -51,8 +51,10 @@ impl SessionsManagerTransport for OperatorTransport {
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
         let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
         let uri = operator_assignments_uri(scope, subscription)?;
+        // The path only: the query holds the subscription, an agent's metadata included.
         tracing::debug!(
-            %uri,
+            path = uri.split_once('?').map_or(uri.as_str(), |(path, _)| path),
+            ?subscription,
             "requesting operator-hosted sessions-manager assignments"
         );
         let request = Request::get(uri)
