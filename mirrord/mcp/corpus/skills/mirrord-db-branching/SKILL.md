@@ -3,7 +3,7 @@ name: mirrord-db-branching
 description: Helps users configure mirrord.json for database branching, enabling isolated database copies for safe development and testing. Use when the user wants to set up MySQL, MariaDB, PostgreSQL, MSSQL, MongoDB, Redis, DynamoDB, ClickHouse, Google Spanner, Amazon S3, turbopuffer, or generic branches, configure copy modes, connection sources, schema migrations, IAM authentication, or manage database branches.
 metadata:
   author: MetalBear
-  version: "2.12"
+  version: "2.13"
 ---
 
 # Mirrord DB Branching Skill
@@ -158,6 +158,7 @@ Enable the matching Helm value on the operator chart, and meet the minimum versi
 | Branch query params (`query_params`, pg only) | 3.197.0 | 3.250.0 | 3.197.0 | `operator.pgBranching: true` |
 | `additional_databases` (pg only) | 3.214.0 | 3.267.0 | 3.214.0 | `operator.pgBranching: true` |
 | Branch pod inherits target's `imagePullSecrets` for a custom `image` | 3.216.0 | — | 3.216.0 | (per engine above) |
+| Branch pod scheduling (`dbPod.tolerations`/`nodeSelector`/`affinity`) | 3.230.0 | — | 3.230.0 | (per engine above) |
 | ConfigMap connection source | 3.205.0 | 3.255.0 | 3.205.0 | (per engine above) |
 | MySQL/MariaDB copy carries over views, triggers, routines & server settings | 3.210.0 | — | — | (per engine above) |
 | MySQL/MariaDB `roles: full` (accounts, grants, definers) | 3.220.0 | — | — | (per engine above) |
@@ -195,6 +196,29 @@ To keep an engine's branches on node-local storage instead, set `dbPod.storage.k
 ### PostgreSQL server arguments
 
 Also cluster-admin Helm config, not a `db_branches` field: `pgBranchConfig.dbPod.dbServerArgs` is a list of extra command-line flags for every PostgreSQL branch's `postgres` server — for example serving TLS with certificates baked into a custom `dbPod.image`. Any file a flag references must already exist in that image (the operator doesn't mount certificate volumes into branch pods), the listener must stay on port `5432`, and the flags also apply to the temporary server the branch runs while restoring copied data, so an invalid flag fails branch creation. It's one setting for the whole cluster — use a [profile](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching#branch-config-profiles) to vary it per branch.
+
+### Branch Pod Labels, Annotations, and Scheduling
+
+Also cluster-admin Helm config. `dbPod.labels` and `dbPod.annotations` put metadata on every branch pod of an engine — useful for a cluster-wide tool that reads pod metadata, e.g. Karpenter, which otherwise deletes a branch pod while consolidating an underutilized node and ends the session's database mid-run. `dbPod.tolerations`, `dbPod.nodeSelector` and `dbPod.affinity` (operator/Helm chart **3.230.0+**; same shapes as the matching pod-spec fields) decide where branch pods can be scheduled — needed when every node carries a taint, e.g. EKS with Karpenter NodePools tainted `NoSchedule`; without a matching toleration the branch pod stays `Pending` with `node(s) had untolerated taint(s)` and the session fails with `operator operation timed out: database branching`.
+
+```yaml helm-values
+operator:
+  pgBranchConfig:
+    dbPod:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+      labels:
+        team: platform
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: dev
+          effect: NoSchedule
+      nodeSelector:
+        karpenter.sh/nodepool: dev-pool
+```
+
+The operator applies all five to the branch database pod and, for labels/annotations since operator 3.219.0 and always for the scheduling fields, to the pods of the branch's schema migration and copy Jobs too, so the whole branch (not just the database pod) is covered. Each engine has its own `<engine>BranchConfig` block, and a [profile](https://metalbear.com/mirrord/docs/sharing-the-cluster/db-branching#branch-config-profiles) is a complete `dbPod` that needs its own copy of these. Only branches created after the change pick it up. Older operators log `branch config contains a key the operator does not recognize; it has no effect` for `tolerations`/`nodeSelector`/`affinity` and schedule branch pods without them.
 
 ## Connection Modes
 
@@ -597,6 +621,7 @@ A remote branch is a standalone `redis-server` by default. An app that connects 
   "feature": { "db_branches": [ {
     "id": "cache-redis",
     "type": "redis",
+    "location": "remote",
     "cluster": true,
     "connection": { "url": "REDIS_URL" },
     "copy": { "mode": "all" }

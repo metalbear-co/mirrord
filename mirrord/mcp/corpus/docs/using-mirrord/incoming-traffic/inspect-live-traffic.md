@@ -61,7 +61,11 @@ Connection ID 0 closed
 This feature requires at least mirrord version **3.191.0**.
 {% endhint %}
 
-If you want to listen for traffic on all ports exposed by the target, you can omit the ports argument like so:
+If you want to listen for traffic on the TCP ports declared by the target container, you can omit the ports argument like so:
 ```
 mirrord dump -t deployment/my-deployment
 ```
+
+From mirrord version **3.282.0**, ports of other containers in the pod are not detected. To listen on one of those, or on a port that isn't declared, pass it with `-p`.
+
+`mirrord dump` exits with an error when it can't detect any ports, which is always the case in [copy target](../copy-target.md) and multi-cluster sessions. Pass the ports with `-p`.

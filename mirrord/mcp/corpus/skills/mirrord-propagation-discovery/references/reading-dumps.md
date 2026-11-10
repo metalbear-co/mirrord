@@ -4,11 +4,11 @@
 
 ```bash
 mirrord dump -t deployment/orders -n staging -p 8080
-mirrord dump -t deployment/orders -n staging            # 3.191.0+: attaches to every containerPort in the pod spec
+mirrord dump -t deployment/orders -n staging            # 3.191.0+: attaches to the target container's declared TCP ports
 mirrord dump -t deployment/orders -n staging --context staging-cluster
 ```
 
-A `deployment/` (or `service/`, `rollout/`...) target attaches the agent to **one pod** of that workload. For a hop with several replicas, dump each pod (`-t pod/<name>`) into its own log, named `<hop>--<pod>.log` so `dump_stats.py` merges them into one hop; otherwise a probe routed to another replica looks like a propagation gap. Target syntax is the same as `mirrord exec`: `deployment/`, `pod/`, `statefulset/`, `rollout/`, `service/`, `label/k=v`, optionally `/container/<name>`. Targetless is not supported. If port detection fails (`couldn't detect ports on target`), the containers declare no `ports:`; read the Service's `targetPort` and pass `-p`.
+A `deployment/` (or `service/`, `rollout/`...) target attaches the agent to **one pod** of that workload. For a hop with several replicas, dump each pod (`-t pod/<name>`) into its own log, named `<hop>--<pod>.log` so `dump_stats.py` merges them into one hop; otherwise a probe routed to another replica looks like a propagation gap. Target syntax is the same as `mirrord exec`: `deployment/`, `pod/`, `statefulset/`, `rollout/`, `service/`, `label/k=v`, optionally `/container/<name>`. Targetless is not supported. From mirrord 3.282.0+, omitting `-p` only detects the target container's own ports, not other containers' in the pod; pass `-p` for those. Port detection always fails (`couldn't detect ports on target`) in copy-target and multi-cluster sessions, and otherwise fails when the target container declares no `ports:`; either way, read the Service's `targetPort` and pass `-p`.
 
 Traffic goes to stdout. Progress (`Listening for traffic... Press Ctrl+C to stop`) is drawn as a spinner and **disappears when stdout is not a terminal**, so set `MIRRORD_PROGRESS_MODE=dumb` to get it as plain lines, and capture both streams into a file outside the repo:
 
