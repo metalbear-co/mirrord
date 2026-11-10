@@ -174,13 +174,14 @@ string_id!(
 ///
 /// Opaque to sessions-manager: it stores the value with the agent's registration and copies it
 /// into the [`crate::ConnectionAssignment`] of each intproxy paired with that agent, without
-/// parsing it. A sessions-manager that predates it ignores the parameter, and the session still
+/// parsing it. A sessions-manager that predates it ignores the header, and the session still
 /// works without it, so a client must treat its absence as "no platform specifics". An operator
 /// that forwards it advertises `ServerlessAgentMetadata`. The MetalBear Cloud sessions-manager
 /// advertises nothing, since it always runs current code.
 ///
-/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], and free of control characters, checked
-/// when an agent builds one. Both sides read it leniently, dropping a value they don't accept, so
+/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], free of control characters, and without
+/// leading or trailing whitespace, which HTTP strips from a header value. Checked when an agent
+/// builds one. Both sides read it leniently, dropping a value they don't accept, so
 /// a version skew loses only the metadata, never the registration or the assignment.
 ///
 /// It describes the customer's platform, so it has no `Display`, and its
@@ -202,6 +203,8 @@ pub enum InvalidAgentMetadata {
     TooLong,
     #[error("agent metadata must not contain control characters")]
     ControlCharacter,
+    #[error("agent metadata must not start or end with whitespace")]
+    SurroundingWhitespace,
 }
 
 impl AgentMetadata {
@@ -217,6 +220,8 @@ impl AgentMetadata {
             Err(InvalidAgentMetadata::TooLong)
         } else if value.chars().any(char::is_control) {
             Err(InvalidAgentMetadata::ControlCharacter)
+        } else if value.trim() != value {
+            Err(InvalidAgentMetadata::SurroundingWhitespace)
         } else {
             Ok(Self(value))
         }
@@ -226,12 +231,13 @@ impl AgentMetadata {
         &self.0
     }
 
-    /// Reads a value that this version may not accept, warning and returning `None` for one it
-    /// rejects, so that agents and intproxies keep working across versions with different rules.
+    /// Reads a value that this version may not accept, returning `None` for one it rejects, so
+    /// that agents and intproxies keep working across versions with different rules. The drop is
+    /// logged at debug: an agent sends the same value on every reconnect.
     pub fn lenient(value: impl Into<String>) -> Option<Self> {
         Self::new(value)
             .inspect_err(|error| {
-                tracing::warn!(%error, "ignoring agent metadata this version doesn't accept");
+                tracing::debug!(%error, "ignoring agent metadata this version doesn't accept");
             })
             .ok()
     }
@@ -282,7 +288,7 @@ where
     match Option::<Lenient>::deserialize(deserializer)? {
         Some(Lenient::Text(value)) => Ok(AgentMetadata::lenient(value)),
         Some(Lenient::Other(_)) => {
-            tracing::warn!("ignoring agent metadata that isn't a string");
+            tracing::debug!("ignoring agent metadata that isn't a string");
             Ok(None)
         }
         None => Ok(None),

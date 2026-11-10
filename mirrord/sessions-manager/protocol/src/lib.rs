@@ -36,7 +36,7 @@ pub struct ConnectionAssignment {
     /// The [`AgentMetadata`] the paired agent registered with. Set only on intproxy assignments,
     /// and only by a sessions-manager that supports it.
     ///
-    /// A value this client's [`AgentMetadata`] rejects reads as absent, with a warning, instead of
+    /// A value this client's [`AgentMetadata`] rejects reads as absent, logged at debug, instead of
     /// failing the assignment: a later sessions-manager may accept more, and a released client
     /// must keep pairing with it.
     #[serde(
