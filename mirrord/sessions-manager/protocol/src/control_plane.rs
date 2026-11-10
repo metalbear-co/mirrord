@@ -1,3 +1,4 @@
+use http::{HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, EnumString};
 use uuid::Uuid;
@@ -187,8 +188,12 @@ string_id!(
 /// It describes the customer's platform, so it has no `Display`, and its
 /// [`Debug`](std::fmt::Debug) prints only the length: subscriptions and assignments get logged
 /// whole. [`AgentMetadata::as_str`] is the one way to read the value.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+///
+/// It has no `Deserialize`: the lenient readers ([`AgentMetadata::lenient`] and the
+/// `ConnectionAssignment` field) are the only way in, so no payload that embeds it can fail as a
+/// whole on a value this version rejects.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(into = "String")]
 pub struct AgentMetadata(String);
 
 /// Why a value can't be an [`AgentMetadata`].
@@ -247,11 +252,22 @@ impl AgentMetadata {
 pub const AGENT_METADATA_HEADER: &str = "x-mirrord-agent-metadata";
 
 impl AssignmentSubscription {
-    /// The metadata to send in [`AGENT_METADATA_HEADER`], for an agent that has any.
-    pub fn agent_metadata(&self) -> Option<&AgentMetadata> {
-        match self {
-            Self::Agent { metadata, .. } => metadata.as_ref(),
-            Self::Intproxy { .. } => None,
+    /// The [`AGENT_METADATA_HEADER`] to send with this subscription, for an agent that has
+    /// metadata. A value the header can't carry is left out, so the agent still registers.
+    pub fn agent_metadata_header(&self) -> Option<(HeaderName, HeaderValue)> {
+        let Self::Agent {
+            metadata: Some(metadata),
+            ..
+        } = self
+        else {
+            return None;
+        };
+        match HeaderValue::from_str(metadata.as_str()) {
+            Ok(value) => Some((HeaderName::from_static(AGENT_METADATA_HEADER), value)),
+            Err(error) => {
+                tracing::debug!(%error, "leaving out agent metadata a header can't carry");
+                None
+            }
         }
     }
 }
