@@ -31,8 +31,8 @@ pub enum AssignmentSubscription {
     Agent {
         #[serde(flatten)]
         identity: AgentIdentity,
-        /// Describes the agent's platform to the intproxies it pairs with. Not part of the
-        /// registration's identity.
+        /// Describes the agent's platform to the intproxies it pairs with. sessions-manager keys
+        /// the registration on `identity` alone and passes this on unread.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<AgentMetadata>,
     },
