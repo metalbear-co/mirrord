@@ -14,7 +14,7 @@
 
 pub use control_plane::{
     AgentIdentity, AgentMetadata, AssignmentId, AssignmentRole, AssignmentSubscription,
-    ControlPlaneEventName, IntproxyIdentity, ReplicaId, ServiceScope,
+    ControlPlaneEventName, IntproxyIdentity, InvalidAgentMetadata, ReplicaId, ServiceScope,
 };
 pub use data_plane::{
     DataPlaneAuthorization, DataPlaneEndpoint, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,

@@ -4,7 +4,8 @@ use std::{
 };
 
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AssignmentId, AssignmentSubscription, ConnectionAssignment, ServiceScope,
+    AgentIdentity, AgentMetadata, AssignmentId, AssignmentSubscription, ConnectionAssignment,
+    ServiceScope,
 };
 
 use crate::{
@@ -156,15 +157,17 @@ pub(crate) struct DeduplicatingAssignmentSubscriber<T> {
 }
 
 impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
-    pub(crate) fn new(transport: T, scope: ServiceScope, identity: AgentIdentity) -> Self {
+    pub(crate) fn new(
+        transport: T,
+        scope: ServiceScope,
+        identity: AgentIdentity,
+        metadata: Option<AgentMetadata>,
+    ) -> Self {
         Self {
             subscriber: ControlPlaneSubscriber::new(
                 transport,
                 scope,
-                AssignmentSubscription::Agent {
-                    identity,
-                    metadata: None,
-                },
+                AssignmentSubscription::Agent { identity, metadata },
                 true,
             ),
             assignments: AssignmentRegistry::default(),

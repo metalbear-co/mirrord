@@ -162,15 +162,73 @@ string_id!(
     /// It must be unique among concurrently running replicas of a service; nothing verifies this.
     ReplicaId
 );
-string_id!(
-    /// What an agent tells the intproxies it pairs with about the platform it serves, such as
-    /// `platform=aws-lambda&invocation_port=8080` for a Lambda function's hub, so the CLI can
-    /// prepare the local process for that platform.
-    ///
-    /// Opaque to sessions-manager: it stores the value with the agent's registration and copies
-    /// it into the [`crate::ConnectionAssignment`] of each intproxy paired with that agent,
-    /// without parsing it. A sessions-manager that predates it ignores the parameter, and the
-    /// session still works without it, so a client must treat its absence as "no platform
-    /// specifics".
-    AgentMetadata
-);
+/// What an agent tells the intproxies it pairs with about the platform it serves, such as
+/// `platform=aws-lambda&invocation_port=8080` for a Lambda function's hub, so the CLI can prepare
+/// the local process for that platform.
+///
+/// Opaque to sessions-manager: it stores the value with the agent's registration and copies it
+/// into the [`crate::ConnectionAssignment`] of each intproxy paired with that agent, without
+/// parsing it. A sessions-manager that predates it ignores the parameter, and the session still
+/// works without it, so a client must treat its absence as "no platform specifics". An operator
+/// that forwards it advertises `ServerlessAgentMetadata`. The MetalBear Cloud sessions-manager
+/// advertises nothing, since it always runs current code.
+///
+/// Bounded by [`AgentMetadata::MAX_LEN`] and never empty, checked both when an agent builds one
+/// and when sessions-manager deserializes one. A value the server would reject therefore can't be
+/// built, so an agent can't end up retrying a registration that always fails.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AgentMetadata(String);
+
+/// Why a value can't be an [`AgentMetadata`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidAgentMetadata {
+    #[error("agent metadata must not be empty")]
+    Empty,
+    #[error(
+        "agent metadata must not be longer than {} bytes",
+        AgentMetadata::MAX_LEN
+    )]
+    TooLong,
+}
+
+impl AgentMetadata {
+    /// It is a short platform descriptor, kept for the agent's lifetime and copied into every
+    /// assignment of its intproxies, so it is bounded well below the URI limit.
+    pub const MAX_LEN: usize = 1024;
+
+    pub fn new(value: impl Into<String>) -> Result<Self, InvalidAgentMetadata> {
+        let value = value.into();
+        if value.is_empty() {
+            Err(InvalidAgentMetadata::Empty)
+        } else if value.len() > Self::MAX_LEN {
+            Err(InvalidAgentMetadata::TooLong)
+        } else {
+            Ok(Self(value))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for AgentMetadata {
+    type Error = InvalidAgentMetadata;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<AgentMetadata> for String {
+    fn from(value: AgentMetadata) -> Self {
+        value.0
+    }
+}
+
+impl std::fmt::Display for AgentMetadata {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
