@@ -106,6 +106,12 @@ jobs:
               core.setOutput("error", "");
             }
 
+      # notify looks this step up by name in the jobs API to tell a run that verified nothing
+      # from a healthy one.
+      - name: GitHub unavailable
+        if: steps.check.outputs.ok == 'github_unavailable'
+        run: echo "GitHub was unavailable, so this run could not verify the release."
+
       - name: Fail on missing required assets
         if: steps.check.outputs.ok != 'true' && steps.check.outputs.ok != 'github_unavailable'
         run: exit 1
@@ -129,6 +135,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     # A hung install would otherwise hold up the serialized runs behind it for hours.
     timeout-minutes: 15
+    # curl, and brew through it, print "returned error: <code>" or a connection error code. A
+    # 5xx or no answer means GitHub itself is down; a 4xx means something the release should
+    # have is missing.
+    env:
+      GITHUB_DOWN_PATTERN: 'returned error: 5[0-9][0-9]|curl: \((6|7|28|35|52|56)\)'
+      MISSING_PATTERN: 'returned error: 4[0-9][0-9]'
     # One output per OS, since matrix legs overwrite each other's outputs of the same name.
     # Every leg evaluates both, but each is empty except on its own OS when that install
     # failed, and the runner never sets empty outputs, so a leg cannot clear the other's
@@ -151,22 +163,21 @@ jobs:
           set -euo pipefail
           url="https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh"
 
-          # curl prints "returned error: <code>" or a connection error code. A 5xx or no answer
-          # means GitHub itself is down; a 4xx means something the release should have is missing.
-          github_down_pattern='returned error: 5[0-9][0-9]|curl: \((6|7|28|35|52|56)\)'
-          missing_pattern='returned error: 4[0-9][0-9]'
-
           # Downloads from GitHub occasionally fail transiently, so retry before declaring
-          # failure; a genuinely broken installer or release fails every attempt.
+          # failure; a genuinely broken installer or release fails every attempt. The install
+          # counts as untested rather than broken only when every failed attempt was GitHub down.
           echo "Installing mirrord via curl|bash from: $url"
+          only_github_down=true
           for attempt in 1 2 3; do
             if { curl -fsSL "$url" | bash; } >/tmp/install_sh.log 2>&1; then
               break
             fi
             echo "----- installer output (attempt ${attempt}/3) -----"
             cat /tmp/install_sh.log || true
-            if [ "$attempt" -eq 3 ] && grep -qE "$github_down_pattern" /tmp/install_sh.log && ! grep -qE "$missing_pattern" /tmp/install_sh.log; then
-              echo "::warning::GitHub answered 5xx or not at all on every attempt, so the curl|bash install was not tested."
+            if grep -qE "$MISSING_PATTERN" /tmp/install_sh.log || ! grep -qE "$GITHUB_DOWN_PATTERN" /tmp/install_sh.log; then
+              only_github_down=false
+            fi
+            if [ "$attempt" -eq 3 ] && [ "$only_github_down" = true ]; then
               echo "ok=github_unavailable" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -263,6 +274,7 @@ jobs:
           # declaring failure; a genuinely broken formula/asset fails every attempt.
           echo "Installing mirrord via Homebrew: metalbear-co/mirrord/mirrord"
           brew_ok=false
+          only_github_down=true
           for attempt in 1 2 3; do
             echo "brew install attempt ${attempt}/3"
             if brew install metalbear-co/mirrord/mirrord >/tmp/brew_install.log 2>&1; then
@@ -271,10 +283,18 @@ jobs:
             fi
             echo "----- brew output (attempt ${attempt}) -----"
             cat /tmp/brew_install.log || true
+            if grep -qE "$MISSING_PATTERN" /tmp/brew_install.log || ! grep -qE "$GITHUB_DOWN_PATTERN" /tmp/brew_install.log; then
+              only_github_down=false
+            fi
             # Reset any partial install left behind by the aborted attempt.
             brew uninstall --force metalbear-co/mirrord/mirrord >/dev/null 2>&1 || true
             sleep 5
           done
+
+          if [ "$brew_ok" != "true" ] && [ "$only_github_down" = true ]; then
+            echo "ok=github_unavailable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if [ "$brew_ok" != "true" ]; then
             echo "ok=false" >> "$GITHUB_OUTPUT"
@@ -302,8 +322,14 @@ jobs:
           echo "ok=true" >> "$GITHUB_OUTPUT"
           echo "error=" >> "$GITHUB_OUTPUT"
 
+      # notify looks this step up by name in the jobs API to tell a run that verified nothing
+      # from a healthy one.
+      - name: GitHub unavailable
+        if: steps.curl.outputs.ok == 'github_unavailable' || steps.brew.outputs.ok == 'github_unavailable'
+        run: echo "::warning::GitHub answered 5xx or not at all on every attempt, so an install path was not tested."
+
       - name: Fail on install errors
-        if: (steps.curl.outputs.ok != 'true' && steps.curl.outputs.ok != 'github_unavailable') || steps.brew.outputs.ok != 'true'
+        if: (steps.curl.outputs.ok != 'true' && steps.curl.outputs.ok != 'github_unavailable') || (steps.brew.outputs.ok != 'true' && steps.brew.outputs.ok != 'github_unavailable')
         run: exit 1
 
       - name: Log install success
@@ -389,6 +415,7 @@ jobs:
 
           if [ "${#github_unavailable[@]}" -gt 0 ]; then
             echo "::warning::GitHub answered 5xx or not at all for: ${github_unavailable[*]}"
+            echo "github_unavailable=true" >> "$GITHUB_OUTPUT"
           fi
 
           if [ "${#missing[@]}" -gt 0 ]; then
@@ -406,6 +433,12 @@ jobs:
           fi
 
           printf 'version=%s\n' "$ver" >> "$GITHUB_OUTPUT"
+
+      # notify looks this step up by name in the jobs API to tell a run that verified nothing
+      # from a healthy one.
+      - name: GitHub unavailable
+        if: steps.version.outputs.github_unavailable == 'true'
+        run: echo "GitHub was unavailable, so this run could not verify every download URL."
 
       - name: Fail on version API or download errors
         if: steps.version.outputs.ok != 'true'
@@ -440,48 +473,68 @@ jobs:
           HTML_URL: ${{ needs.check_latest_release.outputs.html_url }}
           SLACK_PROD_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_PROD_ALERTS_WEBHOOK_URL }}
         run: |
+          # What a run says about the release: "failure" when a check failed, "success" when
+          # every check passed, and "unknown" when GitHub was down (a "GitHub unavailable" step
+          # ran) or the runner was lost (a check abandoned or missing, the rest skipped). An
+          # unknown run verified nothing, so it neither alerts nor counts as the last known status.
+          run_status() {
+            gh api "repos/$GH_REPO/actions/runs/$1/jobs" --jq '
+              [.jobs[] | select(.name != "notify")] as $checks
+              | if any($checks[]; .conclusion == "failure") then "failure"
+                elif any($checks[].steps[]?; .name == "GitHub unavailable" and .conclusion == "success") then "unknown"
+                elif $checks != [] and all($checks[]; .conclusion == "success") then "success"
+                else "unknown" end'
+          }
+
           # One line per failing check, followed by the error outputs its job exports.
           failed="$(jq -r 'to_entries[] | select(.value.result != "success")
             | [.value.outputs | to_entries[] | select((.key | startswith("error")) and .value != "") | .value | gsub(" +"; " ")] as $errors
             | "• \(.key) (\(.value.result))\(if $errors == [] then "" else ": " + ($errors | join("; ")) end)"' <<<"$NEEDS")"
-          # A lost runner leaves its check "abandoned" and the checks after it "skipped", so no
-          # check ran and the run says nothing about the release.
-          if [ -n "$failed" ] && [ "$(jq '[.[] | select(.result == "failure")] | length' <<<"$NEEDS")" -eq 0 ]; then
-            echo "No check ran to completion (lost runner); not notifying."
+
+          # Without the jobs API only a failed check is certain, so a run that looks healthy
+          # announces no recovery.
+          if ! current="$(run_status "$GITHUB_RUN_ID")"; then
+            current="$(jq -r 'if any(.[]; .result == "failure") then "failure" else "unknown" end' <<<"$NEEDS")"
+          fi
+          if [ "$current" = unknown ]; then
+            echo "This run verified nothing (GitHub down or runner lost); not notifying."
             echo "$failed"
             exit 0
           fi
+
           # Cancelled runs were superseded before finishing and say nothing about the status.
           # Branch and status are filtered here rather than with --branch/--status: the API's
           # filtered run listing intermittently returns runs that are days old as the latest.
           # One full API page misses the latest completed main run only if 100 newer runs (branch
           # dispatches or superseded runs) were created after it; then previous is empty and a
           # failure still alerts.
-          # A failed run where no check job failed lost its runner and was never alerted on, so
-          # the lookup skips it; otherwise the next healthy run would announce a recovery.
+          # Unknown runs are skipped, at most max_lookback of them (about 100 minutes of runs).
+          # Past that, or when the jobs API fails, previous stays empty: a failure still alerts
+          # and no recovery is announced.
+          max_lookback=20
           previous=""
-          while read -r run_id conclusion; do
-            if [ "$conclusion" = success ]; then
-              previous=success
+          while read -r run_id; do
+            if ! status="$(run_status "$run_id")"; then
+              echo "Could not read the jobs of run $run_id; treating the previous status as unknown."
               break
             fi
-            failed_checks="$(gh api "repos/$GH_REPO/actions/runs/$run_id/jobs" \
-              --jq '[.jobs[] | select(.name != "notify" and .conclusion == "failure")] | length')"
-            if [ "$failed_checks" -gt 0 ]; then
-              previous=failure
+            if [ "$status" != unknown ]; then
+              previous="$status"
               break
             fi
-            echo "Run $run_id failed without a failed check (lost runner); looking further back."
+            echo "Run $run_id verified nothing (GitHub down or runner lost); looking further back."
+            max_lookback=$((max_lookback - 1))
+            [ "$max_lookback" -gt 0 ] || break
           done < <(gh run list --workflow releases-test.yaml --limit 100 --json databaseId,headBranch,status,conclusion \
-            --jq '.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure")) | "\(.databaseId) \(.conclusion)"')
-          echo "Previous run status: ${previous:-none}"
+            --jq '.[] | select(.headBranch == "main" and .status == "completed" and (.conclusion == "success" or .conclusion == "failure")) | .databaseId')
+          echo "Current run status: $current. Previous run status: ${previous:-none}"
           links="<$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID|Monitor run logs>${HTML_URL:+ · <$HTML_URL|Release page>}"
 
-          if [ -n "$failed" ] && [ "$previous" != failure ]; then
+          if [ "$current" = failure ] && [ "$previous" != failure ]; then
             text=":rotating_light: *Release monitor FAILURE for \`$GITHUB_REPOSITORY\`* (release \`${TAG:-unknown}\`)
           $failed
           $links"
-          elif [ -z "$failed" ] && [ "$previous" = failure ]; then
+          elif [ "$current" = success ] && [ "$previous" = failure ]; then
             text=":white_check_mark: *Release monitor RECOVERED for \`$GITHUB_REPOSITORY\`* (release \`$TAG\`)
           All checks pass.
           $links"
