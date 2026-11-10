@@ -180,9 +180,9 @@ string_id!(
 /// that forwards it advertises `ServerlessAgentMetadata`. The MetalBear Cloud sessions-manager
 /// advertises nothing, since it always runs current code.
 ///
-/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], free of control characters, and without
-/// leading or trailing whitespace, which HTTP strips from a header value. Checked when an agent
-/// builds one. Both sides read it leniently, dropping a value they don't accept, so
+/// Never empty, bounded by [`AgentMetadata::MAX_LEN`], printable ASCII only (proxies and load
+/// balancers may reject other bytes in a header), and without leading or trailing spaces, which
+/// HTTP strips from a header value. Checked when an agent builds one. Both sides read it leniently, dropping a value they don't accept, so
 /// a version skew loses only the metadata, never the registration or the assignment.
 ///
 /// It describes the customer's platform, so it has no `Display`, and its
@@ -206,8 +206,8 @@ pub enum InvalidAgentMetadata {
         AgentMetadata::MAX_LEN
     )]
     TooLong,
-    #[error("agent metadata must not contain control characters")]
-    ControlCharacter,
+    #[error("agent metadata must be printable ASCII")]
+    NotPrintableAscii,
     #[error("agent metadata must not start or end with whitespace")]
     SurroundingWhitespace,
 }
@@ -223,8 +223,8 @@ impl AgentMetadata {
             Err(InvalidAgentMetadata::Empty)
         } else if value.len() > Self::MAX_LEN {
             Err(InvalidAgentMetadata::TooLong)
-        } else if value.chars().any(char::is_control) {
-            Err(InvalidAgentMetadata::ControlCharacter)
+        } else if !value.bytes().all(|byte| matches!(byte, b' '..=b'~')) {
+            Err(InvalidAgentMetadata::NotPrintableAscii)
         } else if value.trim() != value {
             Err(InvalidAgentMetadata::SurroundingWhitespace)
         } else {
@@ -234,6 +234,17 @@ impl AgentMetadata {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Reads the [`AGENT_METADATA_HEADER`] of a registration with [`AgentMetadata::lenient`].
+    pub fn from_header(value: &HeaderValue) -> Option<Self> {
+        match value.to_str() {
+            Ok(value) => Self::lenient(value),
+            Err(_) => {
+                tracing::debug!("ignoring agent metadata that isn't printable ASCII");
+                None
+            }
+        }
     }
 
     /// Reads a value that this version may not accept, returning `None` for one it rejects, so
@@ -253,7 +264,7 @@ pub const AGENT_METADATA_HEADER: &str = "x-mirrord-agent-metadata";
 
 impl AssignmentSubscription {
     /// The [`AGENT_METADATA_HEADER`] to send with this subscription, for an agent that has
-    /// metadata. A value the header can't carry is left out, so the agent still registers.
+    /// metadata.
     pub fn agent_metadata_header(&self) -> Option<(HeaderName, HeaderValue)> {
         let Self::Agent {
             metadata: Some(metadata),
@@ -262,13 +273,9 @@ impl AssignmentSubscription {
         else {
             return None;
         };
-        match HeaderValue::from_str(metadata.as_str()) {
-            Ok(value) => Some((HeaderName::from_static(AGENT_METADATA_HEADER), value)),
-            Err(error) => {
-                tracing::debug!(%error, "leaving out agent metadata a header can't carry");
-                None
-            }
-        }
+        let value = HeaderValue::from_str(metadata.as_str())
+            .expect("printable ASCII is a valid header value");
+        Some((HeaderName::from_static(AGENT_METADATA_HEADER), value))
     }
 }
 
