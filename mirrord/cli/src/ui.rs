@@ -10,7 +10,8 @@
 //! ## mirrord Wizard (aka onboarding Wizard)
 //!
 //! `mirrord wizard` is a thin alias for `mirrord ui` that opens the browser directly on the config
-//! wizard page (`/wizard`).
+//! wizard page (`/wizard`), which generates a `mirrord-up.yaml` with the code of `mirrord up init`
+//! (see `ui::wizard`). `mirrord wizard --tui` runs `mirrord up init` itself.
 //!
 //! The wizard's frontend and backend endpoints are served by the local daemon (see [`crate::ui`]
 //! and `ui::wizard`). This command starts the daemon if needed and points the browser at the wizard
@@ -41,11 +42,13 @@ use tracing::{error, info};
 use crate::{
     CliError,
     config::{
-        ChaosArgs, ChaosFormat, ChaosSubcommand, UI_DEFAULT_PORT, UiCommonArgs, UiSubcommand,
+        ChaosArgs, ChaosFormat, ChaosSubcommand, UI_DEFAULT_PORT, UP_INIT_DEFAULT_OUTPUT,
+        UiCommonArgs, UiSubcommand,
     },
-    data::UserData,
+    data::{GlobalConfig, UserData},
     error::CliResult,
     ui::chaos::{api::BASE_INTPROXY_CHAOS_ROUTE, error::ChaosApiError},
+    up::UpCliError,
 };
 
 mod chaos;
@@ -241,11 +244,12 @@ pub async fn ui_command(
 }
 
 /// The entrypoint for the `wizard` command. Starts the local daemon if needed and opens the browser
-/// on the wizard page.
+/// on the wizard page, or with `tui` runs `mirrord up init`.
 #[mirrord_macros::boxed_future]
 pub async fn wizard_command(
     args: UiCommonArgs,
     no_telemetry: bool,
+    tui: bool,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
@@ -259,6 +263,13 @@ pub async fn wizard_command(
         user_data.machine_id(),
         None,
     );
+
+    if tui {
+        let context = GlobalConfig::load().await.kube_context().map(str::to_owned);
+        return mirrord_up::run_wizard(UP_INIT_DEFAULT_OUTPUT.into(), context)
+            .await
+            .map_err(|error| UpCliError::from(Box::new(error)).into());
+    }
 
     ui_command(args, Some(UiSubcommand::Start), "/wizard")
         .await

@@ -239,10 +239,10 @@
 //!
 //! - `wizard::wizard_command`
 //!
-//! > Opens the onboarding wizard, for setting up a config file via a UI.
+//! > Opens the onboarding wizard, for generating a `mirrord-up.yaml` via a UI.
 //!
 //! Opens a browser window for the wizard. The wizard is served on `localhost` and has various
-//! endpoints that are accessed by the frontend. This is all gated behind the `wizard` feature.
+//! endpoints that are accessed by the frontend. `--tui` runs `mirrord up init` instead.
 //!
 //! ### `mirrord fix [COMMAND]`
 //!
@@ -1394,9 +1394,11 @@ fn main() -> miette::Result<()> {
             }),
             Commands::Mcp => mcp::mcp_command(watch.clone(), &user_data).await?,
             Commands::Ui { args, command } => ui::ui_command(*args, command, "/").await?,
-            Commands::Wizard { args, no_telemetry } => {
-                ui::wizard_command(args, no_telemetry, watch, &user_data).await?
-            }
+            Commands::Wizard {
+                args,
+                no_telemetry,
+                tui,
+            } => ui::wizard_command(args, no_telemetry, tui, watch, &user_data).await?,
             Commands::Chaos(args) => ui::chaos_command(args).await?,
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
