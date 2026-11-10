@@ -1272,6 +1272,7 @@ async fn start_control_plane(
                 AgentClient::start(
                     scope,
                     replica_id,
+                    None,
                     DirectTransport::from_env(endpoint)?,
                     cancellation_token,
                 )?,
@@ -1303,7 +1304,7 @@ async fn start_control_plane(
     let token_refresh = Box::pin(async move { factory.run_token_refresh(connection).await });
 
     Ok((
-        AgentClient::start(scope, replica_id, transport, cancellation_token)?,
+        AgentClient::start(scope, replica_id, None, transport, cancellation_token)?,
         Some(token_refresh),
     ))
 }
