@@ -236,11 +236,23 @@ impl SessionsManagerTransport for DirectTransport {
         let endpoint = self
             .api
             .endpoint(ControlPlaneEndpoint::Assignments { scope })?;
-        tracing::debug!(
-            %endpoint,
-            subscription = ?subscription,
-            "requesting sessions-manager assignments"
-        );
+        // The agent's metadata stays out of the logs: it describes the customer's platform.
+        match subscription {
+            AssignmentSubscription::Agent { identity, .. } => tracing::debug!(
+                %endpoint,
+                agent = ?identity,
+                "requesting sessions-manager assignments"
+            ),
+            AssignmentSubscription::Intproxy {
+                identity,
+                agent_replica_filter,
+            } => tracing::debug!(
+                %endpoint,
+                intproxy = ?identity,
+                ?agent_replica_filter,
+                "requesting sessions-manager assignments"
+            ),
+        }
         // The whole attempt, credentials included, shares one deadline: a provider that has to
         // fetch something before it can answer is part of what makes subscribing slow.
         let credentials =

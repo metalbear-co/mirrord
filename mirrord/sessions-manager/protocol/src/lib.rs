@@ -34,8 +34,26 @@ pub struct ConnectionAssignment {
     pub authorization: DataPlaneAuthorization,
     /// The [`AgentMetadata`] the paired agent registered with. Set only on intproxy assignments,
     /// and only by a sessions-manager that supports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// A value this client's [`AgentMetadata`] rejects reads as absent instead of failing the
+    /// assignment: a later sessions-manager may accept more, and a released client must keep
+    /// pairing with it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_lenient_agent_metadata"
+    )]
     pub agent_metadata: Option<AgentMetadata>,
+}
+
+fn deserialize_lenient_agent_metadata<'de, D>(
+    deserializer: D,
+) -> Result<Option<AgentMetadata>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| AgentMetadata::new(value).ok()))
 }
 
 #[cfg(test)]
