@@ -22,8 +22,9 @@ pub const LOCAL_SHARE_REJECTED_REASON: &str = "LocalShareRejected";
 pub struct LocalShareRequest {
     /// `feature.network.incoming.ports` in the order the user listed them. The operator opens the
     /// first port in this list that it can steal and that a port of the target's Service leads
-    /// to. `None` when the user listed none, and the operator picks the only port the target
-    /// container declares.
+    /// to. `None` when the user listed none, and the operator picks one of the ports the target
+    /// container declares that it can steal and that the Service leads to, as for previews: the
+    /// one behind the Service's port 80, or else behind the Service's first such port.
     pub allowed_ports: Option<Vec<u16>>,
     /// `feature.network.incoming.ignore_ports`, so the operator applies the same exclusions when
     /// it picks the port, also when `allowed_ports` is `None`.

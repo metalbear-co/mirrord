@@ -668,12 +668,13 @@ pub struct LayerConfig {
     /// must have a Service with the target's name, such as Service `web` for target
     /// `deployment/web`. The link opens the first port in `feature.network.incoming.ports` that
     /// this Service exposes: with `ports = [3000, 9000]` and a Service that exposes only 9000, the
-    /// link opens 9000. Without that list, the target container must declare exactly one port
-    /// that mirrord steals, and the Service must expose it. mirrord prints the link before your
-    /// application starts. Requests through the link reach your application while it listens on
-    /// that port, and the service running in the cluster otherwise: before your application
-    /// listens, after it stops listening, until the session ends after mirrord exits, and on
-    /// target pods that the session's agent doesn't run on. The link lasts as long as the
+    /// link opens 9000. Without that list, the link opens one of the ports that the target
+    /// container declares, that mirrord steals and that the Service leads to: the one behind the
+    /// Service's port 80, or else behind the Service's first such port. mirrord prints the link
+    /// before your application starts. Requests through the link reach your application while it
+    /// listens on that port, and the service running in the cluster otherwise: before your
+    /// application listens, after it stops listening, until the session ends after mirrord exits,
+    /// and on target pods that the session's agent doesn't run on. The link lasts as long as the
     /// session; starting the session again creates a different link.
     ///
     /// `mirrord exec --share` turns it on, and so does the environment variable
