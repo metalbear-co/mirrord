@@ -76,7 +76,7 @@ impl ConnectionKind for SeqpacketConnection {
     }
 
     fn conn_counter() -> &'static AtomicUsize {
-        &metrics::SEQPACKET_CONNECTION
+        &metrics::SEQPACKET_OUTGOING_CONNECTION
     }
 }
 
