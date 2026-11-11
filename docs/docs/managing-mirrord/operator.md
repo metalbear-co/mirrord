@@ -89,11 +89,7 @@ DB branch pods pull a database image matching the engine. These are the defaults
 | CockroachDB | `docker.io/cockroachdb/cockroach:{version}`        | `operator.cockroachdbBranchConfig` - `dbPod.image` |
 | Spanner     | `gcr.io/cloud-spanner-emulator/emulator:{version}` | `operator.spannerBranchConfig` - `dbPod.image`     |
 
-[Generic branches](../sharing-the-cluster/db-branching/generic.md) have no default image - the user supplies the full image reference per branch. Admins can restrict which images are allowed with the `allowedImages` glob list under `operator.genericBranchConfig` - `dbPod.allowedImages` (when absent, all images are allowed), and `imagePullSecrets` in the same config covers private registries.
-
-### DB branching migration Job environment
-
-Container-flavor migration Jobs inherit the target container's `env` and `envFrom` by default, with the declared connection variables redirected to the branch. `dbPod.migrationEnv` on every `<db>BranchConfig` controls this: `inherit: false` opts out, and `env`/`envFrom` add admin-supplied values in plain Kubernetes shapes (so `valueFrom`/`secretRef` keep secret values in-cluster). See [Schema Migrations](../sharing-the-cluster/db-branching/migrations.md#admin-control-over-the-jobs-environment) for the full behavior and precedence.
+[Generic branches](../sharing-the-cluster/db-branching/generic.md) have no default image - the user supplies the full image reference per branch. To limit which images users can run, or to pull from a private registry, see [Restricting Branch Images](../sharing-the-cluster/db-branching.md#restricting-branch-images) and [Custom Branch Image](../sharing-the-cluster/db-branching.md#custom-branch-image).
 
 ### Copying images
 
