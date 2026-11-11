@@ -30,6 +30,12 @@ Note: filters are ignored when `"mode": "all"` is set — combine filters with `
 
 Unrecoverable pod failures (e.g. `ImagePullBackOff`, `OOMKilled`) fail the branch immediately with the underlying error rather than waiting for `creation_timeout_secs`.
 
+## Branch pod stuck `Pending`, session fails with `operator operation timed out: database branching`
+
+Usually means every node in the cluster carries a taint the branch pod doesn't tolerate (e.g. EKS with Karpenter, where each NodePool is tainted `NoSchedule`) — `kubectl describe pod` on the branch pod shows `node(s) had untolerated taint(s)`.
+
+**Solution:** Ask the cluster admin to set `dbPod.tolerations`, `dbPod.nodeSelector` and/or `dbPod.affinity` under the engine's `<engine>BranchConfig` in the operator's Helm values (same shapes as the matching pod-spec fields) — this is an operator/Helm-side setting, not something set in `mirrord.json`. Requires operator/Helm chart **3.230.0+**; older operators log `branch config contains a key the operator does not recognize; it has no effect` and ignore all three. The operator applies them to the branch database pod and to the pods of its schema migration and copy Jobs, and (like `dbPod.labels`/`dbPod.annotations`) only branches created after the change pick them up — a profile needs its own copy since each profile is a complete `dbPod`.
+
 ## Connection fails with SSL/TLS errors
 
 Branch databases disable SSL by default (`sslmode=disable` for PostgreSQL). If your application client is configured to require SSL, the connection will fail.

@@ -15,10 +15,11 @@ mod common;
 pub use common::*;
 
 /// libuv stats paths and fds with `statx` through libc's `syscall`, so the layer only sees
-/// `statSync`, `lstatSync` and `fstatSync` with `experimental.hook_libc_syscall`.
+/// `statSync`, `lstatSync` and `fstatSync` through `experimental.hook_libc_syscall`, which is on
+/// by default.
 #[rstest]
 #[tokio::test]
-async fn node_stat(config_dir: &Path) {
+async fn node_stat() {
     let _tracing = init_tracing();
 
     const FD: u64 = 1;
@@ -28,14 +29,13 @@ async fn node_stat(config_dir: &Path) {
         ..Default::default()
     };
 
-    let config = config_dir.join("node_libuv.json");
     let (mut test_process, mut intproxy) = Application::NodeStat
         .start_process(
             vec![
                 ("MIRRORD_FILE_MODE", "localwithoverrides"),
                 ("MIRRORD_FILE_READ_ONLY_PATTERN", "^/app/"),
             ],
-            Some(&config),
+            None,
         )
         .await;
 

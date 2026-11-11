@@ -1834,11 +1834,7 @@ pub(crate) unsafe fn enable_file_hooks(hook_manager: &mut HookManager) {
                 Fn__lxstat64,
                 FN___LXSTAT64
             );
-            if crate::setup()
-                .experimental()
-                .old_glibc_support
-                .unwrap_or_default()
-            {
+            if crate::setup().experimental().old_glibc_support {
                 replace!(
                     hook_manager,
                     "__fxstat",

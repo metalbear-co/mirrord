@@ -3292,7 +3292,7 @@
         },
         "hook_libc_syscall": {
           "title": "_experimental_ hook_libc_syscall {#experimental-hook_libc_syscall}",
-          "description": "Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries\nlike libuv opt into doing syscalls by hand instead of through the libc export (for\nexample, for `statx` or `close`).\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Hooks libc's generic `syscall` function on Linux, to handle scenarios where libraries\nlike libuv opt into doing syscalls by hand instead of through the libc export (for\nexample, for `statx` or `close`).\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
@@ -3340,7 +3340,7 @@
         },
         "old_glibc_support": {
           "title": "_experimental_ old_glibc_support {#experimental-old_glibc_support}",
-          "description": "Hooks `__fxstat` and `__fxstat64` on Linux.\n\nBinaries linked against glibc older than 2.33, such as the official Node.js builds, call\nthese instead of `fstat`. Without this hook they see the local placeholder of a remote\nfile: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.\n\nDefaults to `true` in OSS.\nDefaults to `false` in mfT.",
+          "description": "Hooks `__fxstat` and `__fxstat64` on Linux.\n\nBinaries linked against glibc older than 2.33, such as the official Node.js builds, call\nthese instead of `fstat`. Without this hook they see the local placeholder of a remote\nfile: an empty character device. In Node.js, `fs.copyFileSync` then copies nothing.\n\nDefaults to `true`.",
           "type": [
             "boolean",
             "null"
@@ -4336,7 +4336,7 @@
           ]
         },
         "include_directories": {
-          "description": "Extra import roots for compiling `schema_file`. The file's own directory is always an\nimport root.",
+          "description": "Extra directories to look for the files that `schema_file` imports in. They are searched\nin order, and then the directory of `schema_file`. A relative path is resolved like\n`schema_file`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -4347,7 +4347,7 @@
           "type": "string"
         },
         "schema_file": {
-          "description": "Path to the `.proto` file defining the payload's message type. Relative paths are\nresolved against the current working directory. Not needed when `descriptor_base64` is\nprovided.",
+          "description": "Path to the `.proto` file defining the payload's message type. Not needed when\n`descriptor_base64` is provided.\n\nA relative path is resolved from the directory you run `mirrord exec` or `mirrord up`\nfrom, not from the directory of the config file. With `mirrord up`, it is also not\nresolved from the service's `run.directory`, because the schema is compiled before the\nservice starts.",
           "type": [
             "string",
             "null"

@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap},
     ops::Not,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -886,6 +886,10 @@ impl ServiceConfig {
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     ///
+    /// Relative `payload_protobuf` paths in `config_patch` resolve from `invocation_directory`,
+    /// the directory `mirrord up` is started from (not the service's `run.directory`), or from
+    /// the working directory of this process when it's [`None`].
+    ///
     /// For [`SessionKind::Preview`], the config is for the service's `mirrord preview up` or
     /// `mirrord preview sync` session instead: it is assembled without `env`, and `mode` is the
     /// `split` mode whatever the service's `default_mode`.
@@ -898,6 +902,7 @@ impl ServiceConfig {
         key: EnvKey,
         resolved_targets: &mut HashMap<UnresolvedTarget, ResolvedTarget>,
         up_context: UpKubeContext,
+        invocation_directory: Option<&Path>,
         kind: SessionKind,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let preview = kind == SessionKind::Preview;
@@ -990,7 +995,7 @@ impl ServiceConfig {
                 // The merge would otherwise go into an object form key by key.
                 cfg.feature.db_branches = DatabaseBranchesConfig::default();
             }
-            cfg = apply_config_patch(cfg, patch, &key)?;
+            cfg = apply_config_patch(cfg, patch, &key, invocation_directory)?;
         }
 
         // A preview without a target runs no pod to receive traffic. The mode comes from the
@@ -1207,6 +1212,7 @@ fn apply_config_patch(
     config: LayerConfig,
     patch: serde_json::Value,
     key: &EnvKey,
+    invocation_directory: Option<&Path>,
 ) -> Result<LayerConfig, ConfigPatchErrorKind> {
     let mut layer_config_json = patchable(config, key).map_err(ConfigPatchErrorKind::Serialize)?;
     json_patch::merge(&mut layer_config_json, &patch);
@@ -1216,7 +1222,9 @@ fn apply_config_patch(
 
     // The generated config already contains all environment-derived settings. Isolating this
     // second generation pass keeps environment variables from unexpectedly overriding the patch.
-    let mut context = ConfigContext::default().strict_env(true);
+    let mut context = ConfigContext::default()
+        .strict_env(true)
+        .invocation_directory(invocation_directory.map(Path::to_owned));
     let mut config = file_config.generate_config(&mut context)?;
     config.key = key.clone();
 
@@ -1482,7 +1490,15 @@ impl UpConfig {
 
     /// Verifies the config without touching the cluster, similar to
     /// what `verify_config` does for [`LayerConfig`].
-    pub fn verify_services(&self, key: &EnvKey) -> Result<Vec<ServiceError>, ConfigError> {
+    ///
+    /// `invocation_directory` is the directory `mirrord up` will be started from (not a service's
+    /// `run.directory`), which relative `payload_protobuf` paths in the services' `config_patch`
+    /// resolve from. When [`None`], they resolve from the working directory of this process.
+    pub fn verify_services(
+        &self,
+        key: &EnvKey,
+        invocation_directory: Option<&Path>,
+    ) -> Result<Vec<ServiceError>, ConfigError> {
         let base = self
             .common
             .base_config(&mut ConfigContext::default().strict_env(true))?;
@@ -1520,6 +1536,7 @@ impl UpConfig {
                 key.clone(),
                 &mut resolved_targets,
                 up_context.clone(),
+                invocation_directory,
                 SessionKind::Up,
             ) {
                 Ok(assembled) => assembled,
@@ -1863,6 +1880,8 @@ impl UpConfig {
                         key.clone(),
                         resolved_targets,
                         up_context.clone(),
+                        // The working directory is the directory the command was started from.
+                        None,
                         kind,
                     )
                     .map_err(|source| ConfigPatchError {
@@ -3101,7 +3120,7 @@ mod tests {
         );
 
         let errors = config
-            .verify_services(&EnvKey::Provided("key".to_owned()))
+            .verify_services(&EnvKey::Provided("key".to_owned()), None)
             .unwrap();
         let [ServiceError::IncompatibleTarget(target)] = errors.as_slice() else {
             panic!("expected one incompatible target, got {errors:?}");
@@ -3213,7 +3232,7 @@ mod tests {
                   command: ["echo"]
             "#,
         )
-        .verify_services(&EnvKey::Provided("a-session".to_owned()))
+        .verify_services(&EnvKey::Provided("a-session".to_owned()), None)
         .unwrap();
 
         assert!(matches!(
