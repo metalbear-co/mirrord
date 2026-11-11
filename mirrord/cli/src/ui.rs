@@ -266,9 +266,11 @@ pub async fn wizard_command(
 
     if tui {
         let context = GlobalConfig::load().await.kube_context().map(str::to_owned);
-        return mirrord_up::run_wizard(UP_INIT_DEFAULT_OUTPUT.into(), context)
-            .await
-            .map_err(|error| UpCliError::from(Box::new(error)).into());
+        return Ok(
+            mirrord_up::run_wizard(UP_INIT_DEFAULT_OUTPUT.into(), context)
+                .await
+                .map_err(UpCliError::from)?,
+        );
     }
 
     ui_command(args, Some(UiSubcommand::Start), "/wizard")
