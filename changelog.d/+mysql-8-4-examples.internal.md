@@ -1,1 +1,1 @@
-The MySQL database branch examples in the config reference and CRD docs name version `8.4`, the operator default since 3.232.0.
+The MySQL database branch examples in the config reference and CRD docs name version `8.4`. Any operator since 3.220.0 runs an `8.4` branch when asked; 3.232.0 makes it the default and loads `mysql_native_password` on it, where earlier operators need `--mysql-native-password=ON` in the chart's MySQL `dbServerArgs` for a pinned `8.4` branch.
