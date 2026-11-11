@@ -146,7 +146,7 @@ license:
   licenseServer: http://<license-server-addr>
 ```
 
-If the Operator runs in the same cluster as the License Server, also set `createNamespace: false`. The License Server release already created the `mirrord` namespace, and Helm can't adopt it into a second release.
+If the Operator goes in the same namespace as the License Server (`mirrord` by default), also set `createNamespace: false`. The License Server release already created that namespace, and Helm can't adopt it into a second release.
 
 Install the chart you copied:
 
