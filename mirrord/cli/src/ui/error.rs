@@ -56,6 +56,14 @@ pub(super) enum ApiError {
     /// blocks on an expired credential, which never returns on its own.
     #[error("{what} timed out after {secs}s")]
     Timeout { what: &'static str, secs: u64 },
+
+    /// A target path that does not parse.
+    #[error("invalid target `{0}`")]
+    InvalidTarget(String),
+
+    /// Listing workloads or ports with the `mirrord up init` code failed.
+    #[error(transparent)]
+    Up(#[from] mirrord_up::UpError),
 }
 
 impl IntoResponse for ApiError {
@@ -65,9 +73,9 @@ impl IntoResponse for ApiError {
             | Self::InferKubeconfig(_)
             | Self::InvalidBaggage(_)
             | Self::KubeClient(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::LoadContext { .. } => StatusCode::BAD_REQUEST,
+            Self::LoadContext { .. } | Self::InvalidTarget(_) => StatusCode::BAD_REQUEST,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
-            Self::KubeApi(_) | Self::KubeResource(_) => StatusCode::BAD_GATEWAY,
+            Self::KubeApi(_) | Self::KubeResource(_) | Self::Up(_) => StatusCode::BAD_GATEWAY,
             Self::Timeout { .. } => StatusCode::GATEWAY_TIMEOUT,
         };
 
