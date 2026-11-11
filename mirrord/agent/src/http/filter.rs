@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::{self, Debug},
     io::Read,
     ops::Not,
@@ -62,9 +63,10 @@ pub enum MatchResult {
     NeedsBody,
     /// The filter could not be run: a jq query that does not compile, panics or runs past the time
     /// limit, a regex that hits its backtrack limit, or a body that broke mid-transfer. This is
-    /// not a verdict on the request, so `Not` passes it through unchanged instead of turning a
-    /// broken filter into "steal everything". The callers resolve it with
-    /// [`HttpFilter::undecided_matches`].
+    /// not a verdict on the request, so `Not` passes it through unchanged: flipping it would read
+    /// a filter that checked nothing as a definite answer. The callers settle it with
+    /// [`HttpFilter::undecided_matches`], where a filter with `Not` at its root does match, so a
+    /// broken filter under a top-level `Not` takes the request.
     Undecided,
 }
 
@@ -211,6 +213,9 @@ impl HttpFilter {
     /// pods instead of being served by preview code, the same side [`RequestBody::Unavailable`]
     /// lands on. A body that broke mid-transfer matches nobody, since there is nothing left to
     /// serve.
+    ///
+    /// Only the root of the filter is looked at: a `Not` nested in a composite is settled like a
+    /// plain filter.
     pub fn undecided_matches<T>(&self, body: RequestBody<T>) -> bool {
         matches!(self, Self::Not(..)) && matches!(body, RequestBody::Failed).not()
     }
@@ -358,27 +363,45 @@ impl HttpFilter {
                 }
             }
             Self::HeaderJq(filter) => {
+                if let Some(answer) = parts
+                    .extensions
+                    .get::<JqAnswers>()
+                    .and_then(|answers| answers.0.get(filter))
+                {
+                    return *answer;
+                }
+
                 let headers = parts
                     .extensions
                     .get_or_insert_with(|| NormalizedHeaders::from_headers(&parts.headers));
 
-                let mut failed = false;
+                // A query that does not compile, panics or runs past the time limit is expected to
+                // do the same on the remaining headers, and each of those runs can hold up the
+                // caller for the whole time limit, so the first failure ends the search. Headers
+                // checked before it did not match, or the loop would have ended there.
+                let mut answer = MatchResult::NoMatch;
                 for header in headers.0.iter() {
                     match eval_jaq(filter.clone(), header.clone()).await {
-                        Ok(true) => return MatchResult::Match,
+                        Ok(true) => {
+                            answer = MatchResult::Match;
+                            break;
+                        }
                         Ok(false) => (),
                         Err(err) => {
                             tracing::error!(?err, ?header, ?filter, "failed to run jaq query");
-                            failed = true;
+                            answer = MatchResult::Undecided;
+                            break;
                         }
                     }
                 }
 
-                if failed {
-                    MatchResult::Undecided
-                } else {
-                    MatchResult::NoMatch
-                }
+                parts
+                    .extensions
+                    .get_or_insert_with(JqAnswers::default)
+                    .0
+                    .insert(filter.clone(), answer);
+
+                answer
             }
         }
     }
@@ -394,7 +417,7 @@ impl HttpFilter {
 /// match" for a header it never really checked.
 async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
-        Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
+        Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(1))
     });
 
     let span = tracing::warn_span!("jaq eval", ?query);
@@ -494,6 +517,16 @@ impl NormalizedHeaders {
         )
     }
 }
+
+/// Answers of [`HttpFilter::HeaderJq`] queries over one request, cached in [`Parts::extensions`]
+/// like [`NormalizedHeaders`].
+///
+/// A query's answer depends on the headers alone, and running it costs a blocking task per
+/// header. A filter that answered [`MatchResult::NeedsBody`] runs again in full once the body is
+/// buffered, and several clients can filter with the same query, so each query runs over a
+/// request's headers once and every later ask reads the answer from here.
+#[derive(Clone, Debug, Default)]
+struct JqAnswers(HashMap<JqQuery, MatchResult>);
 
 #[cfg(test)]
 mod test {
@@ -647,9 +680,9 @@ mod test {
         }
     }
 
-    /// A jq query that cannot be run checked nothing, so its answer must not be flipped by `Not`
-    /// into stealing every request on the port. Both the plain filter and its negation stay
-    /// undecided.
+    /// A jq query that cannot be run checked nothing, so `Not` must not flip its answer into a
+    /// definite match. Both the plain filter and its negation stay undecided, and
+    /// [`HttpFilter::undecided_matches`] settles them: only the negation takes the request.
     #[tokio::test]
     async fn jq_query_that_cannot_run_stays_undecided_under_not() {
         let plain = broken_jq_filter();
@@ -664,6 +697,8 @@ mod test {
             negated.matches(&mut parts, NO_BODY).await,
             MatchResult::Undecided
         );
+        assert!(!plain.undecided_matches(NO_BODY));
+        assert!(negated.undecided_matches(NO_BODY));
 
         // A query that does run still decides as usual, in both directions.
         let working = agent_filter(not(jq_filter(r#"test("x-tenant: live")"#)));

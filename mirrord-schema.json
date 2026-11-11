@@ -573,7 +573,7 @@
         },
         "jaq_time_limit": {
           "title": "agent.jaq_time_limit {#agent-jaq_time_limit}",
-          "description": "Time limit for running jaq queries, in milliseconds. Defaults to 500ms.",
+          "description": "Time limit for running jaq queries, in seconds. Defaults to 1 second.",
           "type": [
             "integer",
             "null"
