@@ -10,7 +10,7 @@ tags:
 # Usage API
 
 {% hint style="info" %}
-This is the cloud dashboard's data over HTTPS. It only has something to return if your operator runs with a cloud API key, see [Cloud Setup](cloud.md). Configuring a self-hosted license server rules that out: the operator then ignores any cloud API key you set, logs a warning, authenticates with its license key against your own server, and sends us no identities, so there is nothing here to read. Anonymized product telemetry still leaves the cluster either way.
+This is the cloud dashboard's data over HTTPS. It only has something to return if your operator runs with a cloud API key, see [Cloud Setup](cloud.md). Configuring a self-hosted license server rules that out: the operator then ignores any cloud API key you set, logs a warning, authenticates with its license key against your own server, and sends us no identities, so there is nothing here to read. Anonymized product telemetry still leaves the cluster, unless you turn it off on the Enterprise plan.
 {% endhint %}
 
 The dashboard at [app.metalbear.com](https://app.metalbear.com) shows usage in the browser. The usage API returns the same data as JSON, so you can load it into a BI or reporting tool or run it from a script, for example a weekly job that lists who stopped using mirrord. It returns the report and trends the dashboard renders, the raw session rows the dashboard doesn't show, and the service map from [Topology](topology.md), behind a key you can give to a cron job.

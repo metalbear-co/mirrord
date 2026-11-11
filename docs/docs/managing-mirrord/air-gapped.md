@@ -30,7 +30,7 @@ A certificate is enough for a single cluster. Use the License Server when you ru
 |  | License certificate | License Server |
 |---|---|---|
 | **Where the license lives** | A `license.pem` secret in each cluster | Your License Server, which every Operator connects to |
-| **Seats** | Each Operator pod counts seats on its own | Counted centrally, across clusters |
+| **Seats** | Each cluster's Operator counts seats on its own | Counted centrally, across clusters |
 | **Dashboard** | None | [License Server dashboard](dashboard/license-server.md) |
 | **If it's unreachable** | Nothing to reach | Operators refuse new sessions after their hourly license check fails |
 
@@ -87,7 +87,11 @@ license:
 Install the chart you copied:
 
 ```bash
+# From your chart repository
 helm install -f values.yaml mirrord-operator <your-chart-repo>/mirrord-operator
+
+# Or from the copied .tgz file
+helm install -f values.yaml mirrord-operator ./mirrord-operator-<version>.tgz
 ```
 
 ### As a Kubernetes secret
@@ -102,7 +106,11 @@ license:
 This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it:
 
 ```bash
+# From your chart repository
 helm install -f values.yaml mirrord-operator <your-chart-repo>/mirrord-operator
+
+# Or from the copied .tgz file
+helm install -f values.yaml mirrord-operator ./mirrord-operator-<version>.tgz
 
 kubectl create secret generic mirrord-operator-license-pem \
   --namespace mirrord \
@@ -113,7 +121,24 @@ The Operator pod will wait until the secret exists and start automatically once 
 
 ### With a License Server
 
-Follow [License Server](license-server.md). You can turn off telemetry on its Operators the same way.
+Follow [License Server](license-server.md), with two changes: point it at the Operator image in your registry (the License Server runs the same image), and install its chart from your copy. In the License Server's `values.yaml`:
+
+```yaml
+server:
+  image: your-registry/operator
+```
+
+Then install it from the chart you copied:
+
+```bash
+# From your chart repository
+helm install mirrord-operator-license-server <your-chart-repo>/mirrord-operator-license-server -f ./values.yaml --wait
+
+# Or from the copied .tgz file
+helm install mirrord-operator-license-server ./mirrord-operator-license-server-<version>.tgz -f ./values.yaml --wait
+```
+
+You can turn off telemetry to MetalBear on its Operators the same way. They keep reporting usage to your License Server.
 
 ## Renew the certificate
 
@@ -122,7 +147,11 @@ Replace the certificate before it expires. The Operator picks up the new one on 
 If the certificate is in `values.yaml`, replace it there and upgrade:
 
 ```bash
+# From your chart repository
 helm upgrade -f values.yaml mirrord-operator <your-chart-repo>/mirrord-operator
+
+# Or from the copied .tgz file
+helm upgrade -f values.yaml mirrord-operator ./mirrord-operator-<version>.tgz
 ```
 
 If you use `license.pemRef`, replace the secret:

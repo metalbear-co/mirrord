@@ -70,7 +70,7 @@ _NOTE: The license server needs to be accessible to any mirrord operators you wa
 Next, install the license server on your cluster:
 
 ```bash
-helm install mirrord-license-server metalbear/mirrord-operator-license-server -f ./values.yaml --wait
+helm install mirrord-operator-license-server metalbear/mirrord-operator-license-server -f ./values.yaml --wait
 ```
 
 To make sure it's been installed successfully and is running:
