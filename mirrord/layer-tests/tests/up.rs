@@ -6,13 +6,7 @@
 
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::{
-    collections::HashMap,
-    fs,
-    ops::Not,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::HashMap, fs, ops::Not, path::Path, time::Duration};
 
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 use mirrord_test_utils::run_command::run_mirrord;
@@ -34,9 +28,7 @@ pub use common::*;
 ///
 /// Files stay local and DNS is not remote, as the test intproxy answers neither.
 fn service(python: &str, name: &str, script: &str, args: &[&Path]) -> String {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/apps")
-        .join(script);
+    let script = common::manifest_dir().join("tests/apps").join(script);
     let command = [python, script.to_str().unwrap()]
         .into_iter()
         .chain(args.iter().map(|arg| arg.to_str().unwrap()))

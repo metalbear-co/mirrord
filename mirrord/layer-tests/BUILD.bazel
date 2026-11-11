@@ -1,0 +1,349 @@
+load("//bazel:rust.bzl", "rust_library")
+load(":layer_test.bzl", "APPS", "c_app", "go_app", "layer_tests", "rustc_app")
+
+# Helpers that the tests use to run the apps with the layer, against a test intproxy that stands in
+# for the agent.
+rust_library(
+    name = "layer-tests",
+    visibility = ["//visibility:public"],
+)
+
+# Each file in `tests/` is its own test crate, as it is for Cargo. Its entry gives the platforms
+# that its `#![cfg]` allows (see `layer_test.bzl`), the apps, configs and scripts that it uses, and
+# whether it runs Node apps (`node`, or `node_modules` when they import the packages of
+# `//:node_modules`) or Python apps. A new file in `tests/` must get an entry, or Bazel doesn't run
+# it.
+TESTS = {
+    "bash": {
+        "configs": ["bash_script.json"],
+        "platforms": "unix",
+        "scripts": ["env_bash_cat.sh"],
+    },
+    "close_while_blocked": {
+        "platforms": "linux",
+        "python": True,
+        "scripts": ["close_while_blocked.py"],
+    },
+    "connectx": {
+        "apps": [c_app("connectx")],
+        "platforms": "macos",
+    },
+    "cor_1401_unix_seqpacket": {
+        "configs": ["cor_1401_seqpacket.toml"],
+        "platforms": "linux",
+        "python": True,
+        "scripts": ["cor_1401_seqpacket.py"],
+    },
+    "cor_1734_file_mode": {
+        "apps": [c_app("cor_1734_file_mode")],
+        "platforms": "unix",
+    },
+    "dlopen_cgo": {
+        "apps": [APPS + ":dlopen_cgo/out.cpp_dlopen_cgo"],
+        "platforms": "linux",
+    },
+    "dns_resolve": {
+        "apps": [APPS + "/dns-resolve"],
+        "platforms": "all",
+    },
+    "dns_sd": {
+        "apps": [c_app("dns_sd")],
+        "configs": ["dns_sd.json"],
+        "platforms": "macos",
+    },
+    "double_listen": {
+        "apps": [APPS + "/double-listen"],
+        "platforms": "unix",
+    },
+    "dup_listen": {
+        "apps": [APPS + "/dup-listen"],
+        "platforms": "unix",
+    },
+    "exec_freed_env": {
+        "apps": [c_app("exec_freed_env")],
+        "platforms": "macos",
+    },
+    "exec_functionality": {
+        "platforms": "all",
+        "python": True,
+        "scripts": [
+            "exec_debug_hold.py",
+            "up_greeter.py",
+        ],
+    },
+    "fileops": {
+        "apps": [APPS + "/fileops"] + select({
+            # Only `go_stat`, which is Linux-only, runs it.
+            "@platforms//os:linux": go_app("fileops:go"),
+            "//conditions:default": [],
+        }) + [
+            app
+            for name in [
+                "dir_go",
+                "dir_go_bypass",
+                "faccessat_go",
+                "lseek_go",
+                "read_go",
+                "self_open",
+                "write_go",
+            ]
+            for app in go_app(name)
+        ],
+        "node": True,
+        "platforms": "unix",
+        "scripts": ["fileops.js"],
+    },
+    "filter_ports": {
+        "apps": [APPS + "/listen-ports"],
+        "configs": [
+            "session_body.toml",
+            "session_composite.toml",
+            "session_jq.toml",
+        ],
+        "platforms": "linux",
+    },
+    "fork": {
+        "apps": [c_app("fork")],
+        "platforms": "unix",
+    },
+    "hide_ipv6_interfaces": {
+        "node": True,
+        "platforms": "macos",
+        "scripts": ["issue2903.mjs"],
+    },
+    "http_mirroring": {
+        "apps": go_app("app_go:"),
+        "configs": ["port_mapping.json"],
+        "node_modules": True,
+        "platforms": "all",
+        "python": True,
+        "scripts": [
+            "app_fastapi.py",
+            "app_flask.py",
+            "app_node.js",
+        ],
+    },
+    "ignore_ports": {
+        "configs": ["ignore_ports.json"],
+        "platforms": "linux",
+        "python": True,
+        "scripts": ["app_listen.py"],
+    },
+    "issue1054": {
+        "apps": [rustc_app("issue1054")],
+        "configs": ["port_mapping.json"],
+        "platforms": "unix",
+    },
+    "issue1123": {
+        "apps": [rustc_app("issue1123")],
+        "platforms": "all",
+    },
+    "issue1458": {
+        "apps": [
+            rustc_app("issue1458"),
+            rustc_app("issue1458portnot53"),
+        ],
+        "platforms": "unix",
+    },
+    "issue1776": {
+        "apps": [
+            APPS + "/issue1776",
+            APPS + "/issue1776portnot53",
+        ],
+        "configs": ["issue1776.json"],
+        "platforms": "unix",
+    },
+    "issue1899": {
+        "apps": [APPS + "/issue1899"],
+        "platforms": "unix",
+    },
+    "issue2001": {
+        "apps": [APPS + "/issue2001"],
+        "platforms": "unix",
+    },
+    "issue2055": {
+        "apps": [c_app("gethostbyname")],
+        "platforms": "unix",
+    },
+    "issue2178": {
+        "apps": [c_app("issue2178")],
+        "platforms": "unix",
+    },
+    "issue2204": {
+        "apps": [rustc_app("issue2204")],
+        "platforms": "linux",
+    },
+    "issue2283": {
+        "configs": ["outgoing_filter_local_not_existing_host.json"],
+        "node": True,
+        "platforms": "unix",
+        "scripts": ["issue2283.js"],
+    },
+    "issue2614": {
+        "apps": go_app("open_go"),
+        "platforms": "linux",
+    },
+    "issue2807": {
+        "node_modules": True,
+        "platforms": "macos",
+        "scripts": ["issue2807.mjs"],
+    },
+    "issue2817": {
+        "node_modules": True,
+        "platforms": "unix",
+        "scripts": ["app_node.js"],
+    },
+    "issue2988": {
+        "apps": go_app("issue2988"),
+        "platforms": "unix",
+    },
+    "issue3248": {
+        "apps": [APPS + "/issue3248"],
+        "platforms": "macos",
+    },
+    "issue3456": {
+        "node": True,
+        "platforms": "unix",
+        "scripts": ["issue3456.mjs"],
+    },
+    "issue4622": {
+        "node": True,
+        "platforms": "unix",
+        "scripts": ["issue4622.js"],
+    },
+    "issue5092": {
+        "apps": go_app("issue5092"),
+        "platforms": "unix",
+    },
+    "issue834": {
+        "apps": go_app("issue834:"),
+        "platforms": "linux",
+    },
+    "issue864": {
+        "configs": ["port_mapping_shared_sockets.toml"],
+        "platforms": "unix",
+        "python": True,
+        "scripts": ["shared_sockets.py"],
+    },
+    "listen_ports": {
+        "apps": [APPS + "/listen-ports"],
+        "platforms": "linux",
+    },
+    "local_share": {
+        "platforms": "linux",
+    },
+    "low_fd_reuse": {
+        "platforms": "linux",
+        "python": True,
+        "scripts": ["low_fd_reuse.py"],
+    },
+    "mkdir_rmdir": {
+        "apps": [c_app("mkdir_rmdir")],
+        "configs": ["fs.json"],
+        "platforms": "unix",
+    },
+    "node_copyfile": {
+        "configs": ["node_libuv.json"],
+        "node": True,
+        "platforms": "unix",
+        "scripts": ["node_copyfile.mjs"],
+    },
+    "node_getaddrinfo_no_name": {
+        "node": True,
+        "platforms": "unix",
+    },
+    "node_stat": {
+        "configs": ["node_libuv.json"],
+        "node": True,
+        "platforms": "linux",
+        "scripts": ["node_stat.mjs"],
+    },
+    "outgoing": {
+        # The test that runs `issue2438` is Unix-only.
+        "apps": [APPS + "/outgoing"] + select({
+            "@platforms//os:windows": [],
+            "//conditions:default": [APPS + "/issue2438"],
+        }),
+        "configs": [
+            "outgoing_filter.json",
+            "outgoing_filter_local.json",
+            "outgoing_filter_remote_incomplete.json",
+        ],
+        "node": True,
+        "platforms": "all",
+        "scripts": ["make_connections.mjs"],
+    },
+    "port_mapping": {
+        "apps": [rustc_app("issue2058")],
+        "configs": ["port_mapping.json"],
+        "platforms": "all",
+    },
+    "posix_spawn_shared_sockets": {
+        "apps": [APPS + "/posix-spawn-shared-sockets"],
+        "platforms": "linux",
+    },
+    "readlink": {
+        "apps": [c_app("readlink")],
+        "platforms": "unix",
+    },
+    "rebind0": {
+        "apps": [APPS + "/rebind0"],
+        "configs": ["http_filter_for_rebind0.json"],
+        "platforms": "all",
+    },
+    "recv_from": {
+        "apps": [APPS + "/recv-from"],
+        "platforms": "unix",
+    },
+    "self_connect": {
+        "platforms": "all",
+        "python": True,
+        "scripts": ["self_connect.py"],
+    },
+    "sendfile_eagain": {
+        "apps": [c_app("sendfile_eagain")],
+        "platforms": "unix",
+    },
+    "sendfile_partial": {
+        "apps": [c_app("sendfile_partial")],
+        "platforms": "linux",
+    },
+    "sip": {
+        "platforms": "macos",
+        "scripts": ["nothing.sh"],
+    },
+    "skipping_process": {
+        "apps": [c_app("open_file")],
+        "platforms": "unix",
+    },
+    "socketpair": {
+        "platforms": "windows",
+        "python": True,
+        "scripts": ["socketpair.py"],
+    },
+    "spawn": {
+        "node": True,
+        "platforms": "unix",
+        "scripts": ["node_spawn.mjs"],
+    },
+    "statfs_fstatfs": {
+        "apps": [c_app("statfs_fstatfs")],
+        "platforms": "unix",
+    },
+    "unix_connect_addrlen": {
+        "apps": [c_app("unix_connect_addrlen")],
+        "configs": ["unix_streams.json"],
+        "platforms": "unix",
+    },
+    "up": {
+        "platforms": "all",
+        "python": True,
+        "scripts": [
+            "up_failing.py",
+            "up_greeter.py",
+            "up_sleeper.py",
+        ],
+    },
+}
+
+layer_tests(tests = TESTS)

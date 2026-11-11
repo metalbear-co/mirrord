@@ -128,6 +128,7 @@ name = "mirrord"
 path = "src/main.rs"
 
 [dev-dependencies]
+mirrord-test-utils = { path = "../test-utils" }
 rstest.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
@@ -143,4 +144,7 @@ tar.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
+# Reads the layer's files from Bazel's runfiles at run time rather than embedding them, and leaves
+# out the UI. Only Bazel's `//mirrord/cli` turns it on (see `src/bundle.rs`).
+bazel-runfiles = []
 windows_build = []

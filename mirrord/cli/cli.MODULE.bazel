@@ -1,0 +1,69 @@
+# The external files that the CLI's targets use. `MODULE.bazel` includes this file.
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+# The macOS utilities that the CLI embeds and copies, unsigned, to run SIP-protected programs. The
+# version must match `APPLE_UTILS_VERSION` in `xtask/src/tasks/sip_binaries.rs` and in
+# `mirrord-sip`.
+http_file(
+    name = "apple_utils",
+    downloaded_file_path = "apple-utils.tar.gz",
+    sha256 = "03125cd565e5a2f64274e7968e38289f3bfe68b86397fa1886568b1dd0e65c39",
+    url = "https://github.com/metalbear-co/appleutils/releases/download/v10/apple-utils-v10.tar.gz",
+)
+
+# The base of the CLI's image, `debian:trixie`.
+oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
+oci.pull(
+    name = "debian",
+    digest = "sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
+    image = "docker.io/library/debian",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64/v8",
+    ],
+)
+use_repo(oci, "debian", "debian_linux_amd64", "debian_linux_arm64_v8")
+
+# The `ca-certificates` package from a snapshot of Debian trixie, which the CLI's image takes its
+# trust store from. The CLI's HTTP clients, like the ones for the local daemon and analytics, need
+# the trust store, and the base image has none. Only the package itself is needed, because `cacerts`
+# in `BUILD.bazel` builds the bundle from its certificates, as its `update-ca-certificates` would.
+# `MODULE.bazel.lock` records the package's version and checksum.
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["trixie"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261110T000000Z"],
+)
+apt.install(
+    dependency_set = "trixie",
+    include_transitive = False,
+    packages = ["ca-certificates"],
+    suites = ["trixie"],
+)
+use_repo(apt, "trixie")
+
+# rust-embed embeds the UI only in builds without `debug_assertions`, and debug builds read the
+# files from the UI's folder when they serve them. A Bazel build passes rustc the folder's path in
+# the sandbox, which no longer exists when the CLI runs, so `debug-embed` makes every Bazel build
+# embed the files. An annotation doesn't pass a feature on to the crate's dependencies as Cargo
+# does, so both crates get it: the proc macro in `rust-embed-impl` decides whether to embed the
+# files, and `rust-embed`'s own types must match the code that the macro generates.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+
+[
+    crate.annotation(
+        crate = name,
+        crate_features = ["debug-embed"],
+    )
+    for name in [
+        "rust-embed",
+        "rust-embed-impl",
+    ]
+]

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  The application manifest of the Windows programs that the workspace builds. `longPathAware` lets
+  the program's own Windows API calls take paths longer than 260 characters (`MAX_PATH`), on
+  machines whose `LongPathsEnabled` registry setting is on. Windows ignores the element when the
+  setting is off, which is the default. See
+  https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
+      <ws2:longPathAware>true</ws2:longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

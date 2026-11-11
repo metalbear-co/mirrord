@@ -1,0 +1,34 @@
+# The toolchains and modules of the Go test apps. `MODULE.bazel` includes this file.
+
+bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "gazelle", version = "0.54.0")
+
+# The Go versions that the Go apps are built with, which the tests pick with `GoVersion`. The CI
+# runner image installs the same minor versions (`GO_MINORS` in `mirrord/tests/e2e.Dockerfile`).
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.27.3")
+go_sdk.download(version = "1.26.10")
+go_sdk.download(version = "1.25.14")
+
+# The Go modules that the Go apps import, from the `go.mod` and `go.sum` of each app that
+# `//:go_apps.work` lists. Each app's target depends on them by repository, like
+# `@com_github_gin_gonic_gin//:gin`.
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:go_apps.work")
+use_repo(
+    go_deps,
+    "com_github_gin_gonic_gin",
+    "com_rogchap_v8go",
+    "net_kuoruan_go_v8go_polyfills",
+)
+
+# v8go links the V8 archive in its module's `deps/<platform>` with `-L` and `-lv8`. gazelle copies
+# those flags into the BUILD file that it generates, but nothing there makes the archive an input of
+# the link, so the linker doesn't find it. The patch adds the archive as a C dependency of the
+# package, which makes it an input. It also compiles v8go's C++ without warnings, like the rest of
+# the build's third-party code, which `.bazelrc` can't reach in cgo's compiles.
+go_deps.module_override(
+    patch_strip = 1,
+    patches = ["//bazel/third_party/v8go:libv8.patch"],
+    path = "rogchap.com/v8go",
+)

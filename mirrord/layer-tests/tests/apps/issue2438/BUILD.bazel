@@ -1,0 +1,8 @@
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "issue2438",
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

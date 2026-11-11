@@ -50,3 +50,7 @@ wizard-frontend.tar.gz
 
 ### pnpm store ###
 .pnpm-store/
+
+# Bazel's convenience symlinks into its output base. Bazel names one of them after the
+# workspace directory, so the pattern covers every `bazel-*` entry at the root.
+/bazel-*

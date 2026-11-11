@@ -1,0 +1,33 @@
+load("@bazel_lib//lib:output_files.bzl", "output_files")
+load("//bazel:rust.bzl", "rust_shared_library", "rust_test")
+
+# The layer only builds with the MSVC ABI, because MinHook's C code includes headers that only the
+# Windows SDK has.
+MSVC_ONLY = select({
+    "@llvm//constraints/windows/abi:msvc": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+rust_shared_library(
+    name = "layer-win",
+    # Import-table injection by stork (https://github.com/metalbear-co/stork) finds the layer's
+    # marker by ordinal 1. `/EXPORT` is `link.exe` syntax, which the target can use because it
+    # only builds for MSVC.
+    rustc_flags = ["-Clink-arg=/EXPORT:mirrord_stork_marker,@1"],
+    target_compatible_with = MSVC_ONLY,
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":layer-win",
+    target_compatible_with = MSVC_ONLY,
+)
+
+# The DLL alone, without the import library that `:layer-win` also outputs.
+output_files(
+    name = "layer_file",
+    paths = ["mirrord/layer-win/mirrord_layer_win.dll"],
+    target = ":layer-win",
+    target_compatible_with = MSVC_ONLY,
+    visibility = ["//mirrord/cli:__pkg__"],
+)

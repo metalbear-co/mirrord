@@ -1,0 +1,156 @@
+# The apps that the layer tests run with the layer loaded. Each app's target is named after the path
+# that `tests/common/mod.rs` runs it from, relative to `mirrord/layer-tests`, like
+# `fork/out.c_test_app`. nextest runs a test from its package's directory in the test's runfiles,
+# where Bazel puts the apps at those paths, next to their sources. The Rust apps that are members
+# of the Cargo workspace have packages of their own.
+
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_go//go:def.bzl", "go_binary")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY")
+load("//bazel:rust.bzl", "RUSTC_FLAGS")
+load(":go_test_app.bzl", "go_test_app")
+
+# The C apps. Each app is compatible with the platforms of the tests that run it. The macOS-only and
+# Linux-only apps would compile to an empty program on the other OS, so Bazel skips them there.
+[
+    cc_binary(
+        name = app + "/out.c_test_app",
+        srcs = ["{}/{}.c".format(app, app)],
+        target_compatible_with = compatible_with,
+        visibility = ["//mirrord/layer-tests:__pkg__"],
+    )
+    for app, compatible_with in {
+        "connectx": MACOS_ONLY,
+        "cor_1734_file_mode": UNIX_ONLY,
+        "dns_sd": MACOS_ONLY,
+        "exec_freed_env": MACOS_ONLY,
+        "fork": UNIX_ONLY,
+        "gethostbyname": UNIX_ONLY,
+        "issue2178": UNIX_ONLY,
+        "mkdir_rmdir": UNIX_ONLY,
+        "open_file": UNIX_ONLY,
+        "readlink": UNIX_ONLY,
+        "sendfile_eagain": UNIX_ONLY,
+        "sendfile_partial": LINUX_ONLY,
+        "statfs_fstatfs": UNIX_ONLY,
+        "unix_connect_addrlen": UNIX_ONLY,
+    }.items()
+]
+
+# The single-file Rust apps, which aren't Cargo packages, so they build with rules_rs's rule rather
+# than `//bazel:rust.bzl`'s, which takes a crate's settings from its `Cargo.toml`. They take the
+# workspace's flags from `RUSTC_FLAGS` all the same. Without a manifest to name an edition, they're
+# written for rustc's default, the 2015 edition. `issue1123`
+# and `issue2058` also build for Windows, where the tests that run them run too.
+#
+# Each app's target is `<app>_app`, and its binary is at `<app>/target/<app>`, the path that the
+# tests run it from. The target can't have that name itself, because clippy's aspect writes its
+# marker to `<target>.clippy.ok` next to the binary, which would put a file under the binary's own
+# path.
+[
+    rust_binary(
+        name = app + "_app",
+        srcs = ["{}/{}.rs".format(app, app)],
+        binary_name = "{}/target/{}".format(app, app),
+        clippy_config = "//:clippy.toml",
+        crate_name = app,
+        edition = "2015",
+        rustc_flags = RUSTC_FLAGS,
+        target_compatible_with = compatible_with,
+        visibility = ["//mirrord/layer-tests:__pkg__"],
+    )
+    for app, compatible_with in {
+        "issue1054": UNIX_ONLY,
+        "issue1123": [],
+        "issue1458": UNIX_ONLY,
+        "issue1458portnot53": UNIX_ONLY,
+        "issue2058": [],
+        "issue2204": LINUX_ONLY,
+    }.items()
+]
+
+# The Go apps, by their directory, with the platforms of the tests that run them. They import only
+# the standard library. The apps that import more, `app_go` and `issue834`, are packages of their
+# own (see `//:go_apps.work`).
+[
+    go_test_app(
+        app,
+        target_compatible_with = target_compatible_with,
+    )
+    for app, target_compatible_with in {
+        "dir_go": UNIX_ONLY,
+        "dir_go_bypass": UNIX_ONLY,
+        "faccessat_go": UNIX_ONLY,
+        "issue2988": UNIX_ONLY,
+        "issue5092": UNIX_ONLY,
+        "lseek_go": UNIX_ONLY,
+        # Only `issue2614`, which is Linux-only, runs it.
+        "open_go": LINUX_ONLY,
+        "read_go": UNIX_ONLY,
+        "self_open": UNIX_ONLY,
+        "write_go": UNIX_ONLY,
+    }.items()
+]
+
+# The Go library that `dlopen_cgo`'s loader opens with `dlopen()`, from the loader's own directory,
+# and the loader. rules_go names the library after the target, so a copy gives it the name that the
+# loader opens.
+go_binary(
+    name = "dlopen_cgo/go_server",
+    srcs = ["dlopen_cgo/main.go"],
+    cgo = True,
+    linkmode = "c-shared",
+    target_compatible_with = LINUX_ONLY,
+)
+
+copy_file(
+    name = "dlopen_cgo/libgo_server",
+    src = "dlopen_cgo/go_server",
+    out = "dlopen_cgo/libgo_server.so",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The header that `go build -buildmode=c-shared` writes next to the library, which the loader
+# includes. rules_go only provides it in an output group.
+filegroup(
+    name = "dlopen_cgo/go_server_header",
+    srcs = [":dlopen_cgo/go_server"],
+    output_group = "cgo_exports",
+    target_compatible_with = LINUX_ONLY,
+)
+
+copy_file(
+    name = "dlopen_cgo/libgo_server_header",
+    src = "dlopen_cgo/go_server_header",
+    out = "dlopen_cgo/libgo_server.h",
+    target_compatible_with = LINUX_ONLY,
+)
+
+cc_binary(
+    name = "dlopen_cgo/out.cpp_dlopen_cgo",
+    srcs = [
+        "dlopen_cgo/libgo_server.h",
+        "dlopen_cgo/main.cpp",
+    ],
+    data = [":dlopen_cgo/libgo_server"],
+    # The header is in the output tree, which `#include "..."` only searches through `includes`.
+    includes = ["dlopen_cgo"],
+    linkopts = ["-ldl"],
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)
+
+# The scripts that the tests run with an interpreter.
+exports_files(
+    glob(
+        [
+            "*.js",
+            "*.mjs",
+            "*.py",
+            "*.sh",
+        ],
+    ),
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

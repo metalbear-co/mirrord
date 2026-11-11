@@ -1,0 +1,14 @@
+load("//bazel:rust.bzl", "rust_library")
+
+# The end-to-end tests, which are the library's own `#[test]` functions. They need a cluster, so
+# they run under `cargo xtask test-e2e` rather than Bazel, and Bazel only checks that the library
+# builds.
+rust_library(
+    name = "tests",
+    # The tests find their configs and apps from `env!("CARGO_MANIFEST_DIR")`. rules_rust would set
+    # it to the sandbox directory that the crate compiles in, and its process wrapper fails an
+    # action whose output contains that directory. Bazel never runs these tests, so the package's
+    # relative path is enough to compile them. The sources keep `env!`, because the operator's
+    # end-to-end tests use this library under Cargo and find this repository's configs through it.
+    rustc_env = {"CARGO_MANIFEST_DIR": package_name()},
+)

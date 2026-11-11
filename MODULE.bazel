@@ -1,0 +1,283 @@
+# The module file, the Bazel counterpart of the workspace's root `Cargo.toml`. It names the
+# workspace as the module `mirrord`, and declares everything that the build takes from outside the
+# repository. Bazel reads it before any BUILD file. See https://bazel.build/external/module.
+#
+# Each external dependency becomes a repository: a tree of files with BUILD files of its own, whose
+# targets a label names with `@`, like `@crates//serde`. This file creates repositories in three
+# ways:
+#
+# - `bazel_dep` adds a Bazel module from the Bazel Central Registry (https://registry.bazel.build),
+#   the way Cargo adds a crate from crates.io. Most of these modules are rule sets, like rules_rs,
+#   which provides the Rust rules and toolchains.
+# - `use_extension` loads a module extension, which creates repositories from other inputs, such as
+#   the crates in `Cargo.lock`. `use_repo` then makes the repositories that it names visible to the
+#   workspace's BUILD files.
+# - `use_repo_rule` loads a repository rule, which creates one repository, such as a downloaded
+#   archive.
+#
+# This module is the root module, because Bazel runs in its directory. Some declarations only take
+# effect in the root module, or take precedence there: for example, the toolchains that it
+# registers come before those that its dependencies register. Bazel records the versions that it
+# resolves and the results of the module extensions in `MODULE.bazel.lock`, much as Cargo records
+# the resolved crates in `Cargo.lock`.
+
+module(name = "mirrord")
+
+bazel_dep(name = "rules_rs", version = "0.2.4")
+bazel_dep(name = "llvm", version = "0.8.27")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "bazel_lib", version = "3.7.2")
+bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "tar.bzl", version = "0.10.9")
+bazel_dep(name = "aspect_rules_js", version = "3.6.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+
+# `rcodesign`, which signs the Mac binaries (see `//bazel:macos_sign.bzl`), prebuilt for each OS
+# that builds run on.
+bazel_dep(name = "codesign.bzl", version = "0.0.13")
+
+# The rules that build the agent's and the CLI's images, and the Debian packages that the CLI's
+# image takes its trust store from (see `mirrord/cli/cli.MODULE.bazel`).
+bazel_dep(name = "rules_oci", version = "2.3.0")
+bazel_dep(name = "rules_distroless", version = "0.9.4")
+
+# The C libraries of `lzma-sys` and `bzip2-sys` (see their annotations below).
+bazel_dep(name = "xz", version = "5.4.5.bcr.8")
+bazel_dep(name = "bzip2", version = "1.0.8.bcr.3")
+
+# The C libraries of `rdkafka-sys`, `openssl-sys` and `libz-sys`, which the end-to-end tests' Kafka
+# consumer uses (see their annotations below).
+bazel_dep(name = "librdkafka", version = "2.15.0.bcr.1")
+
+# The module's build assumes `getentropy()` on Linux, which glibc only has since 2.25, while the
+# builds for Linux link against glibc 2.17. The patch turns it off there, and librdkafka then seeds
+# its random numbers from OpenSSL.
+single_version_override(
+    module_name = "librdkafka",
+    patch_strip = 1,
+    patches = ["//bazel/third_party/librdkafka:getentropy.patch"],
+)
+
+bazel_dep(name = "openssl", version = "3.5.5.bcr.0")
+bazel_dep(name = "zlib", version = "1.3.2")
+
+# A TOML parser in Starlark, which `//bazel:cargo_packages.bzl` reads the Cargo manifests with.
+bazel_dep(name = "toml.bzl", version = "0.4.1")
+
+# `@cargo_packages` holds each workspace member's metadata from its Cargo manifest, like its name
+# and version, which its Rust targets take (see `//bazel:cargo_packages.bzl`).
+cargo_packages = use_repo_rule("//bazel:cargo_packages.bzl", "cargo_packages")
+
+cargo_packages(
+    name = "cargo_packages",
+    cargo_toml = "//:Cargo.toml",
+)
+
+# The Rust toolchain that builds every Rust target, which rules_rs registers. rules_rs can't read
+# `rust-toolchain.toml`, so `version` must match the `channel` there, which Cargo builds with.
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
+    edition = "2024",
+    version = "1.99.1",
+)
+
+# Nothing here names the repository, but the extension reports it as a direct dependency of the
+# root module, which Bazel wants `use_repo` to list.
+use_repo(toolchains, "default_rust_toolchains")
+
+# rules_rs builds on rules_rust, and ships a patched copy of it. This makes that copy available as
+# `@rules_rust`, for what rules_rs doesn't provide itself, like `rust_doc` and the clippy aspect.
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+
+# `lld-link.patch` lets rustc link for MSVC with the llvm toolchain, so that any machine can build
+# the Windows CLI and layer. rustc links for MSVC with `link.exe` options, and the llvm toolchain
+# links with clang-cl, a compiler driver that rejects those options (hermetic-llvm#910,
+# rules_rs#137). The patch makes rustc drive the `lld-link` next to clang-cl instead. lld-link takes
+# `link.exe` options, and the toolchain already passes it the same arguments through clang-cl.
+# https://github.com/hermeticbuild/rules_rust/pull/92 makes rules_rust do the same, so the patch can
+# go once rules_rs ships a rules_rust with it.
+rules_rust.patch(
+    patches = [
+        "//bazel/third_party/rules_rust:lld-link.patch",
+    ],
+    strip = 1,
+)
+use_repo(rules_rust, "rules_rust")
+
+# The toolchains that builds can use (`//bazel/platforms/BUILD.bazel` explains toolchains), on top
+# of the ones that rules_rs registers itself: the Rust toolchains, and bindgen, which
+# `//bazel/third_party/frida` uses. For each kind of toolchain, Bazel takes the first one in this
+# list that fits the platforms.
+register_toolchains(
+    "@llvm//toolchain:all",
+    "@codesign.bzl//toolchain:all",
+    "//bazel/platforms:tests_run_on_the_host",
+)
+
+# The macOS frameworks that the llvm toolchain copies out of the SDK for builds for macOS to link
+# against. The toolchain copies only the listed frameworks, and this list replaces its default one,
+# so it repeats the defaults. CoreServices holds FSEvents, which the `notify` crate uses on macOS.
+# CoreServices re-exports CFNetwork, and lld can't link against a framework whose re-exports are
+# missing, so CFNetwork is listed too.
+osx = use_extension("@llvm//extensions:osx.bzl", "osx")
+osx.frameworks(
+    names = [
+        "CFNetwork",
+        "CoreFoundation",
+        "CoreServices",
+        "Foundation",
+        "Kernel",
+        "OSLog",
+        "Security",
+        "SystemConfiguration",
+    ],
+)
+
+# The `@crates` repository, which holds the Cargo workspace's third-party crates, resolved from
+# `Cargo.toml` and `Cargo.lock`, so that Cargo's files stay the only list of them. Each package's
+# BUILD file takes its crate's dependencies from `@crates` with `all_crate_deps()`.
+#
+# `platform_triples` must list every platform that builds run on or build for, because rules_rs
+# resolves the dependencies and features that depend on the platform only for the listed ones.
+#
+# rules_rs turns on the same features of a crate for every crate that depends on it, across the
+# whole workspace and across normal and build dependencies, where Cargo keeps a build dependency's
+# features apart and only unifies the packages that it builds. So Bazel's crates can have more
+# features than Cargo's:
+#
+# - `serde_json` has `preserve_order`, which tree-sitter's build dependency turns on, so JSON
+#   objects keep the order of their keys instead of sorting them.
+# - `rustls` has both the `aws_lc_rs` and the `ring` crypto providers, which frida-build's build
+#   dependency and xtask's apple-codesign turn on, so it can't pick one on its own. The binaries
+#   and the tests that use TLS install `aws_lc_rs` as the default.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    # Gives each crate the lints of its `[lints]` table in `Cargo.toml`, which `lint_config()` in
+    # `//bazel:rust.bzl` passes to rustc, clippy and rustdoc, as Cargo does.
+    generate_lint_config = True,
+    # Leaves out the deprecated `@crates//:<crate>` aliases, in favor of `@crates//<crate>`.
+    incompatible_no_root_alias_targets = True,
+    platform_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+    ],
+)
+use_repo(crate, "crates")
+
+# Bazel runs aws-lc-sys's build script, which compiles the C library the same way that it does
+# under Cargo. Bazel gives the script the target's C toolchain, so the script's output still depends
+# only on the toolchain and the crate. rules_rs suggests a recipe that builds the library from the
+# `aws-lc` module instead, but that module fails to compile against glibc 2.17 without a patch, and
+# it would make the Bazel build differ from the Cargo one. Setting `gen_build_script` to "on"
+# explicitly silences that suggestion.
+#
+# For x86-64 Windows, the build script would assemble parts of aws-lc with NASM, which the
+# toolchain doesn't provide. `AWS_LC_SYS_PREBUILT_NASM` makes the script use the objects that the
+# crate ships already assembled instead. The script ignores the variable on other platforms.
+crate.annotation(
+    build_script_env = {"AWS_LC_SYS_PREBUILT_NASM": "1"},
+    crate = "aws-lc-sys",
+    gen_build_script = "on",
+)
+
+# The end-to-end tests' Kafka consumer uses `rdkafka-sys`. Its build script builds the librdkafka
+# that the crate bundles with CMake, and the `vendored` feature of its `openssl-sys` dependency
+# builds OpenSSL with OpenSSL's Perl scripts, so Bazel builds the C libraries from modules instead.
+# librdkafka comes from the `librdkafka` module, which is newer than the bundled 2.10.0. The crate's
+# bindings are generated in advance, and librdkafka only adds to its ABI, so they still match.
+# `.bazelrc` leaves out its curl and zstd support, as the crate's CMake build does. OpenSSL and zlib
+# come from the `openssl` and `zlib` modules, as in rules_rs's recipes (its `3rd_party` directory).
+crate.annotation(
+    crate = "rdkafka-sys",
+    gen_build_script = "off",
+    deps = ["@librdkafka"],
+)
+crate.annotation(
+    build_script_data = ["@openssl//:gen_dir"],
+    build_script_env = {
+        "OPENSSL_DIR": "$(execpath @openssl//:gen_dir)",
+        "OPENSSL_NO_VENDOR": "1",
+        "OPENSSL_STATIC": "1",
+    },
+    crate = "openssl-sys",
+    gen_build_script = "on",
+)
+crate.annotation(
+    crate = "libz-sys",
+    gen_build_script = "off",
+    deps = ["@zlib"],
+)
+
+# `openssl-sys`'s `vendored` feature still makes `openssl-src` a dependency of its build script.
+# The crate finds the OpenSSL sources that it bundles from `env!("CARGO_MANIFEST_DIR")`, which
+# rules_rust would set to the sandbox directory that the crate compiles in, and its process
+# wrapper fails an action whose output contains that directory. With `OPENSSL_NO_VENDOR`, nothing
+# asks the crate for the sources, so a relative directory is enough.
+crate.annotation(
+    crate = "openssl-src",
+    rustc_env = {"CARGO_MANIFEST_DIR": "."},
+)
+
+# The OpenSSL annotation names `@openssl` in an environment variable, which Bazel expands in the
+# crate's own repository, so that repository must see the module.
+inject_repo(crate, "openssl")
+
+# minhook-detours-sys, which the Windows layer uses, includes `SdkDdkVer.h`, but the Windows SDK
+# names the file `sdkddkver.h`. Windows file systems ignore the case, so builds on Windows machines
+# find it, but builds on Linux and macOS read the llvm toolchain's copy of the SDK from a
+# case-sensitive file system, and need the include to match.
+crate.annotation(
+    crate = "minhook-detours-sys",
+    patch_args = ["-p1"],
+    patches = ["//bazel/third_party/minhook-detours-sys:sdkddkver.patch"],
+)
+
+# apple-codesign, which the macOS crates and xtask use, reads xar archives with `lzma-sys` and
+# `bzip2-sys`. Their build scripts link the system's liblzma and libbz2 when `pkg-config` finds
+# them, and build the bundled sources otherwise, so the result would depend on the machine. These
+# are rules_rs's recipes (its `3rd_party` directory), which build the libraries from the `xz` and
+# `bzip2` modules instead.
+crate.annotation(
+    crate = "lzma-sys",
+    gen_build_script = "off",
+    deps = ["@xz//:lzma"],
+)
+crate.annotation(
+    crate = "bzip2-sys",
+    gen_build_script = "off",
+    deps = ["@bzip2//:bz2"],
+)
+
+# The npm packages of the frontends in `packages/`, from the pnpm workspace's lockfile. `data`
+# lists the pnpm workspace's own packages, so that the lockfile's references to them resolve.
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    data = [
+        "//:package.json",
+        "//:pnpm-workspace.yaml",
+        "//packages/monitor:package.json",
+        "//packages/ui:package.json",
+        "//packages/wizard:package.json",
+    ],
+    pnpm_lock = "//:pnpm-lock.yaml",
+)
+use_repo(npm, "npm")
+
+# The repositories that only one part of the workspace uses are declared in a `*.MODULE.bazel` file
+# next to that part. `include()` reads such a file as if its contents were written here, except
+# that variables don't carry over between the files, so each file loads its own extensions, like
+# `crate = use_extension(...)`.
+include("//mirrord/agent:agent.MODULE.bazel")
+include("//mirrord/cli:cli.MODULE.bazel")
+include("//mirrord/layer-tests/tests/apps:apps.MODULE.bazel")
+include("//mirrord/test-utils:test-utils.MODULE.bazel")
+include("//bazel/third_party/frida:frida.MODULE.bazel")
+include("//bazel/third_party/nextest:nextest.MODULE.bazel")
+include("//bazel/third_party/protoc:protoc.MODULE.bazel")

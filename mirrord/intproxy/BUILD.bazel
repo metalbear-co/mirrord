@@ -1,0 +1,16 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "intproxy",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":intproxy",
+)
+
+rust_test(
+    name = "session_monitor_round_trip",
+    deps = [":intproxy"],
+)

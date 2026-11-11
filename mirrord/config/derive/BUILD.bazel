@@ -1,0 +1,7 @@
+load("//bazel:rust.bzl", "rust_proc_macro")
+
+rust_proc_macro(
+    name = "derive",
+    compile_data = ["README.md"],
+    visibility = ["//visibility:public"],
+)

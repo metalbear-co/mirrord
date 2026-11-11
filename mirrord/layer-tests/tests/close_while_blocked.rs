@@ -9,7 +9,7 @@
 //! closes something remote, so the close hook waits for that connection in the middle of its close
 //! request. Then the main thread does an action, and the test checks what happens.
 
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use mirrord_intproxy_protocol::{
     IncomingRequest, IncomingResponse, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
@@ -44,8 +44,7 @@ async fn start(action: &str, target: &str) -> (TestProcess, FakeIntProxy, FakeLa
             ("MIRRORD_FILE_READ_WRITE_PATTERN", "^/mirrord-test/"),
         ],
     );
-    let app_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/apps/close_while_blocked.py");
+    let app_path = common::manifest_dir().join("tests/apps/close_while_blocked.py");
     let application = Application::DynamicApp(
         Application::get_python3_executable().await,
         vec![

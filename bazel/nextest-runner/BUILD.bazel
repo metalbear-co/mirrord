@@ -1,0 +1,11 @@
+load("//bazel:rust.bzl", "rust_binary")
+
+# The program that writes the Cargo metadata that nextest needs, and that runs a `rust_test`'s
+# binary with nextest (see `src/main.rs` and `//bazel:nextest.bzl`). It's a member of the Cargo
+# workspace, so that it takes its dependencies from it.
+rust_binary(
+    name = "nextest-runner",
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["workspace.Cargo.toml"])

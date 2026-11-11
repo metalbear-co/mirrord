@@ -1,0 +1,13 @@
+# `protoc` for the platform that runs it, from the releases that `protoc.MODULE.bazel` pins. Build
+# scripts that generate code from `.proto` files, like `containerd-client`'s, run it as a tool, so
+# the `select()` below resolves for the execution platform.
+alias(
+    name = "protoc",
+    actual = select({
+        "//bazel/platforms:is_linux_aarch64": "@protoc_linux_aarch_64//:protoc",
+        "//bazel/platforms:is_linux_x86_64": "@protoc_linux_x86_64//:protoc",
+        "@platforms//os:macos": "@protoc_osx_universal_binary//:protoc",
+        "@platforms//os:windows": "@protoc_win64//:protoc",
+    }),
+    visibility = ["//visibility:public"],
+)

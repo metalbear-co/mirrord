@@ -1,0 +1,6 @@
+load("//bazel:rust.bzl", "rust_library")
+
+rust_library(
+    name = "session-monitor-protocol",
+    visibility = ["//visibility:public"],
+)

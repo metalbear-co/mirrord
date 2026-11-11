@@ -1,0 +1,29 @@
+# The root package, `//`, which holds the targets that belong to the whole repository.
+
+load("@crates//:data.bzl", "DEP_DATA")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//bazel:nextest.bzl", "cargo_metadata")
+
+# The root of the pnpm workspace in `pnpm-workspace.yaml`.
+npm_link_all_packages(name = "node_modules")
+
+# The output of `cargo metadata --no-deps` for the workspace, which nextest takes from Cargo to know
+# the workspace's packages and their targets (see `//bazel:nextest.bzl`). Every package of the
+# Cargo workspace is a Bazel package whose Rust macros declare its `cargo_files`.
+cargo_metadata(
+    name = "cargo_metadata",
+    srcs = ["//{}:cargo_files".format(package) for package in DEP_DATA],
+    visibility = ["//visibility:public"],
+)
+
+# The files that other packages read: nextest's configuration, which every nextest test reads at
+# run time (see `//bazel:nextest.bzl`), `clippy.toml`, which clippy reads for most crates (see
+# `//bazel:rust.bzl`), and the schemas, which the tests of `mirrord-config` and `mirrord-up` compare
+# with the generated ones. `Cargo.toml` is here for `:cargo_metadata` above.
+exports_files([
+    ".config/nextest.toml",
+    "Cargo.toml",
+    "clippy.toml",
+    "mirrord-schema.json",
+    "mirrord-up-schema.json",
+])

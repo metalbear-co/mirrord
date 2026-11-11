@@ -1,0 +1,22 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//mirrord/layer-tests/tests/apps:go_test_app.bzl", "go_test_app")
+
+# The app is a package of its own, because `go_deps` reads the Go modules that it imports from its
+# `go.mod` (see `//:go_apps.work`).
+#
+# The app imports v8go, which links a prebuilt V8 that was compiled with GCC against libstdc++. The
+# llvm toolchain links C++ code against LLVM's libc++, unless the platform asks for libstdc++, so the
+# app builds for a Linux platform that does (see `//bazel/platforms`), for the build's CPU. On other
+# OSes, the app builds for the build's own platform, which it isn't compatible with.
+go_test_app(
+    platform = select({
+        "//bazel/platforms:is_linux_aarch64": "//bazel/platforms:aarch64-linux-libstdcxx",
+        "//bazel/platforms:is_linux_x86_64": "//bazel/platforms:x86_64-linux-libstdcxx",
+        "//conditions:default": None,
+    }),
+    target_compatible_with = LINUX_ONLY,
+    deps = [
+        "@com_rogchap_v8go//:v8go",
+        "@net_kuoruan_go_v8go_polyfills//:v8go-polyfills",
+    ],
+)

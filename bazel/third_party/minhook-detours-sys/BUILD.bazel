@@ -1,0 +1,2 @@
+# The patches that `MODULE.bazel` applies to the `minhook-detours-sys` crate. The package exists so
+# that `MODULE.bazel` can name the patch with a label.

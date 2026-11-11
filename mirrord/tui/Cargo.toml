@@ -63,3 +63,6 @@ vt100.workspace = true
 # read it from — for reading a process's parent.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+mirrord-test-utils = { path = "../test-utils" }

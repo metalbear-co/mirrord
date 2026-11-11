@@ -1,5 +1,6 @@
 //! Packs the vendored docs and skills in `corpus/` into a gzipped tar that `src/corpus.rs` embeds,
-//! so the files take less space in the binary.
+//! so the files take less space in the binary, and passes the tar's path to rustc in
+//! `MIRRORD_BUNDLED_MCP_CORPUS`, as Bazel does (see `BUILD.bazel`).
 
 use std::{
     env,
@@ -39,6 +40,10 @@ fn main() -> io::Result<()> {
         archive.append_data(&mut header, &path, contents.as_slice())?;
     }
     archive.into_inner()?.finish()?;
+    println!(
+        "cargo::rustc-env=MIRRORD_BUNDLED_MCP_CORPUS={}",
+        out.join("corpus.tar.gz").display()
+    );
 
     Ok(())
 }

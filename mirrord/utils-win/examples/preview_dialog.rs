@@ -1,6 +1,6 @@
 //! Preview the crash dialog without a real crash.
 //!
-//! Run: `cargo run -p mirrord-utils-win --example preview_dialog`
+//! Run: `bazel run //mirrord/utils-win:preview_dialog`
 
 #[cfg(windows)]
 fn main() {

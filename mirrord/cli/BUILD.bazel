@@ -1,0 +1,326 @@
+# The CLI's package: the binary that mirrord distributes, and its tests.
+#
+# `select()` picks an attribute's value by the platform that the build targets, like `#[cfg]` in
+# Rust. A target whose `target_compatible_with` selects `@platforms//:incompatible` doesn't build
+# for that platform, and `//...` skips it rather than fail. See
+# https://bazel.build/docs/configurable-attributes.
+#
+# `//...` leaves out the targets tagged `manual`, like the ones that build for other platforms, so
+# only a command that names them builds them, like `bazel build //mirrord/cli:image_index`.
+
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@rules_distroless//distroless:defs.bzl", "cacerts")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load")
+load("@tar.bzl//tar:tar.bzl", "tar")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY")
+load("//bazel:image.bzl", "IMAGE_LABELS", "image_tag")
+load("//bazel:macos_sign.bzl", "macos_sign")
+load("//bazel:platform.bzl", "platform_filegroup")
+load("//bazel:rust.bzl", "rust_binary", "rust_test")
+
+# The files that the CLI needs to load the layer (see `src/bundle.rs`), by the condition that
+# selects them, and then by the environment variable that passes each file's path to rustc. Each OS
+# gets the layer for the CLI's own platform. On macOS, the layer is the universal one, and the CLI
+# also bundles the arm64 layer, which the universal layer's arm64e shim loads, and the SIP
+# utilities, which the CLI uses to load the layer into SIP-protected programs.
+#
+# The targets need the files both as labels, in `data` or `compile_data`, and as paths, in
+# `rustc_env`. A `select()` can't be read or converted once it's made, so each of them is a
+# `select()` of its own over one of these dicts.
+LAYER_FILES = {
+    "@platforms//os:linux": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer",
+    },
+    "@platforms//os:macos": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer:universal_layer",
+        "MIRRORD_BUNDLED_LAYER_MACOS_ARM64": "//mirrord/layer:layer_aarch64",
+        "MIRRORD_BUNDLED_SIP_BINARIES": "@apple_utils//file",
+    },
+    "@platforms//os:windows": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer-win:layer_file",
+    },
+    "//conditions:default": {},
+}
+
+# Every file that the CLI bundles: the layer's files, and the UI, which is the same on every
+# platform.
+BUNDLED_FILES = {
+    condition: files | {"MIRRORD_BUNDLED_UI": "//packages/ui:dist"}
+    for condition, files in LAYER_FILES.items()
+}
+
+# The CLI polls its whole runtime on the main thread, and Windows gives that thread 1 MiB unless
+# the binary asks for more, so the CLI asks for 4 MiB. Bazel doesn't run `build.rs`, which asks for
+# the same stack in Cargo builds.
+MAIN_THREAD_STACK_FLAGS = select({
+    "@llvm//constraints/windows/abi:msvc": ["-Clink-arg=/STACK:4194304"],
+    "//conditions:default": [],
+})
+
+# The CLI is one crate that builds as two binaries, which differ in how they get the bundled files.
+# Everything else, like the crates that they link and the layer that they bundle, is the same build
+# for both.
+#
+# `:cli` is the CLI that the tests run, and that `bazel run //mirrord/cli` runs. It turns on
+# `bazel-runfiles`, and reads the layer's files at run time from its runfiles, so that changing the
+# layer doesn't build it again. rustc only gets each file's runfiles path, from `$(rlocationpath)`.
+# It has no UI: no test uses the UI, and with it in the runfiles, every change to the UI would run
+# every test that runs the CLI again.
+#
+# `:cli_standalone` is the CLI that mirrord distributes. It embeds the files, as Cargo builds do,
+# so it runs without its runfiles. rustc gets the files themselves, through `compile_data`, and
+# their paths in the build, from `$(execpath)`. `include_bytes!` resolves a relative path from the
+# source file that calls it, and rust-embed from the crate's directory, so rustc needs absolute
+# paths, and rules_rust makes each `$(execpath)` in `rustc_env` absolute.
+#
+# `//...` covers both binaries on every platform, so that the CLI that mirrord distributes is one
+# that every build, lint and test run has checked:
+#
+# - It builds and lints both binaries. It documents only `:cli`, because they're the same crate.
+# - The layer tests run `:cli`, which is how the code that finds the files in the runfiles is
+#   tested.
+# - `:unit_tests` tests the crate as `:cli_standalone` builds it, with the code that embeds the
+#   files.
+#
+# So a change to the CLI compiles the crate three times, for the two binaries and the unit tests,
+# and a change to a bundled file compiles it twice, for `:cli_standalone` and the unit tests. Only
+# the targets that build for another platform are `manual`, like `:image_index`. On a Mac, `//...`
+# also builds `:cli_universal`, which compiles the crate once more, for the other CPU.
+#
+# Both binaries write a file named `mirrord`, the standalone one in `standalone/`, because two
+# targets of a package can't write the same file.
+rust_binary(
+    name = "cli",
+    crate_features = ["bazel-runfiles"],
+    data = select({
+        condition: files.values()
+        for condition, files in LAYER_FILES.items()
+    }),
+    rustc_env = select({
+        condition: {
+            variable: "$(rlocationpath {})".format(file)
+            for variable, file in files.items()
+        }
+        for condition, files in LAYER_FILES.items()
+    }),
+    rustc_flags = MAIN_THREAD_STACK_FLAGS,
+    # The layer tests run `:cli`.
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)
+
+rust_binary(
+    name = "cli_standalone",
+    binary_name = "standalone/mirrord",
+    compile_data = select({
+        condition: files.values()
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    doc = False,
+    rustc_env = select({
+        condition: {
+            variable: "$(execpath {})".format(file)
+            for variable, file in files.items()
+        }
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    rustc_flags = MAIN_THREAD_STACK_FLAGS,
+)
+
+# The `#[test]` functions in the CLI's sources, like `cargo test --bins`. The test takes the
+# sources, the dependencies and the bundled files from `:cli_standalone`, so it tests the code of
+# the CLI that mirrord distributes.
+#
+# A few tests wait for several seconds each, so they run four at a time to fit in a small test's
+# time limit.
+rust_test(
+    name = "unit_tests",
+    crate = ":cli_standalone",
+    test_threads = 4,
+)
+
+# Each file in `tests/` is its own crate, which takes the package's dependencies and
+# dev-dependencies, as it does with Cargo. The test finds the CLI by its runfiles path, which it
+# takes from `MIRRORD_CLI_FILE`.
+rust_test(
+    name = "ci_credentials",
+    data = [":cli"],
+    env = {"MIRRORD_CLI_FILE": "$(rlocationpath :cli)"},
+    target_compatible_with = UNIX_ONLY,
+)
+
+# The standalone CLI for each Mac CPU, which `:cli_universal` combines. The slices are standalone,
+# because the universal CLI is a single file that `llvm-lipo` writes, without runfiles. On a Mac,
+# the slice for its own CPU is the same build as `:cli_standalone` (see `//bazel:platform.bzl`).
+[
+    platform_filegroup(
+        name = "cli_" + cpu,
+        srcs = [":cli_standalone"],
+        cpu = cpu,
+        os = "macos",
+        tags = ["manual"],
+        target_compatible_with = MACOS_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The universal CLI as `llvm-lipo` writes it. Its arm64 slice keeps the ad hoc signature that lld
+# gives it, and its x86-64 slice has none.
+run_binary(
+    name = "cli_universal_unsigned",
+    srcs = [
+        ":cli_aarch64",
+        ":cli_x86_64",
+    ],
+    outs = ["universal/unsigned/mirrord"],
+    args = [
+        "-create",
+        "-output",
+        "$(execpath universal/unsigned/mirrord)",
+        "$(execpath :cli_x86_64)",
+        "$(execpath :cli_aarch64)",
+    ],
+    target_compatible_with = MACOS_ONLY,
+    tool = "@llvm//tools:llvm-lipo",
+)
+
+# The universal CLI that mirrord distributes for macOS, signed ad hoc by default, or with
+# MetalBear's Developer ID in a release (see `//bazel:macos_sign.bzl`). Notarization, which uploads
+# the signed CLI to Apple's notary service, isn't part of the build: no target uses its result, and
+# it depends on a service rather than on the build's inputs.
+macos_sign(
+    name = "cli_universal",
+    src = ":cli_universal_unsigned",
+    out = "universal/mirrord",
+    identifier = "mirrord",
+    target_compatible_with = MACOS_ONLY,
+    visibility = ["//visibility:public"],
+)
+
+# The CLI's image: Debian with the standalone CLI and the layer in `/opt/mirrord`, which is a
+# volume, so that other containers can mount the CLI from it. The image doesn't carry the CLI's
+# runfiles, so it takes the standalone CLI.
+tar(
+    name = "image_layer",
+    srcs = [":cli_standalone"],
+    compress = "gzip",
+    mtree = [
+        "./opt/mirrord uid=0 gid=0 time=0 mode=0755 type=dir",
+        "./opt/mirrord/bin uid=0 gid=0 time=0 mode=0755 type=dir",
+        "./opt/mirrord/bin/mirrord uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath :cli_standalone)",
+        "./opt/mirrord/lib uid=0 gid=0 time=0 mode=0755 type=dir",
+        "./opt/mirrord/tls uid=0 gid=0 time=0 mode=0755 type=dir",
+        "./usr/bin/mirrord uid=0 gid=0 time=0 mode=0777 type=link link=/opt/mirrord/bin/mirrord",
+    ],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The layer for each Linux CPU, in `/opt/mirrord/lib/<cpu>`, which `mirrord container` loads into a
+# container of that CPU (see `resolve_library_path` in `src/container.rs`). The arm64 image also has
+# the x86-64 layer, for x86-64 containers that run under emulation, so on an arm64 machine, `:image`
+# cross-builds that layer.
+[
+    platform_filegroup(
+        name = "layer_" + cpu,
+        srcs = ["//mirrord/layer"],
+        cpu = cpu,
+        os = "linux",
+        tags = ["manual"],
+        target_compatible_with = LINUX_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+[
+    tar(
+        name = "image_layer_{}_lib".format(cpu),
+        srcs = [":layer_" + cpu],
+        compress = "gzip",
+        mtree = [
+            "./opt/mirrord/lib/{} uid=0 gid=0 time=0 mode=0755 type=dir".format(cpu),
+            "./opt/mirrord/lib/{0}/libmirrord_layer.so uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath :layer_{0})".format(cpu),
+        ],
+        tags = ["manual"],
+        target_compatible_with = LINUX_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The trust store, `/etc/ssl/certs/ca-certificates.crt`, built from Debian's `ca-certificates` (see
+# `cli.MODULE.bazel`). The CLI only reads the bundle, so the image leaves out the rest of the
+# package.
+cacerts(
+    name = "image_cacerts",
+    package = "@trixie//ca-certificates:data",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The CLI's image for the platform that the build targets.
+oci_image(
+    name = "image",
+    base = "@debian",
+    labels = IMAGE_LABELS,
+    target_compatible_with = LINUX_ONLY,
+    tars = [
+        ":image_cacerts",
+        ":image_layer",
+    ] + select({
+        "@platforms//cpu:aarch64": [
+            ":image_layer_aarch64_lib",
+            ":image_layer_x86_64_lib",
+        ],
+        "//conditions:default": [":image_layer_x86_64_lib"],
+    }),
+    volumes = ["/opt/mirrord"],
+)
+
+# The tag that `:image_load` gives the image. `--//mirrord/cli:image_tag=you/mirrord-cli:dev` sets
+# it.
+image_tag(
+    name = "image_tag",
+    build_setting_default = "ghcr.io/metalbear-co/mirrord-cli:latest",
+)
+
+# `bazel run //mirrord/cli:image_load` loads the image for the machine's CPU into Docker, under
+# `:image_tag`.
+oci_load(
+    name = "image_load",
+    image = ":image",
+    repo_tags = ":image_tag",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The image for each Linux CPU. On a Linux machine, the image for its own CPU is the same build as
+# `:image`, and only the other CPU's is a cross-build.
+[
+    platform_filegroup(
+        name = "image_" + cpu,
+        srcs = [":image"],
+        cpu = cpu,
+        os = "linux",
+        tags = ["manual"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The image for both Linux CPUs, which the release publishes. `//...` leaves it out, because it
+# cross-builds.
+oci_image_index(
+    name = "image_index",
+    images = [
+        ":image_aarch64",
+        ":image_x86_64",
+    ],
+    tags = ["manual"],
+)

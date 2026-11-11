@@ -1,0 +1,14 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "up",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    compile_data = glob(["src/testdata/*.yaml"]),
+    crate = ":up",
+    # A test checks that the schema at the repository's root is up to date.
+    data = ["//:mirrord-up-schema.json"],
+)

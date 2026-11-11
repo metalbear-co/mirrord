@@ -1,0 +1,163 @@
+# The platforms that builds can target, and the toolchains and settings that decide how Bazel
+# builds for them. See https://bazel.build/extending/platforms and
+# https://bazel.build/extending/toolchains.
+#
+# A platform describes a system as a set of constraint values, like `@platforms//os:linux` and
+# `@platforms//cpu:aarch64`, so it plays the part of a Rust target triple. A build has a target
+# platform, which its outputs run on and which `--platforms` sets, and execution platforms, which
+# run its actions and the tools that the actions use. Bazel runs every action of this workspace on
+# the machine that runs Bazel, so that machine's platform is the only execution platform. This is
+# like Cargo, which builds build scripts and proc macros for the host, and the crates for
+# `--target`.
+#
+# A toolchain, such as a C/C++ or a Rust compiler, declares the execution and target platforms that
+# it works with. For each kind of toolchain that a target needs, Bazel picks the first registered
+# toolchain that fits both platforms (see `register_toolchains` in `MODULE.bazel`). BUILD files
+# check the target platform's constraint values with `select()` and `target_compatible_with` (see
+# `//mirrord/cli/BUILD.bazel`).
+#
+# The platforms below add a constraint, like the glibc version, to a platform that Bazel detects or
+# that rules_rs defines, or give one of rules_rs's platforms a shorter name. Builds target the
+# machine that runs Bazel (see `.bazelrc`), unless `--platforms` names another platform, like
+# `--platforms=//bazel/platforms:aarch64-linux` or `--platforms=//bazel/platforms:x86_64-macos`.
+
+# Linux builds link against glibc 2.17, so that the binaries run on old distributions, and so that
+# what the tests run is what mirrord distributes. Only a platform can name the glibc version, and
+# the llvm toolchain links against 2.28 when the platform doesn't name one. So a Linux machine
+# targets `linux-host`, and builds for Linux from other machines, or for the other CPU, should
+# target `aarch64-linux` or `x86_64-linux` rather than rules_rs's Linux platforms.
+#
+# `linux-host` is only a target platform. The tools that run during the build still build for the
+# machine, because some C++ code, like rules_rust's process wrapper, breaks when an optimized build
+# compiles it against glibc 2.17's headers: clang deletes the code after calls to their fortified
+# functions, like `getcwd`.
+platform(
+    name = "linux-host",
+    constraint_values = ["@llvm//constraints/libc:gnu.2.17"],
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
+)
+
+[
+    platform(
+        name = cpu + "-linux",
+        constraint_values = ["@llvm//constraints/libc:gnu.2.17"],
+        parents = ["@rules_rs//rs/platforms:{}-unknown-linux-gnu".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The platform of a Mac, which `.bazelrc` sets for the builds there. It's the platform that Bazel
+# detects, under a name that `//bazel:platform.bzl` can switch to, so that files that a transition
+# builds for the Mac's own CPU are the same build as the rest of the Mac's build.
+platform(
+    name = "macos-host",
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
+)
+
+# rules_rs's macOS platforms, named like the Linux ones. `//bazel:platform.bzl` relies on the
+# `{cpu}-{os}` names, to build the slices of the universal CLI and layer.
+[
+    alias(
+        name = cpu + "-macos",
+        actual = "@rules_rs//rs/platforms:{}-apple-darwin".format(cpu),
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The platform of a Windows machine, which `.bazelrc` sets for both the build's outputs and its
+# tools. It adds the MSVC ABI to the platform that Bazel detects, which names no ABI. The Windows
+# layer needs MSVC, because MinHook's C code includes headers that only the Windows SDK has.
+#
+# Windows machines build with the llvm toolchain, as other machines do when they build for Windows,
+# rather than with an installed Visual Studio. Its `clang-cl` and `lld-link` download the MSVC
+# runtime and the Windows SDK (see `.bazelrc`), so the build doesn't depend on what's installed.
+# They also handle paths longer than Windows' 260-character limit, which the deeper files in
+# Bazel's output tree pass, while Visual Studio's `cl.exe` and `link.exe` fail on them.
+#
+# Both Windows platforms compile C++ against Microsoft's STL, the C++ library of MSVC, rather than
+# the llvm toolchain's default libc++. A build for Windows on another machine compiles Bazel's
+# Windows launcher, which every Python, JavaScript and test target that runs on Windows needs, and
+# the launcher only compiles against Microsoft's STL: it opens files by `std::wstring` paths, which
+# libc++'s file streams don't take. A Windows machine takes a prebuilt launcher instead.
+platform(
+    name = "windows-host",
+    constraint_values = [
+        "@llvm//constraints/cxxstdlib:msvcstl",
+        "@llvm//constraints/windows/abi:msvc",
+    ],
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
+)
+
+# rules_rs's x86-64 Windows platform for MSVC, the ABI of the Windows CLI that mirrord distributes,
+# with Microsoft's STL, and named like the Linux ones. Every machine builds for it with the llvm
+# toolchain, Windows machines included.
+platform(
+    name = "x86_64-windows",
+    constraint_values = ["@llvm//constraints/cxxstdlib:msvcstl"],
+    parents = ["@rules_rs//rs/platforms:x86_64-pc-windows-msvc"],
+    visibility = ["//visibility:public"],
+)
+
+# Whether the build targets an OS and CPU, whichever platform it targets. `//bazel:platform.bzl`
+# uses them to keep the build's own platform when it already has the OS and CPU that a target needs,
+# and the tools in `//bazel/third_party` to pick the release for the platform.
+[
+    config_setting(
+        name = "is_{}_{}".format(os, cpu),
+        constraint_values = [
+            "@platforms//cpu:" + cpu,
+            "@platforms//os:" + os,
+        ],
+        visibility = ["//visibility:public"],
+    )
+    for os, cpu in [
+        ("linux", "aarch64"),
+        ("linux", "x86_64"),
+        ("macos", "aarch64"),
+        ("macos", "x86_64"),
+        ("windows", "x86_64"),
+    ]
+]
+
+# Lets tests run on any execution platform, so that `bazel test` runs the tests for every target
+# platform on the machine that runs Bazel. Without a test toolchain, Bazel runs each test on an
+# execution platform that has all of the target platform's constraints. The machine is the only
+# execution platform, so a test for any other platform, even `linux-host`, would have none and
+# wouldn't build. Running the tests on the machine works when the machine can run them, like the
+# x86-64 macOS tests on an arm64 Mac, through Rosetta, or the tests for the glibc 2.17 platforms on
+# Linux, and fails when it can't.
+toolchain(
+    name = "tests_run_on_the_host",
+    toolchain = "@bazel_tools//tools/test:empty_toolchain",
+    toolchain_type = "@bazel_tools//tools/test:default_test_toolchain_type",
+)
+
+# The Linux platforms whose C++ standard library is GCC's libstdc++. The llvm toolchain uses LLVM's
+# libc++ unless the platform names libstdc++, and code that links against a C++ library that GCC
+# compiled needs libstdc++, like the layer tests' `issue834` app, which links a prebuilt V8 (see
+# `//mirrord/layer-tests/tests/apps/issue834`). The toolchain builds libstdc++ from GCC's sources,
+# against glibc 2.17 like the rest of the build, and links it statically. 16.1.0 is GCC's newest
+# release.
+[
+    platform(
+        name = cpu + "-linux-libstdcxx",
+        constraint_values = ["@llvm//constraints/cxxstdlib:libstdcxx.16.1.0"],
+        parents = [":{}-linux".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]

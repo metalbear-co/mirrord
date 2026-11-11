@@ -1,0 +1,6 @@
+load("//bazel:rust.bzl", "rust_proc_macro")
+
+rust_proc_macro(
+    name = "macro",
+    visibility = ["//visibility:public"],
+)

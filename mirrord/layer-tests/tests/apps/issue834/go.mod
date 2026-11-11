@@ -1,4 +1,4 @@
-module app_go
+module issue834
 
 go 1.19
 

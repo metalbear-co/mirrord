@@ -64,9 +64,26 @@ use crate::{
     util::remove_proxy_env,
 };
 
+/// Returns the macOS utilities that the CLI copies to run SIP-protected programs, as the gzipped
+/// tar from `MIRRORD_BUNDLED_SIP_BINARIES`, which the CLI embeds unless it reads it from Bazel's
+/// runfiles (see `bundle.rs`).
 #[cfg(target_os = "macos")]
-pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
-    include_bytes!(env!("MIRRORD_BUNDLED_SIP_BINARIES"));
+fn compressed_sip_binaries() -> std::borrow::Cow<'static, [u8]> {
+    #[cfg(not(feature = "bazel-runfiles"))]
+    let archive = include_bytes!(env!("MIRRORD_BUNDLED_SIP_BINARIES"))
+        .as_slice()
+        .into();
+
+    #[cfg(feature = "bazel-runfiles")]
+    let archive = {
+        let path = crate::bundle::runfile(env!("MIRRORD_BUNDLED_SIP_BINARIES"));
+        std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("can't read {}: {error}", path.display()))
+            .into()
+    };
+
+    archive
+}
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -494,7 +511,10 @@ impl MirrordExecution {
                             load_type: None,
                         });
                 if config.experimental.sip_utils {
-                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
+                    extract_sip_binaries(
+                        &MIRRORD_BINARIES_DIR_PATH_BUF,
+                        &compressed_sip_binaries(),
+                    )?;
                 }
 
                 let result = executable

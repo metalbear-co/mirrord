@@ -1,0 +1,139 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load")
+load("@tar.bzl//tar:tar.bzl", "tar")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:image.bzl", "IMAGE_LABELS", "image_tag")
+load("//bazel:platform.bzl", "platform_filegroup")
+load("//bazel:rust.bzl", "rust_binary", "rust_test")
+
+# The agent runs in the target's Linux pod, and compiles to an empty program elsewhere.
+rust_binary(
+    name = "agent",
+    compile_data = ["src/http/session_ended.html"],
+    # Links `clock_gettime` and `clock_nanosleep` from `libc.so.6` rather than `librt.so.1`, which
+    # the agent's image doesn't have. Rust links `librt` before `libc`, and the llvm toolchain's
+    # `librt` stub exports both functions as ordinary symbols, while glibc's `librt` only keeps them
+    # as compatibility symbols that new programs don't link to. rustc puts the crate's own `-l`
+    # before its dependencies', so `libc` comes first, and `--as-needed` drops `librt`.
+    rustc_flags = ["-lc"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+rust_test(
+    name = "unit_tests",
+    # The suite has hundreds of tests, more than one CPU runs in a small test's time limit.
+    size = "medium",
+    crate = ":agent",
+    target_compatible_with = LINUX_ONLY,
+    test_threads = 4,
+)
+
+# The image's layer: the agent at the root of the file system, where the agent's pod runs it from.
+tar(
+    name = "image_layer",
+    srcs = [":agent"],
+    compress = "gzip",
+    mtree = [
+        "./mirrord-agent uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath :agent)",
+    ],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The programs that the agent runs, from the Debian packages in `agent.MODULE.bazel`, with the
+# libraries that they and the agent load, and the modules that `iptables` loads. The packages hold
+# much more, like translations and other programs, which the image leaves out.
+run_binary(
+    name = "image_runtime",
+    srcs = [
+        ":agent",
+        "@agent_runtime//:flat",
+    ],
+    outs = ["image_runtime.tar.gz"],
+    args = [
+        "$(execpath @agent_runtime//:flat)",
+        "$(execpath image_runtime.tar.gz)",
+        "--elf",
+        "$(execpath :agent)",
+        "/usr/sbin/iptables-nft",
+        "/usr/sbin/ip6tables-nft",
+        "/usr/sbin/iptables-legacy",
+        "/usr/sbin/ip6tables-legacy",
+        "/usr/bin/ss",
+        "/usr/sbin/conntrack",
+        "/usr/bin/sleep",
+        "/usr/bin/cat",
+    ] + select({
+        "@platforms//cpu:aarch64": ["/usr/lib/aarch64-linux-gnu/xtables"],
+        "@platforms//cpu:x86_64": ["/usr/lib/x86_64-linux-gnu/xtables"],
+    }),
+    target_compatible_with = LINUX_ONLY,
+    tool = "//bazel:elf_closure",
+)
+
+# `iptables` takes a lock on `/run/xtables.lock`, which it creates, so `/run` must exist.
+tar(
+    name = "image_run",
+    compress = "gzip",
+    mtree = ["./run uid=0 gid=0 time=0 mode=0755 type=dir"],
+)
+
+# The agent's image for the platform that the build targets.
+oci_image(
+    name = "image",
+    architecture = select({
+        "@platforms//cpu:aarch64": "arm64",
+        "@platforms//cpu:x86_64": "amd64",
+    }),
+    cmd = ["./mirrord-agent"],
+    labels = IMAGE_LABELS,
+    os = "linux",
+    target_compatible_with = LINUX_ONLY,
+    tars = [
+        ":image_runtime",
+        ":image_run",
+        ":image_layer",
+    ],
+)
+
+# The tag that `:image_load` gives the image. `--//mirrord/agent:image_tag=you/mirrord-agent:dev`
+# sets it.
+image_tag(
+    name = "image_tag",
+    build_setting_default = "ghcr.io/metalbear-co/mirrord:latest",
+)
+
+# `bazel run //mirrord/agent:image_load` loads the image for the machine's CPU into Docker, under
+# `:image_tag`.
+oci_load(
+    name = "image_load",
+    image = ":image",
+    repo_tags = ":image_tag",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The image for each Linux CPU. On a Linux machine, the image for its own CPU is the same build as
+# `:image`, and only the other CPU's is a cross-build.
+[
+    platform_filegroup(
+        name = "image_" + cpu,
+        srcs = [":image"],
+        cpu = cpu,
+        os = "linux",
+        tags = ["manual"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The image for both Linux CPUs, which the release publishes. `//...` leaves it out, because it
+# cross-builds.
+oci_image_index(
+    name = "image_index",
+    images = [
+        ":image_aarch64",
+        ":image_x86_64",
+    ],
+    tags = ["manual"],
+)

@@ -3,15 +3,22 @@ import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import path from 'path'
 
+// The version in `[workspace.package]` of the root `Cargo.toml`.
+function workspaceVersion(): string | undefined {
+  const cargoToml = fs.readFileSync(
+    path.resolve(__dirname, '../../Cargo.toml'),
+    'utf8',
+  )
+  return /^version = "([^"]+)"/m.exec(
+    cargoToml.slice(cargoToml.indexOf('[workspace.package]')),
+  )?.[1]
+}
+
 // The bundle is embedded into the CLI binary built from the same checkout, so the workspace
 // version is exactly the mirrord version this UI ships in. Telemetry stamps it on every event.
-const cargoToml = fs.readFileSync(
-  path.resolve(__dirname, '../../Cargo.toml'),
-  'utf8',
-)
-const mirrordVersion = /^version = "([^"]+)"/m.exec(
-  cargoToml.slice(cargoToml.indexOf('[workspace.package]')),
-)?.[1]
+// Bazel passes it in `MIRRORD_VERSION`, so that the build doesn't depend on the rest of the root
+// `Cargo.toml`, and other builds read it from that file.
+const mirrordVersion = process.env.MIRRORD_VERSION || workspaceVersion()
 if (!mirrordVersion) {
   throw new Error('failed to read the workspace version from Cargo.toml')
 }

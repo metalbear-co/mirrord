@@ -371,11 +371,19 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Returns `path` under the repository's root. The root is read when the program runs, not with
+/// `env!`, because a Bazel build would compile in the directory of its sandbox. `bazel run` sets
+/// `BUILD_WORKSPACE_DIRECTORY` to the root, and `cargo run` sets `CARGO_MANIFEST_DIR` to `xtask/`,
+/// whose parent is the root.
 fn relative_to_root(path: &Path) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        // Take the parent because here `CARGO_MANIFEST_DIR` is
-        // the xtask/ subdirectory
-        .parent()
-        .unwrap()
-        .join(path)
+    let root = match std::env::var_os("BUILD_WORKSPACE_DIRECTORY") {
+        Some(root) => PathBuf::from(root),
+        None => {
+            let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+                .expect("`bazel run` or `cargo run` sets the variable that holds the root");
+            // `CARGO_MANIFEST_DIR` is `xtask/`, which has a parent.
+            PathBuf::from(manifest_dir).parent().unwrap().to_owned()
+        }
+    };
+    root.join(path)
 }

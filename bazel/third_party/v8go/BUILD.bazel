@@ -1,0 +1,2 @@
+# The patch that `apps.MODULE.bazel` applies to the `rogchap.com/v8go` Go module. The package exists
+# so that the module file can name the patch with a label.

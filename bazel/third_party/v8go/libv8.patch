@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vinicius Deolindo <viniciusd@metalbear.com>
+Date: Fri, 13 Nov 2026 01:00:39 -0300
+Subject: [PATCH] v8go: make libv8.a an input of the link
+
+The BUILD file that gazelle generates for v8go links with `-lv8` from
+`clinkopts`, but nothing makes the prebuilt `libv8.a` in
+`deps/<platform>` an input of the link, so the linker doesn't find it
+in the sandbox. Each Linux platform's package now imports the archive
+with `cc_import`, and the library depends on it through `cdeps`, so the
+archive is an input of the link.
+
+v8go.cc also compiles without warnings, as the build's other
+third-party C and C++ code does (see `.bazelrc`), because
+`--per_file_copt` doesn't reach cgo's compiles.
+---
+diff --git a/BUILD.bazel b/BUILD.bazel
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -25,6 +25,11 @@ go_library(
+         "v8go.h",
+         "value.go",
+     ],
++    cdeps = select({
++        "@io_bazel_rules_go//go/platform:linux_amd64": ["//deps/linux_x86_64:v8"],
++        "@io_bazel_rules_go//go/platform:linux_arm64": ["//deps/linux_arm64:v8"],
++        "//conditions:default": [],
++    }),
+     cgo = True,
+     clinkopts = [
+         "-pthread -lv8",
+@@ -55,7 +60,7 @@ go_library(
+         ],
+         "//conditions:default": [],
+     }),
+-    cxxopts = ["-fno-rtti -fPIC -std=c++14 -DV8_COMPRESS_POINTERS -DV8_31BIT_SMIS_ON_64BIT_ARCH -Iexternal/gazelle++go_deps+com_rogchap_v8go/deps/include -Wall"],
++    cxxopts = ["-fno-rtti -fPIC -std=c++14 -DV8_COMPRESS_POINTERS -DV8_31BIT_SMIS_ON_64BIT_ARCH -Iexternal/gazelle++go_deps+com_rogchap_v8go/deps/include -w"],
+     importpath = "rogchap.com/v8go",
+     visibility = ["//visibility:public"],
+     deps = [
+diff --git a/deps/linux_arm64/BUILD.bazel b/deps/linux_arm64/BUILD.bazel
+--- a/deps/linux_arm64/BUILD.bazel
++++ b/deps/linux_arm64/BUILD.bazel
+@@ -1,4 +1,5 @@
+ load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("@rules_cc//cc:cc_import.bzl", "cc_import")
+ 
+ go_library(
+     name = "linux_arm64",
+@@ -12,3 +13,9 @@ alias(
+     actual = ":linux_arm64",
+     visibility = ["//visibility:public"],
+ )
++
++cc_import(
++    name = "v8",
++    static_library = "libv8.a",
++    visibility = ["//visibility:public"],
++)
+diff --git a/deps/linux_x86_64/BUILD.bazel b/deps/linux_x86_64/BUILD.bazel
+--- a/deps/linux_x86_64/BUILD.bazel
++++ b/deps/linux_x86_64/BUILD.bazel
+@@ -1,4 +1,5 @@
+ load("@io_bazel_rules_go//go:def.bzl", "go_library")
++load("@rules_cc//cc:cc_import.bzl", "cc_import")
+ 
+ go_library(
+     name = "linux_x86_64",
+@@ -12,3 +13,9 @@ alias(
+     actual = ":linux_x86_64",
+     visibility = ["//visibility:public"],
+ )
++
++cc_import(
++    name = "v8",
++    static_library = "libv8.a",
++    visibility = ["//visibility:public"],
++)

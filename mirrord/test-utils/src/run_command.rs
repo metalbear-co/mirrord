@@ -144,7 +144,7 @@ pub async fn run_mirrord(
     env: HashMap<&str, &str>,
     env_remove: Option<&[&str]>,
 ) -> TestProcess {
-    let path = std::env::var("MIRRORD_TESTS_USE_BINARY")
+    let path = crate::env_path("MIRRORD_TESTS_USE_BINARY")
         .expect("MIRRORD_TESTS_USE_BINARY must point to an external mirrord binary");
     let temp_dir = tempdir().unwrap();
 
@@ -176,6 +176,6 @@ pub async fn run_mirrord(
         server.id().unwrap()
     );
     // We need to hold temp dir until the process is finished
-    let label = output_label(&path, &args);
+    let label = output_label(&path.to_string_lossy(), &args);
     TestProcess::from_child_labeled(server, Some(temp_dir), &label)
 }

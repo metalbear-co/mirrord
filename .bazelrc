@@ -1,0 +1,139 @@
+# The flags that Bazel adds to the commands that run in this workspace, much as `.cargo/config.toml`
+# sets options for Cargo. A line that starts with a command, like `build`, applies to that command,
+# and `build` lines also apply to the commands that build, like `test` and `run`. `common` lines
+# apply to every command. A line like `build:clippy` applies only when the command has
+# `--config=clippy`. See https://bazel.build/run/bazelrc.
+#
+# Builds target the machine that runs Bazel, so `bazel build //...` and `bazel test //...` only
+# build for this machine. `--enable_platform_specific_config` makes Bazel apply the config that's
+# named after the machine's OS:
+#
+# - On Linux, builds target `//bazel/platforms:linux-host` to link against glibc 2.17, while the
+#   tools that run during the build still build for the machine itself.
+# - On macOS, builds target `//bazel/platforms:macos-host`, the platform that Bazel detects, under
+#   a name of the workspace's own, so that `//bazel:platform.bzl` can transition to it.
+# - On Windows, builds and tools both target `//bazel/platforms:windows-host`, which builds for MSVC
+#   with the llvm toolchain, as other machines do when they build for Windows.
+#
+# Passing another platform with `--platforms` cross-compiles, for example
+# `--platforms=//bazel/platforms:aarch64-linux`, `--platforms=//bazel/platforms:x86_64-macos` or
+# `--platforms=//bazel/platforms:x86_64-windows`. A Linux machine builds for every platform in
+# `//bazel/platforms`. `//bazel/platforms/BUILD.bazel` explains platforms.
+common --enable_platform_specific_config
+common:linux --platforms=//bazel/platforms:linux-host
+common:macos --platforms=//bazel/platforms:macos-host
+common:windows --host_platform=//bazel/platforms:windows-host
+
+# Stops Bazel from making a C++ toolchain of the compiler that's installed on the machine, so that a
+# build that the llvm toolchain doesn't fit fails rather than build with that compiler.
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+
+# Turns off the compiler's warnings for third-party C and C++ code, like the llvm toolchain's
+# libstdc++, librdkafka and OpenSSL, which clang compiles with thousands of warnings that only
+# their projects can fix. `external/` matches the paths of every module's sources.
+build --per_file_copt=external/.*@-w
+build --host_per_file_copt=external/.*@-w
+
+# Stops the build scripts from finding the Visual Studio that's installed on a Windows machine.
+# Their cc-rs takes the environment of the Visual Studio that it finds, and passes its library
+# directory to rustc, which rules_rust rejects as a path outside the build, while the llvm toolchain
+# brings MSVC's libraries itself. find-msvc-tools, which cc-rs uses, only looks for the MSVC version
+# that `VCToolsVersion` names, and none is named `none`.
+build:windows --action_env=VCToolsVersion=none
+build:windows --host_action_env=VCToolsVersion=none
+
+# Makes the C and C++ that the build scripts compile on a Windows machine name their sources by
+# relative paths. cc-rs passes the sources by absolute paths, which `__FILE__` then puts in the
+# binaries, and rules_rust fails a compile whose output contains its absolute working directory.
+# Elsewhere, each action runs in a sandbox directory of its own, which those paths don't match, and
+# rules_rust passes the same flag to compilers other than MSVC's. The llvm toolchain's clang-cl
+# takes it through `/clang:`. The build scripts' runner replaces `${pwd}` with the working
+# directory, and in Bazel's own compiles, which name sources by relative paths, it matches nothing.
+build:windows --copt=/clang:-ffile-prefix-map=${pwd}=.
+build:windows --host_copt=/clang:-ffile-prefix-map=${pwd}=.
+
+# Passes the tests two variables of a Windows machine's environment, which Bazel leaves out:
+# `PATHEXT`, the extensions that Windows tries when it runs a command by its name, for the tests
+# that find commands the way Windows does, like mirrord-command's, and `USERPROFILE`, the home
+# directory, which the layer reads on Windows, and warns without.
+test:windows --test_env=PATHEXT
+test:windows --test_env=USERPROFILE
+
+# Accepts the license terms of Microsoft's MSVC runtime, which come with Visual Studio's
+# (https://visualstudio.microsoft.com/license-terms), and of the Windows SDK, so that builds for
+# MSVC that use the llvm toolchain, such as cross-compiled ones, can download them. The llvm
+# toolchain only downloads each one when its terms are accepted, and C code for MSVC needs the
+# SDK's headers.
+common --repo_env=BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1
+common --repo_env=BAZEL_WINDOWS_SDK_EULA=1
+
+# Builds librdkafka, which the end-to-end tests' Kafka consumer links through `rdkafka-sys`, without
+# curl and zstd, as the crate's own CMake build does (see `MODULE.bazel`).
+common --@librdkafka//:with_curl=false
+common --@librdkafka//:with_zstd=false
+
+# Turns off clang's warning about unused arguments in the links of the tools that run during the
+# build: build scripts, proc macros and rules_rust's own tools, which build for the machine.
+# `//bazel:rust.bzl` explains the warning, and https://github.com/hermeticbuild/rules_rust/pull/38
+# removes its cause on Linux: once rules_rs ships a rules_rust with it, the `build:linux` line can
+# go. macOS keeps its line while `-rtlib=compiler-rt` reaches the links. `//bazel:rust.bzl` turns
+# the warning off for the workspace's own targets with a `select()` on the target platform, which
+# `.bazelrc` can't do. Only Linux and macOS machines pass the flag, because Windows machines link
+# their tools with `lld-link`, which doesn't know it.
+build:linux --host_linkopt=-Wno-unused-command-line-argument
+build:macos --host_linkopt=-Wno-unused-command-line-argument
+
+# Keeps symbol tables in binaries, as Cargo and `go build` do. Bazel's default, `sometimes`, strips
+# fastbuild binaries, so rules_go would link the Go test apps with `-s -w`, and the real layer finds
+# Go's runtime in an app by the app's symbols. Optimized builds aren't stripped either way.
+build --strip=never
+
+# Names output directories after the target platform. Bazel would otherwise name them after the CPU
+# and compilation mode only, so builds for different platforms of the same CPU, such as
+# `linux-host` and `x86_64-linux-libstdcxx` on an x86-64 machine, would write to the same paths,
+# and each switch between them would rebuild everything.
+common --experimental_platform_in_output_dir=yes
+
+# `bazel build --config=clippy //...` runs clippy on every Rust target, like `cargo clippy`, fails
+# on any warning, and builds nothing else. Bazel caches the results like any other action, so only
+# the crates that changed are checked again.
+#
+# The dependencies still compile, but nothing links, so clippy is a quicker way than a build to
+# check the code for another platform, for example with
+# `bazel build --config=clippy --platforms=//bazel/platforms:x86_64-windows //...`.
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=clippy_checks
+
+# Makes clippy fail on any warning. Only clippy reads the flag, but it's a build setting, which is
+# part of every target's configuration, and Bazel analyzes the whole workspace again when a
+# command's configuration differs from the previous command's. So every build sets it, and a build
+# with `--config=clippy` or `--config=doc` reuses the analysis of the build before it.
+build --@rules_rust//rust/settings:clippy_flag=-Dwarnings
+
+# Every Rust crate has a `<name>_doc` target, tagged `rustdoc`, that runs rustdoc on it with
+# warnings as errors. Builds leave them out, and `bazel build --config=doc //...` builds only them.
+# The filter applies to the targets that a command names too, so building one doc target also takes
+# `--config=doc`.
+build --build_tag_filters=-rustdoc
+build:doc --build_tag_filters=rustdoc
+
+# Makes `js_binary` launchers small native programs that start Node, rather than bash scripts, so
+# that they also run on Windows machines without bash. That includes the launcher that runs Vite to
+# build the UI, which the Windows CLI embeds. rules_js still calls this launcher experimental.
+common --@aspect_rules_js//js:use_hermetic_launcher
+
+# Makes Windows builds create runfiles directories. A runfiles directory holds the files that a
+# test or a tool reads at run time, like the layer that `//mirrord/cli` loads. On Linux and macOS,
+# Bazel always creates it, but on Windows, it only writes a manifest of where each file is, unless
+# it's asked for the directory too. The nextest runner, the Rust tests and the CLI only look for
+# their files in the directory. Without symlink support, Bazel copies the files into the directory.
+build:windows --enable_runfiles
+
+# Lists each test case under its target in the summary, as `cargo test` and `cargo nextest run`
+# list each test. Bazel would otherwise print one line for each target, which says `PASSED` even
+# when `--test_filter` left no test in it to run.
+test --test_summary=detailed
+
+# Makes `py_binary` launchers start the Python interpreter that rules_python downloads, through a
+# shell script, rather than whichever `python3` is on `PATH`, which a NixOS machine may not have.
+common --@rules_python//python/config_settings:bootstrap_impl=script

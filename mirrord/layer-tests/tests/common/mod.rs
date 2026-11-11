@@ -12,11 +12,36 @@ use std::{
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 pub use mirrord_layer_tests::intproxy::TestIntProxy;
-pub use mirrord_test_utils::{TestProcess, run_command::run_exec};
+pub use mirrord_test_utils::{TestProcess, bazel_python, node, run_command::run_exec};
 use rstest::fixture;
 use tokio::{io::AsyncWriteExt, net::TcpListener};
 use tracing::subscriber::DefaultGuard;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
+
+/// The directory of this crate, which Cargo and nextest give the tests when they run them. The
+/// tests read it then, rather than with `env!` when they compile, so that a Bazel build of the
+/// tests doesn't keep the sandbox directory that they compiled in. Under Bazel, it's the crate's
+/// directory in the test's runfiles, where the test apps and configs are.
+pub fn manifest_dir() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("the tests run under Cargo or nextest"),
+    )
+}
+
+/// Returns the path of the Rust test app `name`, a member of the Cargo workspace in
+/// `tests/apps/<directory>`. Cargo builds it into the workspace's `target/debug`, and Bazel puts it
+/// next to its sources in the test's runfiles, whose directory Bazel's tests get in `RUNFILES_DIR`.
+fn workspace_app(directory: &str, name: &str) -> String {
+    if std::env::var_os("RUNFILES_DIR").is_some() {
+        format!("tests/apps/{directory}/{name}")
+    } else {
+        manifest_dir()
+            .join("../../target/debug")
+            .join(name)
+            .to_string_lossy()
+            .into_owned()
+    }
+}
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
@@ -46,7 +71,11 @@ pub fn init_tracing() -> DefaultGuard {
         .map(|name| name.replace(':', "_"))
     {
         Some(test_name) => {
-            let mut logs_file = PathBuf::from("/tmp/intproxy_logs");
+            // Bazel deletes a test's `/tmp` with its sandbox, but keeps the files in
+            // `TEST_UNDECLARED_OUTPUTS_DIR`, in the test's `test.outputs` in `bazel-testlogs`.
+            let mut logs_file = std::env::var_os("TEST_UNDECLARED_OUTPUTS_DIR")
+                .map(|outputs| PathBuf::from(outputs).join("intproxy_logs"))
+                .unwrap_or_else(|| PathBuf::from("/tmp/intproxy_logs"));
 
             #[cfg(target_os = "macos")]
             logs_file.push("macos");
@@ -215,6 +244,10 @@ impl Application {
     /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
     /// that prevents the layer from loading because of SIP.
     pub(crate) async fn get_python3_executable() -> String {
+        if let Some(python) = bazel_python() {
+            return python.executable.clone();
+        }
+
         // `python3` doesn't exist on windows :D
         let python_exec = if cfg!(target_os = "windows") {
             "python"
@@ -263,25 +296,19 @@ impl Application {
             Application::NodeHTTP
             | Application::NodeIssue2283
             | Application::NodeIssue2807
-            | Application::NodeIssue3456 => String::from("node"),
+            | Application::NodeIssue3456 => node(),
             Application::GoHTTP(version) => format!("tests/apps/app_go/{version}.go_test_app"),
             Application::GoFileOps(version) => {
                 format!("tests/apps/fileops/go/{version}.go_test_app")
             }
-            Application::RustFileOps => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/fileops"
-                )
-            }
+            Application::RustFileOps => workspace_app("fileops", "fileops"),
             Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
             Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeCopyFile
             | Application::NodeStat
             | Application::NodeIssue2903
-            | Application::NodeMakeConnections => String::from("node"),
+            | Application::NodeMakeConnections => node(),
             Application::GoDir(version) => format!("tests/apps/dir_go/{version}.go_test_app"),
             Application::GoIssue834(version) => {
                 format!("tests/apps/issue834/{version}.go_test_app")
@@ -305,94 +332,33 @@ impl Application {
             Application::RustIssue1458PortNot53 => {
                 String::from("tests/apps/issue1458portnot53/target/issue1458portnot53")
             }
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "../../target/debug/outgoing",
-            ),
-            Application::RustDnsResolve => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "../../target/debug/dns_resolve",
-            ),
-            Application::RustRecvFrom => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/recv_from"
-                )
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => {
+                workspace_app("outgoing", "outgoing")
             }
-            Application::RustListenPorts => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/listen_ports"
-                )
-            }
-            Application::RustIssue1776 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1776"
-                )
-            }
+            Application::RustDnsResolve => workspace_app("dns-resolve", "dns_resolve"),
+            Application::RustRecvFrom => workspace_app("recv-from", "recv_from"),
+            Application::RustListenPorts => workspace_app("listen-ports", "listen_ports"),
+            Application::RustIssue1776 => workspace_app("issue1776", "issue1776"),
             Application::RustIssue1776PortNot53 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1776portnot53"
-                )
+                workspace_app("issue1776portnot53", "issue1776portnot53")
             }
-            Application::RustIssue1899 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1899"
-                )
-            }
-            Application::RustIssue2438 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue2438"
-                )
-            }
-            Application::RustIssue2001 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue2001"
-                )
-            }
-            Application::RustIssue3248 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue3248"
-                )
-            }
-            Application::RustRebind0 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/rebind0"
-                )
-            }
-            Application::OpenFile => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/open_file/out.c_test_app",
-            ),
-            Application::CIssue2055 => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/gethostbyname/out.c_test_app",
-            ),
-            Application::CIssue2178 => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/issue2178/out.c_test_app",
-            ),
+            Application::RustIssue1899 => workspace_app("issue1899", "issue1899"),
+            Application::RustIssue2438 => workspace_app("issue2438", "issue2438"),
+            Application::RustIssue2001 => workspace_app("issue2001", "issue2001"),
+            Application::RustIssue3248 => workspace_app("issue3248", "issue3248"),
+            Application::RustRebind0 => workspace_app("rebind0", "rebind0"),
+            Application::OpenFile => manifest_dir()
+                .join("tests/apps/open_file/out.c_test_app")
+                .to_string_lossy()
+                .into_owned(),
+            Application::CIssue2055 => manifest_dir()
+                .join("tests/apps/gethostbyname/out.c_test_app")
+                .to_string_lossy()
+                .into_owned(),
+            Application::CIssue2178 => manifest_dir()
+                .join("tests/apps/issue2178/out.c_test_app")
+                .to_string_lossy()
+                .into_owned(),
             Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
             Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
             Application::GoOpen { version, .. } => {
@@ -409,37 +375,20 @@ impl Application {
             Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
             Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
             Application::DnsSd => String::from("tests/apps/dns_sd/out.c_test_app"),
-            Application::DupListen => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/dup-listen"
-                )
-            }
+            Application::DupListen => workspace_app("dup-listen", "dup-listen"),
             Application::PosixSpawnSharedSockets => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/posix-spawn-shared-sockets"
-                )
+                workspace_app("posix-spawn-shared-sockets", "posix-spawn-shared-sockets")
             }
-            Application::DoubleListen => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/double_listen"
-                )
-            }
-            Application::UnixConnectAddrlen => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/unix_connect_addrlen/out.c_test_app",
-            ),
+            Application::DoubleListen => workspace_app("double-listen", "double_listen"),
+            Application::UnixConnectAddrlen => manifest_dir()
+                .join("tests/apps/unix_connect_addrlen/out.c_test_app")
+                .to_string_lossy()
+                .into_owned(),
         }
     }
 
     pub fn get_args(&self) -> Vec<String> {
-        let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut app_path = manifest_dir();
         app_path.push("tests/apps/");
         match self {
             Application::PythonFlaskHTTP => {
@@ -616,7 +565,7 @@ impl Application {
                 app_path.push("issue4622.js");
                 vec![
                     "-c".to_owned(),
-                    format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
+                    format!("exec 0<&- ; exec {} {}", node(), app_path.to_string_lossy()),
                 ]
             }
             Application::PosixSpawnSharedSockets => vec![],
@@ -770,7 +719,7 @@ impl Application {
 #[fixture]
 #[once]
 pub fn config_dir() -> PathBuf {
-    let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut config_path = manifest_dir();
     config_path.push("tests/configs");
     config_path
 }
@@ -809,6 +758,10 @@ pub fn get_env(
         // remote-first read approach, implicitly overriden through `extra_vars` for tests that
         // require it.
         default_env.push(("MIRRORD_FILE_MODE".to_owned(), "local".to_owned()));
+    }
+
+    if let Some(python) = bazel_python() {
+        default_env.push(("PYTHONPATH".to_owned(), python.python_path.clone()));
     }
 
     let mut exec_env_map: HashMap<String, String> =

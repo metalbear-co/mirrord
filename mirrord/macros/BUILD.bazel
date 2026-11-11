@@ -1,0 +1,11 @@
+load("//bazel:rust.bzl", "rust_proc_macro", "rust_test")
+
+rust_proc_macro(
+    name = "macros",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "boxed_future",
+    deps = [":macros"],
+)

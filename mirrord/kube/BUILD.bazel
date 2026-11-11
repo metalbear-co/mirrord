@@ -1,0 +1,11 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "kube",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":kube",
+)

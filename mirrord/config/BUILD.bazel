@@ -1,0 +1,13 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "config",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":config",
+    # A test checks that the schema at the repository's root is up to date.
+    data = ["//:mirrord-schema.json"],
+)

@@ -1,0 +1,16 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "UNIX_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+load("//mirrord/layer-tests/tests/apps:go_test_app.bzl", "go_test_app")
+
+rust_binary(
+    name = "fileops",
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)
+
+# The Go version of the app, which `go/` holds.
+go_test_app(
+    "go",
+    # Only `fileops`'s Linux-only `go_stat` runs it.
+    target_compatible_with = LINUX_ONLY,
+)

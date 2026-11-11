@@ -1,0 +1,60 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "test-utils",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "wait_for_line",
+    target_compatible_with = UNIX_ONLY,
+    deps = [":test-utils"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":test-utils",
+)
+
+# The interpreters that the layer tests and the end-to-end tests run their Node and Python apps
+# with, which Bazel downloads, so that the tests don't depend on the machine's `node` and `python3`.
+# The tests get each one's runfiles path from the variable that `node()` or `bazel_python()` in
+# `src/lib.rs` reads.
+#
+# `:node` is Node itself, for the platform that the tests run on, rather than rules_nodejs's `:node`
+# launcher, which is a shell script that the layer would load into.
+alias(
+    name = "node",
+    actual = select({
+        "//bazel/platforms:is_linux_aarch64": "@nodejs_linux_arm64//:node_bin",
+        "//bazel/platforms:is_linux_x86_64": "@nodejs_linux_amd64//:node_bin",
+        "//bazel/platforms:is_macos_aarch64": "@nodejs_darwin_arm64//:node_bin",
+        "//bazel/platforms:is_macos_x86_64": "@nodejs_darwin_amd64//:node_bin",
+        "//bazel/platforms:is_windows_x86_64": "@nodejs_windows_amd64//:node_bin",
+    }),
+    visibility = [
+        "//mirrord/layer-tests:__pkg__",
+        "//mirrord/tests:__pkg__",
+    ],
+)
+
+# `:python_env` prints the interpreter and the path of the apps' pip packages, which the tests run
+# the Python apps with (see `bazel_python` in `src/lib.rs`). `requirements.in` lists the packages,
+# and `uv pip compile --generate-hashes --universal requirements.in -o requirements.txt` locks them.
+py_binary(
+    name = "python_env",
+    srcs = ["python_env.py"],
+    visibility = [
+        "//mirrord/layer-tests:__pkg__",
+        "//mirrord/tests:__pkg__",
+    ],
+    deps = [
+        "@pip//fastapi",
+        "@pip//flask",
+        "@pip//uvicorn",
+    ],
+)
+
+exports_files(["requirements.txt"])

@@ -1,0 +1,18 @@
+load("//bazel:compatibility.bzl", "WINDOWS_ONLY")
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "command",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":command",
+)
+
+rust_test(
+    name = "pathext",
+    target_compatible_with = WINDOWS_ONLY,
+    deps = [":command"],
+)

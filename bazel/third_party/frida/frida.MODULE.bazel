@@ -1,0 +1,75 @@
+# The parts of Frida's build that create repositories, which only `MODULE.bazel` can declare.
+# `MODULE.bazel` includes this file, and `BUILD.bazel` next to it builds the rest.
+
+# Turns off `frida-gum-sys`'s build script, and does its work in Bazel instead. The build script
+# would download Frida's devkit, the static library that the crate binds, from GitHub, and generate
+# the bindings with bindgen, which needs libclang. Instead, Bazel pins the devkits below, and
+# `//bazel/third_party/frida` generates the bindings with rules_rs's hermetic bindgen and provides
+# the directory with them as the crate's `OUT_DIR`. The build script would also compile the crate's
+# C code, which `listeners` compiles instead, in the crate's repository, where its headers are. The
+# hub exposes that library to `//bazel/third_party/frida` and the crate through
+# `extra_aliased_targets`.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.annotation(
+    additive_build_file_content = """
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+# The C code that the build script compiles for the `invocation-listener` feature, and the headers
+# that it generates bindings for.
+cc_library(
+    name = "listeners",
+    srcs = ["invocation_listener.c", "probe_listener.c"],
+    hdrs = glob(["*.h"]),
+    copts = ["-O3"],
+    includes = ["."],
+    local_defines = ["USE_GUM_JS=0"],
+    deps = ["@@//bazel/third_party/frida:devkit"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["stalker_params.h"], visibility = ["//visibility:public"])
+""",
+    crate = "frida-gum-sys",
+    extra_aliased_targets = {
+        "frida-gum-sys-listeners": "listeners",
+        "frida-gum-sys-stalker-params-header": "stalker_params.h",
+    },
+    gen_build_script = "off",
+    deps = [
+        "//bazel/third_party/frida:frida_gum_sys_out_dir",
+        "@crates//frida-gum-sys-listeners",
+    ],
+)
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# The version must match `FRIDA_VERSION` in the `frida-gum-sys` crate.
+FRIDA_VERSION = "17.9.5"
+
+[
+    http_archive(
+        name = "frida_gum_devkit_" + platform.replace("-", "_"),
+        build_file_content = """
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "devkit",
+    srcs = ["libfrida-gum.a"],
+    hdrs = ["frida-gum.h"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = "https://github.com/frida/frida/releases/download/{version}/frida-gum-devkit-{version}-{platform}.tar.xz".format(
+            platform = platform,
+            version = FRIDA_VERSION,
+        ),
+    )
+    for platform, sha256 in {
+        "linux-arm64": "598b4e6a22d4cc48f0b7fe7ba9cb65332bbc356c2107c7bbc894fe940a42dce8",
+        "linux-x86_64": "c25f5f3e6b9f3a237d3136d2adb710b717fc53a2f3e59272674f0d2465c8e271",
+        "macos-arm64": "1e7272a74c19eb395ff0d9934c5c3c0ac906dfa839f49bf47f691d2d1e7f2671",
+        "macos-x86_64": "2436110dd85a96a90ea776f7ec5ac14e668086c3f6526f3f489c51bbea19a449",
+    }.items()
+]

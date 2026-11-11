@@ -1,0 +1,50 @@
+# The `protoc` releases that `//bazel/third_party/protoc` picks from, and the crates whose build
+# scripts run them. `MODULE.bazel` includes this file.
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+PROTOC_VERSION = "36.2"
+
+[
+    http_archive(
+        name = "protoc_" + platform.replace("-", "_"),
+        build_file_content = """
+alias(
+    name = "protoc",
+    actual = glob(
+        ["bin/protoc", "bin/protoc.exe"],
+        allow_empty = True,
+    )[0],
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = "https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{platform}.zip".format(
+            platform = platform,
+            version = PROTOC_VERSION,
+        ),
+    )
+    for platform, sha256 in {
+        "linux-aarch_64": "8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a",
+        "linux-x86_64": "121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278",
+        "osx-universal_binary": "83d0dc80672f53486f54299bca6177159f9cad1fd54d4d3143eeea53c4423e1b",
+        "win64": "f0c128dc0d8492eceece83bb459a4c0e316764b929ffbf1aa416357fd644edd3",
+    }.items()
+]
+
+# The build scripts of `containerd-client` and `k8s-cri`, which the agent uses to talk to the
+# container runtimes, generate their gRPC code with `protoc`. They get the `protoc` release for the
+# platform that runs them, from `//bazel/third_party/protoc`.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+
+[
+    crate.annotation(
+        build_script_env = {"PROTOC": "$(execpath @@//bazel/third_party/protoc)"},
+        build_script_tools = ["//bazel/third_party/protoc"],
+        crate = name,
+    )
+    for name in [
+        "containerd-client",
+        "k8s-cri",
+    ]
+]

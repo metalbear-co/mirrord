@@ -10,13 +10,13 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
 use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
-use mirrord_command::resolve_tokio_command;
+use mirrord_command::{resolve_command, resolve_tokio_command};
 use tempfile::TempDir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -33,6 +33,95 @@ pub mod run_command;
 /// logs of the pods in the cluster, instead of only in nextest's report of a failure. Nothing
 /// is written when it is unset.
 pub const LOG_DIR_ENV: &str = "MIRRORD_TESTS_LOG_DIR";
+
+/// Returns the path that the environment variable `variable` holds, if it's set.
+///
+/// Under Bazel, the variable holds a path in the test's runfiles, because a test target can only
+/// pass the files in its `data` to the test, and only as runfiles paths (`$(rlocationpath)` in the
+/// target's `env`). So this joins the path onto the runfiles directory, which the nextest runner
+/// passes every Bazel test in `RUNFILES_DIR`. Under Cargo, the variable holds the path itself.
+pub fn env_path(variable: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var_os(variable)?);
+    let Some(runfiles) = std::env::var_os("RUNFILES_DIR") else {
+        return Some(path);
+    };
+
+    let path = Path::new(&runfiles).join(path);
+    assert!(
+        path.exists(),
+        "{} isn't in the test's runfiles",
+        path.display()
+    );
+
+    // The runfiles directory can be relative to the test's working directory, and tests often run
+    // the program from another one.
+    Some(std::path::absolute(path).unwrap())
+}
+
+/// Returns the Node.js that runs the Node apps: the one that Bazel provides in `MIRRORD_TEST_NODE`,
+/// or `node` from `PATH`.
+pub fn node() -> String {
+    env_path("MIRRORD_TEST_NODE")
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "node".to_owned())
+}
+
+/// The Python interpreter that Bazel provides for the Python apps, in place of `python3` from
+/// `PATH`.
+pub struct BazelPython {
+    /// The interpreter itself.
+    pub executable: String,
+
+    /// The `PYTHONPATH` that holds the apps' pip packages.
+    pub python_path: String,
+}
+
+/// Returns the Python interpreter that Bazel provides, or `None` under Cargo.
+///
+/// Bazel passes the tests `MIRRORD_TEST_PYTHON`, a program that prints the interpreter and the path
+/// that holds the apps' pip packages. Bazel starts the program with a shell script, so the tests
+/// can't run the apps that way: the layer would load into the shell, which makes calls that the
+/// tests don't expect, like reading the host name. So the tests run the interpreter with that path
+/// in `PYTHONPATH`, as they run `python3`.
+pub fn bazel_python() -> Option<&'static BazelPython> {
+    static PYTHON: OnceLock<Option<BazelPython>> = OnceLock::new();
+    PYTHON
+        .get_or_init(|| {
+            let python_env = env_path("MIRRORD_TEST_PYTHON")?;
+            // On Windows, rules_python makes the program's virtual environment each time the
+            // program starts, in a temporary directory that it deletes when the program exits, so
+            // the interpreter that the program prints would be gone. With
+            // `RULES_PYTHON_EXTRACT_ROOT`, it makes the environment there and keeps it. Each test
+            // process gets a directory of its own, because the tests of a target run at the same
+            // time, and the program rewrites the environment's configuration. Other platforms make
+            // the environment when they build the program, and ignore the variable.
+            let venv_root = std::env::var_os("TEST_TMPDIR")
+                .map_or_else(std::env::temp_dir, PathBuf::from)
+                .join(format!("python-env-{}", std::process::id()));
+            let output = resolve_command(python_env)
+                .env("RULES_PYTHON_EXTRACT_ROOT", venv_root)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let mut lines = stdout.lines().map(str::to_owned);
+            Some(BazelPython {
+                executable: lines.next().unwrap(),
+                python_path: lines.next().unwrap(),
+            })
+        })
+        .as_ref()
+}
+
+/// Returns the Python interpreter that runs the Python apps: the one that Bazel provides (see
+/// [`bazel_python`]), or `python3` from `PATH`. Bazel's interpreter only finds the apps' pip
+/// packages with [`BazelPython::python_path`] in `PYTHONPATH`, which [`run_command::run_exec`]
+/// sets.
+pub fn python() -> String {
+    bazel_python()
+        .map(|python| python.executable.clone())
+        .unwrap_or_else(|| "python3".to_owned())
+}
 
 /// The file a process's output is copied to under [`LOG_DIR_ENV`], or `None` when the
 /// directory is unset or cannot be written; a copy that fails must not fail the test.

@@ -1,0 +1,8 @@
+load("//bazel:compatibility.bzl", "MACOS_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "issue3248",
+    target_compatible_with = MACOS_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

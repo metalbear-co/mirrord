@@ -17,6 +17,32 @@
         system:
         let
           pkgs = inputs.nixpkgs.legacyPackages.${system};
+
+          # The `bazel` command runs bazelisk, which runs the Bazel release that `.bazelversion`
+          # names, as CI does, so that the devshell and CI share cached results.
+          #
+          # Bazel downloads prebuilt toolchains, such as rustc, Node.js and Python, which load their
+          # libraries through `/lib64/ld-linux-x86-64.so.2` and look for them in `/usr/lib`, as
+          # Bazel's own release does. NixOS has neither, so on Linux the `bazel` command runs
+          # bazelisk in a bubblewrap namespace that provides both, with the libraries below. Every
+          # action and `bazel run` target runs in that namespace too, because the Bazel server and
+          # the programs that it starts inherit it.
+          bazel =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              pkgs.buildFHSEnv {
+                name = "bazel";
+                targetPkgs = pkgs: [
+                  # libgcc_s and libstdc++.
+                  pkgs.stdenv.cc.cc.lib
+                  pkgs.zlib
+                  # Tests run with Bazel's default `PATH`, `/bin:/usr/bin:/usr/local/bin`, and some
+                  # of them run `git`, which other Linux machines have there.
+                  pkgs.git
+                ];
+                runScript = lib.getExe pkgs.bazelisk;
+              }
+            else
+              pkgs.writeShellScriptBin "bazel" ''exec ${lib.getExe pkgs.bazelisk} "$@"'';
         in
         {
           default = pkgs.mkShell {
@@ -84,6 +110,13 @@
                   ))
                 ];
 
+                # Bazel builds and tests the workspace with toolchains that it downloads itself
+                # (see `MODULE.bazel`).
+                bazelPackages = [
+                  bazel
+                  starpls
+                ];
+
                 # Miscellaneous packages to run CI checks locally
                 miscPackages = [
                   cargo-deny
@@ -94,7 +127,7 @@
                   python312
                 ];
               in
-              rustPackages ++ uiPackages ++ testsPackages ++ miscPackages;
+              rustPackages ++ uiPackages ++ testsPackages ++ bazelPackages ++ miscPackages;
 
             env =
               with pkgs;

@@ -1,5 +1,5 @@
 #[cfg(unix)]
-use std::{fs::OpenOptions, io::Write, net::SocketAddr, ops::Not, path::PathBuf, time::Duration};
+use std::{fs::OpenOptions, io::Write, net::SocketAddr, ops::Not, time::Duration};
 
 use rstest::rstest;
 use tokio::net::TcpListener;
@@ -17,9 +17,7 @@ async fn exec_python(
     script: &str,
     extra_env: Vec<(&str, &str)>,
 ) -> TestProcess {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/apps")
-        .join(script);
+    let script = common::manifest_dir().join("tests/apps").join(script);
     let env = get_env(
         intproxy,
         [
@@ -42,7 +40,8 @@ async fn exec_python(
     run_exec(cmdline, None, None, None, Some(env), None).await
 }
 
-/// Ensures that `mirrord exec` extracts the layer when `MIRRORD_LAYER_FILE` is not set.
+/// Ensures that `mirrord exec` uses the CLI's own layer when `MIRRORD_LAYER_FILE` is not set: the
+/// layer that it embeds, which it extracts to a file, or under Bazel, the layer in its runfiles.
 #[rstest]
 #[tokio::test]
 async fn exec_extracts_layer_without_env() {

@@ -1,0 +1,5 @@
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "issue1317",
+)

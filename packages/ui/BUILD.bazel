@@ -1,0 +1,55 @@
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@cargo_packages//:packages.bzl", "PACKAGES")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/ui:vite/package_json.bzl", vite_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+# The built site, like `pnpm --filter mirrord-ui build`. Vite takes the mirrord version, which is
+# the CLI's, from `MIRRORD_VERSION`, and styles the site with PostCSS and Tailwind through their
+# configs here. It gets the packages that the site imports and the plugins that its configs load,
+# without the tools that only lint and type-check it.
+vite_bin.vite(
+    name = "dist_for_target",
+    srcs = glob([
+        "public/**",
+        "src/**",
+    ]) + [
+        "index.html",
+        "package.json",
+        "postcss.config.js",
+        "tailwind.config.js",
+        "tsconfig.json",
+        "vite.config.ts",
+        ":node_modules/@fontsource/poppins",
+        ":node_modules/@metalbear/ui",
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/autoprefixer",
+        ":node_modules/lucide-react",
+        ":node_modules/postcss",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/tailwindcss",
+        # `vite.config.ts` imports Vite itself.
+        ":node_modules/vite",
+        "//packages/monitor",
+        "//packages/wizard",
+    ],
+    args = ["build"],
+    chdir = package_name(),
+    env = {"MIRRORD_VERSION": PACKAGES["mirrord/cli"].version},
+    out_dirs = ["dist"],
+    # Builds only through `:dist`, for the host.
+    tags = ["manual"],
+)
+
+# The site that the CLI embeds. The site is the same on every platform, but Vite runs native
+# modules, like rollup's, that rules_js picks for the target platform. So the site always builds for
+# the host, where Vite runs, even when the CLI builds for another platform.
+platform_transition_filegroup(
+    name = "dist",
+    srcs = [":dist_for_target"],
+    target_platform = "@platforms//host",
+    visibility = ["//mirrord/cli:__pkg__"],
+)

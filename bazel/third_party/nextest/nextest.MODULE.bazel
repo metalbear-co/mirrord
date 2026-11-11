@@ -1,0 +1,35 @@
+# The cargo-nextest releases that `//bazel/third_party/nextest` picks from. `MODULE.bazel` includes
+# this file. Each archive holds the single, statically linked `cargo-nextest` program, which
+# `//bazel:nextest.bzl` runs to run the tests that a `rust_test` builds.
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+NEXTEST_VERSION = "0.9.151"
+
+[
+    http_archive(
+        name = "nextest_" + platform.replace("-", "_"),
+        build_file_content = """
+alias(
+    name = "nextest",
+    actual = glob(
+        ["cargo-nextest", "cargo-nextest.exe"],
+        allow_empty = True,
+    )[0],
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-{version}/cargo-nextest-{version}-{platform}.tar.gz".format(
+            platform = platform,
+            version = NEXTEST_VERSION,
+        ),
+    )
+    for platform, sha256 in {
+        # The musl builds are static, so they run on any Linux machine, whatever its glibc.
+        "aarch64-unknown-linux-musl": "a9ee2d53cf0711d879f068c0ff814b6fe3af3f9be8799f8ab484e47571087160",
+        "universal-apple-darwin": "d1d7d025d4bfc9fb154cd76aea3949bd78534829a0589abefa6e5dd4edb135dd",
+        "x86_64-pc-windows-msvc": "e51bdb4b5883df48f335381b287378edb244318fac65ae0adaf6b9e69298246b",
+        "x86_64-unknown-linux-musl": "6b284d6fde9670dfb6ee10ea9d9abbc85f95643d3f592472d420d82e257b3a6c",
+    }.items()
+]

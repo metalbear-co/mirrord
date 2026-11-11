@@ -1,0 +1,26 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "cluster-auth",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":cluster-auth",
+)
+
+rust_test(
+    name = "client",
+    deps = [":cluster-auth"],
+)
+
+# The test waits for several token refreshes, which takes about a minute. It needs the `eks`
+# feature, which only the agent, on Linux, turns on.
+rust_test(
+    name = "eks",
+    size = "medium",
+    target_compatible_with = LINUX_ONLY,
+    deps = [":cluster-auth"],
+)

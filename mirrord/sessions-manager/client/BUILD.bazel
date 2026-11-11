@@ -1,0 +1,16 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "client",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":client",
+)
+
+rust_test(
+    name = "intproxy_credentials",
+    deps = [":client"],
+)

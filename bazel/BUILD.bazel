@@ -1,0 +1,44 @@
+# The package of the Starlark code that the workspace's BUILD files load, like `rust.bzl`, and of
+# the flags that the code reads. `load()` only takes `.bzl` files from a package, so the directory
+# needs a BUILD file.
+
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+
+# The paths of a PKCS #12 file with the certificate and private key that `macos_sign` signs the Mac
+# binaries with, and of a file with the PKCS #12 file's password. When both are empty, as they are
+# by default, `macos_sign` signs ad hoc. `//bazel:macos_sign.bzl` explains why the flags hold paths
+# rather than the secrets.
+#
+# `rcodesign` only reads PKCS #12 files that are encrypted with the older algorithms, as Keychain
+# Access exports them. It fails with "incorrect password" on a file that OpenSSL 3 exports with its
+# default algorithms, so `openssl pkcs12 -export` needs `-legacy`.
+#
+# A release passes absolute paths outside the workspace:
+#
+#     bazel build --platforms=//bazel/platforms:aarch64-macos \
+#         --//bazel:macos_signing_p12_file="$RUNNER_TEMP/signing/identity.p12" \
+#         --//bazel:macos_signing_p12_password_file="$RUNNER_TEMP/signing/password" \
+#         //mirrord/cli:cli_universal
+[
+    string_flag(
+        name = name,
+        build_setting_default = "",
+        visibility = ["//visibility:public"],
+    )
+    for name in [
+        "macos_signing_p12_file",
+        "macos_signing_p12_password_file",
+    ]
+]
+
+# The application manifest that the Windows programs embed. The file explains what it sets.
+exports_files(["long_paths.manifest"])
+
+# Copies programs out of a root file system in a tar archive, with the libraries that they load,
+# for images that only need a few programs of some Debian packages (see `elf_closure.py`).
+py_binary(
+    name = "elf_closure",
+    srcs = ["elf_closure.py"],
+    visibility = ["//visibility:public"],
+)

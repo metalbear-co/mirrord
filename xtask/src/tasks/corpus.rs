@@ -257,7 +257,7 @@ fn check_configs(pin: &Pin, checkout: &Path, script: &str) -> Result<()> {
 }
 
 fn corpus_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../mirrord/mcp/corpus")
+    relative_to_root(Path::new("mirrord/mcp/corpus"))
 }
 
 fn read_pin(path: &Path) -> Result<Pin> {

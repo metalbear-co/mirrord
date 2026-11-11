@@ -1,0 +1,14 @@
+# cargo-nextest for the platform that the tests run on, from the releases that
+# `nextest.MODULE.bazel` pins. The tests run on the platform that the build targets, so the
+# `select()` below resolves for the target platform, and `//bazel:nextest.bzl` takes it as a
+# target-configured dependency.
+alias(
+    name = "nextest",
+    actual = select({
+        "//bazel/platforms:is_linux_aarch64": "@nextest_aarch64_unknown_linux_musl//:nextest",
+        "//bazel/platforms:is_linux_x86_64": "@nextest_x86_64_unknown_linux_musl//:nextest",
+        "@platforms//os:macos": "@nextest_universal_apple_darwin//:nextest",
+        "@platforms//os:windows": "@nextest_x86_64_pc_windows_msvc//:nextest",
+    }),
+    visibility = ["//visibility:public"],
+)

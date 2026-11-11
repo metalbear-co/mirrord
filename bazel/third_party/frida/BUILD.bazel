@@ -1,0 +1,99 @@
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_rs//rs:rules_rust_bindgen.bzl", "rust_bindgen")
+load("//bazel:out_dir.bzl", "out_dir")
+
+# Frida's prebuilt devkit for the target platform: `frida-gum.h` and the static library. The
+# devkits are pinned in `frida.MODULE.bazel`, and the version must match `FRIDA_VERSION` in the
+# `frida-gum-sys` crate. Only the Linux and macOS layer uses Frida, so on other platforms the devkit
+# and everything that needs it are incompatible, and builds skip them.
+cc_library(
+    name = "devkit",
+    # The devkit calls compiler runtime functions, like `__clear_cache` on arm64, which C compilers
+    # link by default. rustc links without the defaults, so a Rust binary or library that links the
+    # devkit needs LLVM's builtins explicitly. Without them, the arm64 Linux layer would fail to
+    # load with an undefined symbol.
+    srcs = ["@llvm//runtimes/compiler-rt:clang_rt.builtins.static"],
+    # The system libraries that the devkit needs: those that its example program links with.
+    linkopts = select({
+        "@platforms//os:linux": [
+            "-ldl",
+            "-lm",
+            "-lresolv",
+            "-lrt",
+            "-pthread",
+        ],
+        "@platforms//os:macos": [
+            "-lm",
+            "-lresolv",
+        ],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["@frida_gum_devkit_macos_arm64//:devkit"],
+        "@rules_rs//rs/platforms/config:aarch64-unknown-linux-gnu": ["@frida_gum_devkit_linux_arm64//:devkit"],
+        "@rules_rs//rs/platforms/config:x86_64-apple-darwin": ["@frida_gum_devkit_macos_x86_64//:devkit"],
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["@frida_gum_devkit_linux_x86_64//:devkit"],
+        "//conditions:default": [],
+    }),
+)
+
+# The bindings that `frida-gum-sys`'s build script would generate with bindgen. The build script
+# would need libclang and the target's system headers, which Bazel doesn't give build scripts, so
+# rules_rs's hermetic bindgen generates them with the C toolchain's flags instead. The arguments
+# follow the build script: it generates bindings for `frida-gum.h` and the crate's own headers.
+rust_bindgen(
+    name = "bindings",
+    bindgen_flags = [
+        "--blocklist-type=GumChainedPtr64Rebase",
+        "--blocklist-type=GumChainedPtrArm64eRebase",
+        "--blocklist-type=_GumChainedPtr64Rebase",
+        "--blocklist-type=_GumChainedPtrArm64eRebase",
+        "--no-doc-comments",
+        "--no-layout-tests",
+        "--use-core",
+    ],
+    cc_lib = "@crates//frida-gum-sys-listeners",
+    clang_flags = [
+        # Turns off clang's warning about redefining `__DATE__`, `__TIME__` and `__TIMESTAMP__`.
+        # For reproducible builds, the C toolchain defines them and turns the warning off.
+        # rust_bindgen passes the definitions to clang but drops the flag that turns off the
+        # warning, so it is repeated here.
+        "-Wno-builtin-macro-redefined",
+        # Optimized builds define `_FORTIFY_SOURCE`, and rust_bindgen passes that definition to
+        # clang without the optimization level, so glibc's headers warn that it needs one. The
+        # bindings don't need glibc's fortified wrappers, so they're generated without them.
+        "-U_FORTIFY_SOURCE",
+        "-DUSE_GUM_JS=0",
+        "-include",
+        "frida-gum.h",
+        "-include",
+        "event_sink.h",
+        "-include",
+        "invocation_listener.h",
+        "-include",
+        "probe_listener.h",
+        "-include",
+        "stalker_observer.h",
+    ],
+    header = "@crates//frida-gum-sys-stalker-params-header",
+)
+
+# `frida-gum-sys` includes the bindings from `$OUT_DIR/bindings.rs`. Its build script is off, so
+# this target provides that directory instead, as a dependency of the crate.
+copy_to_directory(
+    name = "bindings_dir",
+    srcs = [":bindings"],
+)
+
+out_dir(
+    name = "frida_gum_sys_out_dir",
+    dir = ":bindings_dir",
+    visibility = ["//visibility:public"],
+)

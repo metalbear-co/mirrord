@@ -4085,9 +4085,9 @@ mod tests {
 mod schema {
     use super::UpConfig;
 
-    /// The `mirrord-up.yaml` schema at the repo root, next to `mirrord-schema.json`.
-    const SCHEMA_FILE_PATH: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../mirrord-up-schema.json");
+    /// The `mirrord-up.yaml` schema at the repo root, next to `mirrord-schema.json`, from the
+    /// crate's directory, where Cargo and nextest run its tests.
+    const SCHEMA_FILE_PATH: &str = "../../mirrord-up-schema.json";
 
     fn generate() -> String {
         serde_json::to_string_pretty(&schemars::schema_for!(UpConfig))

@@ -1,0 +1,22 @@
+# The external files that the agent's targets use. `MODULE.bazel` includes this file.
+
+# The packages that the agent's image takes its programs from, with every package that they depend
+# on, from the snapshot of Debian trixie that `mirrord/cli/cli.MODULE.bazel` lists (see
+# `:image_runtime` in `BUILD.bazel`). They hold the programs that the agent runs: `iptables-nft`,
+# `iptables-legacy` and their IPv6 versions from `iptables`, `ss` from `iproute2`, `conntrack`, and
+# `sleep` and `cat` from `coreutils`. `base-files` links `/bin`, `/lib` and `/lib64` to their
+# directories in `/usr`, where trixie's packages put their files, so that the programs find the
+# dynamic linker. `MODULE.bazel.lock` records the packages' versions and checksums.
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+apt.install(
+    dependency_set = "agent_runtime",
+    packages = [
+        "base-files",
+        "conntrack",
+        "coreutils",
+        "iproute2",
+        "iptables",
+    ],
+    suites = ["trixie"],
+)
+use_repo(apt, "agent_runtime")

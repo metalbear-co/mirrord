@@ -188,6 +188,7 @@ jobs:
         with:
           files: |
             README.md
+      # The docs and the Bazel build of the crate don't change the protocol.
       - name: get protocol changes
         id: changed-protocol
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -196,6 +197,7 @@ jobs:
             mirrord/protocol/**
           files_ignore: |
             mirrord/protocol/**/*.md
+            mirrord/protocol/**/BUILD.bazel
       - name: get protocol toml changes
         id: changed-protocol-toml
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb

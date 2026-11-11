@@ -1,0 +1,6 @@
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "dns-resolve",
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

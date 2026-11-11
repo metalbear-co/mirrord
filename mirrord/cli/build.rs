@@ -1,3 +1,6 @@
+//! Links `mirrord.exe` with a 4 MiB main-thread stack under Cargo. Bazel builds ignore this
+//! script, and link the same stack through `BUILD.bazel`.
+
 /// Links `mirrord.exe` with a 4 MiB main-thread stack.
 ///
 /// The CLI polls its whole runtime on the main thread, and Windows gives that thread 1 MiB unless

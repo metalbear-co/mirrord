@@ -7,6 +7,12 @@ members = [
     "mirrord/*",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
+    # Cargo would find these through the path dependencies on them, but Bazel's `@cargo_packages`
+    # only reads this list.
+    "mirrord/config/derive",
+    "mirrord/intproxy/protocol",
+    "mirrord/layer/core",
+    "mirrord/layer/macro",
     "mirrord/layer-tests/tests/apps/fileops",
     "mirrord/layer-tests/tests/apps/outgoing",
     "mirrord/layer-tests/tests/apps/double-listen",
@@ -35,8 +41,9 @@ members = [
     "sample/rust",
     "medschool",
     "xtask",
-    "mirrord/sessions-manager/client",
-    "mirrord/sessions-manager/protocol",
+    # Bazel's test runner (see `//bazel:nextest.bzl`). It's a member so that it takes its
+    # dependencies from this workspace, like the other crates.
+    "bazel/nextest-runner",
 ]
 
 exclude = [

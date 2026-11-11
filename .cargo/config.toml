@@ -1,3 +1,5 @@
+# Settings for Cargo. Bazel doesn't read this file; its flags are in `.bazelrc`.
+
 [alias]
 xtask = "run --package xtask --"
 
@@ -17,11 +19,11 @@ debug-assertions = true
 incremental = false
 
 [env]
-# The paths of the files that the CLI bundles. They point at placeholders, so that a plain
-# `cargo build` or `cargo clippy` can compile the CLI. A CLI built this way has no layer, and says
-# so when it runs. `cargo xtask build-cli` builds the real files, like the layer and the UI, and
-# passes rustc the path of each one in these variables, which take precedence over the values
-# here. An empty file stands in for the layers and the SIP
+# The paths of the files that the CLI bundles (see `mirrord/cli/src/bundle.rs`). They point at
+# placeholders, so that a plain `cargo build` or `cargo clippy` can compile the CLI. A CLI built
+# this way has no layer, and says so when it runs. Bazel and `cargo xtask build-cli` build the real
+# files, like the layer and the UI, and pass rustc the path of each one in these variables, which
+# take precedence over the values here. An empty file stands in for the layers and the SIP
 # utilities, and a UI with only an index page stands in for the UI.
 #
 # Cargo also sets these for the programs that `cargo run` starts, so their names mustn't be ones

@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vinicius Deolindo <viniciusd@metalbear.com>
+Date: Tue, 10 Nov 2026 22:31:43 -0300
+Subject: [PATCH] rustc: link MSVC targets with the lld-link next to clang-cl
+
+rustc links `*-windows-msvc` targets with `link.exe` options, such as
+`/NOLOGO` and `/LIBPATH:`, and rules_rust gave it the C++ toolchain's
+linker. A toolchain built on LLVM, like hermetic-llvm's, links MSVC
+with clang-cl, a compiler driver that only passes such options on after
+`/link`. So clang-cl took each option for an input file, and every Rust
+link for MSVC failed:
+
+    clang-cl: error: no such file or directory: '/NOLOGO'
+
+When the C++ toolchain's linker for an MSVC target is clang-cl, rustc
+now links with the `lld-link` in the same directory, which takes
+`link.exe` options directly. It gets the toolchain's link arguments
+through `_msvc_linker_args_from_cc`, as other direct linkers do. The
+toolchain lists lld-link among clang-cl's files, so the link action
+already has it. Toolchains that link with Visual Studio's `link.exe`
+don't change.
+
+rustc has no linker flavor for clang-cl, so `-Clinker-flavor` can't fix
+this. `experimental_use_cc_common_link`, which links through the C++
+toolchain, would avoid rustc's options, but it fails for
+`rust_shared_library`, whose import library rules_rust declares on the
+rustc action.
+
+This depends on 9fe9776d (hermeticbuild/rules_rust#102), which adds
+`_msvc_linker_args_from_cc`. See hermeticbuild/hermetic-llvm#910 for
+the toolchain's side of the problem.
+---
+ rust/private/rustc.bzl |   31 +++++++++++++++++++++++++++++--
+ 1 file changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -410,6 +410,7 @@
+ 
+ _LinkerConfigInfo = provider(fields = [
+     "action_name",
++    "clang_cl_lld_link",
+     "feature_configuration",
+     "is_direct_driver",
+     "rpaths",
+@@ -420,6 +421,25 @@
+     "variables",
+ ])
+ 
++def _lld_link_beside_clang_cl(cc_linker, toolchain):
++    """Returns the path of the `lld-link` next to `cc_linker` when rustc must link with it instead.
++
++    rustc links for MSVC with `link.exe` options. clang-cl, which C/C++ toolchains built on LLVM link
++    with, is a compiler driver that only passes those options on after `/link`, so it rejects the
++    ones that rustc passes. Such a toolchain ships `lld-link`, which takes them directly, next to
++    clang-cl, and lists it among clang-cl's files, so the link action has it. See
++    https://github.com/hermeticbuild/hermetic-llvm/issues/910.
++
++    Returns None when `cc_linker` isn't clang-cl or the target isn't MSVC.
++    """
++    if toolchain.target_os != "windows" or toolchain.target_abi != "msvc":
++        return None
++    directory, _, basename = cc_linker.rpartition("/")
++    if basename.lower() not in ("clang-cl", "clang-cl.exe"):
++        return None
++    lld_link = "lld-link" + basename[len("clang-cl"):]
++    return directory + "/" + lld_link if directory else lld_link
++
+ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary):
+     user_link_flags = get_cc_user_link_flags(ctx)
+ 
+@@ -462,6 +482,7 @@
+     use_rust_linker = not cc_linker or toolchain.linker_preference == "rust" or use_bpf_linker
+     if use_rust_linker and not toolchain.linker:
+         fail("No linker available for rustc. Either `rust_toolchain.linker` must be set or a `cc_toolchain` configured for the current configuration.")
++    clang_cl_lld_link = None if use_rust_linker else _lld_link_beside_clang_cl(cc_linker, toolchain)
+ 
+     # Keep CcToolchainVariables and the Rust linker File until map_each runs so
+     # cc_common and File.path use the Rustc action's path mapper.
+@@ -470,7 +491,8 @@
+         action_name = action_name,
+         variables = link_variables,
+         rust_linker = toolchain.linker if use_rust_linker else None,
+-        is_direct_driver = use_rust_linker and toolchain.linker_type == "direct",
++        clang_cl_lld_link = clang_cl_lld_link,
++        is_direct_driver = (use_rust_linker and toolchain.linker_type == "direct") or clang_cl_lld_link != None,
+         target_abi = toolchain.target_abi,
+         target_arch = toolchain.target_arch,
+         target_os = toolchain.target_os,
+@@ -480,6 +502,8 @@
+ def _get_linker_path(linker_config):
+     if linker_config.rust_linker:
+         return linker_config.rust_linker.path
++    if linker_config.clang_cl_lld_link:
++        return linker_config.clang_cl_lld_link
+     return cc_common.get_tool_for_action(
+         feature_configuration = linker_config.feature_configuration,
+         action_name = linker_config.action_name,
+@@ -538,7 +562,10 @@
+             variables = linker_config.variables,
+         ))
+ 
+-    if linker_config.rust_linker:
++    if linker_config.clang_cl_lld_link:
++        # lld-link takes the options that the toolchain's arguments pass on to it through clang-cl.
++        link_args = _msvc_linker_args_from_cc(link_args)
++    elif linker_config.rust_linker:
+         # Make sure we include RPATHs for Rust ABI dylibs even when no cc_toolchain.
+         if linker_config.variables == None and linker_config.rpaths:
+             for rpath in linker_config.rpaths.to_list():
