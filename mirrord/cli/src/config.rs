@@ -645,6 +645,11 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Print a temporary link that reaches this session (Team or Enterprise, needs
+    /// `incoming.mode = "steal"`).
+    #[arg(long)]
+    pub share: bool,
+
     /// Windows DLL injection method.
     ///
     /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment

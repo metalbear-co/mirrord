@@ -3,7 +3,7 @@ name: mirrord-prev-env
 description: Help users create and manage mirrord preview environments — running a modified service as an isolated pod in a shared Kubernetes cluster, scoped by an environment key and HTTP/queue traffic filtering, so teams can validate and review changes against real traffic without affecting live services. Use when a developer wants to run "mirrord preview" ad hoc, share a preview via a link (mirrord-share-ingress), or wire preview environments into CI with the metalbear-co/mirrord-preview GitHub Action (e.g. per-PR previews, least-privilege cluster access).
 metadata:
   author: MetalBear
-  version: "2.9"
+  version: "2.10"
 ---
 
 # Mirrord Preview Environment Skill
@@ -315,7 +315,7 @@ By default, reaching a preview requires injecting the `baggage: mirrord-session=
 - Each shareable preview is reachable at its own host, `<slug>.<shareDomain>`, printed by `mirrord preview start` as the `preview URL`. The `slug` mirrors the preview's key with a random suffix (e.g. `pr-myrepo-a1b2c3`) — recognizable but unguessable ([stable share hosts](#stable-share-hosts) drop the suffix). When the TTL expires the host stops resolving and falls through to a "preview not found" page: by default it redirects to your app domain after a few seconds; with `shareIngress.notFound.redirect: false` (chart **3.215.0+**) it's a plain 404 with no redirect, refresh, or JavaScript, and `appDomain` isn't needed.
 - **The preview URL works with any HTTP filter.** A preview with a custom `http_filter` (a path filter, a different header, composed filters) additionally routes requests carrying the share link's injected baggage header, so its own filter keeps working for regular traffic while the link always reaches the preview.
 
-**How it works:** `mirrord-share-ingress` runs as its own Deployment + Service, watches Preview Environments, matches each request's host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards to that preview's target Service in-cluster. The operator's filtered steal then routes the request to the preview pod — exactly as the browser extension's header would, matching the injected header in addition to the session's own filter.
+**How it works:** `mirrord-share-ingress` runs as its own Deployment + Service, watches Preview Environments, matches each request's host to a live preview, injects `baggage: mirrord-session=<key>`, and forwards to the Service named after the preview's target. The operator's filtered steal then routes the request to the preview pod — exactly as the browser extension's header would, matching the injected header in addition to the session's own filter. With operator and share-ingress chart **3.230.0+**, it picks the Service port whose `targetPort` is a port the preview steals on, preferring the first port in `feature.network.incoming.ports`, or Service port `80` when unset (for a headless Service, the stolen port itself); earlier versions always use the first port in `feature.network.incoming.ports`, or `80` when unset. A target without such a Service can't be reached through its link, and a connection that doesn't complete within five seconds returns a 502 — set the chart's `server.logLevel` to `share_ingress=debug,mirrord=info,warn` to log where each request is forwarded.
 
 **Setup (platform/admin task).** TLS and the public-facing ingress are owned by your platform team; access control to the link is their responsibility.
 

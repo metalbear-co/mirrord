@@ -2,7 +2,6 @@
 #![warn(clippy::indexing_slicing)]
 
 use core::assert_matches;
-use std::path::Path;
 
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse, Payload,
@@ -19,19 +18,18 @@ mod common;
 pub use common::*;
 
 /// On Linux, libuv's `copyfile` sizes the copy with `fstat`, which official Node.js builds call
-/// as `__fxstat64`, and closes both files through libc's `syscall`. The config enables the hooks
-/// for both, so the layer sees the same requests as on macOS.
+/// as `__fxstat64`, and closes both files through libc's `syscall`. The layer hooks both by
+/// default, so it sees the same requests as on macOS.
 #[rstest]
 #[tokio::test]
-async fn node_copyfile(config_dir: &Path) {
+async fn node_copyfile() {
     let _tracing = init_tracing();
 
     let application = Application::NodeCopyFile;
-    let config = config_dir.join("node_libuv.json");
     let (mut test_process, mut intproxy) = application
         .start_process(
             vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/app/dummy")],
-            Some(&config),
+            None,
         )
         .await;
 

@@ -16,7 +16,7 @@ description: >
   mirrord-header-propagation skill.
 metadata:
   author: MetalBear
-  version: "1.0"
+  version: "1.1"
 ---
 
 # mirrord Propagation Discovery Skill

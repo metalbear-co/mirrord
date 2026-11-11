@@ -12,7 +12,7 @@ description: >
   feature of mirrord.
 metadata:
   author: MetalBear
-  version: "1.4"
+  version: "1.5"
 ---
 
 # mirrord Temporal Splitting Configuration Skill
@@ -155,6 +155,7 @@ Rules:
 - Each `appConfig` field uses the same source structure as other queue services: `env`, `envLike`, `volume` (read from a file mounted from a ConfigMap volume instead of an env var — operator **3.198.0+**), `podFile` (read from a file that exists only inside the running pods, e.g. Vault- or CSI-injected, with no ConfigMap/Secret behind it — operator **3.201.0+**), `fallback`, `valueSelector`, `valuePattern`, `containerNames` (legacy spelling `containers` still works — don't set both on the same entry).
 - Per-queue Temporal options (`max_buffered_tasks`) live in a separate `MirrordPropertyList` referenced by the queue's `queueConfig`.
 - `spec.drainTimeout` (seconds) keeps the split's temporary resources alive after the last session ends so a new session can reuse them; unset or `0` tears down immediately. It does **not** wait for in-flight work.
+- A queue entry can set `keyJqFilter` (a jq program returning a task's session key, matched against each session's `key`) so a session with no filter of its own on that queue still gets only its own tasks. Add `enforceFilter: true` next to it to refuse sessions that set their own filter on the queue. Requires mirrord **3.283.0+** and operator **3.230.0+**.
 
 ```yaml crd
 apiVersion: queues.mirrord.metalbear.co/v1
