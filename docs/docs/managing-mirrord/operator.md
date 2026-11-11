@@ -67,38 +67,13 @@ See [Air-gapped Clusters](air-gapped.md).
 
 ## License key
 
+If you run your own [License Server](license-server.md), the license key is the shared secret your Operators use to authenticate to it. See [Connecting Operators to the License Server](license-server.md#connecting-operators-to-the-license-server).
+
 {% hint style="warning" %}
 **⚠️ Deprecated for cloud authentication**
 
 For clusters that reach the mirrord cloud, the license key is being replaced by the [cloud API key](../getting-started/install-the-operator.md#cloud-api-key), which is now the default way the Operator authenticates and obtains its license. Existing cloud license-key installations keep working, but new ones should use a cloud API key.
-
-This does not apply to the [license server](license-server.md): if you run your own license server, the license key is still the shared secret the Operator uses to authenticate to it (a value you choose, not a mirrord-issued credential) and remains required.
 {% endhint %}
-
-Set `license.key` to your key, then install:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-```
-
-Alternatively, reference a Kubernetes secret via `license.keyRef` in `values.yaml`:
-
-```yaml
-license:
-  keyRef: mirrord-operator-license
-```
-
-This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-
-kubectl create secret generic mirrord-operator-license \
-  --namespace mirrord \
-  --from-literal=OPERATOR_LICENSE_KEY=<your license key>
-```
-
-The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
 
 ## Using an Internal Registry (Optional)
 

@@ -70,7 +70,7 @@ _NOTE: The license server needs to be accessible to any mirrord operators you wa
 Next, install the license server on your cluster:
 
 ```bash
-helm install metalbear/mirrord-operator-license-server -f ./values.yaml --wait
+helm install mirrord-license-server metalbear/mirrord-operator-license-server -f ./values.yaml --wait
 ```
 
 To make sure it's been installed successfully and is running:
@@ -149,8 +149,29 @@ _NOTE: The server value must contain the protocol and the prefix for any ingress
 Then run:
 
 ```bash
-helm install metalbear/mirrord-operator -f ./values.yaml --wait
+helm install mirrord-operator metalbear/mirrord-operator -f ./values.yaml --wait
 ```
+
+Alternatively, reference a Kubernetes secret via `license.keyRef` instead of `license.key`:
+
+```yaml
+# ./values.yaml
+license:
+  keyRef: mirrord-operator-license
+  licenseServer: http://<license-server-addr>
+```
+
+This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it, with the same key you set on the License Server:
+
+```bash
+helm install mirrord-operator metalbear/mirrord-operator -f ./values.yaml
+
+kubectl create secret generic mirrord-operator-license \
+  --namespace mirrord \
+  --from-literal=OPERATOR_LICENSE_KEY=<your license key>
+```
+
+The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
 
 ## Getting a Utilisation Report from the License Server
 
