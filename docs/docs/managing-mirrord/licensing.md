@@ -68,35 +68,7 @@ File-based licenses (`.pem` certificates) are not supported for Team subscriptio
 
 ## Telemetry
 
-Team licenses require telemetry to be sent back to MetalBear. Telemetry is used for seat tracking and subscription management.
-
-### What is sent
-
-Every telemetry batch includes the following HTTP headers:
-
-- **Operator version** — the version of the Operator binary
-- **Instance ID** — a random identifier generated at Operator startup (not tied to the cluster or any persistent identity)
-- **License identifiers** — a hash of the license key, plus customer, subscription, and organization IDs from the license
-
-The following event types are sent:
-
-- **Startup** — emitted once when the Operator starts
-- **Alive** — a periodic heartbeat sent every hour (escalates to every minute if the telemetry endpoint has been unreachable for over an hour)
-- **Session** — emitted when a session ends, containing: session duration, target workload kind, a `ci` flag, and anonymized identifiers for the user and target (see below)
-
-### Anonymization
-
-Session events contain user-identifying fields (Kubernetes username, client username, client hostname, target namespace, target name, target container). These are **stripped before the event is forwarded to MetalBear's analytics pipeline**. They are retained only if you use an [Enterprise License Server](license-server.md) that receives telemetry directly.
-
-### What is not collected
-
-The Operator does **not** collect Kubernetes version, node count, cloud provider, or any other cluster infrastructure metadata.
-
-### Connectivity requirement
-
-If the Operator cannot reach MetalBear's telemetry endpoint for more than one hour, new sessions will be blocked until connectivity is restored. Ongoing sessions are not terminated.
-
-If you operate in a network-restricted environment and cannot allow outbound telemetry, an [Enterprise license](license-server.md) is required.
+Team and Free licenses require telemetry, which is used for seat tracking and subscription management. On the Enterprise plan, it's optional. See [What data does the mirrord Operator send to MetalBear cloud?](security.md#what-data-does-the-mirrord-operator-send-to-metalbear-cloud).
 
 ## Sessions
 

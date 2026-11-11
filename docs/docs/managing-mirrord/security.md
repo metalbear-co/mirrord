@@ -120,9 +120,13 @@ For our vulnerability disclosure and customer notification process, see the [Tru
 
 mirrord for Teams is completely on-prem. The Operator communicates with MetalBear servers over an encrypted TLS connection only for license verification and usage metrics. What the usage metrics contain depends on your organization's identity sharing setting.
 
-### Always sent (anonymized), unless turned off on Enterprise
+### Which plans require it
 
-These fields are sent on every plan. On the Enterprise plan, you can turn them off with `operator.disableTelemetries: true`, for example in an [air-gapped cluster](air-gapped.md).
+Team and Free licenses require telemetry. If the Operator can't reach the telemetry endpoint for more than one hour, new sessions are blocked until it can. Ongoing sessions keep running.
+
+On the Enterprise plan, telemetry is optional. Turn it off with `operator.disableTelemetries: true`, for example in an [air-gapped cluster](air-gapped.md).
+
+### Always sent (anonymized)
 
 1. User ID (randomly generated hash, stored on user machine)
 2. Duration of session
@@ -157,8 +161,6 @@ Identity is not sent when:
 * The Operator authenticates against a self-hosted [License Server](license-server.md). A cloud API key is ignored in that configuration and usage metrics stay anonymized.
 
 Changing the setting takes effect at the Operator's next cloud token refresh, without regenerating the key or restarting the Operator.
-
-Only the Enterprise plan can turn this off, with `operator.disableTelemetries: true`. On other plans the anonymized fields above are always sent.
 
 ## Are you SOC2/ISO27001 compliant?
 

@@ -61,7 +61,7 @@ Then copy the Operator and agent images, as in [Copying images](operator.md#copy
 
 In `values.yaml`, point the chart at the images in your registry, as in [Copying images](operator.md#copying-images).
 
-Usage telemetry is on by default. You can turn it off:
+[Usage telemetry](security.md#what-data-does-the-mirrord-operator-send-to-metalbear-cloud) is on by default. You can turn it off:
 
 ```yaml
 operator:
