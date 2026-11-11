@@ -1019,6 +1019,16 @@ pub enum NewOperatorFeature {
     /// run an empty image.
     PreviewCodeSync,
 
+    /// This operator understands the queue split role a multi-cluster primary writes on the child
+    /// `MirrordClusterSession` it creates when a `MirrordSplitConfig` names a `consumerCluster`:
+    /// the consumer cluster (the Default) runs the queue split, a bystander checks its
+    /// `splitQueues` policy against the session's queues and then runs a plain session. A primary
+    /// refuses a workload cluster that does not advertise it: an older operator knows no role, so
+    /// as a bystander it tries to split, finds none of the split resources the consumer holds and
+    /// fails the session with `MissingPrefilledSplitResources`, an error that points at the wrong
+    /// cluster.
+    MultiClusterQueueSplitRole,
+
     /// Supports `mirrord exec --share`: the operator records a share link for the session when it
     /// connects, routes it through share-ingress while the session lives, and serves it to the
     /// session's owner in [`Session::share`].
@@ -1098,7 +1108,8 @@ impl NewOperatorFeature {
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
-            | Self::MultiClusterManagementOnly => Some("multi_cluster"),
+            | Self::MultiClusterManagementOnly
+            | Self::MultiClusterQueueSplitRole => Some("multi_cluster"),
             Self::ProxyApi
             | Self::SessionManagement
             | Self::LayerReconnect
@@ -1187,6 +1198,9 @@ impl Display for NewOperatorFeature {
                 "Azure Service Bus queue splitting"
             }
             NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
+            NewOperatorFeature::MultiClusterQueueSplitRole => {
+                "one consumer cluster for multi-cluster queue splitting"
+            }
             NewOperatorFeature::DbBranchConfigMapSource => {
                 "DB branching ConfigMap connection sources"
             }
@@ -1326,6 +1340,7 @@ impl NewOperatorFeature {
             | NewOperatorFeature::MultiClusterRemote
             | NewOperatorFeature::MultiClusterPrimary
             | NewOperatorFeature::MultiClusterSubscribe
+            | NewOperatorFeature::MultiClusterQueueSplitRole
             | NewOperatorFeature::MultiClusterManagementOnly
             | NewOperatorFeature::UnifiedBranchDbCrd
             | NewOperatorFeature::ConnectParamsInHeader

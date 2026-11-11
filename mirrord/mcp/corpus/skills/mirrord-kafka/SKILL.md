@@ -12,7 +12,7 @@ description: >
   Kafka, or connecting mirrord to a Kafka cluster. This is a Team/Enterprise feature of mirrord.
 metadata:
   author: MetalBear
-  version: "2.8"
+  version: "2.9"
 ---
 
 # mirrord Kafka Splitting Configuration Skill
@@ -148,7 +148,9 @@ Rules:
 - **Same namespace as the target workload.**
 - `spec.targetRef` = `{ apiVersion, kind, name }` (Deployment/StatefulSet/Rollout).
 - Each `spec.queues[]` needs `id`, `kind: kafka`, a `clientConfig` (the `MirrordPropertyList` name; or set once via `spec.clientConfigs.kafka`), and `appConfig.topic`.
-- **Exactly one of `appConfig.groupId` (standard consumers) or `appConfig.appId` (Kafka Streams)** per queue.
+- **Exactly one of `appConfig.groupId` (standard consumers) or `appConfig.appId` (Kafka Streams)** per queue — each must resolve to **one** value, unlike `appConfig.topic`.
+- `appConfig.topic` can resolve to several distinct topic names (one var holding a JSON object of topics, say) — each is split under the same queue `id`, and a filter on that `id` applies to all of them (operator/chart **3.231.0+**). A JSON array of topics, or several `valuePattern` references on one var, fails the split; a topic can only be split under one queue entry.
+- A queue entry can set `keyJqFilter` (a jq program returning a message's session key, matched against each session's `key`) so a session with no filter of its own on that queue still gets only its own messages — useful when the key lives somewhere every developer would otherwise spell out by hand. Add `enforceFilter: true` next to it to refuse sessions that set their own filter on the queue. Requires mirrord **3.283.0+** and operator **3.230.0+**. See `references/mirrord-split-config-crd.md`.
 - For slow-restarting workloads (StatefulSets, Rollouts), consider `spec.restart.timeout` (pod readiness wait after a restart), `spec.ttl` (idle window: keeps the split fully live so a reconnecting session resumes instantly, requires operator **3.194.0+**), and `spec.drainTimeout` (drain window that follows: lets the workload finish the already-forwarded backlog before unpatching). On operators older than 3.194.0, `spec.drainTimeout` alone controls how long the workload stays patched after the last session.
 - The operator can only join the original consumer group once every pod of the previous generation has left it, so a temporary-group split (`mirrord.temporary_group_id`) waits for the workload's rollout to finish — 180 seconds by default, then the session fails. For a slow rollout (many replicas, a long termination grace period, a consumer that stays in the group until its session timeout expires), raise it with `mirrord.group_join_timeout` (seconds) on the `MirrordPropertyList` (operator **3.204.0+**; older operators reject it as an unknown `mirrord.` key).
 
@@ -179,7 +181,7 @@ spec:
 
 `containerNames` is the current spelling (works with Kustomize's `images:` transformer); the legacy `containers` spelling still works on existing manifests — don't set both on the same reference. Don't adopt `containerNames` until the operator and its CRD are upgraded to a release that supports it and the rollout has completed; an older operator can reject or ignore the field.
 
-`appConfig.topic`/`groupId`/`appId` sources also support `envLike` (regex over var names), `volume` (read the name from a file mounted from a ConfigMap volume instead of an env var — requires operator **3.198.0+**; see `references/mirrord-split-config-crd.md`), `podFile` (read the name from a file that exists only inside the running pods — e.g. rendered by `vault-agent-injector` or a secrets-store CSI driver, with no ConfigMap/Secret behind it — requires operator **3.201.0+**; see below), `valueSelector` (a selector over nested keys / `.[]` for JSON-valued env vars — not a full jq expression, no pipes or functions), and `valuePattern` (regex to swap an embedded name). See the split-config reference.
+`appConfig.topic`/`groupId`/`appId` sources also support `envLike` (regex over var names), `volume` (read the name from a file mounted from a ConfigMap volume instead of an env var — requires operator **3.198.0+**; see `references/mirrord-split-config-crd.md`), `podFile` (read the name from a file that exists only inside the running pods — e.g. rendered by `vault-agent-injector` or a secrets-store CSI driver, with no ConfigMap/Secret behind it — requires operator **3.201.0+**; see below), `valueSelector` (a selector over nested keys for JSON-valued env vars, with `.[]` iterating object values — arrays too on a mounted `volume`/`podFile` — not a full jq expression, no pipes or functions), and `valuePattern` (regex to swap an embedded name). See the split-config reference.
 
 **`podFile` source (Vault/CSI-injected names):** the operator reads the file by running `cat` in a running pod of the target, so the target needs at least one running pod when the split starts, and the operator needs `get`/`create` on `pods/exec` in the target namespace (the Helm chart grants this when Kafka splitting is enabled). It then mounts a Secret carrying the substituted content over the file's exact path in the app containers — the same kind of restart env-var injection causes — while the injector's own sidecar keeps rendering the original underneath. `podFile.path` is the absolute in-container path; `podFile.container` defaults to a `vault-agent` sidecar if present, else the pod's first app container (set it explicitly if the default container has no `cat`, e.g. distroless). If both `podFile` and an `env`/`envLike`/`volume` source are set on the same entry, the other source wins and `podFile` is ignored; `fallback` doesn't apply to it. The referenced file's content is pinned for the split's duration — a value that also rotates (like a credential) keeps reading the value from split start.
 
@@ -280,14 +282,14 @@ If the user has the mirrord-config skill, point them there for the full mirrord.
 - [ ] `MirrordPropertyList` (in the target's namespace, or the operator's namespace if sharing) has `bootstrap.servers`; does **not** set `group.id`.
 - [ ] `MirrordSplitConfig` is in the target's namespace with `spec.targetRef` (`apiVersion`, `kind`, `name`).
 - [ ] Each queue has `id`, `kind: kafka`, a `clientConfig` (or `spec.clientConfigs.kafka`), and `appConfig.topic`.
-- [ ] Each queue has **exactly one** of `appConfig.groupId` or `appConfig.appId`.
+- [ ] Each queue has **exactly one** of `appConfig.groupId` or `appConfig.appId`, and each resolves to one value.
 - [ ] `kind` (targetRef) is one of `Deployment`, `StatefulSet`, `Rollout`.
-- [ ] Topic IDs are unique (object form) and match the IDs used in mirrord.json.
+- [ ] Topic IDs are unique (object form) and match the IDs used in mirrord.json. A topic resolved by `appConfig.topic` isn't also split under a different queue entry.
 
 ### Cross-reference checks
 - [ ] Each queue's `clientConfig` resolves to a `MirrordPropertyList`, looked up in the target's namespace first, then the operator's namespace (operator **3.191.0+**) — or, as a final legacy fallback, a `MirrordKafkaClientConfig` of that name in the operator namespace.
 - [ ] mirrord.json `target` matches the `MirrordSplitConfig` `targetRef`.
-- [ ] `jq_filter` is only used with `librdkafka` (not with `mirrord.client_implementation: java`).
+- [ ] `jq_filter` is only used with `librdkafka` (not with `mirrord.client_implementation: java`); same for a queue's `keyJqFilter`.
 - [ ] `payload_protobuf` is only used with `librdkafka`, on `queue_type: Kafka`, and sets exactly one of `schema_file` or `descriptor_base64` plus `message_type`.
 
 ### Proactive warnings (from known-issues.md)

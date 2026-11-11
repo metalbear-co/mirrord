@@ -938,18 +938,18 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
-    #[error("Failed to push the local code into the preview environment")]
+    #[error("Failed to sync the local code into the preview environment")]
     #[diagnostic(help(
-        "The operator relays the push to a sidecar in the preview pod. Check that the operator \
+        "The operator relays the sync to a sidecar in the preview pod. Check that the operator \
         is running and healthy, and see its logs and the logs of the pod's `mirrord-sync` \
         container for details.{GENERAL_HELP}"
     ))]
     PreviewSyncFailed(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    #[error("Failed to read `{}` to push it into the preview environment", path.display())]
+    #[error("Failed to read `{}` to sync it into the preview environment", path.display())]
     #[diagnostic(help(
         "Check that you can read the files under the `sync` directory. A file that a tool removes \
-        while the CLI reads it fails the read too, and running the command again pushes the \
+        while the CLI reads it fails the read too, and running the command again syncs the \
         files.{GENERAL_HELP}"
     ))]
     PreviewSyncReadFailed {
@@ -960,7 +960,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to watch `{}` for changes", path.display())]
     #[diagnostic(help(
-        "The CLI watches each directory under `sync` that it pushes. When the cause says that the \
+        "The CLI watches each directory under `sync` that it syncs. When the cause says that the \
         system allows too few watches, raise `fs.inotify.max_user_watches`, or leave large \
         directories out with `ignore` or `.gitignore`.{GENERAL_HELP}"
     ))]
@@ -970,16 +970,16 @@ pub(crate) enum CliError {
         error: notify::Error,
     },
 
-    #[error("The install command failed in the preview pod")]
+    #[error("The `sync.prepare` command failed in the preview pod")]
     #[diagnostic(help(
-        "The end of its output is above. Fix the install command, or the files that it installs \
-        from, and run `mirrord preview sync` again.{GENERAL_HELP}"
+        "The end of its output is above. Fix `sync.prepare.command`, or the files that it reads, \
+        and run `mirrord preview sync` again.{GENERAL_HELP}"
     ))]
-    PreviewSyncInstallFailed,
+    PreviewSyncPrepareFailed,
 
     #[error("{}", mirrord_operator::sync::UnpairReason::Replaced)]
     #[diagnostic(help(
-        "Only one CLI pushes into a preview environment at a time, and a newer CLI takes over \
+        "Only one CLI syncs into a preview environment at a time, and a newer CLI takes over \
         from an earlier one. This CLI stopped, and left the preview environment as it is.\
         {GENERAL_HELP}"
     ))]
@@ -994,8 +994,8 @@ pub(crate) enum CliError {
 
     #[error("A preview environment with `sync` can't start idle")]
     #[diagnostic(help(
-        "The preview pod waits for the CLI to push the local code, and an idle preview has no \
-        pod to push into. Remove `feature.preview.idle.start_idle`.{GENERAL_HELP}"
+        "The preview pod waits for the CLI to sync the local code, and an idle preview has no \
+        pod to sync into. Remove `feature.preview.idle.start_idle`.{GENERAL_HELP}"
     ))]
     PreviewSyncStartIdle,
 
@@ -1008,7 +1008,7 @@ pub(crate) enum CliError {
 
     #[error("A preview environment with `sync` can't target a CronJob")]
     #[diagnostic(help(
-        "A CronJob creates its pods on a schedule, after the CLI has pushed. Preview the CronJob \
+        "A CronJob creates its pods on a schedule, after the CLI has synced. Preview the CronJob \
         with `mirrord preview up` instead.{GENERAL_HELP}"
     ))]
     PreviewSyncCronJobTarget,
@@ -1016,7 +1016,7 @@ pub(crate) enum CliError {
     #[error("A preview environment with `sync` can't run on a multicluster operator")]
     #[diagnostic(help(
         "A multicluster operator runs the preview's pods in its workload clusters, and only one \
-        pod can hold the pushed code. Preview the service with \
+        pod can hold the synced code. Preview the service with \
         `mirrord preview up` instead.{GENERAL_HELP}"
     ))]
     PreviewSyncMultiCluster,
@@ -1028,35 +1028,18 @@ pub(crate) enum CliError {
     ))]
     PreviewSyncOnWindows,
 
-    #[error("A preview environment with `sync` can't run a `run.command` of `run.type: container`")]
-    #[diagnostic(help(
-        "`run.type: container` runs `run.command` locally with `mirrord container`, but a preview \
-        with `sync` runs its command in the target's container in the preview pod. Set \
-        `sync.run.command` to the command that runs the app in that container.{GENERAL_HELP}"
-    ))]
-    PreviewSyncContainerRun,
-
-    #[error("A preview environment with `sync` doesn't run `run.pre_command`")]
-    #[diagnostic(help(
-        "`run.pre_command` runs on your machine before the local process starts, and a preview \
-        with `sync` starts no local process. Set `sync.run.command`, which the preview runs \
-        instead of `run.command` and without `run.pre_command`, or remove \
-        `run.pre_command`.{GENERAL_HELP}"
-    ))]
-    PreviewSyncPreCommand,
-
     #[error(
-        "The `sync.install.on_change` glob `{}` doesn't lie under the `local` of a `sync.files` \
+        "The `sync.prepare.triggered_by` glob `{}` doesn't lie under the `local` of a `sync.files` \
          entry",
         .0.display()
     )]
     #[diagnostic(help(
-        "The preview pod only has the files that the CLI pushes, so a glob can only match those. \
+        "The preview pod only has the files that the CLI syncs, so a glob can only match those. \
         The globs are resolved against the directory that contains `mirrord-up.yaml`, as \
         `sync.files[].local` is, and each must start with the `local` of an entry spelled out, with \
         wildcards only below it.{GENERAL_HELP}"
     ))]
-    PreviewSyncOnChangeOutsideLocal(PathBuf),
+    PreviewSyncTriggeredByOutsideLocal(PathBuf),
 
     #[error("The settings of the service's preview with `sync` are invalid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -1117,7 +1100,7 @@ pub(crate) enum CliError {
     )]
     #[diagnostic(help(
         "The operator pauses a preview while a `mirrord exec` session targets it, and the preview \
-        pod applies no push until that session ends. Run `mirrord preview sync` again once it has \
+        pod applies no sync until that session ends. Run `mirrord preview sync` again once it has \
         ended."
     ))]
     PreviewSyncPaused {

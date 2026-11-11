@@ -678,7 +678,7 @@ fn enable_hooks(state: &LayerSetup) {
         };
 
         #[cfg(target_os = "linux")]
-        if state.experimental().hook_libc_syscall.unwrap_or_default() {
+        if state.experimental().hook_libc_syscall {
             replace!(
                 &mut hook_manager,
                 "syscall",

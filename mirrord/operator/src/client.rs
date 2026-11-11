@@ -68,9 +68,9 @@ use crate::{
         database_branches::{
             CreatedBranches, DatabaseBranchParams, TARGET_NAMESPACE_ANNOTATION,
             UnifiedDatabaseBranchParams, create_branches, create_mongodb_branches,
-            create_mysql_branches, create_pg_branches, ensure_branch_migrations,
-            list_existing_branches, list_reusable_mongodb_branches, list_reusable_mysql_branches,
-            list_reusable_pg_branches, ownership_label_selector,
+            create_mysql_branches, create_pg_branches, destroy_branch_hint,
+            ensure_branch_migrations, list_existing_branches, list_reusable_mongodb_branches,
+            list_reusable_mysql_branches, list_reusable_pg_branches, ownership_label_selector,
             relay_source_compatibility_warnings, reused_branch_connection_sources,
             wait_for_pending_branches,
         },
@@ -1543,9 +1543,8 @@ where
                 return Err(OperatorApiError::BranchCreationFailed {
                     operation: OperatorOperation::DbBranching,
                     message: format!(
-                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. Delete it \
-                         with `mirrord db-branches -n {api_namespace} destroy {name}` and start \
-                         the session again."
+                        "branch database `{name}` (id `{id}`) failed earlier: {reason}. {}",
+                        destroy_branch_hint(Some(api_namespace), &name)
                     ),
                 });
             }
