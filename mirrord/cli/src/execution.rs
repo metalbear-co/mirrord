@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    ops::Not,
     time::Duration,
 };
 
@@ -28,6 +29,7 @@ use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
+use mirrord_sessions_manager_client::TargetPlatform;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
     MIRRORD_BINARIES_DIR_PATH_BUF, MIRRORD_SIP_X64_FALLBACK_ENV, SipError, SipPatchOptions,
@@ -773,8 +775,8 @@ impl MirrordExecution {
             proxy_process.wait().await.unwrap();
         }
 
-        let intproxy_address: SocketAddr = BufReader::new(stdout)
-            .lines()
+        let mut handshake = BufReader::new(stdout).lines();
+        let intproxy_address: SocketAddr = handshake
             .next_line()
             .await
             .map_err(|e| {
@@ -791,6 +793,27 @@ impl MirrordExecution {
                     "failed to parse port number printed by proxy: {e}"
                 ))
             })?;
+
+        // The target's platform is only a hint for how to run the user's process, so a missing or
+        // unreadable line leaves the session an ordinary one.
+        let target_platform = handshake
+            .next_line()
+            .await
+            .ok()
+            .flatten()
+            .filter(|line| line.is_empty().not())
+            .and_then(|line| {
+                serde_json::from_str::<TargetPlatform>(&line)
+                    .inspect_err(|error| {
+                        tracing::debug!(
+                            %error,
+                            line,
+                            "Ignoring an unreadable target platform from the proxy"
+                        );
+                    })
+                    .ok()
+            });
+        tracing::debug!(?target_platform, "Internal proxy is up");
 
         // The internal proxy is up, so its own guard owns the copies from here on. This process
         // has to let go of them: the IDE flow returns from here normally while the session carries
