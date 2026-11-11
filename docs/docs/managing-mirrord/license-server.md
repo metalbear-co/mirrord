@@ -146,6 +146,8 @@ license:
 
 _NOTE: The server value must contain the protocol and the prefix for any ingress that the the license server can be behind._
 
+If the Operator runs in the same cluster as the license server, also set `createNamespace: false`. The license server release already created the `mirrord` namespace, and Helm can't adopt it into a second release.
+
 Then run:
 
 ```bash
