@@ -41,6 +41,7 @@ mirrord's core functionality is free and open source. Individual developers can 
 [mirrord for Teams](https://metalbear.com/mirrord/pricing/) is the paid offering, available as the **Team** and **Enterprise** plans. Both add the **mirrord Operator** - a Kubernetes operator that runs in your cluster and acts as a centralized control plane. It enables:
 
 * **Concurrent usage** - Multiple developers can work on the same cluster without conflicts
+* **Better security** - Developers don't need permissions to create privileged pods, only the Operator does. Access is managed through Kubernetes RBAC
 * **Traffic filtering** - Route only specific HTTP requests to your local process using header, path, or method filters
 * **Queue splitting** - Split message queue traffic so each developer gets their own messages
 * **DB branching** - Ephemeral database branches per developer session
