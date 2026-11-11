@@ -275,6 +275,10 @@ pub(super) enum Commands {
     /// Run mirrord sessions for services defined in `mirrord-up.yaml`.
     Up(Box<UpArgs>),
 
+    /// Run AWS Lambda handlers locally for a Lambda target (unstable).
+    #[command(hide = true)] // no hub ships yet to deliver invocations
+    Lambda(Box<LambdaArgs>),
+
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
@@ -1469,6 +1473,39 @@ pub(super) enum DbBranchesConnectionsFormat {
     #[default]
     Pretty,
     Json,
+}
+
+#[derive(Args, Debug)]
+pub(super) struct LambdaArgs {
+    #[command(subcommand)]
+    pub command: LambdaCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub(super) enum LambdaCommand {
+    /// Run a Lambda runtime interface client against invocations a Lambda target's hub delivers.
+    ///
+    /// Run it under `mirrord exec`, which does this by itself when the target reports that it is a
+    /// Lambda function: `mirrord exec -f mirrord.json -- mirrord lambda runtime -- python -m
+    /// awslambdaric app.handler`. It listens on the invocation port, serves the Lambda Runtime API
+    /// to the command at `AWS_LAMBDA_RUNTIME_API`, and exits with the command's status.
+    Runtime(LambdaRuntimeArgs),
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct LambdaRuntimeArgs {
+    /// Port the hub delivers invocations to, which the session steals.
+    #[arg(long, default_value_t = 8080)]
+    pub invocation_port: u16,
+
+    /// The runtime interface client to run, with its arguments.
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        required = true,
+        num_args = 1..
+    )]
+    pub command: Vec<OsString>,
 }
 
 #[derive(Args, Debug)]

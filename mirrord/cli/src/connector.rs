@@ -3,7 +3,7 @@ use std::{
     num::NonZeroUsize,
     ops::Not,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::Duration,
 };
@@ -25,7 +25,7 @@ use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use mirrord_sessions_manager_client::{
     DirectTransport, IntproxyClient, OperatorTransport, SessionsManagerClientError,
-    SessionsManagerConnectInfo, SessionsManagerEndpoint, SessionsManagerTransport,
+    SessionsManagerConnectInfo, SessionsManagerEndpoint, SessionsManagerTransport, TargetPlatform,
 };
 use tokio::io::DuplexStream;
 use tokio_util::codec::Encoder;
@@ -69,6 +69,16 @@ pub(crate) enum AgentConnector {
 }
 
 impl AgentConnector {
+    /// Where a sessions-manager connection records the platform its agent reports, to be read
+    /// once the first connection is up. [`None`] for the other connectors, whose agents report
+    /// none.
+    pub(crate) fn target_platform(&self) -> Option<Arc<Mutex<Option<TargetPlatform>>>> {
+        match self {
+            Self::SessionsManager(connector) => Some(connector.target_platform.clone()),
+            Self::Operator(..) | Self::Direct(..) => None,
+        }
+    }
+
     #[mirrord_macros::boxed_future]
     pub async fn into_client(self) -> Result<MirrordClient, ClientError> {
         MirrordClient::new(
@@ -128,6 +138,9 @@ pub(crate) struct DirectConnector {
 pub(crate) struct SessionsManagerConnector {
     pub(crate) connect_info: SessionsManagerConnectInfo,
     pub(crate) route: SessionsManagerRoute,
+    /// The platform the agent of the latest connection reported. The CLI decides how to run the
+    /// user's process from it, after the connector has moved into the [`MirrordClient`].
+    pub(crate) target_platform: Arc<Mutex<Option<TargetPlatform>>>,
 }
 
 /// How a [`SessionsManagerConnector`] reaches its sessions-manager.
@@ -161,9 +174,11 @@ impl SessionsManagerConnector {
         transport: T,
     ) -> Result<OperatorConnection, SessionsManagerClientError> {
         let client = IntproxyClient::with_transport(self.connect_info.clone(), transport)?;
-        Box::pin(client.connect(Duration::from_mins(10)))
-            .await
-            .map(|connected| connected.connection)
+        let connected = Box::pin(client.connect(Duration::from_mins(10))).await?;
+        if let Ok(mut target_platform) = self.target_platform.lock() {
+            *target_platform = connected.platform;
+        }
+        Ok(connected.connection)
     }
 }
 

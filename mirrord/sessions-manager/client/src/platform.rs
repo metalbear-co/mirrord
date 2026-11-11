@@ -12,17 +12,15 @@
 use std::path::PathBuf;
 
 use mirrord_sessions_manager_protocol::AgentMetadata;
-use serde::{Deserialize, Serialize};
 
 /// A target whose platform changes how the CLI runs the user's process.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "platform", rename_all = "kebab-case")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TargetPlatform {
     /// An AWS Lambda function, whose invocations a hub agent delivers as HTTP requests.
     AwsLambda(AwsLambdaTarget),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AwsLambdaTarget {
     /// The port the hub delivers invocations to, which the local runtime listens on.
     pub invocation_port: u16,
