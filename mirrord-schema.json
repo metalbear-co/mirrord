@@ -861,19 +861,9 @@
       "additionalProperties": false
     },
     "CiFileConfig": {
-      "description": "Configuration for mirrord for CI.\n\n```json\n{\n  \"ci\": {\n    \"output_dir\": \"/tmp/mirrord/\",\n    \"lock_timeout_ms\": 1000\n  }\n}\n```",
+      "description": "Configuration for mirrord for CI.\n\n```json\n{\n  \"ci\": {\n    \"output_dir\": \"/tmp/mirrord/\",\n  }\n}\n```",
       "type": "object",
       "properties": {
-        "lock_timeout_ms": {
-          "title": "ci.lock_timeout_ms {#ci-lock_timeout_ms}",
-          "description": "How long, in milliseconds, `mirrord ci start` and `mirrord ci container` wait before failing\nwhen another `mirrord ci` command is using the file where mirrord records the processes that\n`mirrord ci stop` ends.\n\nSessions started at the same time take turns recording their processes in this file, so the\nlater sessions wait for the earlier ones. `mirrord ci stop` holds the file while it signals\nprocesses and removes containers, so raise this value if you start sessions while\n`mirrord ci stop` runs. `mirrord ci stop` itself doesn't wait: it fails at once if another\ncommand holds the file.\n\nDefaults to `1000` milliseconds.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0
-        },
         "output_dir": {
           "title": "ci.output_dir {#ci-output_dir}",
           "description": "Path to a directory where `mirrord ci` will flush application's stdout and stderr.\n\nDefaults to `/tmp/mirrord/`.",

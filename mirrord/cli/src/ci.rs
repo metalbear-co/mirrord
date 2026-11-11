@@ -204,8 +204,17 @@ impl MirrordCiStore {
     /// A session holds the lock for only a few milliseconds (reading and rewriting the state file,
     /// and for a background user command also spawning it), so waiters retry often. With a longer
     /// interval, many waiters wake together and only about one gets the lock per tick, so a batch
-    /// of sessions started at once can run out of `ci.lock_timeout_ms`.
+    /// of sessions started at once can run out of [`Self::LOCK_TIMEOUT`].
     const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(5);
+
+    /// How long `mirrord ci start` and `mirrord ci container` wait for another `mirrord ci`
+    /// command to release the lock before they fail.
+    ///
+    /// Sessions started together hold the lock for only a few milliseconds each, so this is
+    /// generous for them. The long holder is `mirrord ci stop`, which keeps the lock while it
+    /// signals processes and removes containers, so a session started during a stop may still
+    /// time out.
+    const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
     fn default_path() -> PathBuf {
         temp_dir().join(Self::MIRRORD_FOR_CI_TMP_FILE_PATH)
@@ -249,8 +258,8 @@ impl MirrordCiStore {
     /// held lock is expected and short-lived for them, rather than a reason to fail.
     async fn lock_file_waiting(file_path: &Path, lock_timeout: Duration) -> CiResult<CiStoreLock> {
         let lock_file = Self::open_lock_file(file_path).await?;
-        // `timeout` polls its future before it checks the deadline, so `ci.lock_timeout_ms = 0`
-        // still tries the lock once and fails only if another command holds it.
+        // `timeout` polls its future before it checks the deadline, so a zero `lock_timeout` still
+        // tries the lock once and fails only if another command holds it.
         timeout(lock_timeout, async {
             while lock_file.try_lock_exclusive()?.not() {
                 sleep(Self::LOCK_RETRY_INTERVAL).await;
@@ -263,7 +272,7 @@ impl MirrordCiStore {
                 io::ErrorKind::WouldBlock,
                 format!(
                     "timed out after {} ms waiting for another `mirrord ci` command to release \
-                     the CI state file; set `ci.lock_timeout_ms` to a larger value to wait longer",
+                     the CI state file",
                     lock_timeout.as_millis()
                 ),
             )
@@ -460,16 +469,14 @@ impl MirrordCi {
 
     /// When intproxy starts, we need to retrieve its pid and store it in the `mirrord-for-ci.json`,
     /// so we can kill the intproxy later. Requiring the live shutdown owner prevents publishing
-    /// the pid before its SIGTERM handler is registered. Waits up to `ci.lock_timeout_ms` for the
-    /// CI state lock, and fails if another command holds it for longer.
+    /// the pid before its SIGTERM handler is registered. Waits up to
+    /// [`MirrordCiStore::LOCK_TIMEOUT`] for the CI state lock, and fails if another command holds
+    /// it for longer.
     #[tracing::instrument(level = Level::TRACE, skip(_shutdown_handler), err)]
-    pub(super) async fn prepare_intproxy(
-        _shutdown_handler: &IntProxyShutdown,
-        ci_config: &CiConfig,
-    ) -> CiResult<()> {
+    pub(super) async fn prepare_intproxy(_shutdown_handler: &IntProxyShutdown) -> CiResult<()> {
         MirrordCiStore::update(
             &MirrordCiStore::default_path(),
-            Duration::from_millis(ci_config.lock_timeout_ms),
+            MirrordCiStore::LOCK_TIMEOUT,
             |store| {
                 store.intproxy_pids.insert(std::process::id());
             },
@@ -501,7 +508,6 @@ impl MirrordCi {
             .expect("failed to get file name of binary path")
             .to_string_lossy();
 
-        let lock_timeout = Duration::from_millis(ci_config.lock_timeout_ms);
         let ci_run_output_dir =
             Self::create_run_output_dir(progress, binary_path, ci_config).await?;
 
@@ -521,7 +527,7 @@ impl MirrordCi {
                 &binary,
                 binary_args,
                 &MirrordCiStore::default_path(),
-                lock_timeout,
+                MirrordCiStore::LOCK_TIMEOUT,
             )
             .await?;
 
@@ -581,15 +587,18 @@ impl MirrordCi {
             .file_name()
             .expect("failed to get file name of binary path")
             .to_string_lossy();
-        let lock_timeout = Duration::from_millis(ci_config.lock_timeout_ms);
 
         // external proxy and sidecar already have started, so we want to record these and be able
         // to delete them with `mirrord ci stop` even if the following code fails.
-        MirrordCiStore::update(&MirrordCiStore::default_path(), lock_timeout, |store| {
-            store.extproxy_pids.extend(extproxy_pid);
-            store.sidecar_pids.extend(sidecar_pid);
-            store.sidecar_containers.extend(sidecar_container);
-        })
+        MirrordCiStore::update(
+            &MirrordCiStore::default_path(),
+            MirrordCiStore::LOCK_TIMEOUT,
+            |store| {
+                store.extproxy_pids.extend(extproxy_pid);
+                store.sidecar_pids.extend(sidecar_pid);
+                store.sidecar_containers.extend(sidecar_container);
+            },
+        )
         .await?;
 
         let mut command = resolve_tokio_command(binary_path);
@@ -618,7 +627,7 @@ impl MirrordCi {
                 &binary,
                 binary_args,
                 &MirrordCiStore::default_path(),
-                lock_timeout,
+                MirrordCiStore::LOCK_TIMEOUT,
             )
             .await?;
 
