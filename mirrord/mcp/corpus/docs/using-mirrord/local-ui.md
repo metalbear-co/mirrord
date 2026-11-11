@@ -100,6 +100,20 @@ If you have the [mirrord browser extension](incoming-traffic/debug-from-browser.
 - **Dashboard says "unauthorized"** - the token in the URL didn't match. Re-open the URL the CLI printed; don't reuse a URL from a previous run.
 - **"Another session monitor is already running"** - the server is already running. If it isn't behaving as you expect, trying stopping it with `mirrord ui stop` or by killing it manually using its process ID, and then restarting.
 
+## Prefer the terminal? Try `mirrord tui`
+
+{% hint style="info" %}
+`mirrord tui` is experimental.
+{% endhint %}
+
+`mirrord tui` is a terminal version of the session dashboard. It shows your sessions, targets, preview environments, databases and queues without leaving the terminal. It needs mirrord `3.255.0` or newer, on macOS or Linux.
+
+```bash
+mirrord tui
+```
+
+It's evolving based on what people ask for. Missing something or want a feature? Tell us on [Slack](https://metalbear.com/slack) or [open a GitHub issue](https://github.com/metalbear-co/mirrord/issues).
+
 ## What's next?
 
 - Use the [browser extension](incoming-traffic/debug-from-browser.md) to inject a header that matches an operator session's HTTP filter and route browser traffic to the corresponding local layer.

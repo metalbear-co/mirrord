@@ -3,7 +3,7 @@ name: mirrord-ci
 description: Help users set up mirrord in CI pipelines for testing against real Kubernetes environments. Use when users want to run end-to-end tests, integration tests, or automated tests in CI using mirrord to connect to staging/shared clusters.
 metadata:
   author: MetalBear
-  version: "1.5"
+  version: "1.6"
 ---
 
 # Mirrord CI Skill
@@ -28,7 +28,9 @@ Trigger on questions like:
 ## Security note for CI examples
 
 - **Do not** use remote pipe-to-shell installs or other unverified script execution in CI to install mirrord.
-- Pre-install mirrord in a **trusted CI image**, use your org’s **approved** package manager with pinned versions, or follow [official install docs](https://mirrord.dev/docs/overview/quick-start/). The YAML below assumes `mirrord` is already available on the runner unless you add an approved install step.
+- Pre-install mirrord in a **trusted CI image**, use your org's **approved** package manager with pinned versions, or follow [official install docs](https://mirrord.dev/docs/overview/quick-start/). The YAML below assumes `mirrord` is already available on the runner unless you add an approved install step.
+- **GitHub Actions:** [`metalbear-co/setup-mirrord`](https://github.com/metalbear-co/setup-mirrord) installs a pinned release, verifies it against the published checksum, and caches the binary between runs — prefer it over a raw install script.
+- **Other CI, if you must script the install:** `install.sh` (CLI **3.273.0+**) accepts a pinned version plus `MIRRORD_CHECKSUM=<sha256 of the release's zip>` (from the [release page](https://github.com/metalbear-co/mirrord/releases)) and fails the build on a mismatch instead of running an unverified binary; `MIRRORD_VERIFY=1` checks against the published checksum without pinning one, and `MIRRORD_INSTALL_DIR` picks a directory that needs no `sudo`. This still pipes the script into `bash`, so get it approved the same way as any other install step, and pin the version either way.
 
 ## Critical First Steps
 
@@ -175,11 +177,10 @@ jobs:
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
 
-      - name: Ensure mirrord is installed
-        run: |
-          # Use a pre-built runner image that includes mirrord, or install via your org's approved method.
-          # See https://mirrord.dev/docs/overview/quick-start/ — do not pipe remote install scripts.
-          mirrord --version
+      - name: Install mirrord
+        uses: metalbear-co/setup-mirrord@v1
+        # Installs a pinned mirrord release, verifies it against the published checksum, and caches
+        # it between runs. See https://github.com/metalbear-co/setup-mirrord for its inputs.
 
       - name: Start app with mirrord
         run: |
@@ -206,7 +207,9 @@ integration-tests:
       # Install mirrord - use your organization's approved installation method
       # See https://mirrord.dev/docs/overview/quick-start/ for options
       # Option A: Pre-install mirrord in your CI Docker image
-      # Option B: Use a pinned version from GitHub Releases with checksum verification
+      # Option B: Pin a version and verify it against the published checksum (CLI 3.273.0+):
+      #   curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh \
+      #     | MIRRORD_CHECKSUM=<sha256 of the release's zip> MIRRORD_INSTALL_DIR="$HOME/.local/bin" bash -s -- <version>
       mirrord --version  # Verify mirrord is available
     - mkdir -p ~/.kube
     - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config

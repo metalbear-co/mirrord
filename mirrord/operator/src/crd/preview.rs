@@ -845,7 +845,7 @@ impl PreviewIncomingConfig {
         match value.mode {
             IncomingMode::Off => None,
             IncomingMode::Mirror | IncomingMode::Steal => Some(Self {
-                ports: value.ports.as_ref().map(|p| p.iter().copied().collect()),
+                ports: value.ports.clone(),
                 ignore_ports: value.ignore_ports.iter().copied().collect(),
                 steal,
                 http_filter: http_filter

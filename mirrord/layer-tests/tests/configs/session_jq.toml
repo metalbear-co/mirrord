@@ -1,0 +1,9 @@
+key = 'dev.[A]+'
+share = true
+[feature.network.incoming]
+mode = "steal"
+ports = [23456]
+port_mapping = [[54321, 23456]]
+[feature.network.incoming.http_filter]
+ports = [23456]
+header_filter_jq = 'contains("x-team: local")'

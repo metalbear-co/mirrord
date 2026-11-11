@@ -1,6 +1,0 @@
-{
-  "experimental": {
-    "hook_libc_syscall": true,
-    "old_glibc_support": true
-  }
-}

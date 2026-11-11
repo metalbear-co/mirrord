@@ -149,20 +149,20 @@ Each entry in the `spec.queues` list describes one or more Kafka queues consumed
 * `id` - arbitrary queue ID that developers [reference](kafka.md#setting-a-filter) from their mirrord config.
 * `kind` - must be `kafka`.
 * `clientConfig` - name of the `MirrordPropertyList` with the Kafka client connection (from the previous step). Can also be set once for all Kafka queues with `spec.clientConfigs.kafka`.
-* `appConfig.topic` - how the application discovers the topic name. Each entry can use:
+* `appConfig.topic` - how the application discovers the topic names. Each distinct topic is split under the queue ID, and a filter on the queue ID applies to all of them (mirrord operator `3.231.0` or later, operator Helm chart `3.231.0`). An environment variable can hold one topic, or a JSON object of topics: a JSON array of topics, or several `valuePattern` references on one variable, fails the split. A topic belongs to one queue entry: a split of two entries that resolve to the same topic fails. Each source can use:
   * `env` - exact environment variable name containing the topic name.
   * `envLike` - regex matching environment variable names.
   * `volume` - read the topic name from a file mounted from a `configMap` volume (`volume.name` + `volume.file`) instead of an environment variable. See [Queue Names in Mounted Config Files](../queue-splitting.md#queue-names-in-mounted-config-files).
   * `fallback` - fallback topic name if the variable is absent (only valid with `env`). The env var is still rewritten to point at the temporary topic.
-  * `valueSelector` - a selector extracting the topic name from the variable's value: nested keys (`.kafka.topic`) and `.[]` to iterate arrays or object values. Useful when the value holds JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
+  * `valueSelector` - a selector extracting the topic name from the variable's value: nested keys (`.kafka.topic`) and `.[]` to iterate object values, or the arrays of a mounted file. Useful when the value holds JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the topic name is embedded in a larger string. The capture group (named `value`, otherwise the first group) marks the part that is the name; only that part is swapped for the temporary topic and the surrounding text is kept as-is.
   * `containerNames` - limit to specific containers (optional, defaults to all non-infra containers).
 *   One of the following must be set:
 
     * `appConfig.groupId` - how the application discovers the consumer Kafka group id. Use for standard Kafka consumers. The operator's forwarder joins this group, and the consumer's environment is left untouched.
-    * `appConfig.appId` - how the application discovers the Kafka Streams application id. Use for Kafka Streams consumers. The operator patches this variable to a fresh application id. Kafka Streams requires the Java client (`mirrord.client_implementation: java`).
+    * `appConfig.appId` - how the application discovers the Kafka Streams application id. Use for Kafka Streams consumers. The operator patches this variable to a fresh application id. List every topic the application reads in the same queue entry. Kafka Streams requires the Java client (`mirrord.client_implementation: java`).
 
-    Both use the same structure as `appConfig.topic`.
+    Both use the same structure as `appConfig.topic`, and must resolve to one value.
 
 {% hint style="warning" %}
 The mirrord operator can only read consumer's environment variables if they are either:
@@ -394,6 +394,8 @@ spec:
         groupId:
           - env: ORDERS_GROUP_ID
 ```
+
+The `groupId` of a queue with one topic can resolve to several group ids, and the operator sets the start offset of each (mirrord operator `3.231.0` or later, operator Helm chart `3.231.0`).
 
 Then enable it in the mirrord configuration of each session. The branch broker accepts plaintext connections without authentication from anywhere in the cluster, so if the application connects with SASL or TLS, override its security settings:
 

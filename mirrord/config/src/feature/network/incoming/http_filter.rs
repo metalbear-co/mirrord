@@ -100,6 +100,10 @@ use crate::{
 ///  ]
 /// }
 /// ```
+///
+/// A session started with [`share`](#root-share) steals a request that matches the filter above,
+/// or that carries the session key in `baggage` (see [`key`](#root-key)). The examples above
+/// describe the filter on its own.
 #[derive(MirrordConfig, Default, PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 #[config(map_to = "HttpFilterFileConfig", derive = "JsonSchema, Serialize")]
 #[cfg_attr(test, config(derive = "PartialEq, Eq"))]
@@ -338,6 +342,34 @@ impl HttpFilterConfig {
                 Some(list) => list.len() as u16,
                 None => u16::MAX,
             }
+        }
+    }
+
+    /// The filter of a shared session: this filter, or the `baggage` header
+    /// `mirrord-session=<key>`, which share-ingress puts on every request it forwards. The
+    /// configured filter stays whole, so requests that match it still arrive.
+    pub fn for_shared_session(&self, key: &str) -> Result<HttpFilter, HttpFilterParseError> {
+        // share-ingress replaces the `baggage` header of every request it forwards with exactly
+        // `baggage: mirrord-session=<key>`, so the filter matches that whole header and nothing
+        // else. Services that a shared service calls in turn are reached through their own
+        // sessions' filters, not this one.
+        //
+        // The agent matches a header as `<lower-case name>: <value>`, case-insensitively, but a
+        // baggage member name and its value are case-sensitive, hence `(?-i:...)`. The pattern
+        // keeps `^baggage: ` and `mirrord-session=<key>` as they are, because a `MirrordPolicy`
+        // header filter is a regex matched against this pattern, and one written for the
+        // documented filter, `^baggage: .*mirrord-session=<key>.*$`, must accept it.
+        let value = regex::escape(key);
+        let session = HttpFilter::Header(Filter::new(format!(
+            r"^baggage: (?-i:mirrord-session={value})$"
+        ))?);
+        if self.is_filter_set() {
+            Ok(HttpFilter::Composite {
+                all: false,
+                filters: vec![self.as_protocol_http_filter()?, session],
+            })
+        } else {
+            Ok(session)
         }
     }
 

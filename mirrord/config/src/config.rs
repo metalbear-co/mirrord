@@ -46,6 +46,11 @@ pub enum ConfigError {
     #[error("Conflicting configuration found `{0}`")]
     Conflict(String),
 
+    /// A setting that a session started with `share` can't use. The message is written for the
+    /// user, so it is shown as it is.
+    #[error("{0}")]
+    Share(String),
+
     /// A [`ConfigError::Conflict`] that is resolved by changing one setting, so tools such as
     /// `mirrord mcp` can point at it.
     #[error("Conflicting configuration found `{message}`")]

@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    ops::Not,
     time::Duration,
 };
 
@@ -25,7 +26,11 @@ use mirrord_config::{
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
-use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_operator::client::{OperatorSession, SessionShareReadError, SessionShareReader};
+use mirrord_progress::{
+    IdeAction, IdeMessage, LineMode, NotificationLevel, Progress, ProgressTracker,
+    messages::LOCAL_SHARE_NOTE,
+};
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
 #[cfg(target_os = "macos")]
@@ -53,7 +58,7 @@ use crate::util::reparent_to_init;
 use crate::{
     CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
-    error::CliError,
+    error::{CliError, LocalShareError},
     extract::extract_library,
     up::MirrordUp,
     util::remove_proxy_env,
@@ -126,6 +131,145 @@ pub(crate) struct MirrordExecution {
 
     /// Whether this run uses mirrord operator.
     pub uses_operator: bool,
+
+    /// The link that the operator created for this run, when it started with `share`.
+    ///
+    /// [`report_share_link`] prints it before the application starts. On Windows, where the
+    /// internal proxy stays the CLI's child, [`Self::wait`] reports an internal proxy that failed
+    /// while it is set, because the link no longer reaches the application once the session's
+    /// connections end.
+    /// On Unix the internal proxy is reparented to init, so a failure there shows only in the
+    /// internal proxy log.
+    ///
+    /// Not serialized: the IDEs get the link from [`report_share_link`], so the execution JSON
+    /// that they parse has no field for it.
+    #[serde(skip)]
+    pub share_link: Option<LocalShareLink>,
+}
+
+/// The share link that the operator recorded for this session when it connected. Requests to it
+/// reach the application while the application listens on the port that the link opens, and the
+/// target's own service otherwise.
+#[derive(Debug)]
+pub(crate) struct LocalShareLink {
+    /// The URL that share-ingress routes to the session.
+    pub url: String,
+    /// The port of the target that the link opens.
+    pub entry_port: u16,
+}
+
+/// How long [`read_share_link`] reads a link that the operator doesn't serve yet before it fails.
+const SHARE_LINK_MISSING_GRACE: Duration = Duration::from_secs(2);
+
+/// The wait between two reads of a link that the operator doesn't serve yet.
+const SHARE_LINK_MISSING_RETRY: Duration = Duration::from_millis(100);
+
+/// Reads the share link that the operator created when this shared session connected, so that the
+/// CLI can print it before the application starts.
+///
+/// It is read here, before anything starts, so that roles that don't allow reading it, or an
+/// operator that didn't create it, fail the session with an error the user sees in the terminal.
+///
+/// The operator serves the session from its watch of the session objects, which can lag behind
+/// the connect that created the session, so a missing link is read again for a short while
+/// before it counts as missing.
+#[mirrord_macros::boxed_future]
+async fn read_share_link(
+    config: &LayerConfig,
+    session: &OperatorSession,
+) -> CliResult<LocalShareLink> {
+    let reader = SessionShareReader::new(config, session).await?;
+    let missing_until = tokio::time::Instant::now() + SHARE_LINK_MISSING_GRACE;
+    let share = loop {
+        match reader.read().await {
+            Ok(Some(share)) => break Some(share),
+            Ok(None) if tokio::time::Instant::now() < missing_until => {
+                tokio::time::sleep(SHARE_LINK_MISSING_RETRY).await;
+            }
+            Ok(None) => break None,
+            Err(SessionShareReadError::Operator(error)) => return Err(error.into()),
+            Err(error) => return Err(LocalShareError::ReadLink(error).into()),
+        }
+    };
+    let Some(share) = share else {
+        return Err(LocalShareError::Operator(
+            "The operator didn't return this session's share link. Restart the session.".to_owned(),
+        )
+        .into());
+    };
+    Ok(LocalShareLink {
+        url: share.url,
+        entry_port: share.entry_port,
+    })
+}
+
+/// Identifies the share link notification in the IDEs.
+const SHARE_LINK_IDE_ID: &str = "share_link";
+
+/// Tells the user the link that the operator created for this shared session, before the
+/// application starts.
+///
+/// Nothing reports on the link after that: on Unix the CLI becomes the application, and the
+/// internal proxy runs detached, so the text says up front where requests to the link go, how long
+/// the link lasts, and where a failure is logged.
+///
+/// `line_mode` is the tracker's [`ProgressTracker::line_mode`]. A line mode prints the text as an
+/// `info` line. A spinner keeps the text for after its task finishes, because a spinner drops its
+/// `info` lines when stderr isn't a terminal.
+pub(crate) fn report_share_link<P: Progress>(
+    progress: &mut P,
+    line_mode: Option<LineMode>,
+    link: &LocalShareLink,
+    config: &LayerConfig,
+) -> CliResult<()> {
+    let local_port = config
+        .feature
+        .network
+        .incoming
+        .port_mapping
+        .get_by_right(&link.entry_port)
+        .copied()
+        .unwrap_or(link.entry_port);
+    let text = format!(
+        "Share link: {url}\nRequests to it reach your application while it listens on port \
+{local_port}, and the service running in the cluster otherwise. The link lasts as long as this \
+session. If the session fails, mirrord stops your application and writes why to the internal \
+proxy log at {log}.\n{LOCAL_SHARE_NOTE}",
+        url = link.url,
+        log = config.internal_proxy.log_destination.display(),
+    );
+
+    progress.ide(serde_json::to_value(IdeMessage {
+        id: SHARE_LINK_IDE_ID.to_owned(),
+        level: NotificationLevel::Info,
+        text: text.clone(),
+        actions: HashSet::from([IdeAction::Link {
+            label: "Open share link".to_owned(),
+            link: link.url.clone(),
+        }]),
+    })?);
+
+    match line_mode {
+        Some(_) => progress.info(&text),
+        None => progress.add_to_print_buffer(&format!("\n{text}")),
+    }
+
+    Ok(())
+}
+
+/// The internal proxy that the application's layer connects to: one that
+/// [`MirrordExecution::spawn_agent_and_intproxy`] started, or one that is already running
+/// ([`MirrordExecution::setup_existing_intproxy`]).
+struct SpawnedIntproxy {
+    /// Variables for the application: the target's environment and where the layer finds the
+    /// internal proxy.
+    env_vars: HashMap<String, String>,
+    /// The internal proxy process, or `None` when the internal proxy was already running.
+    child: Option<Child>,
+    /// Whether the agent connection goes through the mirrord operator.
+    uses_operator: bool,
+    /// The share link of a run started with `share`.
+    share_link: Option<LocalShareLink>,
 }
 
 /// Struct that when dropped will cancel the token and wait on the join handle
@@ -272,14 +416,17 @@ impl MirrordExecution {
 
         // Spawn agent and intproxy processes, unless MIRRORD_TEST_INTPROXY_ADDR is set and used
         // instead (test-only: skips agent connection and uses an existing intproxy).
-        let (mut env_vars, proxy_process, uses_operator) =
-            match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
-                Ok(addr) => (Self::setup_existing_intproxy(addr, config)?, None, false),
-                _ => {
-                    Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci)
-                        .await?
-                }
-            };
+        let SpawnedIntproxy {
+            mut env_vars,
+            child: proxy_process,
+            uses_operator,
+            share_link,
+        } = match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
+            Ok(addr) => Self::setup_existing_intproxy(addr, config)?,
+            _ => {
+                Self::spawn_agent_and_intproxy(config, progress, analytics, mirrord_for_ci).await?
+            }
+        };
 
         #[cfg(target_os = "macos")]
         {
@@ -411,6 +558,7 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator,
+            share_link,
         })
     }
 
@@ -480,6 +628,10 @@ impl MirrordExecution {
         tls: Option<&SecureChannelSetup>,
         mirrord_for_ci: Option<&MirrordCi>,
     ) -> CliResult<(Self, SocketAddr)> {
+        if config.share {
+            return Err(LocalShareError::UnsupportedContainer.into());
+        }
+
         if !config.use_proxy {
             remove_proxy_env();
         }
@@ -595,6 +747,7 @@ impl MirrordExecution {
                 .map(|unset| unset.to_vec())
                 .unwrap_or_default(),
             uses_operator: connect_info.is_operator(),
+            share_link: None,
         };
 
         Ok((execution, proxy_addr))
@@ -604,12 +757,12 @@ impl MirrordExecution {
     ///
     /// Expects `MIRRORD_TEST_INTPROXY_ADDR` to be a valid socket address, encodes the
     /// resolved config, and returns env vars that point the layer at the given proxy.
-    /// No proxy process is spawned.
+    /// No proxy process is spawned, and no agent or operator is involved.
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     fn setup_existing_intproxy(
         raw_intproxy_addr: String,
         config: &mut LayerConfig,
-    ) -> CliResult<HashMap<String, String>> {
+    ) -> CliResult<SpawnedIntproxy> {
         let intproxy_address: SocketAddr = raw_intproxy_addr.parse().map_err(|e| {
             CliError::InternalProxySpawnError(format!(
                 "invalid {MIRRORD_TEST_INTPROXY_ADDR} value: {e}"
@@ -623,15 +776,19 @@ impl MirrordExecution {
             MIRRORD_LAYER_INTPROXY_ADDR.into(),
             intproxy_address.to_string(),
         );
-        Ok(env_vars)
+        Ok(SpawnedIntproxy {
+            env_vars,
+            child: None,
+            uses_operator: false,
+            share_link: None,
+        })
     }
 
     /// Spawns the agent and the internal proxy, then returns env vars for the layer.
     ///
     /// Establishes the agent connection, validates config against agent capabilities,
     /// fetches remote env vars (unless configured to load from process), and starts the
-    /// internal proxy as a child process. Returns the environment map, child
-    /// intproxy process handle, and whether the run uses the operator.
+    /// internal proxy as a child process.
     #[mirrord_macros::boxed_future]
     #[tracing::instrument(level = Level::TRACE, skip_all)]
     async fn spawn_agent_and_intproxy(
@@ -639,7 +796,7 @@ impl MirrordExecution {
         progress: &mut ProgressTracker,
         analytics: &mut AnalyticsReporter,
         mirrord_for_ci: Option<&MirrordCi>,
-    ) -> CliResult<(HashMap<String, String>, Option<Child>, bool)> {
+    ) -> CliResult<SpawnedIntproxy> {
         let branch_name = GIT_BRANCH.clone();
         let mirrord_up = MirrordUp::from_env();
         let ConnectData {
@@ -658,14 +815,20 @@ impl MirrordExecution {
         .await
         .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
 
+        let share_link = match &connect_info {
+            AgentConnectInfo::Operator(session) if config.share => {
+                Some(read_share_link(config, session).await?)
+            }
+            _ => None,
+        };
+
         let mut client = connector.into_client().await?;
 
         config
             .feature
             .network
             .incoming
-            .http_filter
-            .ensure_usable_with(client.protocol_version())?;
+            .ensure_usable_with(client.protocol_version(), config.shared_session_key())?;
 
         let mut env_vars = if config.feature.env.load_from_process.unwrap_or(false) {
             Default::default()
@@ -806,7 +969,12 @@ impl MirrordExecution {
             intproxy_address.to_string(),
         );
 
-        Ok((env_vars, Some(proxy_process), connect_info.is_operator()))
+        Ok(SpawnedIntproxy {
+            env_vars,
+            child: Some(proxy_process),
+            uses_operator: connect_info.is_operator(),
+            share_link,
+        })
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using
@@ -908,12 +1076,19 @@ impl MirrordExecution {
     /// cleans up the process when the parent process exits, so we need the parent to stay alive
     /// while the internal proxy is running.
     /// See <https://github.com/metalbear-co/mirrord/issues/1211>
+    ///
+    /// On Unix `child` is the intermediate process that `reparent_to_init` lets exit right after
+    /// the fork, and it was already awaited, so this returns at once and the share link check
+    /// below only catches a failed internal proxy on Windows.
     pub(crate) async fn wait(mut self) -> CliResult<()> {
         if let Some(child) = self.child.as_mut() {
-            child
+            let status = child
                 .wait()
                 .await
                 .map_err(CliError::InternalProxyWaitError)?;
+            if self.share_link.is_some() && status.success().not() {
+                return Err(LocalShareError::ProxyExit(status).into());
+            }
         }
 
         Ok(())

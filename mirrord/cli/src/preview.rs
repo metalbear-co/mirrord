@@ -2366,7 +2366,7 @@ async fn load_preview_config(
         .override_envs(env_overrides)
         .strict_env(strict_env);
 
-    let config = crate::util::resolve_layer_config(&mut cfg_context)
+    let mut config = crate::util::resolve_layer_config(&mut cfg_context)
         .await
         .inspect_err(|_| {
             subtask.failure(None);

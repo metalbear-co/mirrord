@@ -277,7 +277,7 @@ use db_branches::db_branches_command;
 use debug_hold::ExecHold;
 use diagnose::diagnose_command;
 use dump::dump_command;
-use execution::{CrashReporting, MirrordExecution};
+use execution::{CrashReporting, MirrordExecution, report_share_link};
 use extension::extension_exec;
 use extract::extract_library;
 use mirrord_analytics::{
@@ -383,6 +383,7 @@ mod verify_config;
 mod vpn;
 mod wsl;
 
+use error::LocalShareError;
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{
@@ -570,6 +571,9 @@ async fn exec_process(
     // print an invitation to the newsletter on certain run count numbers
     suggest_newsletter_signup(run_count, progress);
 
+    // Read before the task below: on Windows that task borrows `progress` until the handoff.
+    let line_mode = progress.line_mode();
+
     #[cfg(not(target_os = "windows"))]
     let mut sub_progress = progress.subtask(EXEC_RUNNING_TASK);
     #[cfg(target_os = "windows")]
@@ -590,6 +594,10 @@ async fn exec_process(
         mirrord_for_ci.is_some(),
         &mut sub_progress,
     );
+
+    if let Some(link) = &execution_info.share_link {
+        report_share_link(&mut sub_progress, line_mode, link, &config)?;
+    }
 
     // `None` when no layer will load, or when `sub_progress` is for a person or prints nothing:
     // `exec` then reports `Ready!` through it as before, so a terminal keeps its whole tree.
@@ -949,12 +957,21 @@ async fn exec(
         )
     }
 
-    let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
+    let mut cfg_context = ConfigContext::default()
+        .override_envs(args.params.as_env_vars())
+        .override_env_opt("MIRRORD_SHARE", args.share.then_some("true"));
     cfg_context = apply_test_env_overrides(cfg_context);
 
     let (config_file_path, mut config) = util::resolve_config(&mut cfg_context).await?;
 
     crate::profile::apply_profile_if_configured(&mut config, progress).await?;
+
+    // Before the local Redis branch starts, so a misconfigured session starts nothing.
+    let result = config.verify(&mut cfg_context);
+    for warning in cfg_context.into_warnings() {
+        progress.warning(&warning);
+    }
+    result?;
 
     let _local_redis: Option<local_redis::LocalRedis> = if let Some(redis_config) =
         config.feature.db_branches.iter().find_map(|branch| {
@@ -1011,12 +1028,6 @@ async fn exec(
     analytics
         .get_mut()
         .add("key_length", config.key.analytics_len());
-
-    let result = config.verify(&mut cfg_context);
-    for warning in cfg_context.into_warnings() {
-        progress.warning(&warning);
-    }
-    result?;
 
     #[cfg(target_os = "macos")]
     if let Err(error) = prompt_sip_report(progress, watch.clone(), user_data.machine_id()).await {
@@ -1111,6 +1122,10 @@ async fn port_forward(
         .override_env_opt("MIRRORD_KUBE_CONTEXT", args.context.as_ref())
         .override_env_opt(LayerConfig::FILE_PATH_ENV, args.config_file.as_ref());
     let mut config = util::resolve_layer_config(&mut cfg_context).await?;
+    if config.share {
+        return Err(LocalShareError::UnsupportedPortForward.into());
+    }
+
     crate::profile::apply_profile_if_configured(&mut config, &progress).await?;
 
     let mut analytics = AnalyticsReporter::new(
