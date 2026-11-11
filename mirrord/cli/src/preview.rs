@@ -327,6 +327,15 @@ impl PreparedPreview {
             .unwrap_or(Target::Targetless);
         let targetless = matches!(config_target, Target::Targetless);
         if targetless {
+            // Branches cannot stand in for the pod `mirrord preview sync` runs the code in, so it is
+            // refused before the checks that suggest adding them.
+            if sync.is_some() {
+                return Err(CliError::UnsupportedTargetConfig(
+                    "`mirrord preview sync` needs a target workload to run the synced code in; \
+                     set a `target`"
+                        .to_owned(),
+                ));
+            }
             if layer_config
                 .feature
                 .db_branches
@@ -349,13 +358,6 @@ impl PreparedPreview {
             }
             if !sources.is_empty() {
                 return Err(manifests_need_a_target());
-            }
-            if sync.is_some() {
-                return Err(CliError::UnsupportedTargetConfig(
-                    "`mirrord preview sync` needs a target workload to run the synced code in; \
-                     set a `target`"
-                        .to_owned(),
-                ));
             }
             // Run here, not with the general config check: that one also loads the config for
             // `preview stop` and friends, where a missing `-t` is not a preview without a target.

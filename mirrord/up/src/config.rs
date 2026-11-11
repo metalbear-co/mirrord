@@ -3815,8 +3815,8 @@ mod tests {
 
     /// Every preview session runs as the `split` mode, which sets the incoming mode to steal. A
     /// service without a target has nothing to steal for, and the targetless check compares
-    /// incoming against the default, so every such service was told `feature.network.incoming`
-    /// is ignored although nobody set it.
+    /// incoming against the default, so a service that set no incoming must not be told
+    /// `feature.network.incoming` is ignored.
     #[test]
     fn targetless_preview_does_not_report_incoming_nobody_set() {
         let config = preview_service(&preview_yaml("none", ""));

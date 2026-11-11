@@ -879,10 +879,7 @@ pub(crate) enum CliError {
     PreviewTargetOrDbBranchesRequired,
 
     #[error("Failed to resolve target for preview environment: {0}")]
-    #[diagnostic(help(
-        "Targetless mode is not supported for preview environments. \
-         Please check that the target exists and has running pods.{GENERAL_HELP}"
-    ))]
+    #[diagnostic(help("Please check that the target exists and has running pods.{GENERAL_HELP}"))]
     PreviewTargetResolutionFailed(String),
 
     #[error("Failed to create preview session resource: {0}")]
