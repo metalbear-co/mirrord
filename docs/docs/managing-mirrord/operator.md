@@ -46,7 +46,7 @@ Installing the Operator creates cluster-scoped objects: CRDs, ClusterRoles, an A
 **Network**
 
 - **API server to Operator:** The Kubernetes API server sends mirrord requests to the Operator through the APIService. The API server must be able to reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke).
-- **Operator to MetalBear:** A cloud-connected Operator sends HTTPS requests to `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Team and Free licenses require telemetry. If the Operator cannot reach the telemetry endpoint for more than one hour, new sessions are blocked. For Enterprise licenses, telemetry is optional. For more details, see [Licensing](licensing.md). If your cluster cannot send outbound traffic, you need an Enterprise license certificate (`license.pem`). Give it to the Operator directly (see [Air-gapped / offline clusters](#air-gapped-offline-clusters-enterprise)), or install it in an [Enterprise License Server](license-server.md) that your Operators connect to.
+- **Operator to MetalBear:** A cloud-connected Operator sends HTTPS requests to `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Team and Free licenses require telemetry. If the Operator cannot reach the telemetry endpoint for more than one hour, new sessions are blocked. For Enterprise licenses, telemetry is optional. For more details, see [Licensing](licensing.md). If your cluster can't send outbound traffic, see [Air-gapped Clusters](air-gapped.md) (Enterprise only).
 - **Image pulls:** Your nodes pull the mirrord images from `ghcr.io/metalbear-co`. Some features use other public images, for example the database images for DB branching. If your nodes cannot reach these registries, see [Using an Internal Registry](#using-an-internal-registry-optional).
 
 **Resources**
@@ -63,39 +63,7 @@ Developers can log in to the Operator with your OIDC identity provider at a publ
 
 ## Air-gapped / offline clusters (Enterprise)
 
-Air-gapped or offline clusters can't reach the cloud to exchange an API key for a license, so Enterprise deployments in that situation use an offline **license certificate** instead. First add the Helm repository and download `values.yaml`, as in [Get the chart](../getting-started/install-the-operator.md#get-the-chart). Then, instead of a cloud API key, give the chart your certificate. If you have a `license.pem` file, set `license.file.secret.data.license.pem` in `values.yaml` using a YAML literal block:
-
-```yaml
-license:
-  file:
-    secret:
-      data:
-        license.pem: |
-          -----BEGIN CERTIFICATE-----
-          <contents of your license.pem file>
-          -----END CERTIFICATE-----
-```
-
-Alternatively, reference a Kubernetes secret via `license.pemRef` in `values.yaml`:
-
-```yaml
-license:
-  pemRef: mirrord-operator-license-pem
-```
-
-This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-
-kubectl create secret generic mirrord-operator-license-pem \
-  --namespace mirrord \
-  --from-file=license.pem=/path/to/license.pem
-```
-
-The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
-
-For a fully self-hosted setup, see the [license server](license-server.md).
+See [Air-gapped Clusters](air-gapped.md).
 
 ## License key
 

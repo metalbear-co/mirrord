@@ -56,7 +56,7 @@ On top of everything in the Team plan, the Enterprise plan adds:
 * **Preview Environments** - Deploy isolated, ephemeral pods in the cluster for async review and QA
 * **mirrord for CI** - Run integration and end-to-end tests against a shared staging cluster without spinning up a dedicated test environment
 * **Multi-cluster** - Intercept traffic across multiple clusters in a single mirrord session
-* **Air-gapped operation** - Run the [License Server](../managing-mirrord/license-server.md) on-prem to manage seats without sending telemetry to MetalBear
+* **Air-gapped operation** - Run mirrord in clusters with no internet access, using a license certificate or an on-prem [License Server](../managing-mirrord/license-server.md). See [Air-gapped Clusters](../managing-mirrord/air-gapped.md).
 * **High availability** - Run the Operator in HA mode
 * **Operator-hosted sessions-manager** - Run the sessions-manager for [workloads outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md) inside the Operator on your cluster, with access managed by Kubernetes RBAC (alpha)
 * **Premium support**

@@ -46,7 +46,7 @@ You can also visit our [Trust Center](https://trust.metalbear.com) for an overvi
 * On the Enterprise plan, with the alpha [Operator-hosted sessions-manager](../using-mirrord/beyond-kubernetes/operator-hosted.md), workloads outside Kubernetes, such as Amazon ECS tasks, reach the Operator through your EKS API server as Kubernetes identities mapped from their IAM roles, with no shared secrets. See [How do ECS workloads authenticate to the Operator?](#how-do-ecs-workloads-authenticate-to-the-operator).
 * The Operator's own permissions are listed in [What can the Operator access in my cluster?](#what-can-the-operator-access-in-my-cluster), with how to limit it to some namespaces.
 * Operator activity is logged per session, including the Kubernetes user, the target, and the traffic filter in use. See [Auditing mirrord usage](#how-do-i-audit-mirrord-usage).
-* mirrord can run fully air-gapped, with no outbound communication to MetalBear. See [Air-gapped operation](#can-mirrord-run-air-gapped).
+* On the Enterprise plan, mirrord can run in air-gapped clusters, and you can turn off usage telemetry. See [Air-gapped operation](#can-mirrord-run-air-gapped).
 * Released container images and CLI binaries carry signed SLSA Build Level 2 provenance, so you can verify what you pulled before installing it. See [How is the Operator built and distributed](#how-is-the-operator-built-and-distributed).
 * Missing anything? Feel free to ask us on [Slack](https://metalbear.com/slack) or hi@metalbear.com
 
@@ -94,7 +94,7 @@ Together with the session start and end times, these fields let you attribute mi
 
 ## Can mirrord run air-gapped?
 
-Yes, on the Enterprise plan. In an air-gapped deployment the Operator sends no telemetry or license verification traffic to MetalBear. Running the [License Server](license-server.md) on-prem is optional, but it is the recommended way to manage seats and collect usage without MetalBear's cloud.
+Yes, on the Enterprise plan. The Operator gets its license from a certificate file or from your own [License Server](license-server.md), and you can turn off usage telemetry. See [Air-gapped Clusters](air-gapped.md).
 
 ## How is the Operator built and distributed?
 
@@ -120,9 +120,9 @@ For our vulnerability disclosure and customer notification process, see the [Tru
 
 mirrord for Teams is completely on-prem. The Operator communicates with MetalBear servers over an encrypted TLS connection only for license verification and usage metrics. What the usage metrics contain depends on your organization's identity sharing setting.
 
-### Always sent (anonymized), except on Enterprise air-gapped
+### Always sent (anonymized), unless turned off on Enterprise
 
-These fields are always sent on every plan. The only exception is an Enterprise [air-gapped](#can-mirrord-run-air-gapped) deployment, where nothing is sent to MetalBear. Running the on-prem [License Server](license-server.md) there is optional, but it is the recommended way to collect usage without MetalBear's cloud.
+These fields are sent on every plan. On the Enterprise plan, you can turn them off with `operator.disableTelemetries: true`, for example in an [air-gapped cluster](air-gapped.md).
 
 1. User ID (randomly generated hash, stored on user machine)
 2. Duration of session
@@ -158,7 +158,7 @@ Identity is not sent when:
 
 Changing the setting takes effect at the Operator's next cloud token refresh, without regenerating the key or restarting the Operator.
 
-Only the Enterprise plan can disable this communication entirely, through an [air-gapped](#can-mirrord-run-air-gapped) deployment (the on-prem License Server is the recommended way to collect usage there). On other plans the anonymized fields above are always sent.
+Only the Enterprise plan can turn this off, with `operator.disableTelemetries: true`. On other plans the anonymized fields above are always sent.
 
 ## Are you SOC2/ISO27001 compliant?
 

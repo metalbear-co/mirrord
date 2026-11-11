@@ -17,7 +17,7 @@ There are two ways to install it:
 - **[Default install](#default-install):** one command, `mirrord operator install`, with the chart's default settings. Use it unless one of the Helm cases below applies.
 - **[Custom install with Helm](#custom-install-with-helm):** if your platform team manages cluster software with Helm or GitOps, or you need to change a default. For example, your nodes can't pull images from `ghcr.io` (see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional)), you want a namespace other than `mirrord`, or you run OpenShift or GKE Autopilot.
 
-If your cluster is isolated from the internet and external networks, for example for security or compliance, see [Air-gapped / offline clusters](../managing-mirrord/operator.md#air-gapped-offline-clusters-enterprise) (Enterprise only).
+If your cluster is isolated from the internet and external networks, for example for security or compliance, see [Air-gapped Clusters](../managing-mirrord/air-gapped.md) (Enterprise only).
 
 ## Requirements
 

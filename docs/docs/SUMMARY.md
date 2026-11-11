@@ -122,6 +122,7 @@
 * [Scalability](managing-mirrord/scalability.md)
 * [Node Upgrades and Scale-Down](managing-mirrord/node-upgrades.md)
 * [Licensing](managing-mirrord/licensing.md)
+* [Air-gapped Clusters](managing-mirrord/air-gapped.md)
 * [License Server](managing-mirrord/license-server.md)
 * [Versioning](managing-mirrord/versioning.md)
 * [Jira Integration](managing-mirrord/jira-integration.md)

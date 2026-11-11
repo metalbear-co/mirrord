@@ -12,14 +12,14 @@ weight: 540
 toc: true
 tags:
   - enterprise
-description: "Run your own mirrord license server to manage seats with no data sent to MetalBear, including in air-gapped clusters."
+description: "Run your own mirrord license server to manage seats without the mirrord cloud, including in air-gapped clusters."
 ---
 
 # License Server
 
-The license server enables you to manage your organization’s seats without sending any data to mirrord’s servers. It can aggregate license metrics from multiple operators (useful if you’re running mirrord across multiple clusters) and provides visibility into seat usage across your organization.
+The license server enables you to manage your organization’s seats without the mirrord cloud. It can aggregate license metrics from multiple operators (useful if you’re running mirrord across multiple clusters) and provides visibility into seat usage across your organization.
 
-The license server also lets you run mirrord in air-gapped clusters, because the operator gets its license without contacting MetalBear. See [Can mirrord run air-gapped?](security.md#can-mirrord-run-air-gapped).
+The license server also lets you run mirrord in [air-gapped clusters](air-gapped.md), because the operator gets its license from it.
 
 {% hint style="info" %}
 This feature is available to users on the Enterprise pricing plan.
