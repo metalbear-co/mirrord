@@ -224,7 +224,18 @@ jobs:
 
       - uses: ./.github/actions/setup-bazel
 
+      # A change to the modules must come with the lockfile that they resolve to, and with the
+      # `use_repo` calls that `bazel mod tidy` writes, or every developer's next build would change
+      # the lockfile. Any other Bazel command updates the lockfile in place, so this step runs
+      # before the others.
+      - name: Bazel modules
+        run: |
+          bazel mod deps --lockfile_mode=error
+          bazel mod tidy
+          git diff --exit-code
+
       - name: lint
+        if: ${{ !cancelled() }}
         run: nix develop .#lint --command bazel run //:lint
 
       - name: format
