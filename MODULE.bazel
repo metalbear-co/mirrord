@@ -36,8 +36,11 @@ bazel_dep(name = "bazel_skylib", version = "1.9.2")
 # that builds run on.
 bazel_dep(name = "codesign.bzl", version = "0.0.13")
 
-# The rules that build the agent's and the CLI's images, and the Debian packages that the CLI's
-# image takes its trust store from (see `mirrord/cli/cli.MODULE.bazel`).
+# The rules that build the images of the agent, the CLI and the end-to-end tests' apps, and the
+# Debian packages that the images take files from: the agent's image takes the programs that the
+# agent runs (see `mirrord/agent/agent.MODULE.bazel`), and the others take their trust store (see
+# `mirrord/cli/cli.MODULE.bazel`, which also pins the Debian snapshot that all the packages come
+# from).
 bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "rules_distroless", version = "0.9.4")
 

@@ -1,8 +1,13 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
-load("@rules_oci//oci:defs.bzl", "oci_load")
+load("@rules_distroless//distroless:defs.bzl", "cacerts")
+load("@rules_go//go:def.bzl", "go_binary")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load", "oci_push")
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@tar.bzl//tar:tar.bzl", "tar")
 load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:image.bzl", "IMAGE_LABELS")
 load("//bazel:nextest.bzl", "nextest_variant")
+load("//bazel:platform.bzl", "platform_filegroup")
 load("//bazel:rust.bzl", "rust_library", "rust_test")
 load("//mirrord/layer-tests/tests/apps:go_test_app.bzl", "GO_VERSIONS", "go_test_app")
 
@@ -27,10 +32,9 @@ rust_library(
     rustc_env = {"CARGO_MANIFEST_DIR": "."},
 )
 
-# The apps that the tests run, at the paths that the tests run them from, relative to this
-# package, as `scripts/prepare_e2e.sh` builds them. The Rust apps are members of the Cargo
-# workspace, with packages of their own, and the tests find them there under Bazel (see `rust_app`
-# in `src/utils/application.rs`).
+# The apps that the tests run, at the paths that the tests run them from, relative to this package.
+# The Rust apps are members of the Cargo workspace, with packages of their own, and the tests find
+# them there under Bazel (see `rust_app` in `src/utils/application.rs`).
 #
 # Each Go app comes with the Go versions that the tests run it with. No test here runs `go-e2e`,
 # which the library's `Application::GoHTTP` runs for the operator's end-to-end tests, so only the
@@ -231,4 +235,153 @@ py_binary(
     main = "e2e_setup.py",
     target_compatible_with = LINUX_ONLY,
     deps = ["@rules_python//python/runfiles"],
+)
+
+# The apps that the tests run, as programs in `/apps`, which Argo CD deploys to the staging
+# cluster, so that `mirrord exec` on the same sources runs the code that is in the cluster. Each Go
+# app is built with the newest Go version, and each app is named after its directory. The base is
+# Debian rather than an empty image, because the tests drive some apps through `kubectl exec`, which
+# needs a shell.
+#
+# The operator's repository runs the apps by these paths: the workloads that Argo CD deploys
+# (`argocd/services/queue-apps`), its end-to-end tests, and its staging tool, which starts
+# `go-azure-servicebus-sender` and `temporal-starter` inside the consumers' pods. An app that one
+# of them runs must be in the image.
+RUST_APPS = [
+    "issue1317",
+    "kafka-consumer",
+    "rust-access-denied-server",
+    "rust-bypassed-unix-socket",
+    "rust-e2e-fileops",
+    "rust-sqs-printer",
+    "rust-unix-socket-client",
+    "rust-websockets",
+]
+
+NEWEST_GO = sorted(GO_VERSIONS.keys())[-1]
+
+# The Go apps that only run in the staging cluster, each with the Go packages that it imports. They
+# build with the default Go version, which is the newest (see
+# `mirrord/layer-tests/tests/apps/apps.MODULE.bazel`). Each app's directory is a package of its own,
+# which exports the app's `main.go`, because `go_deps` reads the modules that the app imports from
+# its `go.mod` (see `//:go_apps.work`).
+STAGING_GO_APPS = {
+    "go-azure-servicebus-queue-consumer": [
+        "@com_github_azure_azure_sdk_for_go_sdk_messaging_azservicebus//:azservicebus",
+    ],
+    "go-azure-servicebus-sender": [
+        "@com_github_azure_azure_sdk_for_go_sdk_messaging_azservicebus//:azservicebus",
+    ],
+    "go-bullmq-consumer": ["@com_github_redis_go_redis_v9//:go-redis"],
+    "go-gcp-pubsub-consumer": ["@com_google_cloud_go_pubsub//:pubsub"],
+    "go-nats-consumer": [
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_nats_io_nats_go//jetstream",
+    ],
+    "go-nats-pubsub-consumer": ["@com_github_nats_io_nats_go//:nats_go"],
+    "go-redis-pubsub-consumer": ["@com_github_redis_go_redis_v9//:go-redis"],
+    "go-rmq-consumer": ["@com_github_rabbitmq_amqp091_go//:amqp091-go"],
+    "temporal-starter": [
+        "@io_temporal_go_api//common/v1:common",
+        "@io_temporal_go_sdk//client",
+        "@io_temporal_go_sdk//converter",
+        "@io_temporal_go_sdk//workflow",
+    ],
+    "temporal-worker": [
+        "@io_temporal_go_api//common/v1:common",
+        "@io_temporal_go_api//serviceerror",
+        "@io_temporal_go_sdk//activity",
+        "@io_temporal_go_sdk//client",
+        "@io_temporal_go_sdk//converter",
+        "@io_temporal_go_sdk//worker",
+        "@io_temporal_go_sdk//workflow",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//encoding/gzip",
+    ],
+}
+
+[
+    go_binary(
+        name = app,
+        srcs = ["//mirrord/tests/{}:main.go".format(app)],
+        target_compatible_with = LINUX_ONLY,
+        deps = deps,
+    )
+    for app, deps in STAGING_GO_APPS.items()
+]
+
+tar(
+    name = "apps_image_layer",
+    srcs = ["//mirrord/tests/{0}".format(app) for app in RUST_APPS] + [
+        "{}/{}.go_test_app".format(app, NEWEST_GO)
+        for app in GO_APPS
+    ] + [":" + app for app in STAGING_GO_APPS],
+    compress = "gzip",
+    mtree = ["./apps uid=0 gid=0 time=0 mode=0755 type=dir"] + [
+        "./apps/{0} uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath //mirrord/tests/{0})".format(app)
+        for app in RUST_APPS
+    ] + [
+        "./apps/{0} uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath {0}/{1}.go_test_app)".format(app, NEWEST_GO)
+        for app in GO_APPS
+    ] + [
+        "./apps/{0} uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath :{0})".format(app)
+        for app in STAGING_GO_APPS
+    ],
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The trust store, for the apps that call services over TLS, like the SQS printer.
+cacerts(
+    name = "apps_image_cacerts",
+    package = "@trixie//ca-certificates:data",
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+oci_image(
+    name = "apps_image",
+    base = "@debian",
+    labels = IMAGE_LABELS,
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+    tars = [
+        ":apps_image_cacerts",
+        ":apps_image_layer",
+    ],
+)
+
+# The image for each Linux CPU. On a Linux machine, the image for its own CPU is the same build as
+# `:apps_image`, with the apps that `bazel build //...` and the tests already built, and only the
+# other CPU's is a cross-build.
+[
+    platform_filegroup(
+        name = "apps_image_" + cpu,
+        srcs = [":apps_image"],
+        cpu = cpu,
+        os = "linux",
+        tags = ["manual"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+oci_image_index(
+    name = "apps_image_index",
+    images = [
+        ":apps_image_aarch64",
+        ":apps_image_x86_64",
+    ],
+    tags = ["manual"],
+)
+
+# Pushes the apps' image for both Linux CPUs, as `.github/workflows/publish-e2e-apps.yaml` does on
+# every change to `main`.
+oci_push(
+    name = "apps_image_push",
+    image = ":apps_image_index",
+    repository = "ghcr.io/metalbear-co/mirrord-e2e-apps",
+    tags = ["manual"],
 )

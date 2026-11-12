@@ -8,4 +8,6 @@ load("//bazel:rust.bzl", "rust_binary")
 rust_binary(
     name = "kafka-consumer",
     target_compatible_with = LINUX_ONLY,
+    # The image of the end-to-end tests' apps holds it.
+    visibility = ["//mirrord/tests:__pkg__"],
 )

@@ -7,11 +7,6 @@ variable "SHA" {
   default = ""
 }
 
-# Comma-separated tags for the SQS printer test image.
-variable "SQS_PRINTER_TAGS" {
-  default = "${REGISTRY}/test-sqs-printer:dev"
-}
-
 # Platforms for the images. Override to target a single platform (e.g. linux/amd64 for local test builds).
 variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
@@ -28,11 +23,6 @@ variable "PRODUCT_CACHE_TO" {
   default = ""
 }
 
-# Test helper images.
-group "test-images" {
-  targets = ["sqs-printer"]
-}
-
 # CI base images used by build and test jobs.
 group "ci-images" {
   targets = [
@@ -42,19 +32,6 @@ group "ci-images" {
     "ci-layer-build-aarch64",
     "ci-rust-build",
   ]
-}
-
-# Test utility that prints SQS messages; used for manual SQS integration testing.
-target "sqs-printer" {
-  context    = "./mirrord/tests/rust-sqs-printer"
-  dockerfile = "Dockerfile"
-  platforms  = split(",", PLATFORMS)
-  tags       = split(",", SQS_PRINTER_TAGS)
-  cache-from = compact([PRODUCT_CACHE_FROM])
-  cache-to   = compact([PRODUCT_CACHE_TO])
-  contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-builder"
-  }
 }
 
 # Builder image: Rust toolchain + cross-compilation tools for building the agent.

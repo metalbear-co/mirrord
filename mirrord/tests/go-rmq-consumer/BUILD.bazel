@@ -1,0 +1,3 @@
+# The app is a package of its own, because `go_deps` reads the Go modules that it imports from its
+# `go.mod` (see `//:go_apps.work`). `//mirrord/tests` builds it.
+exports_files(["main.go"])

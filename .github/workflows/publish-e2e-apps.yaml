@@ -1,0 +1,59 @@
+# Publishes the image of the end-to-end tests' apps, `ghcr.io/metalbear-co/mirrord-e2e-apps`, which
+# Argo CD deploys to the staging cluster (see `:apps_image` in `mirrord/tests/BUILD.bazel`).
+name: Publish the e2e apps image
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - mirrord/tests/**
+      - "!mirrord/tests/src/**"
+      - "!mirrord/tests/AGENTS.md"
+      - mirrord/layer-tests/tests/apps/**
+      - Cargo.toml
+      - Cargo.lock
+      - MODULE.bazel
+      - MODULE.bazel.lock
+      - .github/workflows/publish-e2e-apps.yaml
+  workflow_dispatch:
+
+# Each run moves `latest`, so a run that started later must not finish first and leave `latest` on
+# the older image. A new run waits for the running one to finish, and replaces a run that is still
+# waiting.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+        with:
+          publishes: "true"
+
+      # `oci_push` pushes with the credentials that Docker keeps.
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `latest` is the tag that the staging cluster runs: Argo CD's image updater rolls out each new
+      # digest of it. The `sha-` tags, with the commit's short and long hashes, name the commit that
+      # an image was built from.
+      - name: Push
+        run: |
+          bazel run //mirrord/tests:apps_image_push -- \
+            --tag latest --tag "sha-${GITHUB_SHA::7}" --tag "sha-${GITHUB_SHA}"

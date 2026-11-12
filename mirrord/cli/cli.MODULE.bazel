@@ -11,7 +11,7 @@ http_file(
     url = "https://github.com/metalbear-co/appleutils/releases/download/v10/apple-utils-v10.tar.gz",
 )
 
-# The base of the CLI's image, `debian:trixie`.
+# `debian:trixie`, the base of the CLI's image and of the images of the end-to-end tests' apps.
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "debian",
@@ -24,11 +24,14 @@ oci.pull(
 )
 use_repo(oci, "debian", "debian_linux_amd64", "debian_linux_arm64_v8")
 
-# The `ca-certificates` package from a snapshot of Debian trixie, which the CLI's image takes its
-# trust store from. The CLI's HTTP clients, like the ones for the local daemon and analytics, need
-# the trust store, and the base image has none. Only the package itself is needed, because `cacerts`
-# in `BUILD.bazel` builds the bundle from its certificates, as its `update-ca-certificates` would.
-# `MODULE.bazel.lock` records the package's version and checksum.
+# The snapshot of Debian trixie that every image takes its packages from, and the snapshot's
+# `ca-certificates` package, which the images on the `debian` base take their trust store from. The
+# base image has none, and the CLI's HTTP clients, like the ones for the local daemon and
+# analytics, need one, as do the tests' apps that call services over TLS. Only the package itself
+# is needed, because each image's `cacerts` target builds the bundle from its certificates, as its
+# `update-ca-certificates` would. The agent's image takes its programs from the same snapshot (see
+# `mirrord/agent/agent.MODULE.bazel`). `MODULE.bazel.lock` records the packages' versions and
+# checksums.
 apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
 apt.sources_list(
     architectures = [

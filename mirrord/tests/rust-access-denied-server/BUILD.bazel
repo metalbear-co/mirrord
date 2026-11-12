@@ -2,4 +2,6 @@ load("//bazel:rust.bzl", "rust_binary")
 
 rust_binary(
     name = "rust-access-denied-server",
+    # The image of the end-to-end tests' apps holds it.
+    visibility = ["//mirrord/tests:__pkg__"],
 )
