@@ -763,12 +763,13 @@ mod main {
                 }
             })
         } else {
+            // A shell runs a script that has no shebang with itself, so the script runs with
+            // `$SHELL`. When `$SHELL` isn't set, the script runs with `/bin/sh`, as `execvp` does.
             let shebang = read_shebang_from_file(&complete_path)?.unwrap_or_else(|| {
-                trace!("Did not find a shebang, defaulting to $SHELL.");
+                trace!("Did not find a shebang, defaulting to $SHELL or /bin/sh.");
                 ScriptShebang {
-                    interpreter_path: PathBuf::from(
-                        env::var("SHELL").expect("$SHELL should be present"),
-                    ),
+                    interpreter_path: env::var_os("SHELL")
+                        .map_or_else(|| PathBuf::from("/bin/sh"), PathBuf::from),
                     start_of_rest_of_file: 0,
                 }
             });
