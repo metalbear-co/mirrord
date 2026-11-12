@@ -1,0 +1,1 @@
+A session keeps waiting for a database branch while the operator builds or pulls the copy-on-write snapshot it starts from, instead of giving up after `creation_timeout_secs`. When it does give up on a branch, it shows what the operator says the branch still waits for.
