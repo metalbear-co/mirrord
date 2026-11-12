@@ -587,10 +587,10 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             route,
             first_conn: None,
         };
-        let conn = connector
-            .connect()
-            .await
-            .map_err(CliError::SessionsManagerConnect)?;
+        let conn = connector.connect().await.map_err(|error| match error {
+            SessionsManagerClientError::OperationTimeout => CliError::SessionsManagerConnectTimeout,
+            error => CliError::SessionsManagerConnect(error),
+        })?;
         connector.first_conn = Some(Box::new(conn));
         first_connect_progress.success(None);
 
