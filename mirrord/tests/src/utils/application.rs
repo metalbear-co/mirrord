@@ -2,6 +2,7 @@
 use std::{fmt, time::Duration};
 
 use mirrord_test_utils::{
+    node, python,
     run_command::{run_exec_targetless, run_exec_with_target},
     TestProcess,
 };
@@ -85,17 +86,26 @@ pub(crate) fn app_path(relative: &str) -> String {
     }
 }
 
+/// Returns the path of the Rust test app `name`, a member of the Cargo workspace in
+/// `mirrord/tests/<name>`. Cargo builds it into the workspace's `target/debug`, and Bazel puts it
+/// next to its sources in the test's runfiles, whose directory Bazel's tests get in `RUNFILES_DIR`.
+pub(crate) fn rust_app(name: &str) -> String {
+    if std::env::var_os("RUNFILES_DIR").is_some() {
+        app_path(&format!("{name}/{name}"))
+    } else {
+        app_path(&format!("../../target/debug/{name}"))
+    }
+}
+
 impl Application {
     pub fn get_cmd(&self) -> Vec<String> {
         match self {
             Application::PythonFlaskHTTP => {
-                vec![
-                    "python3".into(),
-                    "-u".into(),
-                    app_path("python-e2e/app_flask.py"),
-                ]
+                vec![python(), "-u".into(), app_path("python-e2e/app_flask.py")]
             }
             Application::PythonFastApiHTTP => vec![
+                python(),
+                "-m".into(),
                 "uvicorn".into(),
                 "--port=80".into(),
                 "--host=0.0.0.0".into(),
@@ -103,6 +113,8 @@ impl Application {
                 "app_fastapi:app".into(),
             ],
             Application::PythonFastApiHTTPIPv6 => vec![
+                python(),
+                "-m".into(),
                 "uvicorn".into(),
                 "--port=80".into(),
                 "--host=::".into(),
@@ -111,26 +123,26 @@ impl Application {
             ],
             Application::PythonCloseSocket => {
                 vec![
-                    "python3".into(),
+                    python(),
                     "-u".into(),
                     app_path("python-e2e/close_socket.py"),
                 ]
             }
             Application::PythonCloseSocketKeepConnection => vec![
-                "python3".into(),
+                python(),
                 "-u".into(),
                 app_path("python-e2e/close_socket_keep_connection.py"),
             ],
-            Application::NodeHTTP => vec!["node".into(), app_path("node-e2e/app.mjs")],
+            Application::NodeHTTP => vec![node(), app_path("node-e2e/app.mjs")],
             Application::NodeHTTP2 => {
                 vec![
-                    "node".into(),
+                    node(),
                     app_path("node-e2e/http2/test_http2_traffic_steal.mjs"),
                 ]
             }
             Application::NodeFsPolicy => {
                 vec![
-                    "node".into(),
+                    node(),
                     app_path("node-e2e/fspolicy/test_operator_fs_policy.mjs"),
                 ]
             }
@@ -145,8 +157,8 @@ impl Application {
                     .map(String::from)
                     .to_vec()
             }
-            Application::RustWebsockets => vec![app_path("../../target/debug/rust-websockets")],
-            Application::RustSqs => vec![app_path("../../target/debug/rust-sqs-printer")],
+            Application::RustWebsockets => vec![rust_app("rust-websockets")],
+            Application::RustSqs => vec![rust_app("rust-sqs-printer")],
             Application::IntproxyChild => vec![app_path("intproxy_child/out.c_test_app")],
         }
     }

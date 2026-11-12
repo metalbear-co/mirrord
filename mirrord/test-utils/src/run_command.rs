@@ -4,7 +4,26 @@ use std::{collections::HashMap, process::Stdio};
 use mirrord_command::resolve_tokio_command;
 use tempfile::tempdir;
 
-use crate::{TestProcess, output_label};
+use crate::{TestProcess, bazel_python, env_path, output_label};
+
+/// Returns the agent image that the tests run.
+///
+/// It's the image in `MIRRORD_AGENT_IMAGE`, so that developers can pick one, like a released agent.
+/// Otherwise, under Bazel, it's the image whose name is in the file at
+/// `MIRRORD_TESTS_AGENT_IMAGE_FILE`, a name that changes with the agent's build, so that a cluster
+/// without that build fails the tests rather than running an older agent (see
+/// `mirrord/tests/BUILD.bazel`). Otherwise, it's `test`, which a cluster can get from
+/// `bazel run //mirrord/agent:image_load --//mirrord/agent:image_tag=test`.
+pub fn agent_image() -> String {
+    if let Ok(image) = std::env::var("MIRRORD_AGENT_IMAGE") {
+        return image;
+    }
+
+    match env_path("MIRRORD_TESTS_AGENT_IMAGE_FILE") {
+        Some(file) => std::fs::read_to_string(file).unwrap().trim().to_owned(),
+        None => "test".to_owned(),
+    }
+}
 
 /// See [`run_exec`].
 pub async fn run_exec_with_target(
@@ -53,17 +72,14 @@ pub async fn run_exec(
         .into_iter()
         .chain(process_cmd.iter().map(String::as_str))
         .collect();
-    let agent_image_env = "MIRRORD_AGENT_IMAGE";
-    let agent_image_from_devs_env = std::env::var(agent_image_env);
-    // used by the CI, to load the image locally:
-    // docker build -t test . -f mirrord/agent/Dockerfile
-    // minikube load image test:latest
+    let agent_image = agent_image();
     let mut base_env = HashMap::new();
-    base_env.insert(
-        agent_image_env,
-        // Let devs running the test specify an agent image per env var.
-        agent_image_from_devs_env.as_deref().unwrap_or("test"),
-    );
+    base_env.insert("MIRRORD_AGENT_IMAGE", agent_image.as_str());
+    // Bazel's interpreter finds the apps' pip packages through `PYTHONPATH` (see
+    // [`bazel_python`]).
+    if let Some(python) = bazel_python() {
+        base_env.insert("PYTHONPATH", python.python_path.as_str());
+    }
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
@@ -96,12 +112,9 @@ pub async fn run_port_forward(namespace: &str, port_mapping: &str) -> TestProces
         port_mapping,
     ];
 
-    let agent_image_from_devs_env = std::env::var("MIRRORD_AGENT_IMAGE");
+    let agent_image = agent_image();
     let mut env = HashMap::new();
-    env.insert(
-        "MIRRORD_AGENT_IMAGE",
-        agent_image_from_devs_env.as_deref().unwrap_or("test"),
-    );
+    env.insert("MIRRORD_AGENT_IMAGE", agent_image.as_str());
     env.insert("MIRRORD_CHECK_VERSION", "false");
     env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");

@@ -1,14 +1,234 @@
-load("//bazel:rust.bzl", "rust_library")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_oci//oci:defs.bzl", "oci_load")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:nextest.bzl", "nextest_variant")
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+load("//mirrord/layer-tests/tests/apps:go_test_app.bzl", "GO_VERSIONS", "go_test_app")
 
-# The end-to-end tests, which are the library's own `#[test]` functions. They need a cluster, so
-# they run under `cargo xtask test-e2e` rather than Bazel, and Bazel only checks that the library
-# builds.
+# The end-to-end tests, which are the library's own `#[test]` functions, run against a Kubernetes
+# cluster that they don't create. They run under Bazel as `:e2e`, `:e2e_dirty_iptables`,
+# `:e2e_ipv6` and `:e2e_operator_install`:
+#
+#     bazel run //mirrord/tests:e2e_setup
+#     bazel test //mirrord/tests:e2e --test_env=KUBECONFIG=<the path that e2e_setup prints>
+#     bazel run //mirrord/tests:e2e_setup -- --delete
+#
+# `:e2e_setup` creates a kind or minikube cluster named `mirrord-e2e`, or reuses it if it exists,
+# and loads the agent that the tests run into it. `--delete` deletes the cluster. `:e2e_cluster`
+# creates or reuses the cluster without loading the agent.
 rust_library(
     name = "tests",
     # The tests find their configs and apps from `env!("CARGO_MANIFEST_DIR")`. rules_rust would set
     # it to the sandbox directory that the crate compiles in, and its process wrapper fails an
-    # action whose output contains that directory. Bazel never runs these tests, so the package's
-    # relative path is enough to compile them. The sources keep `env!`, because the operator's
+    # action whose output contains that directory. nextest runs the tests in the package's directory
+    # in their runfiles, so `.` is that directory. The sources keep `env!`, because the operator's
     # end-to-end tests use this library under Cargo and find this repository's configs through it.
-    rustc_env = {"CARGO_MANIFEST_DIR": package_name()},
+    rustc_env = {"CARGO_MANIFEST_DIR": "."},
+)
+
+# The apps that the tests run, at the paths that the tests run them from, relative to this
+# package, as `scripts/prepare_e2e.sh` builds them. The Rust apps are members of the Cargo
+# workspace, with packages of their own, and the tests find them there under Bazel (see `rust_app`
+# in `src/utils/application.rs`).
+#
+# Each Go app comes with the Go versions that the tests run it with. No test here runs `go-e2e`,
+# which the library's `Application::GoHTTP` runs for the operator's end-to-end tests, so only the
+# apps' image takes it, and `go_statfs` runs one version of `go-e2e-statfs`.
+GO_APPS = {
+    "go-e2e": [],
+    "go-e2e-dir": GO_VERSIONS.keys(),
+    "go-e2e-dns": GO_VERSIONS.keys(),
+    "go-e2e-env": GO_VERSIONS.keys(),
+    "go-e2e-outgoing": GO_VERSIONS.keys(),
+    "go-e2e-statfs": ["25"],
+}
+
+[
+    go_test_app(
+        app,
+        target_compatible_with = LINUX_ONLY,
+        # `go-e2e` imports gin, at the version that the layer tests' `app_go` pins too. `go_deps`
+        # only reads the `go.mod` of the apps that `//:go_apps.work` lists, and `go-e2e` isn't one
+        # of them, so a change to gin in `go-e2e/go.mod` must also go into `app_go/go.mod`.
+        deps = ["@com_github_gin_gonic_gin//:gin"] if app == "go-e2e" else [],
+    )
+    for app in GO_APPS
+]
+
+cc_binary(
+    name = "intproxy_child/out.c_test_app",
+    srcs = ["intproxy_child/intproxy_child.c"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+filegroup(
+    name = "apps",
+    srcs = [
+        "intproxy_child/out.c_test_app",
+        "//mirrord/tests/rust-bypassed-unix-socket",
+        "//mirrord/tests/rust-e2e-fileops",
+        "//mirrord/tests/rust-unix-socket-client",
+        "//mirrord/tests/rust-websockets",
+    ] + [
+        "{}/{}.go_test_app".format(app, minor)
+        for app, minors in GO_APPS.items()
+        for minor in minors
+    ] + glob(
+        [
+            "bash-e2e/**",
+            "configs/**",
+            "node-e2e/**",
+            "python-e2e/**",
+        ],
+        exclude = [
+            "**/__pycache__/**",
+            "**/node_modules/**",
+        ],
+    ),
+)
+
+# The name that the agent's image has in the cluster, which changes with every build of the agent:
+# `mirrord-agent-e2e:<the image's digest>`. A cluster that `:e2e_setup` didn't load the agent into
+# since the agent changed doesn't have the image, so the agent's pod fails to start, rather than
+# the tests running an older agent.
+genrule(
+    name = "agent_image_name",
+    srcs = ["//mirrord/agent:image.digest"],
+    outs = ["agent_image_name.txt"],
+    cmd = "echo \"mirrord-agent-e2e:$$(cut -d: -f2 $<)\" > $@",
+    target_compatible_with = LINUX_ONLY,
+)
+
+oci_load(
+    name = "agent_image_load",
+    image = "//mirrord/agent:image",
+    repo_tags = ":agent_image_name",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The image as an archive that `kind load image-archive` and `minikube image load` take.
+filegroup(
+    name = "agent_image_archive",
+    srcs = [":agent_image_load"],
+    output_group = "tarball",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The tests change the cluster, which Bazel can't see, so Bazel never takes their results from its
+# cache (`external`), and runs them only when they're named (`manual`), one target at a time
+# (`exclusive`), and on this machine, which can reach the cluster (`no-remote-exec`).
+E2E_TAGS = [
+    "exclusive",
+    "external",
+    "manual",
+    "no-remote-exec",
+    "requires-network",
+]
+
+# The tests that run on any cluster. They run the apps with the interpreters of
+# `//mirrord/test-utils`, as the layer tests do, and run the CLI from their runfiles, where the CLI
+# finds the layer. They take the other programs that they run, like `bash`, `curl` and `helm`, from
+# the machine's `PATH`, as they do under Cargo. Bazel's fixed `PATH` lacks them on some machines,
+# and the Bazel Central Registry has no bash to build instead. The `dirty_iptables` tests need the
+# kernel's legacy iptables tables, which some kernels leave out, so they run as
+# `:e2e_dirty_iptables` instead, and the `operator_install` and `traffic::ipv6` tests need clusters
+# of their own (see `.config/nextest.toml`).
+rust_test(
+    name = "e2e",
+    timeout = "eternal",
+    args = [
+        "--profile",
+        "without-dirty-iptables",
+    ],
+    crate = ":tests",
+    data = [
+        ":agent_image_name",
+        ":apps",
+        "//mirrord/cli",
+        "//mirrord/test-utils:node",
+        "//mirrord/test-utils:python_env",
+    ],
+    env = {
+        "MIRRORD_TESTS_AGENT_IMAGE_FILE": "$(rlocationpath :agent_image_name)",
+        "MIRRORD_TESTS_USE_BINARY": "$(rlocationpath //mirrord/cli)",
+        "MIRRORD_TEST_NODE": "$(rlocationpath //mirrord/test-utils:node)",
+        "MIRRORD_TEST_PYTHON": "$(rlocationpath //mirrord/test-utils:python_env)",
+    },
+    env_inherit = ["PATH"],
+    tags = E2E_TAGS,
+    target_compatible_with = LINUX_ONLY,
+    test_threads = 6,
+)
+
+# The `operator_install` tests, which install the operator for the whole cluster, so the other
+# tests' sessions would use it. `.config/nextest.toml` leaves them out of every profile but
+# `operator-install`, and they must run after `:e2e`, in another `bazel test`, or against another
+# cluster.
+nextest_variant(
+    name = "e2e_operator_install",
+    timeout = "eternal",
+    args = [
+        "--profile",
+        "operator-install",
+    ],
+    tags = E2E_TAGS,
+    target_compatible_with = LINUX_ONLY,
+    test = ":e2e",
+)
+
+# The `traffic::ipv6` tests, which need a cluster that only has IPv6 addresses, like the kind
+# cluster that this command creates:
+#
+#     bazel run //mirrord/tests:e2e_setup -- --name mirrord-e2e-ipv6 -- \
+#         --config mirrord/tests/kind-cluster-ipv6-config.yaml
+#
+# `:e2e` leaves them out.
+nextest_variant(
+    name = "e2e_ipv6",
+    timeout = "eternal",
+    args = [
+        "--profile",
+        "ipv6",
+    ],
+    tags = E2E_TAGS,
+    target_compatible_with = LINUX_ONLY,
+    test = ":e2e",
+)
+
+# The `dirty_iptables` tests, which `:e2e` leaves out. They run at the same time, as the other
+# tests of `:e2e` do, because the variant has the `test_threads` of `:e2e`, and the profile sets
+# none of its own.
+nextest_variant(
+    name = "e2e_dirty_iptables",
+    timeout = "eternal",
+    args = [
+        "--profile",
+        "dirty-iptables",
+    ],
+    tags = E2E_TAGS,
+    target_compatible_with = LINUX_ONLY,
+    test = ":e2e",
+)
+
+# Creates a kind or minikube cluster for the tests, or reuses it if it exists, and loads the agent
+# into it. It prints the cluster's kubeconfig, which it keeps in `clusters/`.
+py_binary(
+    name = "e2e_setup",
+    srcs = ["e2e_setup.py"],
+    args = ["--agent-image=$(rlocationpath :agent_image_archive)"],
+    data = [":agent_image_archive"],
+    target_compatible_with = LINUX_ONLY,
+    deps = ["@rules_python//python/runfiles"],
+)
+
+# The first step of `:e2e_setup` alone: it creates or reuses the cluster, and doesn't load the
+# agent. It doesn't depend on the agent's image, so it can run while Bazel builds the image, as CI
+# runs it (see `.github/workflows/test-e2e.yaml`). `:e2e_setup` then loads the agent.
+py_binary(
+    name = "e2e_cluster",
+    srcs = ["e2e_setup.py"],
+    main = "e2e_setup.py",
+    target_compatible_with = LINUX_ONLY,
+    deps = ["@rules_python//python/runfiles"],
 )

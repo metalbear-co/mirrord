@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use mirrord_test_utils::node;
+
 use crate::utils::application::{app_path, GoVersion};
 
 #[derive(Debug)]
@@ -24,11 +26,11 @@ impl EnvApp {
                 vec!["bash".into(), app_path("bash-e2e/env.sh"), "exclude".into()]
             }
             Self::NodeInclude => vec![
-                "node".into(),
+                node(),
                 app_path("node-e2e/remote_env/test_remote_env_vars_include_works.mjs"),
             ],
             Self::NodeExclude => vec![
-                "node".into(),
+                node(),
                 app_path("node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs"),
             ],
         }

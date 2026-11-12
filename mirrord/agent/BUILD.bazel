@@ -93,6 +93,8 @@ oci_image(
         ":image_run",
         ":image_layer",
     ],
+    # The end-to-end tests load it under a name of their own.
+    visibility = ["//mirrord/tests:__pkg__"],
 )
 
 # The tag that `:image_load` gives the image. `--//mirrord/agent:image_tag=you/mirrord-agent:dev`

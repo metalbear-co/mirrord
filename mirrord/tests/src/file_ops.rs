@@ -11,7 +11,7 @@ mod file_ops_tests {
 
     use k8s_openapi::api::core::v1::Pod;
     use kube::{api::LogParams, Api};
-    use mirrord_test_utils::run_command::run_exec_with_target;
+    use mirrord_test_utils::{python, run_command::run_exec_with_target};
     use rstest::*;
     use serde::Deserialize;
     use tempfile::NamedTempFile;
@@ -65,7 +65,7 @@ mod file_ops_tests {
     ) {
         let service = basic_service.await;
         let python_command = [
-            "python3",
+            python().as_str(),
             "-B",
             "-m",
             "unittest",
@@ -99,7 +99,7 @@ mod file_ops_tests {
     ) {
         let service = basic_service.await;
         let python_command = [
-            "python3",
+            python().as_str(),
             "-B",
             "-m",
             "unittest",

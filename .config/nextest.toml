@@ -20,6 +20,16 @@ default-filter = "package(mirrord-tests) & test(/^operator_install::/)"
 # Each test installs the cluster-wide operator, so they must not run at the same time.
 test-threads = 1
 
+# The `dirty_iptables` tests start their target with an init container that runs `iptables-legacy`,
+# which needs the kernel's legacy iptables tables. Some kernels leave them out, and there the tests
+# wait for a pod that never starts until they time out. Bazel's `//mirrord/tests:e2e` runs
+# `without-dirty-iptables`, and `//mirrord/tests:e2e_dirty_iptables` runs `dirty-iptables`.
+[profile.without-dirty-iptables]
+default-filter = "not (package(mirrord-tests) & (test(/^operator_install::/) | test(/^traffic::ipv6::/) | test(/^dirty_iptables::/)))"
+
+[profile.dirty-iptables]
+default-filter = "package(mirrord-tests) & test(/^dirty_iptables::/)"
+
 [profile.ipv6]
 default-filter = "package(mirrord-tests) & test(/^traffic::ipv6::/)"
 test-threads = 1

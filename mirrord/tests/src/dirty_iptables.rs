@@ -3,7 +3,7 @@
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use kube::{api::PostParams, Api};
-use mirrord_test_utils::run_command::run_exec_with_target;
+use mirrord_test_utils::run_command::{agent_image, run_exec_with_target};
 use rstest::*;
 use serde_json::json;
 
@@ -42,11 +42,12 @@ async fn dirty_iptables_test(#[future] kube_client: KubeClient) -> DirtyIptables
 async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest {
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");
-    // Without `MIRRORD_AGENT_IMAGE` the init container uses the locally built `test` agent image,
-    // which is never pulled. An explicitly set image (e.g. a released agent) may be pulled.
-    let (init_image, init_image_pull_policy) = match std::env::var("MIRRORD_AGENT_IMAGE") {
-        Ok(image) => (image, "IfNotPresent"),
-        Err(_) => ("test".to_owned(), "Never"),
+    // Without `MIRRORD_AGENT_IMAGE` the init container uses the locally built agent image, which is
+    // never pulled. An explicitly set image (e.g. a released agent) may be pulled.
+    let init_image = agent_image();
+    let init_image_pull_policy = match std::env::var_os("MIRRORD_AGENT_IMAGE") {
+        Some(_) => "IfNotPresent",
+        None => "Never",
     };
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 

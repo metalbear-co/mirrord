@@ -1,4 +1,4 @@
-"""`rust_nextest_test`, a test that runs a Rust test binary with cargo-nextest.
+"""`rust_nextest_test` and `nextest_variant`, tests that run a Rust test binary with cargo-nextest.
 
 A `rust_test` on its own runs the libtest binary that it builds, which runs all of the crate's tests
 on threads of one process. The workspace's tests run with cargo-nextest instead,
@@ -10,6 +10,8 @@ environment or working directory, which would race with the other tests on libte
 so that its executable runs the binary with the same nextest, configured by the same
 `.config/nextest.toml`, and the tests behave as they do under `cargo nextest run`. The target is
 still a `rust_test` in every other way, so clippy and rust-analyzer see it as one.
+`nextest_variant` runs the binary of a `rust_nextest_test` with other arguments for nextest, like
+another profile.
 
 nextest only runs the binaries of a Cargo workspace, which it learns about from two JSON files that
 `cargo nextest run` takes in place of a build (https://nexte.st/docs/ci-features/archiving/):
@@ -252,3 +254,58 @@ rust_nextest_test = rule(
         ),
     },
 )
+
+def _nextest_variant_test_impl(ctx):
+    test = ctx.attr.test[DefaultInfo]
+
+    # A rule's executable must be a file that the rule creates, so this is a link to the runner
+    # that is `test`'s executable. Windows only runs a program whose name ends with `.exe`.
+    windows = ctx.target_platform_has_constraint(ctx.attr._windows[platform_common.ConstraintValueInfo])
+    executable = ctx.actions.declare_file(ctx.label.name + (".exe" if windows else ""))
+    ctx.actions.symlink(
+        output = executable,
+        target_file = test.files_to_run.executable,
+        is_executable = True,
+    )
+
+    return [
+        DefaultInfo(executable = executable, runfiles = test.default_runfiles),
+        ctx.attr.test[RunEnvironmentInfo],
+    ]
+
+_nextest_variant_test = rule(
+    implementation = _nextest_variant_test_impl,
+    test = True,
+    attrs = {
+        "test": attr.label(
+            doc = "The `rust_nextest_test` whose tests the variant runs.",
+            providers = [RunEnvironmentInfo],
+            mandatory = True,
+        ),
+        "_windows": attr.label(default = "@platforms//os:windows"),
+    },
+)
+
+def nextest_variant(name, test, args = [], **kwargs):
+    """Runs the test binary of a `rust_test` with other arguments for nextest.
+
+    The variant is a test of its own. It runs the binary that `test` builds, with the data, the
+    environment and the `test_threads` of `test`, and only its arguments differ. So a variant
+    whose arguments name another profile of `.config/nextest.toml` runs the tests that the
+    profile selects, and the binary isn't built a second time.
+
+    Bazel reserves one CPU for the variant, whatever the `test_threads` of `test` is, so a variant
+    that isn't `exclusive` should carry the `cpu:<test_threads>` tag of `test`.
+
+    Args:
+      name: The variant's name.
+      test: The `rust_test` whose tests the variant runs.
+      args: Arguments for `cargo nextest run`, in place of the ones of `test`.
+      **kwargs: The attributes that every test takes, like `tags` and `timeout`.
+    """
+    _nextest_variant_test(
+        name = name,
+        test = test,
+        args = ["test"] + args,
+        **kwargs
+    )

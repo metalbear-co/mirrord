@@ -4,4 +4,6 @@ load("//bazel:rust.bzl", "rust_binary")
 rust_binary(
     name = "rust-bypassed-unix-socket",
     target_compatible_with = UNIX_ONLY,
+    # The end-to-end tests run it.
+    visibility = ["//mirrord/tests:__pkg__"],
 )

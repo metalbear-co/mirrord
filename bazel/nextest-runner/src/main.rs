@@ -491,6 +491,12 @@ fn run_tests(nextest_args: &[OsString]) -> anyhow::Result<ExitCode> {
         command.env("PATH", env::join_paths(path)?);
     }
 
+    // Bazel's test setup exports a bash function, `rlocation`, whose body contains the text "ERROR:
+    // rlocation is no longer implicitly provided". Every process of the tests inherits it as the
+    // variable `BASH_FUNC_rlocation%%`. The CLI logs its environment at debug level, so the
+    // end-to-end tests that fail on `ERROR` in the CLI's output would fail.
+    command.env_remove("BASH_FUNC_rlocation%%");
+
     // With `shard_count`, Bazel runs the target once for each shard. nextest sorts the tests and
     // splits them between the shards in turn (`slice:`), so the shards hold the same number of
     // tests, give or take one. `hash:` would keep a test in its shard when other tests are added,

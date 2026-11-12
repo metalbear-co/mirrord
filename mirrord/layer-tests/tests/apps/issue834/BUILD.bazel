@@ -15,6 +15,7 @@ go_test_app(
         "//conditions:default": None,
     }),
     target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
     deps = [
         "@com_rogchap_v8go//:v8go",
         "@net_kuoruan_go_v8go_polyfills//:v8go-polyfills",

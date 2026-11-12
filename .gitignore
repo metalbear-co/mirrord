@@ -8,6 +8,8 @@ __pycache__
 .DS_Store
 **/.DS_Store
 /target
+# The kubeconfigs of the end-to-end tests' clusters (see `mirrord/tests/BUILD.bazel`).
+/mirrord/tests/clusters/
 build/
 .mirrord
 .helix/

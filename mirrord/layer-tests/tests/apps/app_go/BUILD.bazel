@@ -4,6 +4,7 @@ load("//mirrord/layer-tests/tests/apps:go_test_app.bzl", "go_test_app")
 # `go.mod` (see `//:go_apps.work`). `http_mirroring` runs it on Windows too.
 go_test_app(
     target_compatible_with = [],
+    visibility = ["//mirrord/layer-tests:__pkg__"],
     deps = ["@com_github_gin_gonic_gin//:gin"],
 )
 

@@ -104,6 +104,12 @@ common --experimental_platform_in_output_dir=yes
 build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
 build:clippy --output_groups=clippy_checks
 
+# `//...` leaves out the end-to-end tests, which are `manual`, so
+# `bazel build --config=clippy //... //mirrord/tests:e2e` lints them too. They don't build for
+# macOS, so clippy skips a target that a command names when it doesn't build for the platform,
+# rather than fail.
+build:clippy --skip_incompatible_explicit_targets
+
 # Makes clippy fail on any warning. Only clippy reads the flag, but it's a build setting, which is
 # part of every target's configuration, and Bazel analyzes the whole workspace again when a
 # command's configuration differs from the previous command's. So every build sets it, and a build

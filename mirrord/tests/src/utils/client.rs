@@ -64,7 +64,14 @@ pub async fn kube_client() -> KubeClient {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     });
 
-    let mut config = Config::infer().await.unwrap();
+    // Bazel runs the tests with a `HOME` of their own, so they only find the cluster that
+    // `--test_env=KUBECONFIG` names.
+    let mut config = Config::infer().await.unwrap_or_else(|error| {
+        panic!(
+            "can't find the cluster to test against: {error}. Under Bazel, pass the kubeconfig that \
+             `bazel run //mirrord/tests:e2e_setup` prints, with `--test_env=KUBECONFIG=<path>`."
+        )
+    });
     config.accept_invalid_certs = true;
     KubeClient::try_from(config).unwrap()
 }

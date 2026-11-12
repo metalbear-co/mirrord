@@ -13,4 +13,5 @@ go_test_app(
     "go",
     # Only `fileops`'s Linux-only `go_stat` runs it.
     target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
 )

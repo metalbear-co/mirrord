@@ -77,8 +77,8 @@ MAIN_THREAD_STACK_FLAGS = select({
 # that every build, lint and test run has checked:
 #
 # - It builds and lints both binaries. It documents only `:cli`, because they're the same crate.
-# - The layer tests run `:cli`, which is how the code that finds the files in the runfiles is
-#   tested.
+# - The layer tests and the end-to-end tests run `:cli`, which is how the code that finds the files
+#   in the runfiles is tested.
 # - `:unit_tests` tests the crate as `:cli_standalone` builds it, with the code that embeds the
 #   files.
 #
@@ -104,8 +104,11 @@ rust_binary(
         for condition, files in LAYER_FILES.items()
     }),
     rustc_flags = MAIN_THREAD_STACK_FLAGS,
-    # The layer tests run `:cli`.
-    visibility = ["//mirrord/layer-tests:__pkg__"],
+    # The layer tests and the end-to-end tests run `:cli`.
+    visibility = [
+        "//mirrord/layer-tests:__pkg__",
+        "//mirrord/tests:__pkg__",
+    ],
 )
 
 rust_binary(

@@ -79,6 +79,7 @@ load(":go_test_app.bzl", "go_test_app")
     go_test_app(
         app,
         target_compatible_with = target_compatible_with,
+        visibility = ["//mirrord/layer-tests:__pkg__"],
     )
     for app, target_compatible_with in {
         "dir_go": UNIX_ONLY,
