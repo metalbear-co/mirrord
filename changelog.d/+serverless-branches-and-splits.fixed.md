@@ -1,0 +1,1 @@
+mirrord correctly refuses to start a session with a serverless target when `feature.db_branches`, `feature.split_queues`, or `feature.copy_target` is set.
