@@ -165,7 +165,15 @@ where
     while detected.is_known().not() {
         let read_size = match tokio::time::timeout(timeout, stream.read_buf(&mut buf)).await {
             Ok(result) => result?,
-            Err(_) => break,
+            Err(_) => {
+                tracing::warn!(
+                    ?timeout,
+                    bytes_received = buf.len(),
+                    "HTTP detection timed out, treating the connection as raw TCP, so HTTP filters \
+                     will not apply to it",
+                );
+                break;
+            }
         };
 
         if read_size == 0 {
