@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -5,14 +7,8 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-#[cfg(unix)]
-use std::{
-    ffi::OsStr,
-    os::unix::{
-        ffi::OsStrExt,
-        fs::{PermissionsExt, symlink},
-    },
-};
+#[cfg(all(unix, not(target_os = "macos")))]
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
 
 use flate2::read::GzDecoder;
 use futures::{SinkExt, StreamExt};
@@ -265,7 +261,10 @@ fn push_leaves_out_what_the_repository_configuration_excludes() {
 
 /// A `.gitignore` in a directory whose name isn't UTF-8 applies to that directory's files, as in
 /// git.
-#[cfg(unix)]
+///
+/// macOS's file systems, APFS and HFS+, reject names that aren't UTF-8 with `EILSEQ`, so such a
+/// directory can't exist there.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn push_leaves_out_what_a_gitignore_in_a_directory_with_a_non_utf8_name_excludes() {
     let local = tempfile::tempdir().unwrap();
