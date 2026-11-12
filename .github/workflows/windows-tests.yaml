@@ -1,8 +1,12 @@
 name: E2E Tests
 
-
+# Runs the end-to-end tests on Windows: the Windows CLI and layer against a k3s cluster, whose
+# kubeconfig the self-hosted runner fetches from Secret Manager. GitHub's Windows runners can't run
+# Linux containers, so kind or minikube can't run there, as `e2e_setup` runs them on Linux. Instead,
+# a Linux job pushes the agent that the pull request builds to the staging repository, and the
+# tests run it in the cluster. The Windows runner builds the tests in the meantime, in a job of its
+# own, and the job that runs them waits for both.
 on:
-  workflow_call:
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -10,20 +14,59 @@ on:
 permissions:
   contents: read
 
+# The tests share one self-hosted runner and one cluster, so a newer run of a pull request cancels
+# the older one. Every other label starts a run too, which skips its jobs, so those runs get a group
+# of their own rather than cancel the tests.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ (github.event_name == 'workflow_dispatch' || github.event.label.name == 'windows-e2e') && 'tests' || 'other-label' }}
+  cancel-in-progress: true
+
 env:
-  # Some crates have no tests on some platforms; nextest treats that as an error by default.
-  NEXTEST_NO_TESTS: warn
-  RUST_BACKTRACE: "1"
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: "false"
-  LIBCLANG_PATH: "C:\\Program Files\\LLVM\\bin"
+  # The image of the agent that the tests run. Its tag names the commit, so every job knows the
+  # image without waiting for the job that pushes it.
+  AGENT_REPOSITORY: ghcr.io/metalbear-co/mirrord-staging
+  AGENT_TAG: windows-e2e-${{ github.sha }}
 
 jobs:
-  windows_e2e:
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'windows-e2e') || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+  push_agent:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'windows-e2e' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+        with:
+          publishes: "true"
+
+      # `oci_push` pushes with the credentials that Docker keeps.
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The cluster's nodes are x86-64, like this runner, so the job builds and pushes the agent for
+      # that CPU alone.
+      - name: Push the agent
+        run: bazel run //mirrord/agent:push_x86_64 -- --repository "$AGENT_REPOSITORY" --tag "$AGENT_TAG"
+
+  # Builds the tests, with the CLI, the layer and the apps that they run, while `push_agent` pushes
+  # the agent. The runner keeps Bazel's outputs after the job, so `windows_e2e` finds them built.
+  build_tests:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'windows-e2e' }}
     permissions:
       contents: read
     runs-on: [self-hosted, Windows]
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -32,96 +75,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
-          submodules: recursive
+          persist-credentials: false
 
-      - name: Verify Kubeconfig (Existing)
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the Windows E2E Tests
         run: |
-           $KubePath = "$env:USERPROFILE\.kube\config"
-           Write-Host "Checking for existing Kubeconfig at: $KubePath"
-           
-           if (-not (Test-Path $KubePath)) {
-               Write-Error "KUBECONFIG NOT FOUND on runner! This workflow relies on a pre-configured ~/.kube/config."
-               exit 1
-           }
-           
-           $Size = (Get-Item $KubePath).Length
-           if ($Size -lt 10) {
-               Write-Error "Kubeconfig is empty ($Size bytes)."
-               exit 1
-           }
-           Write-Host "Kubeconfig found ($Size bytes). Using existing file."
+          bazel build //mirrord/tests:e2e //mirrord/tests:e2e_dirty_iptables
+          if ($LASTEXITCODE -ne 0) { throw "the build of the end-to-end tests failed" }
 
+  # Waits for the agent's image, which the tests run in the cluster, and for the build.
+  windows_e2e:
+    needs: [push_agent, build_tests]
+    permissions:
+      contents: read
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Verify Cluster Connection
         run: |
           $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\scripts"
           & "$ScriptsDir\verify_k3s_connectivity.ps1"
 
-      - name: Toolchain info
-        run: |
-          $ErrorActionPreference = "Stop"
-          whoami
-          rustc -V
-          cargo -V
-          rustup show
+      - uses: ./.github/actions/setup-bazel
 
-      - name: Prepare e2e tests dependencies
-        run: |
-          $ErrorActionPreference = "Stop"
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE "scripts"
-          & "$ScriptsDir\win_build_test_apps.ps1"
-
-      - name: Ensure Python test deps (flask/uvicorn/fastapi)
-        run: |
-          $ErrorActionPreference = "Stop"
-          $py = Get-Command py -ErrorAction SilentlyContinue
-          if (-not $py) {
-            throw "py launcher not found; ensure Python is installed."
-          }
-          py -3 -m pip install --upgrade pip
-          py -3 -m pip install --upgrade flask uvicorn fastapi
-
-      - name: Build (Debug)
-        run: |
-          $ErrorActionPreference = "Stop"
-          $Target = "x86_64-pc-windows-msvc"
-
-          Write-Host "Building mirrord-layer-win..."
-          cargo build -p mirrord-layer-win --target $Target
-
-          $RelDir = Join-Path $env:GITHUB_WORKSPACE "target\$Target\debug"
-          $dll = Join-Path $RelDir "mirrord_layer_win.dll"
-          if (-not (Test-Path $dll)) { throw "mirrord_layer_win.dll not found" }
-
-          # The layer that `cargo build` embeds in the CLI.
-          $env:MIRRORD_BUNDLED_LAYER = $dll
-
-          Write-Host "Building mirrord binary..."
-          cargo build -p mirrord-cli --bin mirrord --target $Target
-          
-          $exe = Join-Path $RelDir "mirrord.exe"
-          
-          if (-not (Test-Path $exe)) { throw "mirrord.exe not found" }
-          
-          "MIRRORD_TESTS_USE_BINARY=$exe" | Out-File -Append -FilePath $env:GITHUB_ENV
-          "MIRRORD_LAYER_FILE=$dll" | Out-File -Append -FilePath $env:GITHUB_ENV
-
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
-        with:
-          tool: cargo-nextest
       - name: Run Windows E2E Tests
+        env:
+          MIRRORD_AGENT_IMAGE: ${{ env.AGENT_REPOSITORY }}:${{ env.AGENT_TAG }}
         run: |
           $ErrorActionPreference = "Stop"
-          
-          # 1. Verify Connection
-          $ScriptsDir = Join-Path $env:GITHUB_WORKSPACE ".github\workflows\scripts"
-          & "$ScriptsDir\verify_k3s_connectivity.ps1"
+          # The connectivity check writes the kubeconfig here.
+          $env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
 
-          Write-Host "Running E2E tests..."
-          # Note: skipping the specific test skipped in windows-build.yaml
-          # `--no-capture` is nextest's `--nocapture`, and it already forces serial execution.
-          cargo nextest run --target=x86_64-pc-windows-msvc -p mirrord-tests --no-capture
-        env:
-          KUBECONFIG: ${{ env.USERPROFILE }}\.kube\config
+          bazel test //mirrord/tests:e2e //mirrord/tests:e2e_dirty_iptables `
+            --test_env=KUBECONFIG --test_env=MIRRORD_AGENT_IMAGE
+          if ($LASTEXITCODE -ne 0) { throw "the end-to-end tests failed" }

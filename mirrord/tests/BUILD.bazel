@@ -4,7 +4,7 @@ load("@rules_go//go:def.bzl", "go_binary")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load", "oci_push")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@tar.bzl//tar:tar.bzl", "tar")
-load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "LINUX_OR_WINDOWS")
 load("//bazel:image.bzl", "IMAGE_LABELS")
 load("//bazel:nextest.bzl", "nextest_variant")
 load("//bazel:platform.bzl", "platform_filegroup")
@@ -48,10 +48,14 @@ GO_APPS = {
     "go-e2e-statfs": ["25"],
 }
 
+# The Go apps that build on Windows, where the Windows end-to-end tests run them. `go-e2e-statfs`
+# only builds for Linux.
+WINDOWS_GO_APPS = [app for app in GO_APPS if app != "go-e2e-statfs"]
+
 [
     go_test_app(
         app,
-        target_compatible_with = LINUX_ONLY,
+        target_compatible_with = LINUX_OR_WINDOWS if app in WINDOWS_GO_APPS else LINUX_ONLY,
         # `go-e2e` imports gin, at the version that the layer tests' `app_go` pins too. `go_deps`
         # only reads the `go.mod` of the apps that `//:go_apps.work` lists, and `go-e2e` isn't one
         # of them, so a change to gin in `go-e2e/go.mod` must also go into `app_go/go.mod`.
@@ -66,19 +70,30 @@ cc_binary(
     target_compatible_with = LINUX_ONLY,
 )
 
+# On Windows, only the apps that build for Windows: the Windows end-to-end tests ignore the tests
+# that run the others.
 filegroup(
     name = "apps",
-    srcs = [
-        "intproxy_child/out.c_test_app",
-        "//mirrord/tests/rust-bypassed-unix-socket",
-        "//mirrord/tests/rust-e2e-fileops",
-        "//mirrord/tests/rust-unix-socket-client",
-        "//mirrord/tests/rust-websockets",
-    ] + [
-        "{}/{}.go_test_app".format(app, minor)
-        for app, minors in GO_APPS.items()
-        for minor in minors
-    ] + glob(
+    srcs = select({
+        "@platforms//os:windows": [
+            "//mirrord/tests/rust-websockets",
+        ] + [
+            "{}/{}.go_test_app".format(app, minor)
+            for app in WINDOWS_GO_APPS
+            for minor in GO_APPS[app]
+        ],
+        "//conditions:default": [
+            "intproxy_child/out.c_test_app",
+            "//mirrord/tests/rust-bypassed-unix-socket",
+            "//mirrord/tests/rust-e2e-fileops",
+            "//mirrord/tests/rust-unix-socket-client",
+            "//mirrord/tests/rust-websockets",
+        ] + [
+            "{}/{}.go_test_app".format(app, minor)
+            for app, minors in GO_APPS.items()
+            for minor in minors
+        ],
+    }) + glob(
         [
             "bash-e2e/**",
             "configs/**",
@@ -147,21 +162,31 @@ rust_test(
     ],
     crate = ":tests",
     data = [
-        ":agent_image_name",
         ":apps",
         "//mirrord/cli",
         "//mirrord/test-utils:node",
         "//mirrord/test-utils:python_env",
-    ],
+    ] + select({
+        "@platforms//os:linux": [":agent_image_name"],
+        "//conditions:default": [],
+    }),
+    # Only Linux machines build the agent's image, which `:e2e_setup` loads into a kind or minikube
+    # cluster. Windows machines can't run those clusters, so the Windows tests run against a cluster
+    # of their own, with the agent image that `MIRRORD_AGENT_IMAGE` names (see `agent_image` in
+    # `mirrord/test-utils`), which CI pushes (see `.github/workflows/windows-tests.yaml`).
     env = {
-        "MIRRORD_TESTS_AGENT_IMAGE_FILE": "$(rlocationpath :agent_image_name)",
         "MIRRORD_TESTS_USE_BINARY": "$(rlocationpath //mirrord/cli)",
         "MIRRORD_TEST_NODE": "$(rlocationpath //mirrord/test-utils:node)",
         "MIRRORD_TEST_PYTHON": "$(rlocationpath //mirrord/test-utils:python_env)",
-    },
+    } | select({
+        "@platforms//os:linux": {
+            "MIRRORD_TESTS_AGENT_IMAGE_FILE": "$(rlocationpath :agent_image_name)",
+        },
+        "//conditions:default": {},
+    }),
     env_inherit = ["PATH"],
     tags = E2E_TAGS,
-    target_compatible_with = LINUX_ONLY,
+    target_compatible_with = LINUX_OR_WINDOWS,
     test_threads = 6,
 )
 
@@ -177,7 +202,7 @@ nextest_variant(
         "operator-install",
     ],
     tags = E2E_TAGS,
-    target_compatible_with = LINUX_ONLY,
+    target_compatible_with = LINUX_OR_WINDOWS,
     test = ":e2e",
 )
 
@@ -196,7 +221,7 @@ nextest_variant(
         "ipv6",
     ],
     tags = E2E_TAGS,
-    target_compatible_with = LINUX_ONLY,
+    target_compatible_with = LINUX_OR_WINDOWS,
     test = ":e2e",
 )
 
@@ -211,7 +236,7 @@ nextest_variant(
         "dirty-iptables",
     ],
     tags = E2E_TAGS,
-    target_compatible_with = LINUX_ONLY,
+    target_compatible_with = LINUX_OR_WINDOWS,
     test = ":e2e",
 )
 

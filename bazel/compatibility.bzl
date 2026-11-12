@@ -18,6 +18,13 @@ MACOS_ONLY = ["@platforms//os:macos"]
 
 WINDOWS_ONLY = ["@platforms//os:windows"]
 
+# The end-to-end tests run on Linux and Windows machines, against a cluster.
+LINUX_OR_WINDOWS = select({
+    "@platforms//os:linux": [],
+    "@platforms//os:windows": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
 UNIX_ONLY = select({
     "@platforms//os:windows": ["@platforms//:incompatible"],
     "//conditions:default": [],

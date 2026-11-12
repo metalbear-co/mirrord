@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-
-	"C"
 )
 import "time"
 

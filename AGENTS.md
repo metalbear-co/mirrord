@@ -117,9 +117,9 @@ alone, and a change under `.github/` runs nearly every job.
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
 - `bazel run //:lint` runs `typos` on the tracked Markdown outside `mirrord/mcp/corpus`, and Vale on the Markdown at the
   root and every fragment in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
-- While the `windows-e2e` label is on a pull request, adding any label runs the Windows end-to-end tests; pushes
-  don't. `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's on before the pull request
-  leaves draft (`.pr_agent.toml`).
+- Adding the `windows-e2e` label to a pull request runs the Windows end-to-end tests; pushes don't, so remove and
+  add the label again to rerun them. `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's
+  on before the pull request leaves draft (`.pr_agent.toml`).
 
 ## Changelog Fragments
 

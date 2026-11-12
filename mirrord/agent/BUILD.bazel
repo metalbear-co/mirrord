@@ -149,3 +149,12 @@ oci_push(
     repository = "ghcr.io/metalbear-co/mirrord",
     tags = ["manual"],
 )
+
+# Pushes the x86-64 image alone, for a cluster whose nodes are all x86-64, like the one that the
+# Windows end-to-end tests run against. An x86-64 machine builds it without a cross-build.
+oci_push(
+    name = "push_x86_64",
+    image = ":image_x86_64",
+    repository = "ghcr.io/metalbear-co/mirrord",
+    tags = ["manual"],
+)
