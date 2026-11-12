@@ -2462,6 +2462,42 @@ mod tests {
         );
     }
 
+    /// Serverless sessions can't split queues or branch databases, so asking for either must fail
+    /// rather than leave the local process on the shared queues and databases. The docs quote
+    /// these messages.
+    #[rstest]
+    #[case::kafka_branch(
+        json!({ "kafka_branch": true }),
+        "`feature.kafka_branch` is not supported with serverless targets."
+    )]
+    #[case::split_queues(
+        json!({ "split_queues": { "queue": { "queue_type": "SQS", "filter": { "metadata": "^a$" } } } }),
+        "`feature.split_queues` is not supported with serverless targets."
+    )]
+    #[case::db_branches(
+        json!({ "db_branches": [{ "type": "pg", "connection": { "url": { "type": "env", "variable": "DB_URL" } } }] }),
+        "`feature.db_branches` is not supported with serverless targets."
+    )]
+    fn verify_rejects_unsupported_serverless_features(
+        #[case] feature: serde_json::Value,
+        #[case] expected: &str,
+    ) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "target": "serverless/service",
+            "feature": feature,
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::Conflict(message) if message == expected),
+            "{error}"
+        );
+    }
+
     /// The error names the filter that doesn't compile and the value given for it.
     #[rstest]
     #[case::header(json!({ "header_filter": "([" }), "feature.network.incoming.http_filter.header_filter", "([")]
