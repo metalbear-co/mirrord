@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/wizard:vitest/package_json.bzl", vitest_bin = "bin")
 
 npm_link_all_packages(name = "node_modules")
 
@@ -26,5 +27,18 @@ js_library(
         ":node_modules/lucide-react",
         ":node_modules/react",
         ":node_modules/react-dom",
+    ],
+)
+
+# The unit tests, which vitest runs as `pnpm --filter <package> run test:run` does.
+vitest_bin.vitest_test(
+    name = "unit_tests",
+    args = ["run"],
+    chdir = package_name(),
+    data = glob(["src/**"]) + [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        ":node_modules",
     ],
 )
