@@ -9,7 +9,8 @@ with `#[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]`;
 `mirrord-mcp` fails on an option without one.
 
 `mirrord-up-schema.json` embeds this crate's config types and `mirrord-config`'s. After any change to either, or to
-their docs, regenerate it, or `up_schema_file_is_up_to_date` fails:
+their docs, regenerate it, or `up_schema_file_is_up_to_date` fails. Regenerate it with Cargo, for the reason that
+`mirrord/config/AGENTS.md` gives:
 
 ```bash
 cargo test -p mirrord-up generate_up_schema -- --ignored

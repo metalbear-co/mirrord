@@ -11,16 +11,16 @@ create some CRDs.
 ## Command Reference
 
 ```bash
-CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-operator --all-targets --all-features --keep-going -- -Wclippy::indexing_slicing
+bazel build --config=clippy //mirrord/operator/...
 
-# CI also checks the `crd` feature on its own
-cargo check -p mirrord-operator --features crd
+# also builds `:operator_crd`, the crate with only its `crd` feature, as the operator builds it
+bazel build //mirrord/operator/...
 ```
 
 ## Modifying a CRD
 
-When modifying a CRD definition run the `generate_helm_crd_yaml` test in the operator repo to update the generated helm
-charts.
+When modifying a CRD definition run the `generate_helm_crd_yaml` test in the operator repo, which builds with Cargo, to
+update the generated helm charts.
 
 ```bash
 cargo test -p operator-crd generate_helm_crd_yaml -- --ignored --nocapture

@@ -434,7 +434,7 @@ mod tests {
     //! in-process against the real Win32 APIs (no cluster / proxy): they
     //! exercise the completion delivery, the single-fire/cancel race
     //! resolution, the fire-on-drop guard, and the ADDRINFOEXW chain we build
-    //! vs. what the OS produces. Build/run via `cargo test -p mirrord-layer-win`.
+    //! vs. what the OS produces. `bazel test //mirrord/layer-win:unit_tests` runs them.
 
     use std::{
         net::{IpAddr, Ipv4Addr},

@@ -16,15 +16,17 @@ mirrord.exe (the original is never touched):
 The copies sit next to the original, so the report finds the same PDB.
 
 .EXAMPLE
-.\scripts\win_stack_check.ps1 -Exe target\debug\mirrord.exe
+# The PDB is in an output group that Bazel only builds when it's asked for.
+bazel build //mirrord/cli:cli_standalone --output_groups=+pdb_file
+.\scripts\win_stack_check.ps1 -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$Exe,
 
-    # The stack the CLI must fit in. Kept well under what build.rs links, so growth shows up here
-    # before it reaches a user.
+    # The stack the CLI must fit in. Kept well under what `mirrord/cli/BUILD.bazel` links, so growth
+    # shows up here before it reaches a user.
     [long]$Budget = 1MB,
 
     # Small enough that any build overflows, to exercise the report.
