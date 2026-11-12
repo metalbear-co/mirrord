@@ -1416,7 +1416,9 @@ async fn settle_all<E>(
         {
             return Err(Box::new(db.clone()));
         }
-        results[index] = Some(result);
+        if let Some(slot) = results.get_mut(index) {
+            *slot = Some(result);
+        }
     }
     Ok(results.into_iter().flatten().collect())
 }
