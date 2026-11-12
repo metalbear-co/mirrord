@@ -276,44 +276,48 @@ where
             return;
         };
 
-        let Some(http_version) = conn.http_version else {
-            let mut redirected = RedirectedTcp::new(conn.stream, conn.info);
+        let http_version = match conn.http_version {
+            Ok(version) => version,
+            Err(reason) => {
+                let mut redirected = RedirectedTcp::new(conn.stream, conn.info);
 
-            for mirror_tx in &port_state.mirror_txs {
-                if let Err(TrySendError::Full(..)) =
-                    mirror_tx.try_send(MirroredTraffic::Tcp(redirected.mirror()))
-                {
-                    tracing::warn!(
-                        connection = ?redirected,
-                        "Mirroring client's traffic channel is full, \
-                        client will not receive mirrored traffic",
-                    );
+                for mirror_tx in &port_state.mirror_txs {
+                    if let Err(TrySendError::Full(..)) =
+                        mirror_tx.try_send(MirroredTraffic::Tcp(redirected.mirror()))
+                    {
+                        tracing::warn!(
+                            connection = ?redirected,
+                            "Mirroring client's traffic channel is full, \
+                            client will not receive mirrored traffic",
+                        );
+                    }
                 }
+
+                let join_handle = match &port_state.steal_tx {
+                    Some(steal_tx) => {
+                        let (tx, rx) = oneshot::channel();
+                        let _ = steal_tx
+                            .send(StolenTraffic::Tcp {
+                                conn: redirected,
+                                join_handle_tx: tx,
+                                shutdown: port_state.shutdown.child_token(),
+                                reason,
+                            })
+                            .await;
+
+                        rx.await.expect("TcpStealerTask dropped oneshot tx for returning JoinHandle to IO task for TCP connection")
+                    }
+                    None => redirected.pass_through(port_state.shutdown.child_token()),
+                };
+
+                Self::spawn_tracked_connection(self.internal_tx.clone(), port, port_state, async {
+                    if let Err(err) = join_handle.await {
+                        tracing::warn!(?err, "Redirected passthrough task returned JoinError");
+                    }
+                });
+
+                return;
             }
-
-            let join_handle = match &port_state.steal_tx {
-                Some(steal_tx) => {
-                    let (tx, rx) = oneshot::channel();
-                    let _ = steal_tx
-                        .send(StolenTraffic::Tcp {
-                            conn: redirected,
-                            join_handle_tx: tx,
-                            shutdown: port_state.shutdown.child_token(),
-                        })
-                        .await;
-
-                    rx.await.expect("TcpStealerTask dropped oneshot tx for returning JoinHandle to IO task for TCP connection")
-                }
-                None => redirected.pass_through(port_state.shutdown.child_token()),
-            };
-
-            Self::spawn_tracked_connection(self.internal_tx.clone(), port, port_state, async {
-                if let Err(err) = join_handle.await {
-                    tracing::warn!(?err, "Redirected passthrough task returned JoinError");
-                }
-            });
-
-            return;
         };
 
         let tx = self.internal_tx.clone();
@@ -900,6 +904,7 @@ mod test {
             conn: rtcp,
             join_handle_tx,
             shutdown,
+            ..
         } = handle.next().await.unwrap().unwrap()
         else {
             panic!("falsely detected HTTP traffic");

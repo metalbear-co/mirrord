@@ -1,0 +1,1 @@
+The agent logs a warning when a connection on a port stolen with an HTTP filter is passed to the target unfiltered, with the reason: HTTP detection timed out, the traffic isn't HTTP, or TLS negotiated a protocol other than HTTP.
