@@ -1,10 +1,7 @@
 pub mod cli;
-pub mod doc;
-pub mod in_runner;
 pub mod layer;
 pub mod pnpm;
 pub mod release;
 pub mod signing;
 pub mod sip_binaries;
-pub mod test;
 pub mod ui;

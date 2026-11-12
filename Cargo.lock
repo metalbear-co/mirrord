@@ -11421,8 +11421,6 @@ version = "3.287.0"
 dependencies = [
  "anyhow",
  "clap",
- "dirs 6.0.0",
- "dunce",
  "mirrord-command",
  "reqwest 0.13.4",
  "serde_json",

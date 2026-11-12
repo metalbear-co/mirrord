@@ -24,50 +24,57 @@ the user's local process with the mirrord layer loaded.
 
 ## Command Reference
 
+Bazel builds and tests the workspace, with toolchains that it downloads, and CI runs the same commands (see the top of
+`.github/workflows/ci.yaml`). The devshell in `flake.nix` provides `bazel` and the tools that the commands below take
+from `PATH`.
+
 ### Compiling
 
 ```bash
-# check the entire workspace at once
-# always use when a change spans multiple crates instead of checking each crate individually
-# CI appends `-- -Wclippy::indexing_slicing` to every clippy run, so add it to any clippy command here
-CARGO_BUILD_WARNINGS=deny cargo clippy --all-targets --all-features --keep-going -- -Wclippy::indexing_slicing
+# build everything for this machine, including the CLI with its layer and UI
+# `--keep_going` surfaces all errors at once
+bazel build --keep_going //...
 
-# check a specific crate
-# the agent is linux only
-CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going -- -Wclippy::indexing_slicing
+# lint every Rust crate with clippy, as CI does on Linux, macOS and Windows, and the end-to-end
+# tests, which are `manual`, so `//...` leaves them out
+bazel build --config=clippy --keep_going //... //mirrord/tests:e2e
 
-# rustdoc of private items, as `check-rust-docs` builds it
-RUSTDOCFLAGS=-Dwarnings cargo xtask test-doc
+# lint the crates for another platform, without a machine that runs it, e.g. Windows from Linux or a Mac
+bazel build --config=clippy --platforms=//bazel/platforms:x86_64-windows //...
 
-# layer and cli bundled with the new layer
-# use only when a fresh mirrord + layer binary is needed for testing
-cargo xtask build-cli
+# rustdoc of private items, with warnings as errors, as CI builds it
+bazel build --config=doc //...
+
+# the CLI as one file, with the layer and the UI embedded
+bazel build //mirrord/cli:cli_standalone
+
+# run the CLI that the tests run, which has no UI (`//mirrord/cli:cli_standalone` has it)
+bazel run //mirrord/cli -- <args>
 ```
-
-Use `--keep-going` to surface all errors at once. Use `clippy` instead of `check` to lint + compile simultaneously.
 
 ### Testing
 
 ```bash
-# integration tests
-# builds the cli and layer, unless given `--binary`/`--layer` or `MIRRORD_TESTS_USE_BINARY`/`MIRRORD_LAYER_FILE`
-cargo xtask test-integration
+# every unit and integration test that builds for this machine
+bazel test //...
 
-# filtered integration tests
-cargo xtask test-integration -- outgoing_udp --nocapture
+# the tests of one package, e.g. the CLI's unit tests or the layer tests (the integration tests)
+bazel test //mirrord/cli:unit_tests
+bazel test //mirrord/layer-tests/...
 
-# e2e tests, against the cluster kubectl points at; same artifact options
-cargo xtask test-e2e
+# filtered tests: `--test_filter` keeps the tests whose names contain it, and `--test_arg` passes nextest's options
+bazel test //mirrord/layer-tests/... --test_filter=outgoing_udp --test_output=streamed
+bazel test //mirrord/cli:unit_tests --test_arg=-E --test_arg='test(/resolve_url/)'
 
-# unit tests of the cli, with placeholder layer files
-# other crates: cargo nextest run -p <package>
-cargo xtask test-ut
+# e2e tests, against a kind or minikube cluster that `e2e_setup` creates or reuses (see `mirrord/tests/BUILD.bazel`),
+# and `--delete` deletes the cluster
+bazel run //mirrord/tests:e2e_setup
+bazel test //mirrord/tests:e2e --test_env=KUBECONFIG=<the path that e2e_setup prints>
+bazel run //mirrord/tests:e2e_setup -- --delete
 
-# filtered unit tests
-cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
-
-# any of these inside the CI runner image, which has every toolchain the suites need
-cargo xtask in-runner -- cargo xtask test-e2e
+# lint the docs and the frontends, check the changelog fragment and the dependencies, and check the formatting
+bazel run //:lint
+bazel run //:format -- --check
 ```
 
 A unit test in a PR is never a review finding for being there. As a coding agent writing a change, add unit tests only
@@ -80,20 +87,17 @@ a timeout, where `rstest` panics like any other failure.
 
 #### A test can merge and never run
 
-CI runs only what it names: every job is package-scoped and there is no workspace-wide run. Before relying on
-a new test, pull the job log and grep for its name rather than trusting a green check.
-
-Grepping the workflows for `-p <package>` is not enough either, since some runs hide behind xtask.
-`mirrord/cli/`, the `mirrord-cli` package, is tested on Linux by `cargo xtask test-ut` in
-`.github/workflows/test-integration.yaml` and on Windows by `cargo nextest run -p mirrord-cli ...` in
-`test-windows.yaml`. macOS never runs those unit tests: it builds the binary and exercises it only through
-`mirrord-layer-tests`, so a macOS-gated test in `mirrord/cli/` never runs while the PR stays green.
+Bazel only runs the tests that a `BUILD.bazel` declares: a new file under a package's `tests/` needs its own
+`rust_test`, as Cargo's integration tests don't. A crate without tests has no `unit_tests` target, so its first
+`#[test]` needs one too. A test target with `target_compatible_with` only builds and runs on those platforms, and a
+target tagged `manual`, like the e2e targets, only runs when a command names it. Before relying on a new test, pull the
+job log and grep for its name rather than trusting a green check.
 
 ### Styling
 
 ```bash
-# Formatting
-cargo fmt
+# format the Rust code, the Starlark files and the frontends
+bazel run //:format
 ```
 
 ## CI
@@ -154,8 +158,8 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 ## Generated Files
 
 `mirrord-schema.json` and `mirrord-up-schema.json` are generated, as `mirrord/config/AGENTS.md` and
-`mirrord/up/AGENTS.md` say. A change to either runs `corpus_check`, which validates the config examples in the skills
-`mirrord-mcp` vendors against them, so renaming or removing an option they use fails it.
+`mirrord/up/AGENTS.md` say. A change to either runs the `corpus` step of CI's `lint` job, which validates the config
+examples in the skills `mirrord-mcp` vendors against them, so renaming or removing an option they use fails it.
 
 ## Simplicity and Reuse
 

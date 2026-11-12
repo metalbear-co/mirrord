@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use mirrord_command::resolve_command;
 use tasks::{
     layer::CargoOptions,
     release::{BuildOptions, Platform},
@@ -48,20 +47,6 @@ enum Commands {
         cargo_args: Vec<String>,
     },
 
-    /// Build the merged UI frontend only
-    BuildUi,
-
-    /// Run a command inside the CI runner image
-    InRunner {
-        /// Runner image reference
-        #[arg(long, default_value = "ghcr.io/metalbear-co/ci-runner:latest")]
-        image: String,
-
-        /// The command to run
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
-        command: Vec<String>,
-    },
-
     /// Build layer only
     BuildLayer {
         /// Target platform
@@ -97,62 +82,6 @@ enum Commands {
         /// Build in release mode
         #[arg(short, long)]
         release: bool,
-    },
-
-    /// Run `cargo doc --document-private-items --no-deps`
-    TestDoc {
-        /// Additional arguments passed to `cargo doc`
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        cargo_args: Vec<String>,
-    },
-
-    /// Run the e2e test suite, optionally with externally provided mirrord artifacts
-    TestE2e {
-        /// Path to an external mirrord CLI binary
-        #[arg(long)]
-        binary: Option<std::path::PathBuf>,
-
-        /// Path to an external mirrord layer file
-        #[arg(long)]
-        layer: Option<std::path::PathBuf>,
-
-        /// Additional arguments passed to `cargo test` or `cargo nextest run`
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        cargo_args: Vec<String>,
-    },
-
-    /// Run unit tests for the mirrord CLI with placeholder embedded assets
-    TestUt {
-        /// Additional arguments passed to `cargo test`
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        cargo_args: Vec<String>,
-    },
-
-    /// Run the integration test suite, optionally with externally provided mirrord artifacts
-    TestIntegration {
-        /// Path to an external mirrord CLI binary
-        #[arg(long)]
-        binary: Option<std::path::PathBuf>,
-
-        /// Path to an external mirrord layer file
-        #[arg(long)]
-        layer: Option<std::path::PathBuf>,
-
-        /// Additional arguments passed to `cargo test` or `cargo nextest run`
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        cargo_args: Vec<String>,
-    },
-
-    /// Build and run the CLI, analogous to `cargo run`. Does not
-    /// build the UI frontend by default.
-    RunCli {
-        /// Build the merged UI frontend before running
-        #[arg(long)]
-        build_ui: bool,
-
-        /// CLI args for mirrord
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        mirrord_args: Vec<String>,
     },
 }
 
@@ -204,10 +133,6 @@ fn main() -> Result<()> {
             };
 
             tasks::release::build_release_cli(options)?;
-        }
-
-        Commands::BuildUi => {
-            tasks::ui::build_ui()?;
         }
 
         Commands::BuildLayer {
@@ -274,66 +199,6 @@ fn main() -> Result<()> {
 
         Commands::MergeCliUniversal { release } => {
             tasks::cli::merge_macos_universal_cli(release)?;
-        }
-
-        Commands::TestDoc { cargo_args } => {
-            tasks::doc::run(cargo_args)?;
-        }
-
-        Commands::InRunner { image, command } => {
-            tasks::in_runner::run(image, command)?;
-        }
-
-        Commands::TestE2e {
-            binary,
-            layer,
-            cargo_args,
-        } => {
-            tasks::test::run(tasks::test::Suite::E2e, binary, layer, cargo_args)?;
-        }
-
-        Commands::TestUt { cargo_args } => {
-            tasks::test::run_unit(cargo_args)?;
-        }
-
-        Commands::TestIntegration {
-            binary,
-            layer,
-            cargo_args,
-        } => {
-            tasks::test::run(tasks::test::Suite::Integration, binary, layer, cargo_args)?;
-        }
-
-        Commands::RunCli {
-            build_ui,
-            mirrord_args,
-        } => {
-            let platform = Platform::detect().unwrap_or_else(|e| {
-                eprintln!("Failed to detect platform: {}", e);
-                eprintln!("Please specify platform with --platform");
-                std::process::exit(1);
-            });
-
-            let options = BuildOptions {
-                platform,
-                cargo: CargoOptions::default(),
-                build_ui,
-                cargo_args: vec![], // welp
-                quiet: true,
-            };
-
-            let cli_path = tasks::release::build_release_cli(options)?;
-
-            match resolve_command(cli_path).args(mirrord_args).spawn() {
-                Ok(mut child) => {
-                    if let Err(err) = child.wait() {
-                        println!("error while waiting for child: {err}");
-                    };
-                }
-                Err(err) => {
-                    println!("failed to run child process: {err}");
-                }
-            }
         }
     }
 

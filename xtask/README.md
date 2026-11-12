@@ -1,6 +1,8 @@
 # xtask - mirrord Build Automation
 
 This is mirrord's build automation tool, following the Rust [`xtask` pattern](https://github.com/matklad/cargo-xtask).
+Only the release workflow still uses it, to build the CLI and the layer that it ships. Bazel builds the same
+artifacts for development and CI, as `CONTRIBUTING.md` describes.
 
 ## Quick Start
 
@@ -67,15 +69,6 @@ run on old Linux distributions. It requires `--platform` and `cargo-zigbuild`. R
 cargo xtask build-cli --release --platform linux-x86_64 --zigbuild
 ```
 
-### `build-ui`
-
-Builds the merged UI frontend (`packages/ui`, which composes the session monitor and the config
-wizard). The CLI embeds `packages/ui/dist` via rust-embed.
-
-```bash
-cargo xtask build-ui
-```
-
 ### `build-layer`
 
 Builds only the mirrord layer.
@@ -114,9 +107,6 @@ cargo xtask build-cli --release --platform linux-aarch64 --zigbuild
 ### Building Components Separately
 
 ```bash
-# Build the UI frontend only
-cargo xtask build-ui
-
 # Build layer only
 cargo xtask build-layer --release
 
