@@ -65,6 +65,8 @@ function ConvertTo-CommandLineArgument([string]$Argument) {
 function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
     $copy = Join-Path $dir ("mirrord-stack-{0}k.exe" -f ($Stack / 1KB))
     Copy-Item $Exe $copy -Force
+    # Bazel's outputs are read-only, and the copy keeps that attribute, so editbin couldn't change it.
+    (Get-Item $copy).IsReadOnly = $false
     & $editbin /nologo "/STACK:$Stack" $copy | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "editbin failed with exit code $LASTEXITCODE" }
 

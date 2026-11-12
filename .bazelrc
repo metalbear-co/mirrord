@@ -120,6 +120,14 @@ build:clippy --skip_incompatible_explicit_targets
 # with `--config=clippy` or `--config=doc` reuses the analysis of the build before it.
 build --@rules_rust//rust/settings:clippy_flag=-Dwarnings
 
+# CI only checks that clippy and rustdoc pass, and reads none of their outputs, so with a remote
+# cache, these builds leave their outputs in the cache rather than download them. Without a remote
+# cache, the flag changes nothing. Other commands keep Bazel's default, which downloads the outputs
+# of the targets that a command names, because CI reads files from `bazel-bin` and
+# `bazel-testlogs`, like the release files and the test reports, so `common:ci` doesn't set it.
+build:clippy --remote_download_outputs=minimal
+build:doc --remote_download_outputs=minimal
+
 # Every Rust crate has a `<name>_doc` target, tagged `rustdoc`, that runs rustdoc on it with
 # warnings as errors. Builds leave them out, and `bazel build --config=doc //...` builds only them.
 # The filter applies to the targets that a command names too, so building one doc target also takes
@@ -136,7 +144,8 @@ common --@aspect_rules_js//js:use_hermetic_launcher
 # test or a tool reads at run time, like the layer that `//mirrord/cli` loads. On Linux and macOS,
 # Bazel always creates it, but on Windows, it only writes a manifest of where each file is, unless
 # it's asked for the directory too. The nextest runner, the Rust tests and the CLI only look for
-# their files in the directory. Without symlink support, Bazel copies the files into the directory.
+# their files in the directory. Without symlink support, which `--windows_enable_symlinks` turns on
+# where Windows allows it, as CI's Windows runners do, Bazel copies the files into the directory.
 build:windows --enable_runfiles
 
 # Lists each test case under its target in the summary, as `cargo test` and `cargo nextest run`
@@ -147,3 +156,27 @@ test --test_summary=detailed
 # Makes `py_binary` launchers start the Python interpreter that rules_python downloads, through a
 # shell script, rather than whichever `python3` is on `PATH`, which a NixOS machine may not have.
 common --@rules_python//python/config_settings:bootstrap_impl=script
+
+# The flags that CI adds to every command. `.github/actions/setup-bazel` turns them on in the
+# runner's `~/.bazelrc`, so CI runs the same commands as a developer does. Each command first lists
+# the flags that it read from each rc file, which shows what the runner configured on its own, like
+# a remote cache. CI keeps going after a failure, so that one run reports every failing target, and
+# every failing test of a target, which nextest would otherwise stop at the first one (see the `ci`
+# profile in `.config/nextest.toml`), and prints the output of the tests that fail. Its logs don't
+# render Bazel's progress bar, so it prints plain lines instead, at most one a minute, each with the
+# time, which is how a log shows where a slow job spent its time.
+common:ci --announce_rc
+common:ci --color=yes
+common:ci --curses=no
+common:ci --show_progress_rate_limit=60
+common:ci --show_timestamps
+build:ci --keep_going
+build:ci --verbose_failures
+test:ci --test_output=errors
+test:ci --test_env=NEXTEST_PROFILE=ci
+
+# Tells the tests that they run in CI, as GitHub's runners tell every program, while Bazel gives
+# tests a fixed environment without it. On Windows, mirrord's crash monitor shows a dialog when a
+# program under mirrord dies, which waits for someone to close it unless mirrord runs in CI. The
+# layer tests' Python apps end by killing themselves, so the monitor would keep the test waiting.
+test:ci --test_env=CI=true

@@ -7,7 +7,7 @@ kube
 kubectl
 kubeconfig
 Kubernetes
-Minikube
+minikube
 namespace
 namespaces
 namespaced

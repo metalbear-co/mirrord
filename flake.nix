@@ -146,6 +146,16 @@
                 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = x86-gcc;
               };
           };
+
+          # CI's lint job runs `bazel run //:lint` and `bazel run //:format` in this shell, so that
+          # it runs the tools at the versions that developers run, without the toolchains that the
+          # default shell builds the workspace with. Bazel itself comes from CI's own setup.
+          lint = pkgs.mkShellNoCC {
+            packages = lintPackages ++ [
+              # cargo-deny and cargo-shear read the workspace through `cargo metadata`.
+              pkgs.cargo
+            ];
+          };
         }
       );
     };

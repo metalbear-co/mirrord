@@ -52,21 +52,23 @@ jobs:
         with:
           cache: false
           rustflags: ""
-      - name: Rust cache
-        if: steps.version.outputs.should-release == 'true'
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: mirrord
 
+      # Cargo.lock records the workspace's own versions, which the bump changed.
       - name: Update Cargo.lock
         if: steps.version.outputs.should-release == 'true'
         run: cargo update -w -q
+
+      # The release pull request commits what the next step writes, with the release bot's token.
+      - if: steps.version.outputs.should-release == 'true'
+        uses: ./.github/actions/setup-bazel
+        with:
+          publishes: "true"
 
       # Ships the current docs and skills. Only fails when they can't be fetched; content that
       # doesn't hold up fails the release PR's checks instead.
       - name: Bump the docs and skills corpus
         if: steps.version.outputs.should-release == 'true'
-        run: cargo run -p mirrord-mcp-vendor -- sync --bump
+        run: bazel run //mirrord/mcp/vendor -- sync --bump
 
       - name: Generate draft release notes
         if: steps.version.outputs.should-release == 'true'

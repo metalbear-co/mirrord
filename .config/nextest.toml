@@ -33,3 +33,9 @@ default-filter = "package(mirrord-tests) & test(/^dirty_iptables::/)"
 [profile.ipv6]
 default-filter = "package(mirrord-tests) & test(/^traffic::ipv6::/)"
 test-threads = 1
+
+# The profile that CI's tests run with (see `.bazelrc`). It runs every test of a target, rather than
+# stop at the first failing one, so that one run reports every failure. A target that passes its own
+# `--profile`, like the end-to-end ones, keeps its profile.
+[profile.ci]
+fail-fast = false

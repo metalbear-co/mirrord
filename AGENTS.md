@@ -100,19 +100,19 @@ cargo fmt
 
 `.github/workflows/ci.yaml` runs on pull requests into `main` that aren't drafts, and in the merge queue. A pull
 request into a branch its `pull_request` trigger doesn't list gets it only as part of a GitHub stack, from the first
-push after it joins. Its `plan` job picks the other jobs from the changed paths, and a change under
-`.github/workflows/` runs nearly every one.
+push after it joins. Its `plan` job skips the build for a change to the root's Markdown and the changelog fragments
+alone, and a change under `.github/` runs nearly every job.
 
-- `ci` (the `ci-success` job) is the only required check. It and `lint-success` only collect the jobs they need, so
-  when either fails, read the job under it that failed.
+- CI runs the same Bazel commands as a developer, which the comment at the top of `ci.yaml` lists. The
+  `build-test (<platform>)` jobs build, lint, document and test on each platform, in one step each, so read the step
+  that failed. `test-e2e.yaml` runs the end-to-end tests on a kind, a minikube and an IPv6 kind cluster.
+- `ci` (the `ci-success` job) is the only required check. It only collects the jobs it needs, so when it fails, read
+  the job under it that failed.
 - `main` merges through the merge queue, with merge commits, after one approval and with every review thread resolved.
 - nextest retries a failing test twice, so `FLAKY` marks a pass on a retry and `TRY 3 FAIL` a test that never passed.
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
-- `typos` checks the tracked Markdown outside `mirrord/mcp/corpus`, and Vale the Markdown at the root and every fragment
-  in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
-- The CI runner image (`mirrord/tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
-  A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
-  when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
+- `bazel run //:lint` runs `typos` on the tracked Markdown outside `mirrord/mcp/corpus`, and Vale on the Markdown at the
+  root and every fragment in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
 - While the `windows-e2e` label is on a pull request, adding any label runs the Windows end-to-end tests; pushes
   don't. `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's on before the pull request
   leaves draft (`.pr_agent.toml`).
