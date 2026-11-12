@@ -181,6 +181,37 @@ operator:
 
 The operator puts them on the branch database pod and, from operator 3.219.0 on, on the pods of the branch's [schema migration](db-branching/migrations.md) and copy Jobs, so the whole branch falls under the same rules; earlier versions set them on the database pod only. Each engine has its own `<engine>BranchConfig` block, and a [profile](#branch-config-profiles) is a complete `dbPod`, so set them again in each profile that needs them. Only branches created after the change pick them up.
 
+## Branch Pod Scheduling
+
+Cluster admins can decide where branch pods run with `dbPod.tolerations`, `dbPod.nodeSelector` and `dbPod.affinity` in the operator's Helm values. They take the same shapes as the fields of a pod spec. This is useful when every node in the cluster carries a taint - for example on EKS with Karpenter, where each NodePool is tainted `NoSchedule`. Without a matching toleration the branch pod never gets a node, stays `Pending` with `node(s) had untolerated taint(s)`, and the session fails with `operator operation timed out: database branching`:
+
+```yaml
+operator:
+  pgBranchConfig:
+    dbPod:
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: dev
+          effect: NoSchedule
+      nodeSelector:
+        karpenter.sh/nodepool: dev-pool
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+```
+
+The operator puts all three on the branch database pod and on the pods of the branch's [schema migration](db-branching/migrations.md) and copy Jobs, so a Job pod is never the one left `Pending` while the database pod runs. As with labels and annotations, each engine has its own `<engine>BranchConfig` block, a [profile](#branch-config-profiles) is a complete `dbPod` that needs its own copy, and only branches created after the change pick them up.
+
+{% hint style="info" %}
+`dbPod.tolerations`, `nodeSelector` and `affinity` require operator and Helm chart `3.230.0` or later. Earlier operators log `branch config contains a key the operator does not recognize; it has no effect` for them and schedule branch pods without any of the three.
+{% endhint %}
+
 ## A Namespace per Key
 
 By default, a branch pod runs in the same namespace as the session's target. Setting `namespace: true` on a branch runs it in a namespace of its own instead, named after the session key: `mirrord-<key>` by default. This is useful when you want everything a developer's session created in one place, to see it, to put a quota on it, or to clean it up in one go.

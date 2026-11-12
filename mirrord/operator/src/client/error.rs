@@ -28,6 +28,7 @@ pub enum OperatorOperation {
     MysqlBranching,
     MongodbBranching,
     PreparingClientCertificate,
+    ReadShareLink,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -46,6 +47,7 @@ impl fmt::Display for OperatorOperation {
             Self::MysqlBranching => "MySQL branching",
             Self::MongodbBranching => "MongoDB branching",
             Self::PreparingClientCertificate => "preparing client certificate",
+            Self::ReadShareLink => "reading the share link",
         };
 
         f.write_str(as_str)
@@ -133,6 +135,11 @@ pub enum OperatorApiError {
 
     #[error("unsupported target configuration: {0}")]
     UnsupportedTargetConfig(String),
+
+    /// A session started with `share` can't run against this operator or target. The message is
+    /// written for the user, so it is shown as it is.
+    #[error("{0}")]
+    LocalShare(String),
 
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),

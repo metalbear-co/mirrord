@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -11,29 +11,21 @@ import {
   Button,
   Badge,
 } from '@metalbear/ui'
-import { useConfigData, DefaultConfig } from './UserDataContext'
-import { readBoilerplateType } from './JsonUtils'
+import { useDraft } from './DraftContext'
+import { useModes } from '../lib/queries'
+import {
+  commandError,
+  newDraft,
+  targetDone,
+  toPickedService,
+  trafficError,
+} from '../lib/up'
 import { strings } from '../strings'
-
-const STEPS_WITH_LEARNING = 3
-
-// Map internal mode names to display names
-const modeDisplayNames: Record<string, string> = {
-  steal: 'Filtering',
-  mirror: 'Mirror',
-  replace: 'Replace',
-  custom: 'Custom',
-}
-
-const modeColors: Record<string, string> = {
-  steal: 'bg-primary/10 text-primary border-primary/20',
-  mirror: 'bg-primary/10 text-primary border-primary/20',
-  replace: 'bg-primary/10 text-primary border-primary/20',
-  custom: 'bg-primary/10 text-primary border-primary/20',
-}
-
-import BoilerplateStep from './steps/BoilerplateStep'
-import ConfigTabs from './steps/ConfigTabs'
+import ModeStep from './steps/ModeStep'
+import TargetStep from './steps/TargetStep'
+import TrafficStep from './steps/TrafficStep'
+import RunStep from './steps/RunStep'
+import ExportStep from './steps/ExportStep'
 import LearningSteps from './steps/LearningSteps'
 import ErrorBoundary from './ErrorBoundary'
 
@@ -43,143 +35,170 @@ interface WizardProps {
   startWithLearning?: boolean
 }
 
-type WizardStep = 'boilerplate' | 'config' | 'learning'
+/**
+ * Each service goes through `mode`, `target`, `traffic` (only with a target) and `run`, like the
+ * `mirrord up init` questions, then lands on `export`, which can start another.
+ */
+type WizardStep = 'learning' | 'mode' | 'target' | 'traffic' | 'run' | 'export'
 
-type ConfigTab = 'target' | 'network' | 'export'
+const CONFIG_STEPS: WizardStep[] = [
+  'mode',
+  'target',
+  'traffic',
+  'run',
+  'export',
+]
 
 const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
-  const { config, setConfig } = useConfigData()
-  const [currentStep, setCurrentStep] = useState<WizardStep>(
-    startWithLearning ? 'learning' : 'boilerplate',
-  )
+  const { draft, setDraft, services, setServices, reset } = useDraft()
+  const modes = useModes()
+  const firstStep: WizardStep = startWithLearning ? 'learning' : 'mode'
+  const [currentStep, setCurrentStep] = useState<WizardStep>(firstStep)
   const [learningComplete, setLearningComplete] = useState(false)
-  const [currentTab, setCurrentTab] = useState<ConfigTab>('target')
-  const [canAdvanceTab, setCanAdvanceTab] = useState(false)
+  const takenNames = services.map((service) => service.name)
 
-  // Reset to correct step when wizard opens
+  // Reset to the first step when the wizard opens
   useEffect(() => {
     if (open) {
-      setCurrentStep(startWithLearning ? 'learning' : 'boilerplate')
-      setCurrentTab('target')
+      setCurrentStep(startWithLearning ? 'learning' : 'mode')
       setLearningComplete(false)
     }
   }, [open, startWithLearning])
 
   const handleClose = () => {
-    setConfig(DefaultConfig)
-    setCurrentStep(startWithLearning ? 'learning' : 'boilerplate')
+    reset()
+    setCurrentStep(firstStep)
     setLearningComplete(false)
-    setCurrentTab('target')
     onClose()
   }
 
-  const goToConfig = () => {
-    setCurrentStep('boilerplate')
-  }
-
-  const goFromBoilerplate = () => {
-    setCurrentStep('config')
-    setCurrentTab('target')
-  }
-
   const goBack = () => {
-    if (currentStep === 'config') {
-      if (currentTab === 'target') {
-        setCurrentStep('boilerplate')
-      } else if (currentTab === 'network') {
-        setCurrentTab('target')
-      } else {
-        setCurrentTab('network')
-      }
-    } else if (currentStep === 'boilerplate' && learningComplete) {
-      setCurrentStep('learning')
+    switch (currentStep) {
+      case 'mode':
+        // Back from a new service drops it.
+        if (services.length > 0) {
+          setDraft(newDraft())
+          setCurrentStep('export')
+        } else if (learningComplete) {
+          setCurrentStep('learning')
+        }
+        break
+      case 'target':
+        setCurrentStep('mode')
+        break
+      case 'traffic':
+        setCurrentStep('target')
+        break
+      case 'run':
+        setCurrentStep(draft.targetless ? 'target' : 'traffic')
+        break
+      case 'learning':
+      case 'export':
+        break
     }
   }
 
   const goNext = () => {
-    if (currentStep === 'config') {
-      if (currentTab === 'target') {
-        setCurrentTab('network')
-      } else if (currentTab === 'network') {
-        setCurrentTab('export')
-      }
+    switch (currentStep) {
+      case 'mode':
+        setCurrentStep('target')
+        break
+      case 'target':
+        setCurrentStep(draft.targetless ? 'run' : 'traffic')
+        break
+      case 'traffic':
+        setCurrentStep('run')
+        break
+      case 'run':
+        setServices([...services, toPickedService(draft)])
+        setDraft(newDraft())
+        setCurrentStep('export')
+        break
+      case 'learning':
+      case 'export':
+        break
     }
   }
+
+  const canGoNext = (() => {
+    switch (currentStep) {
+      case 'mode':
+        return modes.isSuccess
+      case 'target':
+        return targetDone(draft, takenNames)
+      case 'traffic':
+        return trafficError(draft) === null
+      case 'run':
+        return commandError(draft.command) === null
+      case 'learning':
+      case 'export':
+        return false
+    }
+  })()
+
+  const canGoBack =
+    (currentStep === 'mode' && (services.length > 0 || learningComplete)) ||
+    currentStep === 'target' ||
+    currentStep === 'traffic' ||
+    currentStep === 'run'
 
   const handleLearningComplete = () => {
     setLearningComplete(true)
-    setCurrentStep('boilerplate')
+    setCurrentStep('mode')
   }
 
-  const boilerplateType = readBoilerplateType(config)
-  const isTargetConfigView = currentStep === 'config' && currentTab === 'target'
-
-  const getStepInfo = () => {
-    switch (currentStep) {
-      case 'learning':
-        return { title: 'Learn mirrord', step: 1, total: STEPS_WITH_LEARNING }
-      case 'boilerplate':
-        return {
-          title: 'Choose Mode',
-          step: learningComplete ? 2 : 1,
-          total: learningComplete ? STEPS_WITH_LEARNING : 2,
-        }
-      case 'config':
-        return {
-          title: 'Configure',
-          step: learningComplete ? STEPS_WITH_LEARNING : 2,
-          total: learningComplete ? STEPS_WITH_LEARNING : 2,
-        }
-      default:
-        return { title: '', step: 0, total: 0 }
-    }
-  }
-
-  const stepInfo = getStepInfo()
+  // A targetless service skips the traffic step.
+  const steps = CONFIG_STEPS.filter(
+    (step) => step !== 'traffic' || !draft.targetless,
+  )
+  const stepCount = steps.length + (learningComplete ? 1 : 0)
+  const stepNumber =
+    currentStep === 'learning'
+      ? 1
+      : steps.indexOf(currentStep) + 1 + (learningComplete ? 1 : 0)
+  const modeLabel = modes.data?.find((mode) => mode.id === draft.mode)?.label
+  const showModeBadge =
+    currentStep !== 'learning' && currentStep !== 'export' && modeLabel
 
   return (
     <Dialog
       open={open}
       onOpenChange={(isOpen: boolean) => !isOpen && handleClose()}
     >
-      <DialogContent
-        className={`bg-card border-border max-h-[90vh] max-w-2xl overflow-y-auto border shadow-xl [&>button]:hidden ${
-          isTargetConfigView ? 'h-[min(90vh,750px)]' : ''
-        }`}
-      >
-        <DialogHeader className="border-border -mx-6 border-b px-6 pb-4">
+      {/* Only the step scrolls, so Back and Next stay in view. */}
+      <DialogContent className="bg-card border-border flex max-h-[90vh] max-w-2xl flex-col gap-0 border shadow-xl [&>button]:hidden">
+        <DialogHeader className="border-border -mx-6 shrink-0 border-b px-6 pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <DialogTitle className="text-foreground text-xl font-semibold">
-                {stepInfo.title}
+                {strings.wizard.stepTitles[currentStep]}
               </DialogTitle>
-              {currentStep !== 'learning' && boilerplateType !== 'custom' && (
+              {showModeBadge && (
                 <Badge
                   variant="outline"
-                  className={`text-xs font-medium capitalize ${modeColors[boilerplateType] ?? modeColors['custom']}`}
+                  className="bg-primary/10 text-primary border-primary/20 text-xs font-medium"
                 >
-                  {modeDisplayNames[boilerplateType] ?? boilerplateType}
+                  {modeLabel}
                 </Badge>
               )}
             </div>
             <div className="flex items-center gap-4">
               {/* Step indicator */}
               <div className="flex items-center gap-2">
-                {Array.from(
-                  { length: stepInfo.total },
-                  (_, index) => index + 1,
-                ).map((stepNumber) => (
-                  <div
-                    key={stepNumber}
-                    className={`h-2 rounded-full transition-all duration-300 ${
-                      stepNumber === stepInfo.step
-                        ? 'bg-primary w-6'
-                        : stepNumber < stepInfo.step
-                          ? 'bg-primary/50 w-2'
-                          : 'bg-muted w-2'
-                    }`}
-                  />
-                ))}
+                {Array.from({ length: stepCount }, (_, index) => index + 1).map(
+                  (n) => (
+                    <div
+                      key={n}
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        n === stepNumber
+                          ? 'bg-primary w-6'
+                          : n < stepNumber
+                            ? 'bg-primary/50 w-2'
+                            : 'bg-muted w-2'
+                      }`}
+                    />
+                  ),
+                )}
               </div>
               <DialogClose asChild>
                 <button className="hover:bg-muted rounded-full p-2 transition-colors">
@@ -193,71 +212,60 @@ const Wizard = ({ open, onClose, startWithLearning = false }: WizardProps) => {
           {strings.wizard.dialogDescription}
         </DialogDescription>
 
-        <div className="py-6">
+        <div
+          data-testid="wizard-step"
+          className="-mx-6 min-h-0 flex-1 overflow-y-auto px-6 py-6"
+        >
           {currentStep === 'learning' && (
             <LearningSteps
               onComplete={handleLearningComplete}
-              onSkip={goToConfig}
+              onSkip={() => setCurrentStep('mode')}
             />
           )}
-          {currentStep === 'boilerplate' && <BoilerplateStep />}
-          {currentStep === 'config' && (
+          {currentStep !== 'learning' && (
             <ErrorBoundary>
-              <ConfigTabs
-                currentTab={currentTab}
-                onTabChange={setCurrentTab}
-                onCanAdvanceChange={setCanAdvanceTab}
-              />
+              {currentStep === 'mode' && <ModeStep />}
+              {currentStep === 'target' && <TargetStep />}
+              {currentStep === 'traffic' && <TrafficStep />}
+              {currentStep === 'run' && <RunStep />}
+              {currentStep === 'export' && (
+                <ExportStep onAddService={() => setCurrentStep('mode')} />
+              )}
             </ErrorBoundary>
           )}
         </div>
 
-        {currentStep !== 'learning' && (
-          <DialogFooter className="border-border -mx-6 flex justify-between border-t px-6 pt-4 sm:justify-between">
-            {currentStep === 'boilerplate' && (
-              <>
-                <div>
-                  {learningComplete && (
-                    <Button
-                      variant="outline"
-                      onClick={goBack}
-                      className="gap-2"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      {strings.wizard.back}
-                    </Button>
-                  )}
-                </div>
-                <div>
-                  <Button
-                    onClick={goFromBoilerplate}
-                    className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
-                  >
-                    {strings.wizard.continue}
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </>
-            )}
-
-            {currentStep === 'config' && (
-              <>
+        {currentStep !== 'learning' && currentStep !== 'export' && (
+          <DialogFooter className="border-border -mx-6 flex shrink-0 justify-between border-t px-6 pt-4 sm:justify-between">
+            <div>
+              {canGoBack && (
                 <Button variant="outline" onClick={goBack} className="gap-2">
                   <ChevronLeft className="h-4 w-4" />
                   {strings.wizard.back}
                 </Button>
-                {currentTab !== 'export' && canAdvanceTab && (
-                  <Button
-                    onClick={goNext}
-                    className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
-                  >
-                    {strings.wizard.next}
+              )}
+            </div>
+            <div>
+              <Button
+                onClick={goNext}
+                disabled={!canGoNext}
+                className="shadow-brand hover:shadow-brand-hover gap-2 text-white"
+              >
+                {currentStep === 'run' ? (
+                  <>
+                    <Plus className="h-4 w-4" />
+                    {strings.wizard.addService}
+                  </>
+                ) : (
+                  <>
+                    {currentStep === 'mode'
+                      ? strings.wizard.continue
+                      : strings.wizard.next}
                     <ChevronRight className="h-4 w-4" />
-                  </Button>
+                  </>
                 )}
-                {(currentTab === 'export' || !canAdvanceTab) && <div />}
-              </>
-            )}
+              </Button>
+            </div>
           </DialogFooter>
         )}
       </DialogContent>

@@ -1,9 +1,7 @@
-//! Cluster **target** enumeration for the config wizard's target picker, served under
-//! `/api/v2/kube/{targets,target-types}`. It lives under v2 (not the wizard module) because it only
-//! reads kube resources, but it still flips the returning-wizard flag: reaching the target picker
-//! means the user started the config flow.
+//! Cluster **target** enumeration, served under `/api/v2/kube/{targets,target-types}`. The config
+//! wizard lists targets through `/api/v1/up/workloads` (see `ui::wizard`).
 
-use axum::extract::{Query, State};
+use axum::extract::Query;
 use futures::StreamExt;
 use itertools::Itertools;
 use k8s_openapi::api::{
@@ -16,19 +14,7 @@ use mirrord_config::target::TargetType;
 use mirrord_kube::api::kubernetes::{rollout::Rollout, seeker::KubeResourceSeeker};
 use serde::{Deserialize, Serialize};
 
-use crate::ui::{
-    error::ApiError,
-    server::{AppState, client_for_context},
-};
-
-/// Flags the user as a returning wizard user on their first pass through the target picker.
-async fn mark_returning(state: &AppState) {
-    let mut user_data = state.user_data.lock().await;
-    if !user_data.is_returning_wizard() {
-        // ignore failures to persist
-        let _ = user_data.update_is_returning_wizard().await;
-    }
-}
+use crate::ui::{error::ApiError, server::client_for_context};
 
 /// ### Response for `GET /api/v2/kube/target-types`
 ///
@@ -44,14 +30,11 @@ pub(crate) struct TargetTypesResponse {
 /// `GET /api/v2/kube/targets` endpoint.
 #[derive(Debug, Serialize)]
 pub(crate) struct TargetInfo {
-    /// ### Shown in the wizard's `Target` tab
+    /// Like `deployment/api`.
     target_path: String,
-    /// ### Shown in the wizard's `Target` tab
     target_namespace: String,
-    /// ### Shown in the wizard's `Target` tab
+    /// Of the target's pod template.
     containers: Vec<String>,
-    /// ### Shown in the wizard's `Network` tab
-    ///
     /// Ports exposed by the target's Pod or Pods that we have auto-detected.
     ///
     /// These are the ports the user is most likely to be interested in.
@@ -104,10 +87,7 @@ pub(crate) struct TargetsQuery {
 
 /// Lists the resource types mirrord can target. Static (no cluster access); served at
 /// `GET /api/v2/kube/target-types`.
-pub(crate) async fn list_target_types(
-    State(state): State<AppState>,
-) -> axum::Json<TargetTypesResponse> {
-    mark_returning(&state).await;
+pub(crate) async fn list_target_types() -> axum::Json<TargetTypesResponse> {
     axum::Json(TargetTypesResponse {
         target_types: TargetType::all()
             .filter(|&t| t != TargetType::Targetless)
@@ -119,11 +99,8 @@ pub(crate) async fn list_target_types(
 /// may optionally be restricted to a single [`TargetType`]. Served at `GET /api/v2/kube/targets`.
 #[tracing::instrument(level = tracing::Level::TRACE, skip_all, ret)]
 pub(crate) async fn list_targets(
-    State(state): State<AppState>,
     Query(query_params): Query<TargetsQuery>,
 ) -> Result<axum::Json<Vec<TargetInfo>>, ApiError> {
-    mark_returning(&state).await;
-
     let namespace = query_params.namespace.as_deref().unwrap_or("default");
     let client = client_for_context(query_params.context.as_deref()).await?;
     let seeker = KubeResourceSeeker {

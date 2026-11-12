@@ -41,6 +41,7 @@ One entry per Temporal task queue the worker consumes:
 | `appConfig.temporalAddress` | No | Env var holding the Temporal frontend address. The operator patches it so the worker connects to the operator's proxy instead of the real frontend. |
 | `appConfig.temporalNamespace` | No | Env var holding the Temporal namespace. |
 | `queueConfig` | No | Name of a `MirrordPropertyList` with per-queue settings (`max_buffered_tasks` — see the property-list reference). |
+| `keyJqFilter` | No | A jq program returning a task's session key, so a session with no `filter`/`message_filter`/`jq_filter` on this queue still gets only the tasks carrying its own `key` (a task with no key, or one the program errors on, goes to the deployed worker). An explicit filter the session sets itself — an empty `message_filter: {}` included — replaces it. Add `enforceFilter: true` next to it to refuse a session that sets its own filter on the queue. Same jq constraints as a session's own `jq_filter`. Requires mirrord **3.283.0+** and operator **3.230.0+**. |
 
 ### `appConfig` source structure
 

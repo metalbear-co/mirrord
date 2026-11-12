@@ -1,1 +1,0 @@
-Check the skills at upstream HEAD against the config schemas of every pull request that changes them, so a schema change that breaks a skill fails its own pull request instead of the next release pull request.

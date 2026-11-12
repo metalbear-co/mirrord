@@ -29,7 +29,10 @@ use config::{
     ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
 };
 use futures::TryStreamExt;
-pub use init::{InitError, run_wizard};
+pub use init::{
+    InitError, PickedService, PickedWorkload, RenderError, SkeletonError, detect_ports,
+    list_workloads_for_mode, render_skeleton, run_wizard, service_name_for,
+};
 use inquire::{Confirm, Select};
 use itertools::Itertools;
 use k8s_openapi::api::core::v1::Namespace;

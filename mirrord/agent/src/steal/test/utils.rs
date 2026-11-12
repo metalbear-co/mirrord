@@ -634,7 +634,7 @@ impl StealingClient {
             .await
             .unwrap();
         assert_eq!(
-            api.recv().await.unwrap(),
+            *api.recv().await.unwrap(),
             DaemonMessage::TcpSteal(DaemonTcp::SubscribeResult(Ok(steal_type.get_port()))),
         );
 
@@ -647,7 +647,7 @@ impl StealingClient {
     }
 
     pub async fn expect_log(&mut self, level: LogLevel, containing: &str) {
-        match self.api.recv().await.unwrap() {
+        match self.recv().await {
             DaemonMessage::LogMessage(log) => {
                 assert_eq!(log.level, level);
                 assert!(log.message.contains(containing));
@@ -666,7 +666,7 @@ impl StealingClient {
     }
 
     pub async fn expect_connection(&mut self) -> NewTcpConnectionV2 {
-        match self.api.recv().await.unwrap() {
+        match self.recv().await {
             DaemonMessage::TcpSteal(DaemonTcp::NewConnectionV1(conn)) => {
                 assert!(
                     self.protocol_version
@@ -690,7 +690,7 @@ impl StealingClient {
 
     /// For handling passthrough requests, see [`TestRequest::accept`].
     pub async fn expect_request(&mut self, expected: &TestRequest) {
-        let mut request = match self.api.recv().await.unwrap() {
+        let mut request = match self.recv().await {
             DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV1(
                 request,
             ))) => {
@@ -762,7 +762,7 @@ impl StealingClient {
         }
 
         while request.request.body.is_last.not() {
-            match self.api.recv().await.unwrap() {
+            match self.recv().await {
                 DaemonMessage::TcpSteal(DaemonTcp::HttpRequestChunked(ChunkedRequest::Body(
                     ChunkedRequestBodyV1 {
                         frames,
@@ -864,7 +864,7 @@ impl StealingClient {
         match protocol {
             TestTcpProtocol::Echo => {
                 while got_bytes != expected {
-                    let bytes = match self.api.recv().await.unwrap() {
+                    let bytes = match self.recv().await {
                         DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                             bytes,
                             connection_id,
@@ -885,7 +885,7 @@ impl StealingClient {
                         .unwrap();
                 }
 
-                match self.api.recv().await.unwrap() {
+                match self.recv().await {
                     DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         bytes,
                         connection_id,
@@ -905,7 +905,7 @@ impl StealingClient {
                     .unwrap();
 
                 assert_eq!(
-                    self.api.recv().await.unwrap(),
+                    self.recv().await,
                     DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
                         connection_id: expect_connection_id
                     })),
@@ -922,7 +922,7 @@ impl StealingClient {
                     .unwrap();
 
                 while expected != got_bytes {
-                    match self.api.recv().await.unwrap() {
+                    match self.recv().await {
                         DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                             bytes,
                             connection_id,
@@ -935,7 +935,7 @@ impl StealingClient {
                     }
                 }
 
-                match self.api.recv().await.unwrap() {
+                match self.recv().await {
                     DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         bytes,
                         connection_id,
@@ -947,7 +947,7 @@ impl StealingClient {
                 };
 
                 assert_eq!(
-                    self.api.recv().await.unwrap(),
+                    self.recv().await,
                     DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
                         connection_id: expect_connection_id
                     })),
@@ -956,7 +956,7 @@ impl StealingClient {
 
             TestTcpProtocol::ServerTalks => {
                 assert_eq!(
-                    self.api.recv().await.unwrap(),
+                    self.recv().await,
                     DaemonMessage::TcpSteal(DaemonTcp::Data(TcpData {
                         connection_id: expect_connection_id,
                         bytes: Default::default(),
@@ -982,7 +982,7 @@ impl StealingClient {
                     .unwrap();
 
                 assert_eq!(
-                    self.api.recv().await.unwrap(),
+                    self.recv().await,
                     DaemonMessage::TcpSteal(DaemonTcp::Close(TcpClose {
                         connection_id: expect_connection_id
                     })),
@@ -992,7 +992,7 @@ impl StealingClient {
     }
 
     pub async fn recv(&mut self) -> DaemonMessage {
-        self.api.recv().await.unwrap()
+        self.api.recv().await.unwrap().into_parts().0.into_inner()
     }
 }
 

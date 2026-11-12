@@ -2,7 +2,9 @@ use std::{collections::HashSet, fmt, ops::Not, str::FromStr};
 
 use bimap::BiMap;
 use mirrord_analytics::{AnalyticValue, Analytics, CollectAnalytics};
+use mirrord_protocol::tcp::HTTP_COMPOSITE_FILTER_VERSION;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize, de, ser, ser::SerializeSeq as _};
 use thiserror::Error;
 use tls_delivery::LocalTlsDelivery;
@@ -136,7 +138,7 @@ impl MirrordConfig for IncomingFileConfig {
                     .source_value(context)
                     .transpose()?
                     .unwrap_or_default(),
-                ports: advanced.ports.map(|ports| ports.into_iter().collect()),
+                ports: advanced.ports,
                 https_delivery: advanced.https_delivery,
                 tls_delivery: advanced.tls_delivery,
             },
@@ -341,6 +343,9 @@ pub struct IncomingAdvancedFileConfig {
     /// List of ports to mirror/steal traffic from. Other ports will remain local.
     ///
     /// Mutually exclusive with [`ignore_ports`](###ignore_ports).
+    ///
+    /// The order of the list matters to [`share`](#root-share), which opens the first port in it
+    /// that the target's Service exposes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ports: Option<Vec<u16>>,
 
@@ -523,7 +528,10 @@ pub struct IncomingConfig {
     ///
     /// Mutually exclusive with
     /// [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
-    pub ports: Option<HashSet<u16>>,
+    ///
+    /// The order of the list matters to [`share`](#root-share), which opens the first port in it
+    /// that the target's Service exposes.
+    pub ports: Option<Vec<u16>>,
 
     /// ##### feature.network.incoming.https_delivery {#feature-network-incoming-https_delivery}
     ///
@@ -538,6 +546,35 @@ pub struct IncomingConfig {
 }
 
 impl IncomingConfig {
+    /// Checks that the agent supports this session's HTTP filter, including the composite filter
+    /// that a shared session builds from a custom filter and its session key.
+    ///
+    /// `shared_session_key` is [`LayerConfig::shared_session_key`](crate::LayerConfig::shared_session_key).
+    pub fn ensure_usable_with(
+        &self,
+        agent_protocol_version: &Version,
+        shared_session_key: Option<&str>,
+    ) -> Result<()> {
+        self.http_filter
+            .ensure_usable_with(agent_protocol_version)?;
+        if shared_session_key.is_some()
+            && self.http_filter.is_filter_set()
+            && HTTP_COMPOSITE_FILTER_VERSION
+                .matches(agent_protocol_version)
+                .not()
+        {
+            // The requirement is a single `>=` comparator, so what follows it is the oldest version
+            // that works.
+            return Err(ConfigError::Share(format!(
+                "A shared session adds its session key to your HTTP filter, which needs a mirrord-agent with protocol version {} or newer. Use a newer mirrord-agent, or turn off `share`.",
+                HTTP_COMPOSITE_FILTER_VERSION
+                    .to_string()
+                    .trim_start_matches(">=")
+            )));
+        }
+        Ok(())
+    }
+
     /// <!--${internal}-->
     /// Helper function.
     ///
@@ -550,12 +587,15 @@ impl IncomingConfig {
     /// Helper function
     ///
     /// Checks whether the given port can be stolen without an HTTP filter.
-    pub fn steals_port_without_filter(&self, port: u16) -> bool {
+    ///
+    /// `shared_session_key` is [`LayerConfig::shared_session_key`](crate::LayerConfig::shared_session_key):
+    /// a shared session filters on its key even without a configured filter.
+    pub fn steals_port_without_filter(&self, port: u16, shared_session_key: Option<&str>) -> bool {
         if self.is_steal().not() {
             return false;
         }
 
-        if self.http_filter.is_filter_set() {
+        if self.http_filter.is_filter_set() || shared_session_key.is_some() {
             self.http_filter
                 .ports
                 .as_ref()
@@ -586,6 +626,9 @@ impl IncomingConfig {
 /// 2. HTTP traffic stealing: Steals only HTTP traffic, mirrord tries to detect if the incoming data
 ///    on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the
 ///    traffic on the port if it is HTTP;
+///
+/// A session started with [`share`](#root-share) steals only the HTTP requests that carry its
+/// session key (see [`key`](#root-key)), plus the requests that match its `http_filter`.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug, JsonSchema, Default)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub enum IncomingMode {

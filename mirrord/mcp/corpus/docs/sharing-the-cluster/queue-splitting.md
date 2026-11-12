@@ -304,7 +304,7 @@ spec:
         query: sum(kafka_consumergroup_lag{consumergroup="{{orders.group}}", topic="{{orders.queue}}"})
 ```
 
-A value naming a queue id the `MirrordSplitConfig` does not declare, or a `group` its queue does not have, makes the operator refuse the `MirrordSplitConfig`, and splits of its workloads fail. An override naming a trigger or metadata key the `ScaledObject` does not have, or a queue the split does not include, is not applied.
+A value naming a queue id the `MirrordSplitConfig` does not declare, or a `group` its queue does not have, makes the operator refuse the `MirrordSplitConfig`, and splits of its workloads fail. An override naming a trigger or metadata key the `ScaledObject` does not have, a queue the split does not include, or the `queue` of a queue id that resolves to several queues is not applied.
 
 A GitOps tool deploying the `ScaledObject` would put the original triggers back. The operator therefore registers a mutating webhook that reapplies its rewrite to every update of a redirected `ScaledObject`, including the dry runs Flux compares against. Flux sees the `ScaledObject` as in sync and keeps reconciling it: changes from Git roll out during the split, and the triggers stay redirected. When the split ends, the operator undoes only its own rewrite, so those changes stay.
 
@@ -453,6 +453,55 @@ A `message_filter` of `{ "tenant": "^blue$", "region": "eu" }` is the same as `f
 
 Queue filter policies (`splitQueues` in a mirrord policy) check `message_filter` entries and `all_of` / `any_of` branches by attribute name. A `metadata` regex cannot prove which attribute it filters on, so on a queue covered by such a policy rule it is rejected the same way a lone `jq_filter` is.
 
+### Filters in the split config
+
+A queue entry of the `MirrordSplitConfig` can say where the session key is in a message with `keyJqFilter`. This is useful when the key sits somewhere every developer would otherwise have to spell out, such as a field in the message body: the cluster admin writes the program once, and a developer's entry only has to name the queue.
+
+`keyJqFilter` is a jq program that returns the key of a message. It only points at the key: mirrord compares the result with each session's `key`, so a session gets the messages that carry its own key. A message with no key, or one the program fails on, goes to the target.
+
+```yaml
+apiVersion: queues.mirrord.metalbear.co/v1
+kind: MirrordSplitConfig
+metadata:
+  name: orders-consumer
+  namespace: staging
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: orders-consumer
+  queues:
+    - id: orders
+      kind: sqs
+      keyJqFilter: '.Body | fromjson | .session_key'
+      appConfig:
+        queue:
+          - env: ORDERS_QUEUE_NAME
+```
+
+A session that lists the queue with no `filter`, `message_filter` or `jq_filter` uses it. The session needs a `key`, or it fails to start:
+
+```json
+{
+  "key": "alice",
+  "feature": {
+    "split_queues": {
+      "orders": { "queue_type": "SQS" }
+    }
+  }
+}
+```
+
+The queue filters `mirrord up` generates give way to `keyJqFilter` too. A filter the session sets itself replaces `keyJqFilter`, an empty `message_filter: {}` included (it keeps meaning "split the queue, deliver nothing"). A queue the session does not list delivers nothing to the local application, whether or not the split config has a `keyJqFilter` for it.
+
+To stop sessions from setting their own filter on a queue, add `enforceFilter: true` next to `keyJqFilter`. A session that sets a filter on that queue then fails to start, with an error that names the queue and the `MirrordSplitConfig`. An empty `message_filter: {}` and the filters `mirrord up` generates are still accepted.
+
+`keyJqFilter` is a jq filter, so what applies to a session's `jq_filter` applies here too: Kafka with the Java sidecar does not support it, and a queue filter policy rule that covers the queue rejects it.
+
+{% hint style="warning" %}
+Filters in the split config require mirrord `3.283.0` or later, and mirrord operator `3.230.0` or later. Against an older operator the CLI refuses to start a session whose entry has no filter and names the missing feature.
+{% endhint %}
+
 ### One queue or many
 
 `feature.split_queues` accepts two shapes.
@@ -502,7 +551,7 @@ To have your AI agent do this, use the [`mirrord-header-propagation`](https://gi
 {% endhint %}
 
 {% hint style="info" %}
-An entry with no `filter`, an empty `message_filter`, and no `jq_filter` is treated as a match-none directive.
+An entry with no `filter`, no `message_filter` and no `jq_filter` uses the `keyJqFilter` of its split config queue entry (see [Filters in the split config](#filters-in-the-split-config)). When the split config has none either, the entry matches nothing. An empty `message_filter: {}` is a filter of the entry's own and matches nothing.
 {% endhint %}
 
 For complete, copy-pasteable filter examples, see the "Setting a filter" section on each queue service page.
