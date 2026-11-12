@@ -5,6 +5,29 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
+# The library with only its `crd` feature, as the operator builds it to get the CRDs. The workspace
+# turns on `client` too, so `:operator` compiles the code behind it, and code behind `crd` alone
+# that uses an item behind `client` would compile there, but fail to compile in the operator.
+#
+# The check is narrower than `cargo check -p mirrord-operator --features crd`, which the operator's
+# build amounts to. `cargo_features` only changes the crate's own features (see `//bazel:rust.bzl`),
+# so the target still gets the optional dependencies that only `client` turns on, like `tokio`, and
+# each dependency with the features that the whole workspace gives it. So code behind `crd` alone
+# that uses such a crate, or such a feature of a crate, compiles here and fails in the operator.
+# Leaving those dependencies out would take resolving Cargo's features for the package a second
+# time, which rules_rs does once, for the whole workspace.
+#
+# The target only checks that the code compiles, so it allows every lint and clippy skips it:
+# with `client`'s dependencies unused, the crate's own `#![deny(unused_crate_dependencies)]` would
+# fail it. `:operator` gets the lints.
+rust_library(
+    name = "operator_crd",
+    cargo_features = ["crd"],
+    doc = False,
+    rustc_flags = ["--cap-lints=allow"],
+    tags = ["noclippy"],
+)
+
 rust_test(
     name = "unit_tests",
     crate = ":operator",

@@ -142,13 +142,24 @@ def _cargo_attrs(kwargs, test = False):
     `crate_features` and `deps`, which are added to the ones here, and `rustc_env`, whose variables
     are merged with the ones here. A `test` passes its full `deps` and its crate's name itself (see
     `rust_test`).
+
+    `cargo_features` in `kwargs` replaces the package's features that the workspace unifies, so the
+    crate's own `cfg(feature = "...")`s are those of
+    `cargo build -p <package> --no-default-features --features <features>`. Nothing here reads the
+    `[features]` table, so the list must also name the features that a listed feature turns on. The
+    dependencies stay the workspace's, because rules_rs resolves one set of them for each package:
+    the target gets every optional dependency that the workspace's features turn on, and each
+    dependency has the features that the workspace gives it.
     """
     kwargs = dict(kwargs)
+    cargo_features = kwargs.pop("cargo_features", None)
 
     attrs = {
         "aliases": aliases(),
         "rustc_flags": RUSTC_FLAGS + kwargs.pop("rustc_flags", []),
-        "crate_features": _crate_features() + kwargs.pop("crate_features", []),
+        "crate_features": (
+            _crate_features() if cargo_features == None else cargo_features
+        ) + kwargs.pop("crate_features", []),
         "edition": edition(),
         # rules_rust would set `CARGO_PKG_NAME` to the target's name, and leave the description and
         # the other fields empty.
