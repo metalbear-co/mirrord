@@ -94,6 +94,10 @@ build --strip=never
 # and each switch between them would rebuild everything.
 common --experimental_platform_in_output_dir=yes
 
+# Makes rules_rust's rustfmt, which `bazel run //:format` runs, read the workspace's `rustfmt.toml`,
+# as `cargo fmt` does. rules_rust would otherwise give it an empty one.
+common --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
+
 # `bazel build --config=clippy //...` runs clippy on every Rust target, like `cargo clippy`, fails
 # on any warning, and builds nothing else. Bazel caches the results like any other action, so only
 # the crates that changed are checked again.

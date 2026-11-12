@@ -8,9 +8,7 @@ fn main() {
     println!("test issue 1054: START");
     let address: SocketAddr = "0.0.0.0:80".parse().expect("failed to bind");
     let listener = TcpListener::bind(address).unwrap();
-    let cloned = listener
-        .try_clone()
-        .expect("failed to clone listneer");
+    let cloned = listener.try_clone().expect("failed to clone listneer");
 
     assert_eq!(listener.local_addr().unwrap(), address);
     assert_eq!(listener.local_addr().unwrap(), cloned.local_addr().unwrap());

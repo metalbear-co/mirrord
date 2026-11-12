@@ -43,6 +43,27 @@
               }
             else
               pkgs.writeShellScriptBin "bazel" ''exec ${lib.getExe pkgs.bazelisk} "$@"'';
+
+          # The tools that `bazel run //:lint` and `bazel run //:format` take from `PATH`.
+          lintPackages = with pkgs; [
+            markdownlint-cli2
+            typos
+            vale
+            cargo-deny
+            cargo-shear
+            python3Packages.towncrier
+            bazel-buildtools
+            # The flaky test report's tests run `.github/scripts/flaky-tests.sh`, which unzips the
+            # reports.
+            unzip
+            # pnpm installs the frontends' ESLint, TypeScript and Prettier.
+            nodejs
+            pnpm_10
+            # `cargo xtask corpus check` runs the skills repo's config check through uv, on the
+            # Python version that the skills repo's CI uses.
+            uv
+            python312
+          ];
         in
         {
           default = pkgs.mkShell {
@@ -91,12 +112,6 @@
                     cmake
                   ];
 
-                # Packages required to build the frontends
-                uiPackages = [
-                  nodejs
-                  pnpm_10
-                ];
-
                 # Packages to run tests locally
                 testsPackages = [
                   cargo-nextest
@@ -116,18 +131,8 @@
                   bazel
                   starpls
                 ];
-
-                # Miscellaneous packages to run CI checks locally
-                miscPackages = [
-                  cargo-deny
-                  python3Packages.towncrier
-                  # `cargo xtask corpus check` runs the skills repo's config check through uv, on
-                  # the Python version that the skills repo's CI uses
-                  uv
-                  python312
-                ];
               in
-              rustPackages ++ uiPackages ++ testsPackages ++ bazelPackages ++ miscPackages;
+              rustPackages ++ testsPackages ++ bazelPackages ++ lintPackages;
 
             env =
               with pkgs;

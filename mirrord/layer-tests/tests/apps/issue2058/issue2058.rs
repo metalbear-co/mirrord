@@ -1,4 +1,4 @@
-use std::{net::TcpListener, io::Read};
+use std::{io::Read, net::TcpListener};
 
 const LISTEN_ON: &str = "0.0.0.0:9999";
 const EXPECTED_MESSAGE: &[u8] = b"HELLO";

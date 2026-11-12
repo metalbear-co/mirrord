@@ -1,0 +1,29 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+
+# `bazel run //:lint` and `bazel run //:format` (see the root `BUILD.bazel`). They run on Windows
+# too, so they're Python programs rather than shell scripts.
+py_binary(
+    name = "lint",
+    srcs = ["lint.py"],
+    visibility = ["//:__pkg__"],
+    deps = [":tools"],
+)
+
+py_binary(
+    name = "format",
+    srcs = ["format.py"],
+    args = ["--rustfmt=$(rlocationpath @rules_rust//tools/rustfmt)"],
+    data = ["@rules_rust//tools/rustfmt"],
+    visibility = ["//:__pkg__"],
+    deps = [
+        ":tools",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+# The code that `:lint` and `:format` share.
+py_library(
+    name = "tools",
+    srcs = ["tools.py"],
+)
