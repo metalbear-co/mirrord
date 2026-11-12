@@ -1473,6 +1473,12 @@ impl LayerConfig {
                     "`feature.db_branches` is not supported with serverless targets.".to_owned(),
                 ));
             }
+
+            if self.feature.copy_target.enabled {
+                return Err(ConfigError::Conflict(
+                    "`feature.copy_target` is not supported with serverless targets.".to_owned(),
+                ));
+            }
         }
 
         self.feature.split_queues.verify(context)?;
@@ -2462,7 +2468,7 @@ mod tests {
         );
     }
 
-    /// Serverless sessions can't split queues or branch databases, so asking for either must fail
+    /// Serverless sessions can't split queues, branch databases, or copy the target, so asking for either must fail
     /// rather than leave the local process on the shared queues and databases. The docs quote
     /// these messages.
     #[rstest]
@@ -2477,6 +2483,10 @@ mod tests {
     #[case::db_branches(
         json!({ "db_branches": [{ "type": "pg", "connection": { "url": { "type": "env", "variable": "DB_URL" } } }] }),
         "`feature.db_branches` is not supported with serverless targets."
+    )]
+    #[case::copy_target(
+        json!({ "copy_target": true }),
+        "`feature.copy_target` is not supported with serverless targets."
     )]
     fn verify_rejects_unsupported_serverless_features(
         #[case] feature: serde_json::Value,
