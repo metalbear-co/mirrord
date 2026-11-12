@@ -3,4 +3,3 @@ target/*
 **/.vscode*
 **/.git*
 **/.github*
-**/.devcontainer*
