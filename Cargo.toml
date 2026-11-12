@@ -13,6 +13,7 @@ members = [
     "mirrord/intproxy/protocol",
     "mirrord/layer/core",
     "mirrord/layer/macro",
+    "mirrord/mcp/vendor",
     "mirrord/layer-tests/tests/apps/fileops",
     "mirrord/layer-tests/tests/apps/outgoing",
     "mirrord/layer-tests/tests/apps/double-listen",

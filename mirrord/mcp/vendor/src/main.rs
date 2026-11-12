@@ -20,11 +20,44 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use chrono::{SecondsFormat, Utc};
+use clap::{Parser, Subcommand};
 use mirrord_command::resolve_command;
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
-use crate::relative_to_root;
+#[derive(Parser)]
+#[command(about = "Vendor the docs and skills repos that `mirrord mcp` answers from")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Replace the vendored files with those of the pinned commits
+    Sync {
+        /// First move the pins to upstream HEAD
+        #[arg(long)]
+        bump: bool,
+    },
+
+    /// Fail unless the vendored files are byte-identical to those of the pinned commits, and the
+    /// config blocks in the skills repo at its pinned commit validate against this build's schemas
+    /// (needs `uv`)
+    Check,
+
+    /// Fail unless the config blocks in the skills repo at upstream HEAD, which the next release
+    /// ships, validate against this build's schemas (needs `uv`)
+    CheckUpstream,
+}
+
+fn main() -> Result<()> {
+    match Cli::parse().command {
+        Command::Sync { bump } => sync(bump),
+        Command::Check => check(),
+        Command::CheckUpstream => check_upstream(),
+    }
+}
 
 /// An upstream repo vendored into the corpus.
 struct Corpus {
@@ -85,7 +118,7 @@ struct Pin {
 
 /// Vendors every corpus from its pinned commit, replacing what is vendored. With `bump`, first
 /// moves the pins to upstream HEAD.
-pub fn sync(bump: bool) -> Result<()> {
+fn sync(bump: bool) -> Result<()> {
     for corpus in CORPORA {
         let pin_path = corpus_dir().join(format!("{}.pin.json", corpus.name));
         let pin = if bump {
@@ -135,7 +168,7 @@ pub fn sync(bump: bool) -> Result<()> {
 /// Fails unless every corpus holds exactly the files of its pinned commit, byte for byte, and, for
 /// each corpus with a `config_check`, the config blocks in its repo at the pinned commit validate
 /// against the schemas of this build.
-pub fn check() -> Result<()> {
+fn check() -> Result<()> {
     let mut mismatches = Vec::new();
     for corpus in CORPORA {
         let pin = read_pin(&corpus_dir().join(format!("{}.pin.json", corpus.name)))?;
@@ -176,7 +209,7 @@ pub fn check() -> Result<()> {
 
     if !mismatches.is_empty() {
         bail!(
-            "the vendored corpus doesn't match its pins, run `cargo xtask corpus sync`:\n{}",
+            "the vendored corpus doesn't match its pins, run `bazel run //mirrord/mcp/vendor -- sync`:\n{}",
             mismatches.join("\n")
         );
     }
@@ -189,7 +222,7 @@ pub fn check() -> Result<()> {
 /// release PR bumps the pins to HEAD, so a schema change that breaks a config block there fails
 /// its own PR instead of the next release PR. The vendored files aren't compared, since they
 /// follow the pins.
-pub fn check_upstream() -> Result<()> {
+fn check_upstream() -> Result<()> {
     for corpus in CORPORA {
         let Some(script) = corpus.config_check else {
             continue;
@@ -256,6 +289,22 @@ fn check_configs(pin: &Pin, checkout: &Path, script: &str) -> Result<()> {
     Ok(())
 }
 
+/// Returns `path` under the repository's root. `bazel run` runs the program in its runfiles and
+/// passes the root in `BUILD_WORKSPACE_DIRECTORY`, and `cargo run` passes this package's directory
+/// in `CARGO_MANIFEST_DIR`.
+fn relative_to_root(path: &Path) -> PathBuf {
+    let root = match std::env::var_os("BUILD_WORKSPACE_DIRECTORY") {
+        Some(root) => PathBuf::from(root),
+        None => {
+            let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR")
+                .expect("`bazel run` or `cargo run` sets the variable that holds the root");
+            // `CARGO_MANIFEST_DIR` is `mirrord/mcp/vendor/`, three levels below the root.
+            PathBuf::from(manifest_dir).join("../../..")
+        }
+    };
+    root.join(path)
+}
+
 fn corpus_dir() -> PathBuf {
     relative_to_root(Path::new("mirrord/mcp/corpus"))
 }
@@ -280,7 +329,7 @@ fn upstream_head(repo: &str) -> Result<String> {
 /// drop, and unique, so runs at the same time don't share it.
 fn fetch(pin: &Pin) -> Result<TempDir> {
     let checkout = tempfile::Builder::new()
-        .prefix("mirrord-xtask-corpus-")
+        .prefix("mirrord-mcp-vendor-")
         .tempdir()?;
     git(Some(checkout.path()), &["init", "--quiet"])?;
     git(

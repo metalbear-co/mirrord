@@ -8,4 +8,4 @@ Tools are registered in the `tools` module and must be answered offline, from wh
 is reported through `mirrord-analytics`, and every new tool needs a variant in the `McpTool` telemetry enum.
 
 The docs and skills it answers from are vendored into `corpus/` from pinned upstream commits: never edit them by hand,
-bump them with `cargo xtask corpus sync --bump` (the release PR does).
+bump them with `bazel run //mirrord/mcp/vendor -- sync --bump` (the release PR does).

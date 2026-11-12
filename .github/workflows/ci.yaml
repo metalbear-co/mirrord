@@ -244,7 +244,7 @@ jobs:
         with:
           files: |
             mirrord/mcp/corpus/**
-            xtask/src/tasks/corpus.rs
+            mirrord/mcp/vendor/**
       - name: get config changes
         id: changed-config-schema
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -350,7 +350,7 @@ jobs:
           # `release.yaml` builds the head of the release branch rather than its merge with main,
           # so a release PR checks the schemas of that head. Other runs keep the default ref.
           ref: ${{ needs.plan.outputs.release_branch == 'true' && github.event.pull_request.head.sha || '' }}
-      # `cargo xtask corpus check` runs the skills repo's config check through uv.
+      # `mirrord-mcp-vendor check` runs the skills repo's config check through uv.
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
@@ -359,7 +359,7 @@ jobs:
         uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
           shared-key: mirrord
-      - run: cargo xtask corpus check
+      - run: cargo run -p mirrord-mcp-vendor -- check
 
   # The next release PR bumps the corpus pins to upstream HEAD, so this checks the config blocks in
   # the skills repo at HEAD against the schemas of this PR, to fail a schema change that breaks
@@ -403,7 +403,7 @@ jobs:
         with:
           shared-key: mirrord
       - if: ${{ steps.skip.outputs.skip != 'true' }}
-        run: cargo xtask corpus check-upstream
+        run: cargo run -p mirrord-mcp-vendor -- check-upstream
 
   install_script:
     needs: [plan]

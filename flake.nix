@@ -59,8 +59,8 @@
             # pnpm installs the frontends' ESLint, TypeScript and Prettier.
             nodejs
             pnpm_10
-            # `cargo xtask corpus check` runs the skills repo's config check through uv, on the
-            # Python version that the skills repo's CI uses.
+            # `bazel run //mirrord/mcp/vendor -- check` runs the skills repo's config check through
+            # uv, on the Python version that the skills repo's CI uses.
             uv
             python312
           ];

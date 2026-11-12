@@ -2,7 +2,7 @@
 //! network access.
 //!
 //! They are vendored into `corpus/` from pinned commits of `metalbear-co/docs` and
-//! `metalbear-co/skills` by `cargo xtask corpus`, which the release PR runs to bump the pins. The
+//! `metalbear-co/skills` by `//mirrord/mcp/vendor`, which the release PR runs to bump the pins. The
 //! tests below are the checks the content has to pass to ship, so a bad bump fails the release PR.
 
 use std::{collections::BTreeMap, io::Read, ops::Not, sync::LazyLock};
@@ -36,7 +36,7 @@ pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
                 .read_to_end(&mut contents)
                 .expect("the build packs a valid archive");
             let contents = String::from_utf8(contents).unwrap_or_else(|_| {
-                panic!("`cargo xtask corpus` vendors only UTF-8 files, but `{path}` isn't")
+                panic!("`//mirrord/mcp/vendor` vendors only UTF-8 files, but `{path}` isn't")
             });
             (path, contents)
         })
