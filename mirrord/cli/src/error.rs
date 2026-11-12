@@ -438,8 +438,8 @@ pub(crate) enum CliError {
     )]
     #[diagnostic(help(
         "A plain `cargo build` embeds an empty placeholder for the layer (see `.cargo/config.toml`). \
-        Build the CLI with `cargo xtask build-cli`, which builds the layer and embeds it, or point \
-        `MIRRORD_LAYER_FILE` at a layer that you built."
+        Build the CLI with `bazel build //mirrord/cli:cli_standalone`, which builds the layer and \
+        embeds it, or point `MIRRORD_LAYER_FILE` at a layer that you built."
     ))]
     EmptyBundledLayer,
 

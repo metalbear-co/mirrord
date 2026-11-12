@@ -592,7 +592,7 @@ You can check the run as it progresses and download the completed artifacts from
 
 ## Changing the release on macOS
 
-If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, you need to update the build logic in [xtask/](/xtask/). See [xtask/README.md](xtask/README.md) for details.
+If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, the build logic is in Bazel: `//mirrord/cli:cli_universal`, `//mirrord/layer:universal_layer` and `bazel/macos_sign.bzl`.
 
 # Submitting a Pull Request
 

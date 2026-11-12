@@ -41,7 +41,6 @@ members = [
     "mirrord/sessions-manager/protocol",
     "sample/rust",
     "medschool",
-    "xtask",
     # Bazel's test runner (see `//bazel:nextest.bzl`). It's a member so that it takes its
     # dependencies from this workspace, like the other crates.
     "bazel/nextest-runner",

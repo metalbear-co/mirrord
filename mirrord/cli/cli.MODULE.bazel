@@ -3,8 +3,7 @@
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
 # The macOS utilities that the CLI embeds and copies, unsigned, to run SIP-protected programs. The
-# version must match `APPLE_UTILS_VERSION` in `xtask/src/tasks/sip_binaries.rs` and in
-# `mirrord-sip`.
+# version must match `APPLE_UTILS_VERSION` in `mirrord-sip`.
 http_file(
     name = "apple_utils",
     downloaded_file_path = "apple-utils.tar.gz",

@@ -148,7 +148,7 @@ osx.frameworks(
 # - `serde_json` has `preserve_order`, which tree-sitter's build dependency turns on, so JSON
 #   objects keep the order of their keys instead of sorting them.
 # - `rustls` has both the `aws_lc_rs` and the `ring` crypto providers, which frida-build's build
-#   dependency and xtask's apple-codesign turn on, so it can't pick one on its own. The binaries
+#   dependency and apple-codesign turn on, so it can't pick one on its own. The binaries
 #   and the tests that use TLS install `aws_lc_rs` as the default.
 crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
 crate.from_cargo(
@@ -238,7 +238,7 @@ crate.annotation(
     patches = ["//bazel/third_party/minhook-detours-sys:sdkddkver.patch"],
 )
 
-# apple-codesign, which the macOS crates and xtask use, reads xar archives with `lzma-sys` and
+# apple-codesign, which the macOS crates use, reads xar archives with `lzma-sys` and
 # `bzip2-sys`. Their build scripts link the system's liblzma and libbz2 when `pkg-config` finds
 # them, and build the bundled sources otherwise, so the result would depend on the machine. These
 # are rules_rs's recipes (its `3rd_party` directory), which build the libraries from the `xz` and

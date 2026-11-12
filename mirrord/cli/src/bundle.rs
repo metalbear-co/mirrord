@@ -7,9 +7,8 @@
 //! layer doesn't compile the CLI again, and has no UI.
 //!
 //! Each file comes from an environment variable that the build passes to rustc: the file's path
-//! when the CLI embeds it, from `.cargo/config.toml`, `cargo xtask build-cli` or Bazel's
-//! `$(execpath)`, and its runfiles path, from Bazel's `$(rlocationpath)`, when the CLI reads it at
-//! run time.
+//! when the CLI embeds it, from `.cargo/config.toml` or Bazel's `$(execpath)`, and its runfiles
+//! path, from Bazel's `$(rlocationpath)`, when the CLI reads it at run time.
 
 use std::path::PathBuf;
 

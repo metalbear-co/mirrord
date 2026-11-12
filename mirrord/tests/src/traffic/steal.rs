@@ -332,9 +332,6 @@ mod steal_tests {
         .await;
     }
 
-    /// To run on mac, first build the universal binary from the repo root with
-    /// `cargo xtask build-cli --platform macos-universal`, then run the test with
-    /// `MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord`.
     #[rstest]
     #[tokio::test]
     async fn filter_with_single_client_and_only_matching_requests(
@@ -586,9 +583,6 @@ mod steal_tests {
         application.assert(&mirrored_process).await;
     }
 
-    /// To run on mac, first build the universal binary from the repo root with
-    /// `cargo xtask build-cli --platform macos-universal`, then run the test with
-    /// `MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord`.
     #[rstest]
     #[tokio::test]
     async fn filter_with_single_client_and_some_matching_requests(
