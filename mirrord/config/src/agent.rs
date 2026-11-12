@@ -67,7 +67,8 @@ impl fmt::Display for LinuxCapability {
 ///     "override_cache_control": true,
 ///     "max_body_buffer_size": 65535,
 ///     "max_body_buffer_timeout": 1000,
-///     "http_detection_timeout": 2
+///     "http_detection_timeout": 2,
+///     "http_detect_inactive_ports": false
 ///   }
 /// }
 /// ```
@@ -505,6 +506,18 @@ pub struct AgentConfig {
     /// detection time may exceed this value for connections that send data in many small chunks.
     #[config(env = "MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT", default = 2)]
     pub http_detection_timeout: u64,
+
+    /// ### agent.http_detect_inactive_ports {#agent-http_detect_inactive_ports}
+    ///
+    /// By default, when no session is stealing from a port the agent is still intercepting,
+    /// a new connection to that port is forwarded to the target unfiltered for as long as it
+    /// stays open, even after a session starts stealing again. With this option, the agent
+    /// detects whether such a connection is HTTP and, if it is, applies the active sessions'
+    /// HTTP filters to each of its requests.
+    ///
+    /// Defaults to `false`.
+    #[config(env = "MIRRORD_AGENT_HTTP_DETECT_INACTIVE_PORTS", default = false)]
+    pub http_detect_inactive_ports: bool,
 
     /// ### agent.http2_max_header_list_size {#agent-http2_max_header_list_size}
     ///

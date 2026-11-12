@@ -1,0 +1,1 @@
+Added the `agent.http_detect_inactive_ports` option, off by default. It makes the agent run HTTP detection on connections that arrive while their port has no subscriber, so a later subscription's HTTP filters apply to them.

@@ -57,7 +57,7 @@ impl WorkloadCompanionIngress {
             // The remote layer hands off every accepted connection, including ones on ports that
             // no client has subscribed to yet.
             RedirectorTaskConfig {
-                handle_unsubscribed_connections: true,
+                http_detect_inactive_ports: true,
                 ..RedirectorTaskConfig::from_env()
             },
         );
