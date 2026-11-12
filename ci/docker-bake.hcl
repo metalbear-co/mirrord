@@ -7,23 +7,12 @@ variable "SHA" {
   default = ""
 }
 
-# Comma-separated tags for the agent image.
-# Override in CI: AGENT_TAGS="ghcr.io/metalbear-co/mirrord:1.2.3,ghcr.io/metalbear-co/mirrord:latest"
-variable "AGENT_TAGS" {
-  default = "${REGISTRY}/mirrord:dev"
-}
-
-# Comma-separated tags for the CLI image.
-variable "CLI_TAGS" {
-  default = "${REGISTRY}/mirrord-cli:dev"
-}
-
 # Comma-separated tags for the SQS printer test image.
 variable "SQS_PRINTER_TAGS" {
   default = "${REGISTRY}/test-sqs-printer:dev"
 }
 
-# Platforms for product images. Override to target a single platform (e.g. linux/amd64 for local test builds).
+# Platforms for the images. Override to target a single platform (e.g. linux/amd64 for local test builds).
 variable "PLATFORMS" {
   default = "linux/amd64,linux/arm64"
 }
@@ -37,11 +26,6 @@ variable "PRODUCT_CACHE_FROM" {
 
 variable "PRODUCT_CACHE_TO" {
   default = ""
-}
-
-# Product images built from this repo.
-group "default" {
-  targets = ["agent", "cli"]
 }
 
 # Test helper images.
@@ -58,31 +42,6 @@ group "ci-images" {
     "ci-layer-build-aarch64",
     "ci-rust-build",
   ]
-}
-
-target "agent" {
-  context    = "."
-  dockerfile = "mirrord/agent/Dockerfile"
-  platforms  = split(",", PLATFORMS)
-  tags       = split(",", AGENT_TAGS)
-  cache-from = compact([PRODUCT_CACHE_FROM])
-  cache-to   = compact([PRODUCT_CACHE_TO])
-  contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405"  = "target:ci-agent-builder"
-    "ghcr.io/metalbear-co/ci-agent-runtime:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-runtime"
-  }
-}
-
-target "cli" {
-  context    = "."
-  dockerfile = "mirrord/cli/Dockerfile"
-  platforms  = split(",", PLATFORMS)
-  tags       = split(",", CLI_TAGS)
-  cache-from = compact([PRODUCT_CACHE_FROM])
-  cache-to   = compact([PRODUCT_CACHE_TO])
-  contexts = {
-    "ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405" = "target:ci-agent-builder"
-  }
 }
 
 # Test utility that prints SQS messages; used for manual SQS integration testing.
