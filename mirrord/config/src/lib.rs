@@ -3329,7 +3329,7 @@ mod tests {
             ));
 
             let mut context = ConfigContext::default();
-            let resolved = config
+            let mut resolved = config
                 .generate_config(&mut context)
                 .expect("config generation should succeed before verification");
             resolved
@@ -3449,7 +3449,7 @@ mod tests {
         );
 
         let mut context = ConfigContext::default();
-        let resolved = config
+        let mut resolved = config
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
         resolved
@@ -3517,7 +3517,7 @@ mod tests {
         );
 
         let mut context = ConfigContext::default();
-        let resolved = config
+        let mut resolved = config
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
         resolved
