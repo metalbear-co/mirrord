@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-11-10T00:00:00.000Z
+lastmod: 2026-11-12T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -55,7 +55,8 @@ We provide sane defaults for this option, so you don't have to set up anything h
     "override_cache_control": true,
     "max_body_buffer_size": 65535,
     "max_body_buffer_timeout": 1000,
-    "http_detection_timeout": 2
+    "http_detection_timeout": 2,
+    "http_detect_inactive_ports": false
   }
 }
 ```
@@ -185,12 +186,23 @@ services allow.
 
 Defaults to 16 Kb.
 
+### agent.http_detect_inactive_ports {#agent-http_detect_inactive_ports}
+
+By default, when no session is stealing from a port the agent is still intercepting,
+a new connection to that port is forwarded to the target unfiltered for as long as it
+stays open, even after a session starts stealing again. With this option, the agent
+detects whether such a connection is HTTP and, if it is, applies the active sessions'
+HTTP filters to each of its requests.
+
+Defaults to `false`.
+
 ### agent.http_detection_timeout {#agent-http_detection_timeout}
 
 How long, in seconds, to wait for data on a redirected connection during HTTP protocol
-detection before giving up and treating it as raw TCP. The timer resets on every read,
-so total detection time may exceed this value for connections that send data in many
-small chunks.
+detection before giving up and treating it as raw TCP. HTTP filters don't apply to such a
+connection, so when stealing with an HTTP filter, the whole connection, including any HTTP
+requests sent on it later, stays with the target. The timer resets on every read, so total
+detection time may exceed this value for connections that send data in many small chunks.
 
 ### agent.image {#agent-image}
 
@@ -3310,6 +3322,10 @@ For example, this filter steals HTTP requests to `/api/my-endpoint`, or requests
 }
 ```
 
+A session started with [`share`](#root-share) steals a request that matches the filter above,
+or that carries the session key in `baggage` (see [`key`](#root-key)). The examples above
+describe the filter on its own.
+
 ##### feature.network.incoming.http_filter.all_of {#feature-network-incoming-http_filter-all_of}
 
 An array of HTTP filters.
@@ -3731,6 +3747,9 @@ Can be set to either `"mirror"` (default), `"steal"` or `"off"`.
    on a port is HTTP (in a best-effort kind of way, not guaranteed to be HTTP), and steals the
    traffic on the port if it is HTTP;
 
+A session started with [`share`](#root-share) steals only the HTTP requests that carry its
+session key (see [`key`](#root-key)), plus the requests that match its `http_filter`.
+
 ##### feature.network.incoming.on_concurrent_steal {#feature-network-incoming-on_concurrent_steal}
 
 (Operator Only): Allows overriding port locks
@@ -3757,6 +3776,9 @@ mirrored/stolen.
 
 Mutually exclusive with
 [`feature.network.incoming.ignore_ports`](#feature-network-ignore_ports).
+
+The order of the list matters to [`share`](#root-share), which opens the first port in it
+that the target's Service exposes.
 
 ##### feature.network.incoming.tls_delivery {#feature-network-incoming-tls_delivery}
 
@@ -4903,6 +4925,22 @@ The recommended use is to propagate it in W3C `baggage` or `tracestate`, then fi
 }
 ```
 
+A session started with [`share`](#root-share) doesn't need that `header_filter`, because
+it filters on its key on its own: it steals the HTTP requests whose W3C `baggage` header is
+exactly `mirrord-session=<key>`, because share-ingress sets that header on every request
+it forwards, replacing any `baggage` the request had. A custom `http_filter` still applies,
+so a shared session steals a request that matches the filter or that carries the key.
+Without a custom filter, a shared session steals only the requests that carry the key, not
+the whole port. `http_filter.ports` still limits the ports. A session without `share`
+keeps its configured filter, so a service that the shared service calls, such as
+`payments` behind a shared `web`, runs without `share` and with the `header_filter` above,
+which also matches a `baggage` header that carries other members.
+
+The key of a shared session may hold only printable ASCII characters other than a space,
+`"`, `%`, `,`, `;` and `\`, because share-ingress sends it as it is in `baggage`, where
+the others would end the value or change its meaning: receivers percent-decode a value
+with `%`. A service that forwards the member must keep its value as it is.
+
 The key itself is [templated](#root-templating-key), so instead of a literal it can be
 derived from another variable. Using `git_branch` gives each branch its own session
 without passing a key per run:
@@ -5002,6 +5040,32 @@ The `MIRRORD_SESSIONS_MANAGER_URL` environment variable overrides it.
 
 Defaults to the MetalBear Cloud sessions-manager,
 `https://sm-aws-use1.app.metalbear.com/sm`.
+
+## share {#root-share}
+
+Prints a temporary HTTPS link to this session. People who open the link reach the service
+on your machine, and the target's own service in the cluster whenever a request doesn't
+reach your machine, so the cluster's access rules for share links protect both. Needs the
+Team or Enterprise mirrord operator, share-ingress in the cluster, and
+`feature.network.incoming.mode` set to `"steal"`. Share links don't work with
+`feature.copy_target` yet.
+
+The link reaches the target through the Kubernetes Service named after it, so the namespace
+must have a Service with the target's name, such as Service `web` for target
+`deployment/web`. The link opens the first port in `feature.network.incoming.ports` that
+this Service exposes: with `ports = [3000, 9000]` and a Service that exposes only 9000, the
+link opens 9000. Without that list, the link opens one of the ports that the target
+container declares, that mirrord steals and that the Service leads to: the one behind the
+Service's port 80, or else behind the Service's first such port. mirrord prints the link
+before your application starts. Requests through the link reach your application while it
+listens on that port, and the service running in the cluster otherwise: before your
+application listens, after it stops listening, until the session ends after mirrord exits,
+and on target pods that the session's agent doesn't run on. The link lasts as long as the
+session; starting the session again creates a different link.
+
+`mirrord exec --share` turns it on, and so does the environment variable
+`MIRRORD_SHARE=true`. Other commands, such as `mirrord dump` and `mirrord port-forward`,
+refuse to run with it.
 
 ## sip_binaries {#root-sip_binaries}
 
