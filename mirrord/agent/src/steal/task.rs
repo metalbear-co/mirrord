@@ -22,7 +22,7 @@ use super::{
     subscriptions::{PortSubscription, PortSubscriptions},
 };
 use crate::{
-    http::filter::HttpFilter,
+    http::{RawTcpReason, filter::HttpFilter},
     incoming::{RedirectedHttp, RedirectedTcp, RedirectorTaskError, StealHandle, StolenTraffic},
     util::{ChannelClosedFuture, ClientId, protocol_version::ClientProtocolVersion},
 };
@@ -162,14 +162,29 @@ impl TcpStealerTask {
                     conn,
                     join_handle_tx,
                     shutdown,
+                    reason,
                 },
             ) => {
-                tracing::warn!(
-                    source = %conn.info().peer_addr,
-                    destination = %conn.info().original_destination,
-                    "Connection on a port stolen with an HTTP filter is not HTTP, or HTTP \
-                     detection timed out, passing it to the target without filtering",
-                );
+                let source = conn.info().peer_addr;
+                let destination = conn.info().original_destination;
+                // The client closed the connection before sending a full request, so there is nothing to filter.
+                if reason == RawTcpReason::Closed {
+                    tracing::debug!(
+                        %source,
+                        %destination,
+                        ?reason,
+                        "Passing a raw TCP connection on a port stolen with an HTTP filter to its \
+                         original destination",
+                    );
+                } else {
+                    tracing::warn!(
+                        %source,
+                        %destination,
+                        ?reason,
+                        "Passing a raw TCP connection on a port stolen with an HTTP filter to its \
+                         original destination, so HTTP filters will not apply to it",
+                    );
+                }
                 join_handle_tx.
                     send(conn.pass_through(shutdown))
                     .expect("RedirectorTask dropped oneshot rx for receiving JoinHandle to IO task for TCP connection");
@@ -182,6 +197,7 @@ impl TcpStealerTask {
                     conn,
                     join_handle_tx,
                     shutdown,
+                    ..
                 },
             ) => {
                 let Some(client) = clients.get(client_id) else {
