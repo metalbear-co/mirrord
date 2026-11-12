@@ -1,8 +1,6 @@
-# Cross compilable mirrord workspace
-# On Windows: You can build specific packages like cargo build -p mirrord-cli -p mirrord-layer-win
-# On Unix: Default cargo build will build the Unix-compatible crates
-# All platforms: mirrord/* in members ensures all crates are available for explicit builds
-# This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
+# The mirrord workspace. Every member builds on every platform: a crate that only works on some
+# platforms, like the agent or the layer, builds as an empty crate or program on the others. So a
+# plain `cargo build` or `cargo clippy` covers the whole workspace everywhere.
 [workspace]
 
 members = [
@@ -41,22 +39,6 @@ members = [
     "mirrord/sessions-manager/protocol",
 ]
 
-default-members = [
-    # Every crate in `mirrord/` except `tests`, the end-to-end tests, which need a cluster, and
-    # `test-utils`, the helpers of the other crates' tests, which only run with those tests. A glob
-    # can't leave out one name, so this one leaves out every crate whose name starts with `t`, and
-    # the lines after it add the others back. A new crate whose name starts with `t` must be listed
-    # here.
-    "mirrord/[!t]*",
-    "mirrord/test-macros",
-    "mirrord/tls-util",
-    "mirrord/tui",
-    "mirrord/agent/env",
-    "mirrord/agent/iptables",
-    "xtask",
-    "mirrord/sessions-manager/client",
-    "mirrord/sessions-manager/protocol",
-]
 exclude = [
     "mirrord/sessions-manager",
 ]

@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::{
     net::{SocketAddr, TcpStream},
     os::fd::{AsRawFd, FromRawFd, RawFd},
@@ -6,8 +7,10 @@ use std::{
 
 /// The remote peer the test answers the connect request for. The layer reports it from its socket
 /// bookkeeping, while the socket itself is connected to the local intproxy.
+#[cfg(unix)]
 const PEER: &str = "1.1.1.1:4567";
 
+#[cfg(unix)]
 #[allow(
     clippy::disallowed_methods,
     reason = "exercises the layer's exec hooks through `Command`'s `posix_spawn` path"
@@ -46,3 +49,9 @@ fn main() {
         );
     }
 }
+
+/// The app shares Unix file descriptors with its children, and the tests only run it on Linux. On
+/// other platforms it's an empty program, so that `cargo build` and `cargo clippy` of the whole
+/// workspace work there.
+#[cfg(not(unix))]
+fn main() {}

@@ -61,6 +61,8 @@
                     rustPlatform.bindgenHook
                     # Required to build `containerd-client`
                     protobuf
+                    # Required to build `rdkafka-sys`, which the end-to-end tests' Kafka consumer uses
+                    cmake
                   ];
 
                 # Packages required to build the frontends
