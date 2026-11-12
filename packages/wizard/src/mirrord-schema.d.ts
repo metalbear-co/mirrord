@@ -542,7 +542,7 @@ export type FeatureDbBranchesFeatureDbBranches = DatabaseBranchesConfig | null
  *
  * Example:
  *
- * ```json { "id": "my-branch-db", "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.0", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ```
+ * ```json { "id": "my-branch-db", "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.4", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ```
  */
 export type DatabaseBranchConfig = {
   connection: FeatureDbBranchesBaseConnectionFeatureDbBranchesBaseConnection
@@ -600,7 +600,7 @@ export type FeatureDbBranchesBaseVersionFeatureDbBranchesBaseVersion =
 /**
  * A list of configurations for database branches.
  *
- * ```json { "feature": { "db_branches": [ { "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.0", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ] } } ```
+ * ```json { "feature": { "db_branches": [ { "name": "my-database-name", "ttl_secs": 120, "type": "mysql", "version": "8.4", "connection": { "url": { "type": "env", "variable": "DB_CONNECTION_URL" } } } ] } } ```
  */
 export type DatabaseBranchesConfig = DatabaseBranchConfig[]
 export type FeatureEnvFeatureEnv = ToggleableConfigFor_EnvFileConfig | null
