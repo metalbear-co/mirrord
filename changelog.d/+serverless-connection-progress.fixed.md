@@ -1,0 +1,1 @@
+`mirrord exec` with a serverless target shows its progress while it waits for the target's agent, and fails with an error that names the cause instead of appearing to hang.

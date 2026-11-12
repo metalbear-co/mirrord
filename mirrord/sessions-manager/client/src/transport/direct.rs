@@ -260,6 +260,9 @@ impl SessionsManagerTransport for DirectTransport {
         {
             return Err(error);
         }
+        if response.status() == StatusCode::FORBIDDEN {
+            return Err(SessionsManagerClientError::Forbidden);
+        }
         verify_event_stream(response.status(), response.headers())?;
 
         Ok(ControlPlaneEventStream::from_bytes(response.bytes_stream()))
@@ -328,11 +331,23 @@ mod tests {
         }
     }
 
-    /// No login token was sent, so `mirrord login` is not what refused the session, and the 401
-    /// is reported as is.
-    #[tokio::test]
-    async fn a_401_without_a_login_token_is_reported_as_the_bare_status() {
-        let app = Router::new().fallback(|| async { StatusCode::UNAUTHORIZED.into_response() });
+    struct FixedLogin;
+
+    impl LoginTokenSource for FixedLogin {
+        fn login_token(
+            &self,
+        ) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+            std::future::ready(Ok(Some(LoginToken::from("login-token".to_owned())))).boxed()
+        }
+    }
+
+    /// Connects an intproxy authenticating with `login` to a sessions-manager that answers every
+    /// request with `status`, and returns the error the connect fails with.
+    async fn connect_error(
+        status: StatusCode,
+        login: Arc<dyn LoginTokenSource>,
+    ) -> SessionsManagerClientError {
+        let app = Router::new().fallback(move || async move { status.into_response() });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url =
             Url::parse(&format!("http://{}/sm", listener.local_addr().unwrap())).unwrap();
@@ -340,10 +355,7 @@ mod tests {
 
         let transport = DirectTransport::new(base_url.clone())
             .unwrap()
-            .with_credentials(Arc::new(LoginTokenCredentials::new(
-                Arc::new(NoLogin),
-                &base_url,
-            )));
+            .with_credentials(Arc::new(LoginTokenCredentials::new(login, &base_url)));
         let client = IntproxyClient::with_transport(
             SessionsManagerConnectInfo {
                 scope: ServiceScope {
@@ -357,13 +369,32 @@ mod tests {
         )
         .unwrap();
 
-        let error = client.connect(Duration::from_secs(5)).await.unwrap_err();
+        client.connect(Duration::from_secs(5)).await.unwrap_err()
+    }
+
+    /// No login token was sent, so `mirrord login` is not what refused the session, and the 401
+    /// is reported as is.
+    #[tokio::test]
+    async fn a_401_without_a_login_token_is_reported_as_the_bare_status() {
+        let error = connect_error(StatusCode::UNAUTHORIZED, Arc::new(NoLogin)).await;
 
         assert!(
             matches!(
                 error,
                 SessionsManagerClientError::HttpStatus(StatusCode::UNAUTHORIZED)
             ),
+            "got {error:?}"
+        );
+    }
+
+    /// sessions-manager never answers 403, so even with a login token sent, a 403 is the
+    /// fronting proxy's, and the login is not blamed for it.
+    #[tokio::test]
+    async fn a_403_with_a_login_token_blames_the_proxy() {
+        let error = connect_error(StatusCode::FORBIDDEN, Arc::new(FixedLogin)).await;
+
+        assert!(
+            matches!(error, SessionsManagerClientError::Forbidden),
             "got {error:?}"
         );
     }
