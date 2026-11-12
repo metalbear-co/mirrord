@@ -43,7 +43,7 @@ describe('Homepage', () => {
       render(<Homepage />)
 
       expect(screen.getByText(/Generate a/)).toBeInTheDocument()
-      expect(screen.getByText('mirrord.json')).toBeInTheDocument()
+      expect(screen.getByText('mirrord-up.yaml')).toBeInTheDocument()
     })
 
     it('renders the Get Started button', () => {

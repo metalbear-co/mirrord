@@ -255,10 +255,16 @@ impl KubernetesAPI {
             }
 
             if let Some(network_config) = network_config {
+                // Share links need the operator, so a session that creates its own agent is
+                // never shared and has no session key filter.
                 let stolen_probes = containers_probe_ports
                     .iter()
                     .copied()
-                    .filter(|port| network_config.incoming.steals_port_without_filter(*port))
+                    .filter(|port| {
+                        network_config
+                            .incoming
+                            .steals_port_without_filter(*port, None)
+                    })
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");

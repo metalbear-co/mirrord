@@ -46,3 +46,12 @@ pub const SESSION_READY_MESSAGE: &str = "Ready!";
 /// On Linux and macOS in `json` mode the layer finishes it from inside the
 /// program, and the IDE matches the finish to the task by this name.
 pub const EXEC_RUNNING_TASK: &str = "running process";
+
+/// The note printed under a share link: what people who open it reach, and who can open it.
+///
+/// share-ingress forwards every request for the link to the target's Service, so whenever the
+/// session doesn't steal a request (the application isn't listening, the CLI has exited but the
+/// session still lives, or the request lands on a pod without the session's agent) the cluster's
+/// own service answers it through the public share domain. The note says so, because the share
+/// domain's access rules then guard that service too.
+pub const LOCAL_SHARE_NOTE: &str = "Note: people who open this link reach the service running on your machine, and the one running in the cluster whenever a request doesn't reach your machine. Who can open it is set by your cluster's access rules for share links.";

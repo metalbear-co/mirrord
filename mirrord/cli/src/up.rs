@@ -64,7 +64,7 @@ pub enum UpCliError {
     Up(#[from] UpError),
 
     #[error(transparent)]
-    Init(#[from] Box<InitError>),
+    Init(Box<InitError>),
 
     #[error("mirrord-up.yaml file not found.")]
     #[diagnostic(help(
@@ -179,7 +179,8 @@ pub(crate) async fn up_command(
     user_data: &UserData,
 ) -> Result<(), UpCliError> {
     if let Some(UpSubcommand::Init { output }) = args.command {
-        return Ok(run_wizard(output).await.map_err(Box::new)?);
+        let context = GlobalConfig::load().await.kube_context().map(str::to_owned);
+        return Ok(run_wizard(output, context).await?);
     }
 
     // No analytics: IDE extensions list on every refresh, and no session starts.
@@ -378,6 +379,13 @@ fn service_analytics(
             service.into()
         })
         .collect()
+}
+
+/// Boxes, so callers can use `?` on an [`InitError`].
+impl From<InitError> for UpCliError {
+    fn from(error: InitError) -> Self {
+        Self::Init(Box::new(error))
+    }
 }
 
 /// Coarse bucket assigned to a failed `mirrord up` invocation for analytics.

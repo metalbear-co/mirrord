@@ -6,7 +6,7 @@ use crate::{
     CliResult,
     config::ExtensionExecArgs,
     data::UserData,
-    execution::{CrashReporting, MirrordExecution},
+    execution::{CrashReporting, MirrordExecution, report_share_link},
     print_config,
     queue_splitting::suggest_queue_splitting,
 };
@@ -58,6 +58,12 @@ async fn mirrord_exec(
         execution_info.uses_operator,
         &mut progress,
     )?;
+
+    // The IDEs stop reading the CLI's output at the execution JSON below, so the link goes first.
+    if let Some(link) = &execution_info.share_link {
+        let line_mode = progress.line_mode();
+        report_share_link(&mut progress, line_mode, link, &config)?;
+    }
 
     let output = serde_json::to_string(&execution_info)?;
     progress.success(Some(&output));
