@@ -622,6 +622,22 @@ pub struct LayerConfig {
     /// }
     /// ```
     ///
+    /// A session started with [`share`](#root-share) doesn't need that `header_filter`, because
+    /// it filters on its key on its own: it steals the HTTP requests whose W3C `baggage` header is
+    /// exactly `mirrord-session=<key>`, because share-ingress sets that header on every request
+    /// it forwards, replacing any `baggage` the request had. A custom `http_filter` still applies,
+    /// so a shared session steals a request that matches the filter or that carries the key.
+    /// Without a custom filter, a shared session steals only the requests that carry the key, not
+    /// the whole port. `http_filter.ports` still limits the ports. A session without `share`
+    /// keeps its configured filter, so a service that the shared service calls, such as
+    /// `payments` behind a shared `web`, runs without `share` and with the `header_filter` above,
+    /// which also matches a `baggage` header that carries other members.
+    ///
+    /// The key of a shared session may hold only printable ASCII characters other than a space,
+    /// `"`, `%`, `,`, `;` and `\`, because share-ingress sends it as it is in `baggage`, where
+    /// the others would end the value or change its meaning: receivers percent-decode a value
+    /// with `%`. A service that forwards the member must keep its value as it is.
+    ///
     /// The key itself is [templated](#root-templating-key), so instead of a literal it can be
     /// derived from another variable. Using `git_branch` gives each branch its own session
     /// without passing a key per run:
@@ -639,6 +655,34 @@ pub struct LayerConfig {
     /// 4. Fallback: A unique key is randomly generated if no other option is provided
     #[config(nested, plan = Oss)]
     pub key: EnvKey,
+
+    /// ## share {#root-share}
+    ///
+    /// Prints a temporary HTTPS link to this session. People who open the link reach the service
+    /// on your machine, and the target's own service in the cluster whenever a request doesn't
+    /// reach your machine, so the cluster's access rules for share links protect both. Needs the
+    /// Team or Enterprise mirrord operator, share-ingress in the cluster, and
+    /// `feature.network.incoming.mode` set to `"steal"`. Share links don't work with
+    /// `feature.copy_target` yet.
+    ///
+    /// The link reaches the target through the Kubernetes Service named after it, so the namespace
+    /// must have a Service with the target's name, such as Service `web` for target
+    /// `deployment/web`. The link opens the first port in `feature.network.incoming.ports` that
+    /// this Service exposes: with `ports = [3000, 9000]` and a Service that exposes only 9000, the
+    /// link opens 9000. Without that list, the link opens one of the ports that the target
+    /// container declares, that mirrord steals and that the Service leads to: the one behind the
+    /// Service's port 80, or else behind the Service's first such port. mirrord prints the link
+    /// before your application starts. Requests through the link reach your application while it
+    /// listens on that port, and the service running in the cluster otherwise: before your
+    /// application listens, after it stops listening, until the session ends after mirrord exits,
+    /// and on target pods that the session's agent doesn't run on. The link lasts as long as the
+    /// session; starting the session again creates a different link.
+    ///
+    /// `mirrord exec --share` turns it on, and so does the environment variable
+    /// `MIRRORD_SHARE=true`. Other commands, such as `mirrord dump` and `mirrord port-forward`,
+    /// refuse to run with it.
+    #[config(env = "MIRRORD_SHARE", default = false, plan = Team)]
+    pub share: bool,
 
     /// ## traceparent {#root-traceparent}
     ///
@@ -700,6 +744,33 @@ impl LayerConfig {
         let encoded = BASE64_STANDARD.encode(serialized);
 
         Ok(encoded)
+    }
+
+    /// Serializes the resolved config in the shape [`LayerFileConfig`] can parse.
+    ///
+    /// `verify-config --resolved` is also a way to run mirrord's config generation from the
+    /// outside: users can inspect the final `resolved_config`, save it to a file, and then use it
+    /// with `mirrord exec -f <file>`. `mirrord up` also merges its services' patches into this
+    /// shape before it parses the result as a config file again.
+    ///
+    /// The file schema has `deny_unknown_fields`, and it doesn't accept one thing that the resolved
+    /// config holds, so this patches just the JSON instead of the config types:
+    /// - `key`: [`LayerConfig`] stores it as an [`EnvKey`], so normal serialization keeps whether
+    ///   it was generated or provided. Config files only accept `key` as a plain string, so it is
+    ///   replaced by its string. A `key_generated` field wouldn't work either: once the user saves
+    ///   the output to a file, `mirrord exec` parses it as [`LayerFileConfig`], which rejects the
+    ///   unknown field.
+    ///
+    /// [`Self::encode`] doesn't use this: the layer and the proxies need `key` as it is.
+    pub fn as_file_config(&self) -> Result<serde_json::Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "key".to_owned(),
+                serde_json::Value::String(self.key.as_str().to_owned()),
+            );
+        }
+        Ok(value)
     }
 
     /// Resolves the config from the environment variables.
@@ -947,10 +1018,98 @@ impl LayerConfig {
         Ok(())
     }
 
+    /// The session key that this session's HTTP filter matches in addition to its own filter, set
+    /// only for a [`share`](Self::share)d session in mode `steal` (see
+    /// [`HttpFilterConfig::for_shared_session`](feature::network::incoming::http_filter::HttpFilterConfig::for_shared_session)).
+    ///
+    /// share-ingress tags each request it forwards with this key, so a shared session must steal
+    /// those requests while other cluster traffic keeps reaching the target. Sessions that are not
+    /// shared keep their configured filter, or steal the whole port when none is set.
+    ///
+    /// It is computed from the final config instead of stored, so a profile that changes
+    /// `incoming.mode`, or a later `--share`, can't leave a stale value.
+    pub fn shared_session_key(&self) -> Option<&str> {
+        (self.share && self.feature.network.incoming.is_steal()).then(|| self.key.as_str())
+    }
+
+    /// Verifies the settings of a session started with [`share`](Self::share), as part of
+    /// [`Self::verify`].
+    ///
+    /// Its errors are [`ConfigError::Share`], whose messages are written for the user, so the CLI
+    /// shows them as they are.
+    fn verify_share(&self) -> Result<(), ConfigError> {
+        if self.share.not() {
+            return Ok(());
+        }
+        let incoming = &self.feature.network.incoming;
+        if incoming
+            .ports
+            .as_ref()
+            .is_some_and(|ports| ports.is_empty())
+        {
+            return Err(ConfigError::Share("The share link has no port to open, because feature.network.incoming.ports is empty. Add the port that the link should open to feature.network.incoming.ports.".to_owned()));
+        }
+        if incoming.is_steal().not() {
+            return Err(ConfigError::Share("Can't share this session yet: share links need incoming mode 'steal'. Support for mirror and incoming - off is planned, contact us in case you need it sooner.".to_owned()));
+        }
+        if self.operator == Some(false) {
+            return Err(ConfigError::Share("Share links need a Team or Enterprise mirrord operator, and `operator` is `false` in your configuration. Set it to `true` to share this session.".to_owned()));
+        }
+        if self.feature.copy_target.enabled {
+            return Err(ConfigError::Share(
+                "Share links aren't supported with copy_target yet.".to_owned(),
+            ));
+        }
+        // share-ingress sends the key as it is in `baggage`, and the shared session's filter
+        // matches it as it is, so the key must be a valid baggage value that no receiver decodes.
+        if let Some(invalid) = self
+            .key
+            .as_str()
+            .chars()
+            .find(|c| c.is_ascii_graphic().not() || matches!(c, '"' | '%' | ',' | ';' | '\\'))
+        {
+            return Err(ConfigError::Share(format!(
+                "The session key can't be shared, because it contains {invalid:?}. A shared session's key may hold only printable ASCII characters other than a space, '\"', '%', ',', ';' and '\\'."
+            )));
+        }
+        if let Some(ports) = &incoming.ports {
+            let reasons: Vec<_> = ports
+                .iter()
+                .filter_map(|&port| {
+                    let reason = if port == 0 {
+                        "it is 0"
+                    } else if incoming.ignore_ports.contains(&port) {
+                        "feature.network.incoming.ignore_ports contains it"
+                    } else if incoming
+                        .http_filter
+                        .ports
+                        .as_ref()
+                        .is_some_and(|filter_ports| filter_ports.contains(&port).not())
+                    {
+                        "feature.network.incoming.http_filter.ports doesn't contain it"
+                    } else {
+                        return None;
+                    };
+                    Some(format!("port {port}, because {reason}"))
+                })
+                .collect();
+            if reasons.len() == ports.len() {
+                return Err(ConfigError::Share(format!(
+                    "The share link can't open any port in feature.network.incoming.ports: {}. Add a port that the link can open to feature.network.incoming.ports.",
+                    reasons.join("; ")
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        self.verify_share()?;
+
         if let Some(Target::Label(target)) = &self.target.path {
             target.verify()?;
 
@@ -1411,7 +1570,14 @@ impl LayerConfig {
     ///
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
-    pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+    ///
+    /// Clears `share`, so a config file written for `mirrord exec --share` also starts a preview:
+    /// a preview gets its link from its `PreviewSession`, and the checks and operator features
+    /// of a shared `mirrord exec` session don't apply to it.
+    pub fn verify_for_preview_env(
+        &mut self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -1504,6 +1670,13 @@ impl LayerConfig {
 
         if self.feature.hostname != default.feature.hostname {
             context.add_warning(ignored("feature.hostname"));
+        }
+
+        // share - unsupported
+
+        if self.share {
+            context.add_warning(ignored("share"));
+            self.share = false;
         }
 
         // cronjob targets - the preview is a CronJob, not a long-running pod, so nothing can
@@ -2105,6 +2278,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            share: None,
             feature: Some(FeatureFileConfig {
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Simple(Some(
@@ -2134,6 +2308,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            share: None,
             key: None,
             accept_invalid_certificates: Some(false),
             kubeconfig: None,
@@ -3118,7 +3293,7 @@ mod tests {
         );
 
         let mut context = ConfigContext::default();
-        let resolved = config
+        let mut resolved = config
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
 

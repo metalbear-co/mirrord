@@ -1,0 +1,1 @@
+The agent reports the bytes of mirrord-protocol messages it holds in memory, in `mirrord_agent_buffered_messages_bytes`, and the bytes held by its outgoing traffic throttles, in `mirrord_agent_outgoing_throttle_permits`.

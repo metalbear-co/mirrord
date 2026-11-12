@@ -794,9 +794,16 @@ pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client
         })?
 }
 
-async fn build_client(context: Option<&str>) -> UiResult<Client> {
+/// The default namespace of `context` (see [`kube_config`]), read without building a client, which
+/// would run the auth-exec plugin.
+pub(super) async fn default_namespace(context: Option<&str>) -> UiResult<String> {
+    Ok(kube_config(context).await?.default_namespace)
+}
+
+/// The kube config of `context`, else of the global `kube_context`, else inferred.
+async fn kube_config(context: Option<&str>) -> UiResult<Config> {
     let global_context = GlobalConfig::fresh_kube_context().await;
-    let mut config = match context.or(global_context.as_deref()) {
+    let config = match context.or(global_context.as_deref()) {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),
@@ -811,6 +818,11 @@ async fn build_client(context: Option<&str>) -> UiResult<Client> {
         }
         None => Config::infer().await.map_err(ApiError::InferKubeconfig)?,
     };
+    Ok(config)
+}
+
+async fn build_client(context: Option<&str>) -> UiResult<Client> {
+    let mut config = kube_config(context).await?;
     add_baggage_header(&mut config, baggage_from_env().as_deref())
         .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
     // Without a client version, the operator returns legacy ports without hit counts.
@@ -1881,6 +1893,7 @@ mod tests {
                 key: Some(key.to_owned()),
                 http_filter: None,
                 created_at: None,
+                share: None,
             }
         }
 

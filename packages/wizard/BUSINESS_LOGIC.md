@@ -2,180 +2,78 @@
 
 ## Overview
 
-The wizard frontend is a React application that helps users create `mirrord.json` configuration files through a guided wizard interface. It connects to a backend API to fetch Kubernetes cluster information.
+The wizard frontend is a React application that helps users create a `mirrord-up.yaml`, which
+they run with `mirrord up -f <file>`. It asks the same questions as `mirrord up init`, in the same
+order and with the same wording, and the `mirrord ui` server turns what the user picked into the
+YAML with the code `mirrord up init` uses (`mirrord_up::render_skeleton`). So the same picks give
+the same file. `mirrord wizard --tui` runs `mirrord up init` itself.
 
 ## Application Flow
 
 ### 1. Entry Point (App.tsx → Homepage.tsx)
 
-1. App checks if user is "returning" via API call to `/api/v1/is-returning`
-2. Based on response, shows either:
-   - **New User**: `HomepageNewUser` - Welcome message + two panels (Learn First / Skip to Config)
-   - **Returning User**: `HomepageReturning` - Welcome back + two panels (Create Config / Learn)
+The homepage offers "Get Started" (straight to the questions) and "Learn the basics first" (the
+learning pages, then the questions).
 
-### 2. Homepage Panels
+### 2. Questions for each service
 
-Each homepage has two clickable panels that open different wizard flows:
+The steps follow `mirrord up init` (`mirrord/up/src/init.rs`):
 
-**New User:**
+1. **Mode** (`ModeStep`): Split (recommended, preselected), Mirror or Replace. The modes, their
+   labels and descriptions come from `GET /api/v1/up/modes`.
+2. **Target** (`TargetStep`): a namespace and a workload, from the kube context `mirrord up init`
+   and `mirrord up` use: the `kube_context` of the global config, or the kubeconfig's current
+   context. It is shown but cannot be changed (`mirrord up init` has no context question). The
+   workloads come from `GET /api/v1/up/workloads`, which lists them with the code of
+   `mirrord up init` (only the kinds the mode allows, one entry per container of a pod with
+   several). Split also offers "Run without a target (outgoing traffic only)". The service is
+   named after the workload (`<workload>-2` and so on when the name is taken); a targetless
+   service is named by the user.
+3. **Traffic** (`TrafficStep`), skipped for a targetless service: the mode's `traffic_question`,
+   off by default. When on: the HTTP header filter (not in Replace), the ports the target
+   declares (from `GET /api/v1/up/ports`) to intercept (all ticked; unticked ones are ignored),
+   and other ports to ignore.
+4. **Run** (`RunStep`): the local command (required) and the working directory.
+5. **Export** (`ExportStep`): the services so far, "Add another service" (back to Mode), the YAML
+   from `POST /api/v1/up/render`, copy and download as `mirrord-up.yaml`, and how to run it. It
+   also points to the `common` block for the settings every service shares, which `mirrord up init`
+   doesn't ask about because each has a good default.
 
-- "Learn About mirrord First" → IntroStep + 6 Learning Steps + BoilerplateStep + ConfigStep
-- "Skip to Configuration" → BoilerplateStep + ConfigStep
-
-**Returning User:**
-
-- "Create Configuration" → BoilerplateStep + ConfigStep
-- "Learn About mirrord" → 6 Learning Steps + BoilerplateStep + ConfigStep
-
-### 3. Wizard Steps
-
-#### Step: BoilerplateStep
-
-User selects one of three modes:
-
-- **Filtering Mode** (steal): Selective traffic stealing with HTTP header/path filters
-- **Mirror Mode**: Copy traffic without disrupting remote service
-- **Replace Mode**: Completely substitute remote service (copy_target + scale_down)
-
-#### Step: ConfigStep (ConfigTabs)
-
-Three tabs:
-
-1. **Target Tab**: Select namespace, target type, and specific target from K8s cluster
-2. **Network Tab**: Configure incoming traffic, filters, and port mappings
-3. **Export Tab**: View JSON, copy to clipboard, or download file
+Going back from the Mode step of another service drops it and returns to Export.
 
 ## API Routes
 
 ```typescript
 const ALL_API_ROUTES = {
-  isReturning: "/api/v1/is-returning",
-  clusterDetails: "/api/v1/cluster-details", // Returns { namespaces: string[], target_types: string[] }
-  targets: (namespace: string, targetType?: string) =>
-    "/api/v1/namespace/{namespace}/targets?target_type={targetType}",
-  // Returns Target[] where Target = { target_path, target_namespace, detected_ports }
-};
+  isReturning: '/api/v1/is-returning',
+  upModes: '/api/v1/up/modes', // { modes: ModeInfo[] }
+  upWorkloads: (namespace, mode) => '/api/v1/up/workloads?namespace=...&mode=...', // { workloads: string[] }
+  upPorts: (namespace, path) => '/api/v1/up/ports?namespace=...&path=...', // { ports: number[] }
+  upRender: '/api/v1/up/render', // POST { services: PickedService[] } → { yaml } or 400 { error }
+  contexts: '/api/v2/kube/contexts',
+  namespaces: '/api/v2/kube/namespaces',
+}
+// Errors come back as { error: string }, which the wizard shows.
 ```
 
-## Config Data Structure
-
-### Default Config
+## Picked services (lib/up.ts)
 
 ```typescript
-const DefaultConfig: LayerFileConfig = {
-  feature: {
-    network: {
-      incoming: { mode: "mirror" },
-      outgoing: true,
-    },
-    fs: "read",
-    env: true,
-  },
-};
-```
-
-### Key Config Sections
-
-1. **target**: `{ path: "deployment/name", namespace: "default" }`
-2. **feature.network.incoming.mode**: `"mirror"` | `"steal"`
-3. **feature.network.incoming.ports**: `number[]` - ports to intercept
-4. **feature.network.incoming.port_mapping**: `[localPort, remotePort][]`
-5. **feature.network.incoming.http_filter**: Header/path filters for selective stealing
-6. **feature.copy_target**: `{ enabled: boolean, scale_down: boolean }` - for Replace mode
-
-## Config Manipulation Functions (JsonUtils.tsx)
-
-### Mode/Boilerplate
-
-- `readBoilerplateType(config)` → `"steal"` | `"mirror"` | `"replace"` | `"custom"`
-- `updateConfigMode(mode, config)` → Sets `incoming.mode`
-- `updateConfigCopyTarget(enabled, scaleDown, config)` → Sets `copy_target`
-
-### Target
-
-- `readCurrentTargetDetails(config)` → `{ type: string, name?: string }`
-- `updateConfigTarget(config, targetPath, namespace)` → Sets `target`
-
-### Incoming Network
-
-- `readIncoming(config)` → Returns entire `network.incoming` section
-- `updateIncoming(config, newIncoming)` → Replaces `network.incoming`
-
-### HTTP Filters
-
-- `readCurrentFilters(config)` → `{ filters: UiHttpFilter[], operator: "any"|"all"|null }`
-- `updateConfigFilter(filters, operator, config)` → Sets `http_filter`
-- `removeSingleFilter(filter, config)` → Removes one filter
-- `disableConfigFilter(config)` → Clears all filters
-- `regexificationRay(value)` → Converts exact match to regex: `"foo"` → `"^foo$"`
-
-Filter types:
-
-```typescript
-interface UiHttpFilter {
-  value: string; // The filter pattern (regex)
-  type: "header" | "path";
+interface PickedService {
+  name: string
+  mode: 'split' | 'mirror' | 'replace'
+  target: { path: string; namespace: string } | null // null: targetless
+  header_filter: string | null // null: the default session-key filter
+  ignore_ports: number[]
+  command: string // split on whitespace by the server
+  directory: string | null
 }
 ```
 
-### Ports
-
-- `readCurrentPorts(config)` → `number[]` - ports from `incoming.ports`
-- `updateConfigPorts(ports, config)` → Sets `incoming.ports` (and `http_filter.ports` if filters exist)
-- `readCurrentPortMapping(config)` → `[localPort, remotePort][]`
-- `updateConfigPortMapping(mappings, config)` → Sets `incoming.port_mapping`
-- `addRemoveOrUpdateMapping(remote, local, config)` → Smart mapping update
-- `getLocalPort(remotePort, config)` → Returns mapped local port or remote if no mapping
-- `removePortandMapping(remotePort, config)` → Removes port and its mapping
-- `disablePortsAndMapping(config)` → Clears both ports and mappings
-
-### JSON Export
-
-- `getConfigString(config)` → Pretty-printed JSON (removes `incoming.ports` in replace mode)
+The service being edited is a `ServiceDraft`. `toPickedService` turns it into `PickedService`: without
+the traffic question answered, there is no header filter and no ignored port.
 
 ## State Management
 
-### UserDataContext
-
-- `UserDataContext`: Stores boolean for `isReturning` status
-- `ConfigDataContext`: Stores current `LayerFileConfig` and setter
-- `ConfigDataContextProvider`: Wraps app with config state (initialized to `DefaultConfig`)
-
-## UI Components Needed
-
-### Core
-
-- **Wizard**: Dialog with header (title, step counter, mode badge), content area, footer (Back/Next)
-- **Panel**: Card with title, description, button → opens wizard
-
-### Form Components (from @metalbear/ui)
-
-- Button, Input, Textarea, Label
-- Select (SelectTrigger, SelectContent, SelectItem, SelectValue)
-- Tabs (TabsList, TabsTrigger, TabsContent)
-- RadioGroup (RadioGroupItem)
-- Switch, Checkbox, Separator, Badge
-- Dialog (DialogContent, DialogTitle, DialogDescription)
-- Toast (ToastProvider, ToastViewport, Toast, ToastTitle, ToastDescription, ToastClose)
-- Tooltip (TooltipProvider, Tooltip, TooltipTrigger, TooltipContent)
-
-### Custom (keep local)
-
-- **Card**: Simple card with CardHeader, CardTitle, CardDescription, CardContent, CardFooter
-- **Popover**: For target search dropdown (not in @metalbear/ui)
-
-## Assets
-
-- `mirrord-logo.svg` - Logo for homepage
-- `mirrord-architecture.svg` - Architecture diagram for learning steps
-- `flow-diagram.png` - Feedback loop diagram for learning steps
-
-## Key Business Rules
-
-1. **Replace Mode**: Sets `copy_target.enabled=true`, `copy_target.scale_down=true`, mode="steal"
-2. **Mirror Mode**: Sets `copy_target.enabled=false`, mode="mirror"
-3. **Filtering Mode**: Sets `copy_target.enabled=false`, mode="steal" (allows filters)
-4. **Port Conflicts**: Local ports must be unique across all mappings
-5. **Filter Ports**: When filters exist, ports are synced to `http_filter.ports`
-6. **Target Required**: Cannot proceed to Network tab without selecting a target
-7. **Replace Mode Restrictions**: Cannot delete auto-detected ports, no `incoming.ports` in export
+`DraftContext` holds the finished services and the service being edited. Closing the wizard
+drops both.

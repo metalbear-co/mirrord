@@ -596,6 +596,13 @@ pub struct Session {
     pub http_filter: Option<SessionHttpFilter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<Time>,
+    /// The share link of a session started with `share`.
+    ///
+    /// Only a `get` of one session by its owner carries it, because the link opens the owner's
+    /// local application to anyone who has the URL. The operator leaves it out of every other
+    /// view of the session, such as [`MirrordOperatorStatus::sessions`] and the `sessions` list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<SessionShare>,
 }
 
 impl Session {
@@ -609,6 +616,22 @@ impl Session {
 pub struct SessionHttpFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<String>,
+}
+
+/// The share link of a session started with `share`, as the operator serves it to the session's
+/// owner in [`Session::share`].
+///
+/// The operator records the link in the session when the session connects, and the link lasts as
+/// long as the session. The CLI reads it once, before it starts the application, to print the
+/// link, so the share link needs no messages of its own on the session's connection.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionShare {
+    /// The URL that share-ingress routes to the session, `https://<host>`.
+    pub url: String,
+    /// The port of the target that the link opens. The local application listens on it, or on
+    /// the local port that `feature.network.incoming.port_mapping` maps it to.
+    pub entry_port: u16,
 }
 
 /// Resource used to access the operator's session management routes.
@@ -1013,6 +1036,11 @@ pub enum NewOperatorFeature {
     /// cluster.
     MultiClusterQueueSplitRole,
 
+    /// Supports `mirrord exec --share`: the operator records a share link for the session when it
+    /// connects, routes it through share-ingress while the session lives, and serves it to the
+    /// session's owner in [`Session::share`].
+    LocalShare,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1027,6 +1055,7 @@ impl NewOperatorFeature {
     /// their display name.
     pub fn feature_config_key(self) -> Option<&'static str> {
         match self {
+            Self::LocalShare => Some("share"),
             Self::CopyTarget
             | Self::CopyTargetExcludeContainers
             | Self::CopyTargetFilterIsolation => Some("feature.copy_target"),
@@ -1108,6 +1137,7 @@ impl NewOperatorFeature {
 impl Display for NewOperatorFeature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let name = match self {
+            NewOperatorFeature::LocalShare => "share links",
             NewOperatorFeature::ProxyApi => "proxy API",
             NewOperatorFeature::CopyTarget => "copy target",
             NewOperatorFeature::CopyTargetExcludeContainers => "copy target excluded containers",
@@ -1261,6 +1291,7 @@ impl NewOperatorFeature {
     /// cluster list and default cluster, so a lone `multiCluster.enabled` fails startup).
     pub fn helm_values(&self) -> &'static [&'static str] {
         match self {
+            NewOperatorFeature::LocalShare => &[],
             NewOperatorFeature::PreviewEnv
             | NewOperatorFeature::PreviewTlsDelivery
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget

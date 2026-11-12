@@ -58,6 +58,7 @@ use mirrord_progress::Progress;
 use preview_sync::PreviewSyncConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use thiserror::Error;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
 use tracing::Level;
 use uuid::Uuid;
@@ -81,7 +82,7 @@ use crate::{
     },
     crd::{
         MirrordClusterOperatorUserCredential, MirrordOperatorCrd, MirrordOperatorSpec,
-        NewOperatorFeature, OPERATOR_STATUS_NAME, TargetCrd,
+        NewOperatorFeature, OPERATOR_STATUS_NAME, SessionCrd, SessionShare, TargetCrd,
         copy_target::{CopyTargetCrd, CopyTargetPhase, CopyTargetSpec},
         db_branching::{
             branch_database::{BranchDatabase, BranchDatabaseSpec, DatabaseDialect, DialectConfig},
@@ -96,6 +97,7 @@ use crate::{
         },
         session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
     },
+    share::LocalShareRequest,
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
         FeatureGateHitRequest, MIRRORD_CLI_VERSION_HEADER, PaidFeatureGate, SESSION_ID_HEADER,
@@ -192,6 +194,12 @@ pub struct OperatorSession {
     id: u64,
     /// URL where websocket connection request should be sent.
     connect_url: String,
+    /// The namespace of the session's target, which the operator files the session's
+    /// [`SessionCrd`] view under, so [`SessionShareReader`] can read the view with the
+    /// namespaced route. `None` for sessions that can't be shared, such as copied targets and
+    /// multi-cluster sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    namespace: Option<String>,
     /// Base64-encoded connect query string, sent in the [`CONNECT_PARAMS_HEADER`] header.
     ///
     /// Set only when the operator advertises [`NewOperatorFeature::ConnectParamsInHeader`]. When
@@ -231,6 +239,7 @@ impl fmt::Debug for OperatorSession {
         debug_struct
             .field("id", &format!("{:X}", self.id))
             .field("connect_url", &self.connect_url)
+            .field("namespace", &self.namespace)
             .field(
                 "connect_params_in_header",
                 &self.connect_params_header.is_some(),
@@ -246,6 +255,107 @@ impl fmt::Debug for OperatorSession {
             .field("traceparent", &self.traceparent)
             .field("baggage", &self.baggage);
         debug_struct.finish()
+    }
+}
+
+/// How long one read of a share link may take, so that a hung read fails the CLI's read instead
+/// of hanging it.
+const SHARE_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Reads the share link of a session started with `share`, as the operator serves it to the
+/// session's owner in [`Session::share`](crate::crd::Session::share).
+///
+/// It reads the session's `sessions` view through the namespaced route, because users whose
+/// roles are namespaced can't `get` the cluster-wide path. The CLI builds one for its read loop
+/// and reuses it, because building its client can run the kubeconfig's credential plugin, and the
+/// CLI reads the link again while the operator's watch catches up with the session.
+#[derive(Clone)]
+pub struct SessionShareReader {
+    api: Api<SessionCrd>,
+    name: String,
+}
+
+/// Why [`SessionShareReader::read`] failed.
+#[derive(Debug, Error)]
+pub enum SessionShareReadError {
+    /// Kubernetes refused the read because the user's roles don't allow `get` on `sessions`.
+    #[error(
+        "Share links need permission to get `sessions` in the `operator.metalbear.co` API group. Ask your platform team to update the mirrord roles."
+    )]
+    MissingPermission,
+
+    /// Kubernetes or the operator refused the read for another reason, such as credentials that
+    /// expired. Reading again doesn't help. The text is the refusal's own message.
+    #[error(
+        "The cluster refused to read this session's share link: {0}. Check that you're logged in to the cluster and that your roles allow it, then restart the session."
+    )]
+    Refused(String),
+
+    /// The cluster didn't answer the read in time. A later read may work.
+    #[error(
+        "Reading this session's share link timed out. Check your connection to the cluster, then restart the session."
+    )]
+    TimedOut,
+
+    /// The read failed for a reason the client can't tell apart from a passing one, such as a
+    /// lost connection.
+    #[error(transparent)]
+    Operator(#[from] OperatorApiError),
+}
+
+impl SessionShareReader {
+    /// Builds the reader with the session's certificate.
+    ///
+    /// Only a session with a target namespace can be shared, so a session without one is an
+    /// error instead of a read through the cluster-wide route, which namespaced roles would
+    /// refuse with a misleading permission error.
+    #[mirrord_macros::boxed_future]
+    pub async fn new(
+        layer_config: &LayerConfig,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<Self> {
+        let Some(namespace) = &session.namespace else {
+            return Err(OperatorApiError::LocalShare(
+                "This session has no target namespace, so it has no share link.".to_owned(),
+            ));
+        };
+        let client = OperatorApi::session_client(layer_config, session).await?;
+
+        Ok(Self {
+            api: Api::namespaced(client, namespace),
+            name: session.id.to_string(),
+        })
+    }
+
+    /// Reads the share link. `None` when the operator serves no link for the session, which
+    /// includes a session that it doesn't serve, or doesn't serve yet.
+    #[tracing::instrument(level = Level::TRACE, skip(self), fields(session = %self.name), ret)]
+    pub async fn read(&self) -> Result<Option<SessionShare>, SessionShareReadError> {
+        let result = tokio::time::timeout(SHARE_READ_TIMEOUT, self.api.get(&self.name))
+            .await
+            .map_err(|_| SessionShareReadError::TimedOut)?;
+
+        match result {
+            Ok(view) => Ok(view.spec.session.share),
+            Err(kube::Error::Api(status)) if status.code == 404 => Ok(None),
+            Err(kube::Error::Api(status))
+                if status.code == 403
+                    && status.details.as_ref().is_some_and(|details| {
+                        details.kind == SessionCrd::plural(&())
+                            && details.group == SessionCrd::group(&())
+                    }) =>
+            {
+                Err(SessionShareReadError::MissingPermission)
+            }
+            Err(kube::Error::Api(status)) if matches!(status.code, 401 | 403) => {
+                Err(SessionShareReadError::Refused(status.message.clone()))
+            }
+            Err(error) => Err(OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::ReadShareLink,
+            }
+            .into()),
+        }
     }
 }
 
@@ -1893,12 +2003,28 @@ where
         Ok(())
     }
 
+    /// Refuses `share` when the operator can't serve a share link, with an upgrade error instead of
+    /// a session whose share link nothing creates. Multi-cluster sessions run it against the
+    /// primary, which refuses a shared session itself once it supports share links.
+    fn check_share_support(&self, layer_config: &LayerConfig) -> OperatorApiResult<()> {
+        if layer_config.share.not() {
+            return Ok(());
+        }
+
+        self.operator
+            .spec
+            .require_feature(NewOperatorFeature::LocalShare)?;
+
+        Ok(())
+    }
+
     /// Check the operator supports all the operator features required by the user's configuration.
     pub fn check_feature_support(
         &self,
         layer_config: &LayerConfig,
         auto_queue_splitting: bool,
     ) -> OperatorApiResult<()> {
+        self.check_share_support(layer_config)?;
         if matches!(layer_config.target.path, Some(Target::Label(_))) {
             self.operator
                 .spec
@@ -2082,6 +2208,29 @@ pub fn required_branching_feature(config: &DatabaseBranchConfig) -> Option<NewOp
         | DatabaseBranchConfig::Clickhouse(_)
         | DatabaseBranchConfig::Redis(_) => None,
     }
+}
+
+/// Why a session started with `share` can't target a Job or a CronJob: mirrord would copy the
+/// target, and the operator doesn't share a copied target.
+const SHARE_JOB_TARGET_ERROR: &str = "Share links don't support Job or CronJob targets yet, because mirrord runs those targets in a copy of their pod (copy_target).";
+
+/// Why a session started with `share` can't target a Deployment that should have pods but has
+/// none available: mirrord would copy the target, and the operator doesn't share a copied target.
+/// The deployment is assumed to be in a bad state only for a while, so a retry can work.
+const SHARE_EMPTY_DEPLOYMENT_ERROR: &str = "The target deployment has no available pod, so mirrord would run the session in a copy of the target (copy_target), and share links aren't supported with copy_target yet. Retry once a pod of the deployment is ready.";
+
+/// Why a session started with `share` can't target a Deployment scaled to zero replicas: mirrord
+/// would copy the target, and the operator doesn't share a copied target. Unlike
+/// [`SHARE_EMPTY_DEPLOYMENT_ERROR`], no pod is on its way, so a retry works only after someone
+/// scales the deployment up.
+const SHARE_SCALED_TO_ZERO_ERROR: &str = "The target deployment is scaled to zero replicas, so mirrord would run the session in a copy of the target (copy_target), and share links aren't supported with copy_target yet. Retry once the deployment is scaled up and a pod of it is ready.";
+
+/// Why a session started with `share` can't split `broker` queues on an operator that splits
+/// them only in a copy of the target.
+fn share_splitting_error(broker: &str) -> String {
+    format!(
+        "Share links don't support {broker} queue splitting with this operator, because it splits queues only in a copy of the target (copy_target), and share links aren't supported with copy_target yet. Upgrade the operator to split {broker} queues without a copy."
+    )
 }
 
 /// Warning shown when [`disable_unsupported_auto_splits`] removes the RabbitMQ splits from an
@@ -2308,10 +2457,12 @@ impl OperatorApi<PreparedClientCert> {
                 branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
+                LocalShareRequest::from_config(layer_config),
             );
             let session = self.make_operator_session(
                 id,
                 connect_url,
+                None,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )?;
@@ -2345,7 +2496,7 @@ impl OperatorApi<PreparedClientCert> {
                             .feature
                             .network
                             .incoming
-                            .steals_port_without_filter(*port)
+                            .steals_port_without_filter(*port, layer_config.shared_session_key())
                     })
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>();
@@ -2377,6 +2528,7 @@ impl OperatorApi<PreparedClientCert> {
             let session = self.make_operator_session(
                 None,
                 connect_url,
+                Some(target.namespace().unwrap_or("default").to_owned()),
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )?;
@@ -2510,6 +2662,7 @@ impl OperatorApi<PreparedClientCert> {
             branch_db_names,
             session_ci_info,
             layer_config.key.as_str(),
+            LocalShareRequest::from_config(layer_config),
         );
         let session_id = copied
             .status
@@ -2518,6 +2671,7 @@ impl OperatorApi<PreparedClientCert> {
         let session = self.make_operator_session(
             session_id,
             connect_url,
+            None,
             layer_config.traceparent.clone(),
             layer_config.baggage.clone(),
         )?;
@@ -2589,6 +2743,7 @@ impl OperatorApi<PreparedClientCert> {
             progress.warning(RMQ_AUTO_SPLITS_DISABLED_WARNING);
         }
         self.check_split_config_filters_support(layer_config)?;
+        self.check_share_support(layer_config)?;
         // Owned: branch preparation below edits the config while the namespace is still needed.
         let namespace = layer_config.target.namespace.clone();
 
@@ -2599,7 +2754,7 @@ impl OperatorApi<PreparedClientCert> {
             "Connecting to multi-cluster primary - workload cluster will resolve target"
         );
 
-        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting);
+        let do_copy_target = self.should_copy_target_mc(layer_config, auto_queue_splitting)?;
 
         let use_proxy_api = self
             .operator
@@ -2672,11 +2827,13 @@ impl OperatorApi<PreparedClientCert> {
                 branch_db_names.clone(),
                 session_ci_info.clone(),
                 layer_config.key.as_str(),
+                LocalShareRequest::from_config(layer_config),
             );
 
             self.make_operator_session(
                 id,
                 connect_url,
+                None,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )
@@ -2699,6 +2856,7 @@ impl OperatorApi<PreparedClientCert> {
             self.make_operator_session(
                 None,
                 connect_url,
+                None,
                 layer_config.traceparent.clone(),
                 layer_config.baggage.clone(),
             )
@@ -2747,6 +2905,11 @@ impl OperatorApi<PreparedClientCert> {
     /// Returns whether the `copy_target` feature should be used,
     /// with an optional reason (in case the feature is not explicitly enabled in the
     /// [`LayerConfig`]).
+    ///
+    /// A session started with `share` gets an error instead of an automatic copy_target: the
+    /// operator refuses to share a copied target, and the user must learn the cause that turned
+    /// copy_target on, before mirrord creates the copy. An explicit copy_target is refused
+    /// earlier, by [`LayerConfig::verify`].
     async fn should_copy_target<P: Progress>(
         &self,
         config: &LayerConfig,
@@ -2765,6 +2928,11 @@ impl OperatorApi<PreparedClientCert> {
         ) {
             // Job and CronJob targets have no long-running pod for the agent to attach to,
             // so they can only be reached through a copied pod.
+            if config.share {
+                return Err(OperatorApiError::LocalShare(
+                    SHARE_JOB_TARGET_ERROR.to_owned(),
+                ));
+            }
             return Ok((true, Some("a Job or CronJob target")));
         }
 
@@ -2783,6 +2951,9 @@ impl OperatorApi<PreparedClientCert> {
                     .not()
             {
                 // Operator does not support SQS splitting without copying the target.
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("SQS")));
+                }
                 return Ok((true, Some("SQS splitting")));
             }
 
@@ -2800,6 +2971,9 @@ impl OperatorApi<PreparedClientCert> {
                     .not()
             {
                 // Operator does not support Kafka splitting without copying the target.
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("Kafka")));
+                }
                 return Ok((true, Some("Kafka splitting")));
             }
         }
@@ -2828,6 +3002,11 @@ impl OperatorApi<PreparedClientCert> {
             // Is configured to have replicas.
             // We assume that the deployment is in bad state only temporarily,
             // and enable copy_target to improve UX.
+            if config.share {
+                return Err(OperatorApiError::LocalShare(
+                    SHARE_EMPTY_DEPLOYMENT_ERROR.to_owned(),
+                ));
+            }
             return Ok((true, Some("empty deployment")));
         }
 
@@ -2881,7 +3060,9 @@ impl OperatorApi<PreparedClientCert> {
             // It might be that rollouts are not even installed in the cluster.
             // Depending on how hardened the cluster is, we might get one of these error codes.
             Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
-            Err(error) => {
+            // A shared session is refused below without a copy, so saying that it will use
+            // copy_target would be wrong.
+            Err(error) if config.share.not() => {
                 tracing::warn!(
                     deployment = ?resource,
                     %error,
@@ -2893,8 +3074,14 @@ impl OperatorApi<PreparedClientCert> {
                     This session will use the copy_target feature. Error: {error}",
                 ));
             }
+            Err(_) => {}
         }
 
+        if config.share {
+            return Err(OperatorApiError::LocalShare(
+                SHARE_SCALED_TO_ZERO_ERROR.to_owned(),
+            ));
+        }
         Ok((true, Some("empty deployment")))
     }
 
@@ -2902,9 +3089,16 @@ impl OperatorApi<PreparedClientCert> {
     /// replica count because the target lives on a remote cluster. Instead we
     /// only look at things we know on the cluster we are conencted to:
     /// explicit opt-in and queue-splitting config.
-    fn should_copy_target_mc(&self, config: &LayerConfig, auto_queue_splitting: bool) -> bool {
+    ///
+    /// Like [`OperatorApi::should_copy_target`], a session started with `share` gets an error
+    /// instead of an automatic copy_target, before the copy is made.
+    fn should_copy_target_mc(
+        &self,
+        config: &LayerConfig,
+        auto_queue_splitting: bool,
+    ) -> OperatorApiResult<bool> {
         if config.feature.copy_target.enabled {
-            return true;
+            return Ok(true);
         }
 
         // Job and CronJob targets can only be reached through a copied pod. The target type is
@@ -2915,7 +3109,12 @@ impl OperatorApi<PreparedClientCert> {
             .as_ref()
             .is_some_and(Target::requires_copy)
         {
-            return true;
+            if config.share {
+                return Err(OperatorApiError::LocalShare(
+                    SHARE_JOB_TARGET_ERROR.to_owned(),
+                ));
+            }
+            return Ok(true);
         }
 
         if auto_queue_splitting.not() {
@@ -2932,7 +3131,10 @@ impl OperatorApi<PreparedClientCert> {
                     .contains(&NewOperatorFeature::SqsQueueSplittingDirect)
                     .not()
             {
-                return true;
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("SQS")));
+                }
+                return Ok(true);
             }
 
             if config
@@ -2948,11 +3150,14 @@ impl OperatorApi<PreparedClientCert> {
                     .contains(&NewOperatorFeature::KafkaQueueSplittingDirect)
                     .not()
             {
-                return true;
+                if config.share {
+                    return Err(OperatorApiError::LocalShare(share_splitting_error("Kafka")));
+                }
+                return Ok(true);
             }
         }
 
-        false
+        Ok(false)
     }
 
     /// Creates a new [`OperatorSession`] with the given `id` and `connect_url`.
@@ -2963,6 +3168,7 @@ impl OperatorApi<PreparedClientCert> {
         &self,
         id: Option<&str>,
         connect_url: String,
+        namespace: Option<String>,
         traceparent: Option<String>,
         baggage: Option<String>,
     ) -> OperatorApiResult<OperatorSession> {
@@ -2997,6 +3203,7 @@ impl OperatorApi<PreparedClientCert> {
         Ok(OperatorSession {
             id,
             connect_url,
+            namespace,
             connect_params_header,
             client_cert: self.client_cert.cert.clone(),
             operator_license_fingerprint: self.operator.spec.license.fingerprint.clone(),
@@ -3091,6 +3298,7 @@ impl OperatorApi<PreparedClientCert> {
         mut branch_db_names: BranchDbNames,
         session_ci_info: Option<SessionCiInfo>,
         key: &str,
+        local_share: Option<LocalShareRequest>,
     ) -> String {
         let unified_branch_db_names = branch_db_names.unified();
         let name = crd
@@ -3108,6 +3316,7 @@ impl OperatorApi<PreparedClientCert> {
         let url_path = CopyTargetCrd::url_path(&(), Some(namespace));
 
         let connect_params = ConnectParams {
+            local_share,
             connect: true,
             on_concurrent_steal: None,
             profile,
@@ -3426,21 +3635,7 @@ impl OperatorApi<PreparedClientCert> {
                 .map(|fingerprint| SanitizedString::from_base64(fingerprint)),
         });
 
-        let (mut config, _) = Self::base_client_config(layer_config).await?;
-        let cert_header = Self::make_client_cert_header(&session.client_cert)?;
-        config
-            .headers
-            .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
-
-        let client = ClientBuilder::try_from(config)
-            .map_err(KubeApiError::from)
-            .map_err(OperatorApiError::CreateKubeClient)?
-            .with_layer(&BufferLayer::new(1024))
-            .with_layer(&RetryLayer::new(retry_policy_from_config(
-                &layer_config.startup_retry,
-            )?))
-            .build();
-
+        let client = Self::session_client(layer_config, &session).await?;
         let conn = Self::connect_target(&client, &session).await?;
 
         Ok(OperatorSessionConnection {
@@ -3448,6 +3643,29 @@ impl OperatorApi<PreparedClientCert> {
             session,
             target_container_ports: Vec::new(),
         })
+    }
+
+    /// Builds a client that authenticates with the session's certificate, for a process that
+    /// holds only the [`OperatorSession`] and not the [`OperatorApi`] that prepared it, such as
+    /// the intproxy.
+    async fn session_client(
+        layer_config: &LayerConfig,
+        session: &OperatorSession,
+    ) -> OperatorApiResult<Client> {
+        let (mut config, _) = Self::base_client_config(layer_config).await?;
+        let cert_header = Self::make_client_cert_header(&session.client_cert)?;
+        config
+            .headers
+            .push((HeaderName::from_static(CLIENT_CERT_HEADER), cert_header));
+
+        Ok(ClientBuilder::try_from(config)
+            .map_err(KubeApiError::from)
+            .map_err(OperatorApiError::CreateKubeClient)?
+            .with_layer(&BufferLayer::new(1024))
+            .with_layer(&RetryLayer::new(retry_policy_from_config(
+                &layer_config.startup_retry,
+            )?))
+            .build())
     }
 
     /// Makes a websocket connection to the target of the given [`OperatorSession`], reusing this
@@ -4101,6 +4319,7 @@ mod test {
             .collect();
 
         let params = ConnectParams {
+            local_share: None,
             connect: true,
             on_concurrent_steal: Some(concurrent_steal),
             profile,
@@ -4247,6 +4466,7 @@ mod test {
         #[case] expected: &str,
     ) {
         let params = ConnectParams {
+            local_share: None,
             connect: true,
             on_concurrent_steal: Some(ConcurrentSteal::Abort),
             profile: None,

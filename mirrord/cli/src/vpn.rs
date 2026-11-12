@@ -8,7 +8,10 @@ use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
-    CliError, config::VpnArgs, connection::create_and_connect, error::CliResult,
+    CliError,
+    config::VpnArgs,
+    connection::create_and_connect,
+    error::{CliResult, LocalShareError},
     kube::kube_client_from_layer_config,
 };
 
@@ -22,6 +25,9 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
 
     let mut layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
+    if layer_config.share {
+        return Err(LocalShareError::UnsupportedCommand("vpn").into());
+    }
     layer_config.agent.privileged = true;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
