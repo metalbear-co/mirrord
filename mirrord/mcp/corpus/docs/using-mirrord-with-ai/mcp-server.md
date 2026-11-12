@@ -13,7 +13,7 @@ The mirrord CLI includes an [MCP](https://modelcontextprotocol.io) server, `mirr
 
 ## What you need
 
-- mirrord CLI `3.273.0` or later. Check with `mirrord --version`, and see [Installing the mirrord CLI](../installing-mirrord/cli.md).
+- mirrord CLI `3.273.0` or later. Check with `mirrord --version`, and see [Install mirrord](../getting-started/install-mirrord.md).
 - An agent that supports MCP servers over stdio, such as Claude Code, Codex, Cursor, VS Code, Windsurf, Claude Desktop, or OpenCode.
 
 ## Register the server

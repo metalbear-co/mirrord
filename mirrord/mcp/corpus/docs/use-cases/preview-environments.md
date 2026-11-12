@@ -175,7 +175,7 @@ Each PR gets an isolated preview keyed by its number. The `{{ key }}` template i
 
 ## Previewing Several Services
 
-`mirrord preview up` starts a preview for every service in a [`mirrord-up.yaml`](../using-mirrord/multiple-concurrent-sessions.md) that has an image, all under one key. It reads the same file as `mirrord up`, so services already defined there need no separate `mirrord.json`. `mirrord preview down` stops them again.
+`mirrord preview up` starts a preview for every service in a [`mirrord-up.yaml`](../using-mirrord/multiple-concurrent-sessions.md) that has an image, all under one key. It reads the same file as `mirrord up`, so services already defined there need no separate `mirrord.json`. `mirrord preview down` stops them again. To preview your local code without building images, see [Sync Your Local Code to a Preview Environment](preview-environments-code-sync.md).
 
 {% hint style="info" %}
 `mirrord preview up` and `mirrord preview down` require mirrord `3.279.0` or later.
@@ -209,7 +209,7 @@ A service's image comes from the first of these two that is set:
 1. `--image <service>=<image ref>`, repeated once per service. Everything after the first `=` is the image ref.
 2. The `MIRRORD_<SERVICE>_IMAGE` environment variable. `<SERVICE>` is the service name in upper case, with every character that isn't a letter or digit turned into `_`, so `user-auth-service` reads `MIRRORD_USER_AUTH_SERVICE_IMAGE`.
 
-If a service has no image, `mirrord preview up` skips it.
+If a service has no image, `mirrord preview up` skips it. It ignores [`sync`](preview-environments-code-sync.md), so a service with `sync` and an image gets a regular preview.
 
 ### Key
 
@@ -224,6 +224,7 @@ Each preview is created as `mirrord preview start` would create it for the servi
 | `target`, `context`, `ignore_ports`, `config_patch` | Used as in `mirrord up` |
 | `http_filter` | Replaces the default `baggage: mirrord-session=<key>` filter, as in [`split` mode](../using-mirrord/multiple-concurrent-sessions.md#service-modes) |
 | `default_mode`, `env`, `run`, `skip` | Ignored |
+| `sync` | Ignored. Used by [`mirrord preview sync`](preview-environments-code-sync.md) |
 
 * `config_patch` can set any `mirrord.json` option except `feature.preview.image`, which is rejected.
 * Queues are [split by the key](../using-mirrord/multiple-concurrent-sessions.md#queue-splitting), as in `mirrord up`'s `split` mode. This only applies to deployment, rollout and statefulset targets.
@@ -249,7 +250,7 @@ Every service is checked first. If any check fails, the command exits non-zero a
 
 The command exits with `0` when every preview is ready or idle. If a preview fails to start, the command exits non-zero and names the failed services. Previews that did start keep running.
 
-Running `mirrord preview up` again with the same key replaces each previewed service's session and keeps its preview URL. The old session goes before the new one is ready, so a service whose new preview fails is left with no preview. Services that get no image on a rerun keep their earlier preview until its TTL runs out or you stop it.
+Running `mirrord preview up` again with the same key replaces each previewed service's session and keeps its preview URL. The old session goes before the new one is ready, so a service whose new preview fails is left with no preview. Services that get no image on a rerun keep their earlier preview until its TTL runs out or you stop it. This also replaces a preview that `mirrord preview sync` started.
 
 ### Sharing Previews via a Link
 
@@ -263,7 +264,7 @@ The one limitation is [stable share hosts](#stable-share-hosts): leave `operator
 mirrord preview down -k pr-123
 ```
 
-`mirrord preview down` stops every preview under the key in all namespaces, like `mirrord preview stop -k <key> -A`. It finds the key the way `mirrord preview up` does. On `main` or `master`, or with no branch checked out, pass the key with `--key` or `MIRRORD_KEY`, since the random key `mirrord preview up` generated there can't be found again.
+`mirrord preview down` stops every preview under the key in all namespaces, like `mirrord preview stop -k <key> -A`. It finds the key the way `mirrord preview up` and `mirrord preview sync` do. On `main` or `master`, or with no branch checked out, pass the key with `--key` or `MIRRORD_KEY`, since the random key that they generated there can't be found again.
 
 When `mirrord-up.yaml` (or the file passed with `-f`) exists, `mirrord preview down` stops the previews in every kube context its services use. It exits with `0` when there is nothing to stop.
 
@@ -512,6 +513,8 @@ warning), `feature.preview.idle` is rejected, and `feature.preview.replicas` doe
 Database branch parameters with a `value_pattern` need a running target pod to read the
 runtime value from, which a CronJob does not have, so they are rejected as well; plain
 variable parameters work.
+
+[Code sync](preview-environments-code-sync.md) doesn't support CronJob targets.
 
 Requires operator 3.205.0 or later and CLI 3.256.0 or later, plus `create`, `delete`, and
 `patch` on `batch/cronjobs` and `create` on `batch/jobs` for the operator, which the Helm chart

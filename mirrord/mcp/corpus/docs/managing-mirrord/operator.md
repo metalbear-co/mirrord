@@ -1,6 +1,6 @@
 ---
 title: mirrord Operator
-description: "How to install and manage the mirrord Operator, which runs in your cluster for Team and Enterprise."
+description: "What the mirrord Operator does, what it needs from your cluster, and how to configure it for licensing, internal registries, and specific platforms."
 tags:
   - team
   - enterprise
@@ -24,23 +24,19 @@ The Operator solves this by acting as a centralized control plane:
 
 ## Installation
 
-You'll need a mirrord for Teams license. [Register here](https://app.metalbear.com) to get started. Once you have an organization, `mirrord operator install` logs you in, creates your organization's operator API key, and installs the Operator with the default Helm values. Creating the key needs an organization admin and works only while the organization has no operator API key yet; otherwise, install with `mirrord operator install --api-key <key>`. For anything custom, use the Helm chart below.
+To install the Operator, see [Install the Operator](../getting-started/install-the-operator.md).
 
-{% hint style="info" %}
-**AI coding agents:** you don't need a person to do this. Run `mirrord operator signup` (no authentication, no credit card) to start a seven-day Enterprise trial and get a claim URL to hand your user, then `mirrord operator install --from-signup` to install the Operator with it. See [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md) and [metalbear.com/agents.md](https://metalbear.com/agents.md).
-{% endhint %}
-
-### Requirements
+## Requirements
 
 Before you install the Operator, make sure that your cluster and network meet these requirements.
 
 **Kubernetes version**
 
-The Operator needs Kubernetes `1.22` or later. Some features need a newer version. See [Cluster Requirements](../installing-mirrord/README.md#cluster-requirements).
+The Operator needs Kubernetes `1.22` or later. Some features need a newer version, listed in [Which Kubernetes versions does mirrord support?](../faq/limitations.md#which-kubernetes-versions-does-mirrord-support)
 
 **Permissions**
 
-The Helm chart makes cluster-scoped objects: CRDs, ClusterRoles, an APIService, and a PriorityClass for agent pods. The user who installs the chart needs permission to make these objects. In most clusters, this is the `cluster-admin` role.
+Installing the Operator creates cluster-scoped objects: CRDs, ClusterRoles, an APIService, and a PriorityClass for agent pods. The user who installs it needs permission to create these objects. In most clusters, this is the `cluster-admin` role.
 
 **Nodes**
 
@@ -57,81 +53,13 @@ The Helm chart makes cluster-scoped objects: CRDs, ClusterRoles, an APIService, 
 
 The Operator runs as one pod by default. Agents run only while sessions use them. For the default CPU and memory values, see [Scalability](scalability.md).
 
-### Helm
+## Rotating the cloud API key
 
-Add the MetalBear Helm repository:
-
-```bash
-helm repo add metalbear https://metalbear-co.github.io/charts
-```
-
-Download the accompanying `values.yaml`:
-
-```bash
-curl https://raw.githubusercontent.com/metalbear-co/charts/main/mirrord-operator/values.yaml --output values.yaml
-```
-
-{% hint style="info" %}
-To let developers target [serverless workloads](../using-mirrord/serverless/README.md) running outside Kubernetes, such as Amazon ECS tasks, set `operator.sessionsManager: true`. This experimental feature runs sessions-manager inside the Operator. See [Operator-Hosted Sessions-Manager](../using-mirrord/serverless/operator-hosted.md).
-{% endhint %}
-
-### Cloud API key
-
-The Operator authenticates to the mirrord cloud with a **cloud API key** and uses it to obtain its license over the API. This is the default way to install the Operator. Generate a key in the dashboard under **Settings** at [app.metalbear.com](https://app.metalbear.com) — it's shown only once, so store it then.
-
-If you have no organization yet and an AI agent is doing the install, [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md) mints the same kind of key without a dashboard visit.
-
-When generating the key you also choose whether to enable **identity sharing**. With it on, usage metrics include developer usernames and session targets so the usage dashboard can show them by name; with it off, usage metrics stay anonymized. The fields are listed under [What data does the Operator send to MetalBear cloud](../managing-mirrord/security.md#what-data-does-the-mirrord-operator-send-to-metalbear-cloud). Set `cloud.anonymizeData: true` in your Helm values to keep metrics anonymized regardless of the key.
-
-Provide the key to the chart in one of three ways:
-
-**Kubernetes secret (recommended)** — reference a secret via `cloud.apiKey.keyRef`, so the key never lives in your `values.yaml`:
-
-```yaml
-cloud:
-  apiKey:
-    keyRef: mirrord-operator-cloud-api-key
-```
-
-This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-
-kubectl create secret generic mirrord-operator-cloud-api-key \
-  --namespace mirrord \
-  --from-literal=apiKey=<your API key>
-```
-
-The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
-
-**Google Secret Manager** — store the key in GSM and reference it via `cloud.apiKey.gsmRef`. The Operator reads it using Application Default Credentials (see `sa.gcpSa`):
-
-```yaml
-cloud:
-  apiKey:
-    gsmRef: projects/PROJECT_ID/secrets/SECRET_NAME/versions/latest
-```
-
-**Inline (dev/test)** — set the value directly, keeping in mind it then lives in your Helm values:
-
-```yaml
-cloud:
-  apiKey:
-    key: <your API key>
-```
-
-Then install:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-```
-
-Rotating and revoking the key are done from the dashboard. When you revoke, you can choose a grace window so the current key keeps working while you roll the Operator over to the new one.
+Rotate and revoke the key at [app.metalbear.com](https://app.metalbear.com). When you revoke, you can choose a grace window so the current key keeps working while you roll the Operator over to the new one.
 
 ## Air-gapped / offline clusters (Enterprise)
 
-Air-gapped or offline clusters can't reach the cloud to exchange an API key for a license, so Enterprise deployments in that situation use an offline **license certificate** instead. If you have a `license.pem` file, set `license.file.secret.data.license.pem` in `values.yaml` using a YAML literal block:
+Air-gapped or offline clusters can't reach the cloud to exchange an API key for a license, so Enterprise deployments in that situation use an offline **license certificate** instead. First add the Helm repository and download `values.yaml`, as in [Get the chart](../getting-started/install-the-operator.md#get-the-chart). Then, instead of a cloud API key, give the chart your certificate. If you have a `license.pem` file, set `license.file.secret.data.license.pem` in `values.yaml` using a YAML literal block:
 
 ```yaml
 license:
@@ -170,7 +98,7 @@ For a fully self-hosted setup, see the [license server](license-server.md).
 {% hint style="warning" %}
 **⚠️ Deprecated for cloud authentication**
 
-For clusters that reach the mirrord cloud, the license key is being replaced by the [cloud API key](#cloud-api-key), which is now the default way the Operator authenticates and obtains its license. Existing cloud license-key installations keep working, but new ones should use a cloud API key.
+For clusters that reach the mirrord cloud, the license key is being replaced by the [cloud API key](../getting-started/install-the-operator.md#cloud-api-key), which is now the default way the Operator authenticates and obtains its license. Existing cloud license-key installations keep working, but new ones should use a cloud API key.
 
 This does not apply to the [license server](license-server.md): if you run your own license server, the license key is still the shared secret the Operator uses to authenticate to it (a value you choose, not a mirrord-issued credential) and remains required.
 {% endhint %}
@@ -211,9 +139,13 @@ These images are only pulled when the corresponding feature is enabled:
 | Image                   | Default                                     | Tag              | Description                                                                                   | Override                                                                  |
 | ----------------------- | ------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Kafka splitting sidecar | `ghcr.io/metalbear-co/operator-kafka-proxy` | Same as operator | JVM sidecar for Kafka splitting (only when `operator.kafkaSplittingSidecar.enabled` is true). | `operator.kafkaSplittingSidecar.image`                                    |
-| MSSQL tools             | `ghcr.io/metalbear-co/mssql-tools`          | `latest`         | Sidecar for MSSQL DB branching (provides `sqlcmd`, `sqlpackage`, `bcp`).                      | Env `MSSQL_TOOLS_IMAGE` via `operator.extraEnv`                           |
+| MSSQL tools             | `ghcr.io/metalbear-co/mssql-tools`          | Same as operator | Init container and sidecar for MSSQL DB branching (provides `sqlpackage` and `sqlcmd`). Table data is exported with the `bcp` in the branch's SQL Server image. | Env `MSSQL_TOOLS_IMAGE` via `operator.extraEnv`                           |
 | Flyway                  | `flyway/flyway`                             | `12`             | Flyway migration runner for DB branching.                                                     | Per-branch `migrations.image`, or `dbPod.migrationImages.flyway.registry` |
 | Liquibase               | `liquibase/liquibase`                       | `4.33`           | Liquibase migration runner for DB branching.                                                  | Per-branch `migrations.image`, or `dbPod.migrationImages.liquibase.registry` |
+
+### Code sync
+
+A preview pod with [code sync](../use-cases/preview-environments-code-sync.md) runs the operator's image in an init container, and pulls it with the target pod's pull secrets. So when the operator image comes from a private registry, the target's pods must list a pull secret for that registry.
 
 ### DB branching default database images
 
@@ -311,11 +243,3 @@ agent:
   annotations:
     cloud.google.com/generate-allowlist: "true"
 ```
-
-### Verifying the Installation
-
-```bash
-mirrord operator status
-```
-
-All mirrord clients will now use the Operator automatically when running against the cluster.
