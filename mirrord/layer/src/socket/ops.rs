@@ -427,9 +427,9 @@ pub(super) fn connectx(
     socket: RawFd,
     endpoints: *const sa_endpoints_t,
     associd: sae_associd_t,
-    flags: c_uint,
-    iov: *const iovec,
-    iovcnt: c_uint,
+    _flags: c_uint,
+    _iov: *const iovec,
+    _iovcnt: c_uint,
     len: *mut size_t,
     connid: *mut sae_connid_t,
 ) -> Detour<ConnectResult> {
