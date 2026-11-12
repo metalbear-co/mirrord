@@ -1,0 +1,40 @@
+name: Linear loop pull requests
+
+# `pull_request_target` runs this file and script from the default branch, so a branch of the agent
+# can never change the code that holds the Linear credentials. Nothing from the pull request is
+# checked out.
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: linear-loop-pr-${{ github.event.pull_request.number }}-${{ github.event.action }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: >-
+      github.event.pull_request.user.login == 'linear-code[bot]' &&
+      startsWith(github.event.pull_request.head.ref, 'linear/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Route the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ github.event.action }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
+          LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
+        run: .github/scripts/linear-loop-pr.sh
