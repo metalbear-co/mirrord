@@ -12,7 +12,10 @@ rust_shared_library(
     # statically rather than depending on libraries that users' machines don't have.
     cc_runtime_linkage = "static",
     target_compatible_with = UNIX_ONLY,
-    visibility = ["//mirrord/cli:__pkg__"],
+    visibility = [
+        "//mirrord/cli:__pkg__",
+        "//release:__pkg__",
+    ],
 )
 
 rust_test(
@@ -148,5 +151,8 @@ platform_filegroup(
     cpu = "aarch64",
     os = "macos",
     target_compatible_with = MACOS_ONLY,
-    visibility = ["//mirrord/cli:__pkg__"],
+    visibility = [
+        "//mirrord/cli:__pkg__",
+        "//release:__pkg__",
+    ],
 )

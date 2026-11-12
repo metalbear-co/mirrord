@@ -14,12 +14,12 @@ load("@rules_python//python:py_binary.bzl", "py_binary")
 # Access exports them. It fails with "incorrect password" on a file that OpenSSL 3 exports with its
 # default algorithms, so `openssl pkcs12 -export` needs `-legacy`.
 #
-# A release passes absolute paths outside the workspace:
+# A release writes both files outside the workspace, and passes their absolute paths to the command
+# that builds `//release:unix`, in the `build_unix_and_release_images` job of
+# `.github/workflows/release.yaml`:
 #
-#     bazel build --platforms=//bazel/platforms:aarch64-macos \
-#         --//bazel:macos_signing_p12_file="$RUNNER_TEMP/signing/identity.p12" \
-#         --//bazel:macos_signing_p12_password_file="$RUNNER_TEMP/signing/password" \
-#         //mirrord/cli:cli_universal
+#     --//bazel:macos_signing_p12_file="$RUNNER_TEMP/signing/identity.p12"
+#     --//bazel:macos_signing_p12_password_file="$RUNNER_TEMP/signing/password"
 [
     string_flag(
         name = name,

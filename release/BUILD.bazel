@@ -1,0 +1,116 @@
+# The files of a release, under the names that the GitHub release gives them. `release.yaml` builds
+# `:unix` with `--config=release` (see `.bazelrc`) on one Linux machine, which builds the Linux
+# files for both CPUs and the universal macOS files: Bazel's toolchains build every platform from
+# Linux, and `rcodesign` signs the macOS files there too (see `//bazel:macos_sign.bzl`). The Windows
+# files are signed in place after the build, on Windows, so `release.yaml` builds them on their own.
+#
+# Each platform's files are the CLI, the layer, and a zip of the CLI with its SHA-256 checksum, in
+# the format of `shasum -a 256`, which the Homebrew formula takes.
+
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:platform.bzl", "platform_filegroup")
+
+# Each platform, by the name that its files carry, with the targets of its CLI and layer.
+PLATFORMS = {
+    "linux_aarch64": {
+        "cli": "//mirrord/cli:cli_standalone",
+        "cpu": "aarch64",
+        "layer": "//mirrord/layer",
+        "layer_file": "libmirrord_layer_linux_aarch64.so",
+        "os": "linux",
+    },
+    "linux_x86_64": {
+        "cli": "//mirrord/cli:cli_standalone",
+        "cpu": "x86_64",
+        "layer": "//mirrord/layer",
+        "layer_file": "libmirrord_layer_linux_x86_64.so",
+        "os": "linux",
+    },
+    # The universal files build their slices for both CPUs themselves, so the CPU here only picks
+    # a Mac platform for them.
+    "mac_universal": {
+        "cli": "//mirrord/cli:cli_universal",
+        "cpu": "aarch64",
+        "layer": "//mirrord/layer:universal_layer",
+        "layer_file": "libmirrord_layer_mac_universal.dylib",
+        "os": "macos",
+    },
+}
+
+py_binary(
+    name = "zip_with_checksum",
+    srcs = ["zip_with_checksum.py"],
+)
+
+[
+    platform_filegroup(
+        name = name + "_" + part,
+        srcs = [platform[part]],
+        cpu = platform["cpu"],
+        os = platform["os"],
+        tags = ["manual"],
+    )
+    for name, platform in PLATFORMS.items()
+    for part in [
+        "cli",
+        "layer",
+    ]
+]
+
+# Each rule's name differs from its file's, so that `:mirrord_<platform>` names the file itself,
+# as `.github/workflows/ci.yaml` builds it.
+[
+    copy_file(
+        name = "mirrord_{}_copy".format(name),
+        src = ":{}_cli".format(name),
+        out = "mirrord_" + name,
+        is_executable = True,
+        tags = ["manual"],
+    )
+    for name in PLATFORMS
+]
+
+[
+    copy_file(
+        name = platform["layer_file"] + "_copy",
+        src = ":{}_layer".format(name),
+        out = platform["layer_file"],
+        tags = ["manual"],
+    )
+    for name, platform in PLATFORMS.items()
+]
+
+[
+    run_binary(
+        name = "mirrord_{}_zip".format(name),
+        srcs = [":mirrord_" + name],
+        outs = [
+            "mirrord_{}.zip".format(name),
+            "mirrord_{}.shasum256".format(name),
+        ],
+        args = [
+            "$(execpath :mirrord_{})".format(name),
+            "$(execpath mirrord_{}.zip)".format(name),
+            "$(execpath mirrord_{}.shasum256)".format(name),
+        ],
+        tags = ["manual"],
+        tool = ":zip_with_checksum",
+    )
+    for name in PLATFORMS
+]
+
+filegroup(
+    name = "unix",
+    srcs = [
+        target
+        for name, platform in PLATFORMS.items()
+        for target in [
+            ":mirrord_" + name,
+            ":" + platform["layer_file"],
+            ":mirrord_{}_zip".format(name),
+        ]
+    ],
+    tags = ["manual"],
+)

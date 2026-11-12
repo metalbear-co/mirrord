@@ -1,5 +1,5 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load", "oci_push")
 load("@tar.bzl//tar:tar.bzl", "tar")
 load("//bazel:compatibility.bzl", "LINUX_ONLY")
 load("//bazel:image.bzl", "IMAGE_LABELS", "image_tag")
@@ -137,5 +137,15 @@ oci_image_index(
         ":image_aarch64",
         ":image_x86_64",
     ],
+    tags = ["manual"],
+)
+
+# Pushes `:image_index` to `ghcr.io/metalbear-co/mirrord`, which the release does with
+# `bazel run --config=release //mirrord/agent:push -- --tag <version>`. `--repository` pushes it
+# elsewhere, like a staging repository.
+oci_push(
+    name = "push",
+    image = ":image_index",
+    repository = "ghcr.io/metalbear-co/mirrord",
     tags = ["manual"],
 )

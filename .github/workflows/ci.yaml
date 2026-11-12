@@ -14,7 +14,9 @@
 # The `build-test` job runs the first four on each platform, as separate steps, so that the job's
 # summary shows which of them failed. `.github/actions/setup-bazel` turns on the `ci` config of
 # `.bazelrc` for every command. The `lint` job runs the last two, with the tools of the `lint`
-# devshell in `flake.nix`. The end-to-end tests run in `test-e2e.yaml`.
+# devshell in `flake.nix`. The end-to-end tests run in `test-e2e.yaml`. On a release branch, the
+# `*_on_release_branch` jobs build what the release builds, with `--config=release`, and run the
+# end-to-end tests of the IDE extensions with it.
 #
 # Please be mindful, we try to target less than 30 minutes for the CI to run. If you're adding
 # something, please make sure it doesn't impact too much, and if you're reviewing please have it in
@@ -373,32 +375,112 @@ jobs:
 
   # ── release branches ────────────────────────────────────────────────
 
-  # The IDE extensions' end-to-end tests run the CLI and the agent of the release branch, which
-  # these jobs build while the other jobs run.
-  build_mirrord_on_release_branch:
-    name: build mirrord CLI
+  # A release pull request builds what `release.yaml` builds, with `--config=release`, so that it
+  # finds what fails to build only with optimizations, like code that only debug assertions use,
+  # or only for the release, before the release itself does, which has pushed its images by the
+  # time that a later job of it fails. Three jobs build it.
+  #
+  # `build_e2e_files_on_release_branch` builds the two files that the IDE extensions' end-to-end
+  # tests run, so that the tests start without waiting for the other platforms. They download the
+  # Linux CLI, with the layer and the UI that it embeds, from the `mirrord-artifacts` artifact, and
+  # load the agent's image as the image `test` from the `test.tar` of the `test` artifact.
+  build_e2e_files_on_release_branch:
+    name: build release (e2e files)
     needs: [plan]
     if: ${{ needs.plan.outputs.release_branch == 'true' }}
-    uses: ./.github/workflows/build-mirrord-cli.yaml
-    secrets: inherit
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
-  build_agent_image_on_release_branch:
-    name: build agent image
+      - uses: ./.github/actions/setup-bazel
+
+      # `image_load`'s `tarball` output is the archive that `docker load` takes.
+      - name: Build the CLI and the agent image
+        run: |
+          bazel build --config=release --//mirrord/agent:image_tag=test:latest --output_groups=+tarball \
+            //release:mirrord_linux_x86_64 //mirrord/agent:image_load
+          mkdir "$RUNNER_TEMP/cli"
+          cp bazel-bin/release/mirrord_linux_x86_64 "$RUNNER_TEMP/cli/mirrord"
+          cp bazel-bin/mirrord/agent/image_load/tarball.tar "$RUNNER_TEMP/test.tar"
+
+      - name: Upload the CLI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mirrord-artifacts
+          path: ${{ runner.temp }}/cli/mirrord
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload the agent image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test
+          path: ${{ runner.temp }}/test.tar
+          if-no-files-found: error
+          retention-days: 2
+
+  # Builds the targets that the `build_unix_and_release_images` job of `release.yaml` builds: the
+  # files for Linux and macOS, with the macOS files signed ad hoc, and the images. It runs after
+  # `build_e2e_files_on_release_branch`, whose outputs it takes from the remote cache rather than
+  # build the Linux x86-64 CLI and the agent again.
+  build_on_release_branch:
+    name: build release (unix)
+    needs: [plan, build_e2e_files_on_release_branch]
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the release files and the images
+        run: |
+          bazel build --config=release --remote_download_outputs=minimal \
+            //release:unix \
+            //mirrord/agent:push //mirrord/agent:image_index.digest \
+            //mirrord/cli:push //mirrord/cli:image_index.digest
+
+  # Builds the targets that the `build_binaries_windows` job of `release.yaml` builds, which only
+  # a Windows machine builds as the release does. Every crate fails on a warning, so a warning
+  # that only an optimized build for Windows gives would otherwise first fail in the release.
+  build_windows_on_release_branch:
+    name: build release (windows)
     needs: [plan]
     if: ${{ needs.plan.outputs.release_branch == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-agent-image.yaml
+    runs-on: blacksmith-16vcpu-windows-2025
+    timeout-minutes: 150
+    env:
+      # See `build-test`.
+      MSYS2_ARG_CONV_EXCL: "*"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the release files
+        run: |
+          bazel build --config=release --remote_download_outputs=minimal \
+            //mirrord/cli:cli_standalone //mirrord/layer-win
 
   intellij_e2e_on_release_branch:
-    needs: [build_mirrord_on_release_branch, build_agent_image_on_release_branch]
+    needs: [build_e2e_files_on_release_branch]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
-    needs: [build_mirrord_on_release_branch, build_agent_image_on_release_branch]
+    needs: [build_e2e_files_on_release_branch]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
@@ -416,8 +498,9 @@ jobs:
         plan,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
-        build_mirrord_on_release_branch,
-        build_agent_image_on_release_branch,
+        build_e2e_files_on_release_branch,
+        build_on_release_branch,
+        build_windows_on_release_branch,
         build-test,
         e2e,
         lint,

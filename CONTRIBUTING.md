@@ -577,6 +577,10 @@ The standard CI workflow runs when you open a new PR, but in some cases you'll a
 From [the release workflow definition](/.github/workflows/release.yaml):
 >   Running from workflow dispatch (AKA manual) will not publish anything. This is intended for testing changes to this flow.
 
+A manual run builds and signs every file, and pushes the images only to their staging repositories. The jobs and steps
+that publish run only when `validate_release_request` sets `should_release`, which it never does on a manual run, so a
+job or step that you add and that publishes must check `should_release` too.
+
 To test the release workflow:
 
 1. Push your changes to a branch on the main mirrord repository (not a fork)
@@ -784,7 +788,9 @@ Releases are fully automated. Under normal circumstances no manual steps are req
 3. Review the release PR, fix any changelog issues or typos, then merge it.
 4. Merging triggers the [Release workflow](/.github/workflows/release.yaml), which:
    - Validates the PR came from a `releases/*` branch.
-   - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
+   - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows) with Bazel's `--config=release`,
+     and signs the macOS files with `rcodesign` on Linux and the Windows files with Azure Artifact Signing. The comments
+     on the jobs in `release.yaml` explain each step.
    - Publishes the Docker images to GHCR.
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
    - Publishes to Homebrew, Chocolatey, and WinGet.

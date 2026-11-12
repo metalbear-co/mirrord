@@ -1,1 +1,1 @@
-Added an experimental Bazel build, which is not meant for general use yet.
+mirrord's CLI, layer and images are now built, tested and released with Bazel.

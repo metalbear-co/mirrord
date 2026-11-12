@@ -27,7 +27,7 @@ jobs:
       contents: read
     outputs:
       should_release: ${{ steps.validate.outputs.should_release }}
-      version: ${{ steps.validate.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.precheck.outputs.sha }}
     steps:
       # Resolve the single commit this release is pinned to, before anything is
@@ -92,21 +92,24 @@ jobs:
           # where actions/checkout falls back to the triggering ref.
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
 
+      # Without a release commit, this checks out the triggering ref, whose version a manual run
+      # builds.
       - name: Checkout
-        if: steps.precheck.outputs.sha != ''
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ steps.precheck.outputs.sha }}
+          persist-credentials: false
 
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        if: steps.precheck.outputs.sha != ''
-        with:
-          cache: false
-          rustflags: ""
-
-      - name: Install cargo-get
-        if: steps.precheck.outputs.sha != ''
-        run: cargo install cargo-get
+      # The other jobs take the version from this job's output.
+      - name: Read the version
+        id: version
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version format in Cargo.toml: ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate release conditions
         id: validate
@@ -115,13 +118,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
           HEAD_REF: ${{ github.head_ref }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
 
           if [ "${EVENT_NAME}" != "pull_request" ]; then
             echo "Manual dispatch — skipping release validation."
             echo "should_release=false" >> "${GITHUB_OUTPUT}"
-            echo "version=" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
@@ -131,111 +134,208 @@ jobs:
           if [ "${merged}" != "true" ]; then
             echo "PR was not merged, skipping."
             echo "should_release=false" >> "${GITHUB_OUTPUT}"
-            echo "version=" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
           if [[ "${head_ref}" != releases/* ]]; then
             echo "PR is not from a releases/* branch (head: ${head_ref}), skipping."
             echo "should_release=false" >> "${GITHUB_OUTPUT}"
-            echo "version=" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          version=$(cargo get workspace.package.version)
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid version format in Cargo.toml: ${version}"
-            exit 1
-          fi
-
+          version="${VERSION}"
           if gh release view "${version}" &>/dev/null; then
             echo "Release ${version} already exists, skipping."
             echo "should_release=false" >> "${GITHUB_OUTPUT}"
-            echo "version=${version}" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
           echo "All checks passed — will release ${version}."
           echo "should_release=true" >> "${GITHUB_OUTPUT}"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
-  build_binaries_aarch64-unknown-linux-gnu:
+  # Builds everything that the release takes from a Linux machine, in one Bazel command, so that
+  # each crate compiles once: the Linux files for both CPUs and the universal macOS files, under the
+  # names that the release gives them (see `release/BUILD.bazel`), and the agent's and the CLI's
+  # images for both Linux CPUs. `--config=release` optimizes them as `cargo build --release` would.
+  # Bazel signs the macOS files with MetalBear's Developer ID through `rcodesign` (see
+  # `//bazel:macos_sign.bzl`), which reads the certificate and its private key from a PKCS #12 file.
+  #
+  # The job then pushes the images from the output base that built them, so `bazel run` finds every
+  # action of `:push` already done. No image is pushed before the files and both images built, and
+  # the job only logs in to the registry then. Each image is one index for both CPUs, whose digest
+  # `:image_index.digest` writes to `image_index.json.sha256`.
+  #
+  # `build_on_release_branch` in `ci.yaml` builds the same targets on the release pull request.
+  build_unix_and_release_images:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 150
+    permissions:
+      packages: write
+      contents: read
+      # Keyless Sigstore signing of the build provenance, and recording it.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-          rustflags: ""
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
-      - run: uv --version
-      # 0.23.0 is the floor: rustc's aarch64-unknown-linux-gnu spec passes
-      # `-Wl,--fix-cortex-a53-843419`, which zig's linker rejects, and only
-      # cargo-zigbuild >= 0.23.0 filters that argument out.
-      - run: uv tool install cargo-zigbuild==0.23.0
-      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
-      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - run: rustup target add aarch64-unknown-linux-gnu
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+      - uses: ./.github/actions/setup-bazel
         with:
-          node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - name: Build mirrord CLI
+          publishes: "true"
+
+      - name: Write the signing certificate
         env:
-          RUSTFLAGS: ${{ env.RUSTFLAGS }} -A dead_code
-        run: cargo xtask build-cli --platform linux-aarch64 --zigbuild --release
+          P12_BASE64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+        run: |
+          signing="$RUNNER_TEMP/signing"
+          mkdir -m 700 "$signing"
+          base64 --decode <<< "$P12_BASE64" > "$signing/identity.p12"
+          printf '%s' "$P12_PASSWORD" > "$signing/password"
+
+      - name: Build the release files and the images
+        id: build
+        run: |
+          bazel build --config=release \
+            --//bazel:macos_signing_p12_file="$RUNNER_TEMP/signing/identity.p12" \
+            --//bazel:macos_signing_p12_password_file="$RUNNER_TEMP/signing/password" \
+            //release:unix \
+            //mirrord/agent:push //mirrord/agent:image_index.digest \
+            //mirrord/cli:push //mirrord/cli:image_index.digest
+          for image in agent cli; do
+            digest=$(cat "bazel-bin/mirrord/$image/image_index.json.sha256")
+            echo "${image}_digest=${digest:?}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Remove the signing certificate
+        if: ${{ always() }}
+        run: rm -rf "$RUNNER_TEMP/signing"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: aarch64-unknown-linux-gnu
+          name: unix
           path: |
-            target/aarch64-unknown-linux-gnu/release/mirrord
-            target/aarch64-unknown-linux-gnu/release/libmirrord_layer.so
+            bazel-bin/release/mirrord_*
+            bazel-bin/release/libmirrord_layer_*
           if-no-files-found: error
           retention-days: 2
-  build_binaries_x86_64-unknown-linux-gnu:
-    needs: [validate_release_request]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+
+      # The Homebrew formula takes the checksums of the zips.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shasum
+          path: bazel-bin/release/*.shasum256
+          if-no-files-found: error
+          retention-days: 2
+
+      # `oci_push` pushes with the credentials that Docker keeps.
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the images (test)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          bazel run --config=release //mirrord/agent:push -- \
+            --repository ghcr.io/metalbear-co/mirrord-staging --tag ${{ github.sha }}
+          bazel run --config=release //mirrord/cli:push -- \
+            --repository ghcr.io/metalbear-co/mirrord-cli-staging --tag ${{ github.sha }}
+
+      # Staging images are attested too, so a workflow_dispatch run exercises the
+      # signing path without needing to cut a release.
+      - name: Attest the agent image's build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-staging
+          subject-digest: ${{ steps.build.outputs.agent_digest }}
+          push-to-registry: true
+
+      - name: Attest the CLI image's build provenance (test)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli-staging
+          subject-digest: ${{ steps.build.outputs.cli_digest }}
+          push-to-registry: true
+
+      # Only the version tags are published here. `latest` is moved after both
+      # attestations exist, so a signing failure can never leave the floating
+      # tag that existing installs follow pointing at an unattested image.
+      - name: Push the images (final/release)
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          bazel run --config=release //mirrord/agent:push -- \
+            --tag ${{ needs.validate_release_request.outputs.version }}
+          bazel run --config=release //mirrord/cli:push -- \
+            --tag ${{ needs.validate_release_request.outputs.version }}
+
+      # The agent runs privileged in our users' clusters, so it is the artifact
+      # most worth being able to trace back to a build. The digest is the one of
+      # the multi-arch index, which is what pulling either tag resolves to, so
+      # verifying against a tag works.
+      - name: Attest the agent image's build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord
+          subject-digest: ${{ steps.build.outputs.agent_digest }}
+          push-to-registry: true
+
+      - name: Attest the CLI image's build provenance
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/metalbear-co/mirrord-cli
+          subject-digest: ${{ steps.build.outputs.cli_digest }}
+          push-to-registry: true
+
+      # Pushes the same indexes again, so `latest` names the attested digests.
+      - name: Promote latest
+        if: needs.validate_release_request.outputs.should_release == 'true'
+        run: |
+          bazel run --config=release //mirrord/agent:push -- --tag latest
+          bazel run --config=release //mirrord/cli:push -- --tag latest
+
+  # Checks the macOS files with Apple's own tools, which `rcodesign` doesn't replace: that the
+  # signatures are valid and MetalBear's, that the files hold both CPUs, and that the CLI runs.
+  verify_binaries_macos:
+    needs: [build_unix_and_release_images]
+    runs-on: blacksmith-6vcpu-macos-15
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-          rustflags: ""
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
-      - run: uv --version
-      - run: uv tool install cargo-zigbuild==0.23.0
-      - run: uv tool install ziglang==0.15.2 --with-executables-from ziglang
-      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: ln -sf "$(command -v python-zig)" "$HOME/.local/bin/zig"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - name: Build mirrord CLI
-        run: cargo xtask build-cli --platform linux-x86_64 --zigbuild --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: x86_64-unknown-linux-gnu
-          path: |
-            target/x86_64-unknown-linux-gnu/release/mirrord
-            target/x86_64-unknown-linux-gnu/release/libmirrord_layer.so
-          if-no-files-found: error
-          retention-days: 2
+          name: unix
+          path: release
+
+      - name: Verify the macOS files
+        working-directory: release
+        run: |
+          for file in mirrord_mac_universal libmirrord_layer_mac_universal.dylib; do
+            codesign --verify --strict --verbose=2 "$file"
+            codesign --display --verbose=2 "$file" 2>&1 | grep -q "Authority=Developer ID Application: METALBEAR TECH LTD"
+            lipo -archs "$file"
+          done
+          # `lipo -verify_arch` fails unless the file has every CPU that it names. The layer also
+          # has the arm64e shim (see `mirrord/layer/BUILD.bazel`).
+          lipo mirrord_mac_universal -verify_arch x86_64 arm64
+          lipo libmirrord_layer_mac_universal.dylib -verify_arch x86_64 arm64 arm64e
+          chmod +x mirrord_mac_universal
+          ./mirrord_mac_universal --version
+
   build_binaries_windows:
     needs: [validate_release_request]
     if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
     runs-on: windows-latest
+    timeout-minutes: 180
     environment: release
     permissions:
       # Needed to mint the OIDC token that authenticates against Azure Artifact Signing.
@@ -246,56 +346,39 @@ jobs:
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-          rustflags: ""
       - name: Install WiX Toolset
         run: |
           choco install wixtoolset -y
           $env:PATH = "C:\Program Files (x86)\WiX Toolset v3.14\bin;$env:PATH"
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Get release version
-        id: version
-        run: |
-          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+      - uses: ./.github/actions/setup-bazel
         with:
-          node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - name: Prepare pnpm (first corepack run downloads it)
-        run: pnpm --version
+          publishes: "true"
 
+      # Signing changes the files in place, so they're copied out of Bazel's output tree, and lose
+      # the read-only attribute that Bazel gives its outputs. `build_windows_on_release_branch` in
+      # `ci.yaml` builds the same targets on the release pull request.
       - name: Build mirrord DLL and EXE
         run: |
           $ErrorActionPreference = "Stop"
 
-          cargo xtask build-cli --release
+          bazel build --config=release //mirrord/cli:cli_standalone //mirrord/layer-win
+          if ($LASTEXITCODE -ne 0) { throw "bazel build failed" }
 
-          $uiIndex = "packages\ui\dist\index.html"
-          if (-not (Test-Path $uiIndex)) {
-            throw "UI frontend assets not found at $uiIndex - the release binary would serve 404s from 'mirrord ui'"
-          }
+          $release = "$env:RUNNER_TEMP\release"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $exe = "$release\mirrord.exe"
+          $dll = "$release\mirrord_layer_win.dll"
+          Copy-Item bazel-bin\mirrord\cli\standalone\mirrord.exe $exe
+          Copy-Item bazel-bin\mirrord\layer-win\mirrord_layer_win.dll $dll
+          foreach ($file in @($exe, $dll)) { (Get-Item $file).IsReadOnly = $false }
 
-          $dll = "target\release\mirrord_layer_win.dll"
-          if (-not (Test-Path $dll)) {
-            throw "DLL not found at $dll"
-          }
-
-          $exe = "target\release\mirrord.exe"
-          if (-not (Test-Path $exe)) {
-            throw "EXE not found at $exe"
-          }
-
-          # Save paths for next steps. Absolute, so the signing action resolves them
-          # regardless of the working directory it runs from.
-          echo "MIRRORD_DLL=$((Resolve-Path $dll).Path)" >> $env:GITHUB_ENV
-          echo "MIRRORD_EXE=$((Resolve-Path $exe).Path)" >> $env:GITHUB_ENV
+          echo "RELEASE_DIR=$release" >> $env:GITHUB_ENV
+          echo "MIRRORD_DLL=$dll" >> $env:GITHUB_ENV
+          echo "MIRRORD_EXE=$exe" >> $env:GITHUB_ENV
 
       - name: Azure login
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
@@ -331,8 +414,7 @@ jobs:
           Copy-Item "mirrord\cli\wix\mirrord.ico" "$wixDir\mirrord.ico" -Force
           Copy-Item "mirrord\cli\wix\License.rtf" "$wixDir\License.rtf" -Force
 
-          # Get version from step output
-          $version = "${{ steps.version.outputs.version }}"
+          $version = "${{ needs.validate_release_request.outputs.version }}"
 
           # MSI's ProductVersion caps each field at Major.Minor.Build = 255.255.65535.
           # We encode the CLI version as 1.<major>.<minor * 10 + patch>, using the wide Build field 
@@ -368,7 +450,7 @@ jobs:
 
           # Build MSI
           $obj = "$wixDir\main.wixobj"
-          $msi = "$wixDir\mirrord.msi"
+          $msi = "$env:RELEASE_DIR\mirrord.msi"
 
           candle.exe -nologo "$wixDir\main.wxs" -out $obj
           if ($LASTEXITCODE -ne 0) { throw "candle.exe failed" }
@@ -409,13 +491,9 @@ jobs:
 
       - name: Generate checksums
         run: |
-          $exe = $env:MIRRORD_EXE
-          $dll = $env:MIRRORD_DLL
-          $msi = $env:MIRRORD_MSI
-
-          (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$exe.sha256" -NoNewline -Encoding ascii
-          (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$dll.sha256" -NoNewline -Encoding ascii
-          (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$msi.sha256" -NoNewline -Encoding ascii
+          foreach ($file in @($env:MIRRORD_EXE, $env:MIRRORD_DLL, $env:MIRRORD_MSI)) {
+            (Get-FileHash $file -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath "$file.sha256" -NoNewline -Encoding ascii
+          }
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -430,549 +508,10 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
-  # Stage 1: Build x86_64 layer (runs in parallel)
-  build_layer_macos_x86_64:
-    needs: [validate_release_request]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: macos-15-intel
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          target: x86_64-apple-darwin
-          rustflags: ""
-          cache: false
-      - name: Import Code-Signing Certificates
-        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: Build x86_64 layer
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo xtask build-layer --platform macos-x86_64 --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: layer-x86_64-apple-darwin
-          path: target/release/libmirrord_layer.dylib
-          if-no-files-found: error
-          retention-days: 2
-
-  # Stage 1: Build aarch64 layer + shim (runs in parallel)
-  build_layer_macos_aarch64:
-    needs: [validate_release_request]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-6vcpu-macos-15
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          target: aarch64-apple-darwin
-          rustflags: ""
-          cache: false
-      - name: Import Code-Signing Certificates
-        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: Build aarch64 layer + shim
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo xtask build-layer --platform macos-aarch64 --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: layer-aarch64-apple-darwin
-          path: |
-            target/release/libmirrord_layer.dylib
-            target/release/shim.dylib
-          if-no-files-found: error
-          retention-days: 2
-
-  # Stage 2: Link universal layer from pre-built layers
-  link_layer_macos_universal:
-    runs-on: blacksmith-6vcpu-macos-15
-    needs: [validate_release_request, build_layer_macos_x86_64, build_layer_macos_aarch64]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: layer-x86_64-apple-darwin
-          path: artifacts/layer-x86_64
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: layer-aarch64-apple-darwin
-          path: artifacts/layer-aarch64
-      - name: Recreate cargo target structure
-        run: |
-          mkdir -p target/x86_64-apple-darwin/release
-          mkdir -p target/release
-          cp artifacts/layer-x86_64/libmirrord_layer.dylib target/x86_64-apple-darwin/release/
-          cp artifacts/layer-aarch64/libmirrord_layer.dylib target/release/
-          cp artifacts/layer-aarch64/shim.dylib target/release/
-      - name: Import Code-Signing Certificates
-        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: Link universal layer
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo xtask link-layer-universal --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: layer-universal-apple-darwin
-          path: |
-            target/universal-apple-darwin/release/libmirrord_layer.dylib
-            target/release/libmirrord_layer.dylib
-          if-no-files-found: error
-          retention-days: 2
-
-  # Stage 3: Build x86_64 CLI (runs in parallel)
-  build_cli_macos_x86_64:
-    runs-on: macos-15-intel
-    needs: [validate_release_request, link_layer_macos_universal]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          target: x86_64-apple-darwin
-          rustflags: ""
-          cache: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: layer-universal-apple-darwin
-          path: artifacts/layer-universal
-      - name: Recreate layer structure
-        run: |
-          mkdir -p target/universal-apple-darwin/release
-          mkdir -p target/aarch64-apple-darwin/release
-          cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-          cp artifacts/layer-universal/release/libmirrord_layer.dylib target/aarch64-apple-darwin/release/
-      - name: Import Code-Signing Certificates
-        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: Build x86_64 CLI
-        env:
-          MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo xtask build-cli --platform macos-x86_64 --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: cli-x86_64-apple-darwin
-          path: target/release/mirrord
-          if-no-files-found: error
-          retention-days: 2
-
-  # Stage 3: Build aarch64 CLI (runs in parallel)
-  build_cli_macos_aarch64:
-    runs-on: blacksmith-6vcpu-macos-15
-    needs: [validate_release_request, link_layer_macos_universal]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          target: aarch64-apple-darwin
-          rustflags: ""
-          cache: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
-        with:
-          node-version: 24
-      - name: Enable corepack (pnpm-only; leave npm alone for wizard build)
-        run: corepack enable pnpm
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: layer-universal-apple-darwin
-          path: artifacts/layer-universal
-      - name: Recreate layer structure
-        run: |
-          mkdir -p target/universal-apple-darwin/release
-          mkdir -p target/release
-          cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-          cp artifacts/layer-universal/release/libmirrord_layer.dylib target/release/
-      - name: Import Code-Signing Certificates
-        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: Build aarch64 CLI
-        env:
-          MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo xtask build-cli --platform macos-aarch64 --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: cli-aarch64-apple-darwin
-          path: target/release/mirrord
-          if-no-files-found: error
-          retention-days: 2
-
-  # Stage 4: Merge universal CLI from pre-built CLIs
-  merge_cli_macos_universal:
-    runs-on: blacksmith-6vcpu-macos-15
-    needs:
-      [
-        validate_release_request,
-        build_cli_macos_x86_64,
-        build_cli_macos_aarch64,
-        link_layer_macos_universal,
-      ]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: cli-x86_64-apple-darwin
-          path: artifacts/cli-x86_64
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: cli-aarch64-apple-darwin
-          path: artifacts/cli-aarch64
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-        with:
-          name: layer-universal-apple-darwin
-          path: artifacts/layer-universal
-      - name: Recreate cargo target structure
-        run: |
-          mkdir -p target/x86_64-apple-darwin/release
-          mkdir -p target/release
-          mkdir -p target/universal-apple-darwin/release
-          cp artifacts/cli-x86_64/mirrord target/x86_64-apple-darwin/release/
-          cp artifacts/cli-aarch64/mirrord target/release/
-          cp artifacts/layer-universal/universal-apple-darwin/release/libmirrord_layer.dylib target/universal-apple-darwin/release/
-      - name: Import Code-Signing Certificates
-        uses: metalbear-co/import-codesign-certs@7f43a75d5120d645e67d471d678ccbff1d140cd6
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - name: Install gon via HomeBrew for code signing and app notarization
-        run: |
-          brew tap mitchellh/gon
-          brew install mitchellh/gon/gon
-      - name: Merge universal CLI
-        env:
-          AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
-          AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
-        run: cargo xtask merge-cli-universal --release
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: universal-apple-darwin
-          path: |
-            target/universal-apple-darwin/release/mirrord
-            target/universal-apple-darwin/release/libmirrord_layer.dylib
-          if-no-files-found: error
-          retention-days: 2
-
-  release_docker_image:
-    needs: [validate_release_request]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    permissions:
-      packages: write
-      contents: read
-      # Keyless Sigstore signing of the build provenance, and recording it.
-      id-token: write
-      attestations: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - name: Check disk space
-        run: df . -h
-      - name: Free disk space
-        continue-on-error: true
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
-          sudo rm -rf \
-            /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            /usr/lib/jvm || true
-          echo "some directories deleted"
-          sudo apt install aptitude -y >/dev/null 2>&1
-          sudo aptitude purge aria2 ansible azure-cli shellcheck rpm xorriso zsync \
-            esl-erlang firefox gfortran-8 gfortran-9 google-chrome-stable \
-            google-cloud-sdk imagemagick \
-            libmagickcore-dev libmagickwand-dev libmagic-dev ant ant-optional kubectl \
-            mercurial apt-transport-https mono-complete libmysqlclient \
-            unixodbc-dev yarn chrpath libssl-dev libxft-dev \
-            libfreetype6 libfreetype6-dev libfontconfig1 libfontconfig1-dev \
-            snmp pollinate libpq-dev postgresql-client powershell ruby-full \
-            sphinxsearch subversion mongodb-org azure-cli microsoft-edge-stable \
-            -y -f >/dev/null 2>&1
-          sudo aptitude purge google-cloud-sdk -f -y >/dev/null 2>&1
-          sudo aptitude purge microsoft-edge-stable -f -y >/dev/null 2>&1 || true
-          sudo apt purge microsoft-edge-stable -f -y >/dev/null 2>&1 || true
-          sudo aptitude purge '~n ^mysql' -f -y >/dev/null 2>&1
-          sudo aptitude purge '~n ^php' -f -y >/dev/null 2>&1
-          sudo aptitude purge '~n ^dotnet' -f -y >/dev/null 2>&1
-          sudo apt-get autoremove -y >/dev/null 2>&1
-          sudo apt-get autoclean -y >/dev/null 2>&1
-          echo "some packages purged"
-      - name: Check disk space
-        run: |
-          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head
-          df . -h
-          sudo du /usr/ -hx -d 4 --threshold=1G | sort -hr | head
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Get release version
-        run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')" >> $GITHUB_OUTPUT
-        id: version
-
-      - name: Build and push (test)
-        id: build_test
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord-staging:${{ github.sha }}"
-        run: |
-          docker buildx bake -f ci/docker-bake.hcl agent --push \
-            --metadata-file /tmp/agent-metadata.json
-          digest=$(jq -r '.agent."containerimage.digest"' /tmp/agent-metadata.json)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-
-      # Staging images are attested too, so a workflow_dispatch run exercises the
-      # signing path without needing to cut a release.
-      - name: Attest build provenance (test)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-name: ghcr.io/metalbear-co/mirrord-staging
-          subject-digest: ${{ steps.build_test.outputs.digest }}
-          push-to-registry: true
-
-      # Only the version tag is published here. `latest` is moved after the
-      # attestation exists, so a signing failure can never leave the floating
-      # tag that existing installs follow pointing at an unattested image.
-      - name: Build and push (final/release)
-        id: build_release
-        if: needs.validate_release_request.outputs.should_release == 'true'
-        env:
-          AGENT_TAGS: "ghcr.io/metalbear-co/mirrord:${{ steps.version.outputs.version }}"
-          PRODUCT_CACHE_FROM: ""
-          PRODUCT_CACHE_TO: ""
-        run: |
-          docker buildx bake -f ci/docker-bake.hcl agent --push --no-cache \
-            --metadata-file /tmp/agent-metadata.json
-          digest=$(jq -r '.agent."containerimage.digest"' /tmp/agent-metadata.json)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-
-      # The agent runs privileged in our users' clusters, so it is the artifact
-      # most worth being able to trace back to a build. bake reports the digest
-      # of the multi-arch manifest list, which is what pulling either tag
-      # resolves to, so verifying against a tag works.
-      - name: Attest build provenance
-        if: needs.validate_release_request.outputs.should_release == 'true'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-name: ghcr.io/metalbear-co/mirrord
-          subject-digest: ${{ steps.build_release.outputs.digest }}
-          push-to-registry: true
-
-      - name: Promote latest
-        if: needs.validate_release_request.outputs.should_release == 'true'
-        run: |
-          docker buildx imagetools create \
-            -t ghcr.io/metalbear-co/mirrord:latest \
-            ghcr.io/metalbear-co/mirrord@${{ steps.build_release.outputs.digest }}
-
-  release_cli_docker_image:
-    needs: [validate_release_request]
-    if: github.event_name == 'workflow_dispatch' || needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    permissions:
-      packages: write
-      contents: read
-      # Keyless Sigstore signing of the build provenance, and recording it.
-      id-token: write
-      attestations: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-      - name: Check disk space
-        run: df . -h
-      - name: Free disk space
-        continue-on-error: true
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
-          sudo rm -rf \
-            /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
-            /usr/lib/jvm || true
-          echo "some directories deleted"
-          sudo apt install aptitude -y >/dev/null 2>&1
-          sudo aptitude purge aria2 ansible azure-cli shellcheck rpm xorriso zsync \
-            esl-erlang firefox gfortran-8 gfortran-9 google-chrome-stable \
-            google-cloud-sdk imagemagick \
-            libmagickcore-dev libmagickwand-dev libmagic-dev ant ant-optional kubectl \
-            mercurial apt-transport-https mono-complete libmysqlclient \
-            unixodbc-dev yarn chrpath libssl-dev libxft-dev \
-            libfreetype6 libfreetype6-dev libfontconfig1 libfontconfig1-dev \
-            snmp pollinate libpq-dev postgresql-client powershell ruby-full \
-            sphinxsearch subversion mongodb-org azure-cli microsoft-edge-stable \
-            -y -f >/dev/null 2>&1
-          sudo aptitude purge google-cloud-sdk -f -y >/dev/null 2>&1
-          sudo aptitude purge microsoft-edge-stable -f -y >/dev/null 2>&1 || true
-          sudo apt purge microsoft-edge-stable -f -y >/dev/null 2>&1 || true
-          sudo aptitude purge '~n ^mysql' -f -y >/dev/null 2>&1
-          sudo aptitude purge '~n ^php' -f -y >/dev/null 2>&1
-          sudo aptitude purge '~n ^dotnet' -f -y >/dev/null 2>&1
-          sudo apt-get autoremove -y >/dev/null 2>&1
-          sudo apt-get autoclean -y >/dev/null 2>&1
-          echo "some packages purged"
-      - name: Check disk space
-        run: |
-          sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head
-          df . -h
-          sudo du /usr/ -hx -d 4 --threshold=1G | sort -hr | head
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Get release version
-        run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"')" >> $GITHUB_OUTPUT
-        id: version
-
-      - name: Build and push (test)
-        id: build_test
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli-staging:${{ github.sha }}"
-        run: |
-          docker buildx bake -f ci/docker-bake.hcl cli --push \
-            --metadata-file /tmp/cli-metadata.json
-          digest=$(jq -r '.cli."containerimage.digest"' /tmp/cli-metadata.json)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-
-      - name: Attest build provenance (test)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-name: ghcr.io/metalbear-co/mirrord-cli-staging
-          subject-digest: ${{ steps.build_test.outputs.digest }}
-          push-to-registry: true
-
-      # As above: version tag now, `latest` only once provenance exists.
-      - name: Build and push (final/release)
-        id: build_release
-        if: needs.validate_release_request.outputs.should_release == 'true'
-        env:
-          CLI_TAGS: "ghcr.io/metalbear-co/mirrord-cli:${{ steps.version.outputs.version }}"
-          PRODUCT_CACHE_FROM: ""
-          PRODUCT_CACHE_TO: ""
-        run: |
-          docker buildx bake -f ci/docker-bake.hcl cli --push --no-cache \
-            --metadata-file /tmp/cli-metadata.json
-          digest=$(jq -r '.cli."containerimage.digest"' /tmp/cli-metadata.json)
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-
-      - name: Attest build provenance
-        if: needs.validate_release_request.outputs.should_release == 'true'
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
-        with:
-          subject-name: ghcr.io/metalbear-co/mirrord-cli
-          subject-digest: ${{ steps.build_release.outputs.digest }}
-          push-to-registry: true
-
-      - name: Promote latest
-        if: needs.validate_release_request.outputs.should_release == 'true'
-        run: |
-          docker buildx imagetools create \
-            -t ghcr.io/metalbear-co/mirrord-cli:latest \
-            ghcr.io/metalbear-co/mirrord-cli@${{ steps.build_release.outputs.digest }}
-
-  check_for_new_docs:
-    needs: [validate_release_request]
-    if: needs.validate_release_request.outputs.should_release == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    outputs:
-      config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-          fetch-tags: true
-          fetch-depth: 0
-      - name: get config changes since last release
-        id: changed-config-schema
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            mirrord-schema.json
-          base_sha: latest
-
   update_config_docs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [validate_release_request, check_for_new_docs]
-    if: needs.validate_release_request.outputs.should_release == 'true' && needs.check_for_new_docs.outputs.config_schema_changed == 'true'
+    needs: [validate_release_request]
+    if: needs.validate_release_request.outputs.should_release == 'true'
     permissions:
       contents: write
     env:
@@ -981,15 +520,34 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+          # The step that pushes to the `docs` branch takes the token itself.
+          persist-credentials: false
+          fetch-tags: true
+          fetch-depth: 0
+      # The docs come from the config schema's doc comments, so they only change with the schema.
+      # The `latest` tag is the previous release.
+      - name: Check whether the config schema changed since the last release
+        id: schema
+        env:
+          SHA: ${{ needs.validate_release_request.outputs.sha }}
+        run: |
+          if git diff --quiet "latest...$SHA" -- mirrord-schema.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/setup-bazel
+        if: steps.schema.outputs.changed == 'true'
         with:
-          cache: false
-      - run: mkdir ${{ env.TEMP_DIR_NAME }}
+          publishes: "true"
+      - if: steps.schema.outputs.changed == 'true'
+        run: mkdir ${{ env.TEMP_DIR_NAME }}
       - name: Generate new GitBook files from our config
+        if: steps.schema.outputs.changed == 'true'
         run: ./scripts/residency.sh # uses env.TEMP_DIR_NAME
         shell: bash
       - name: Commit to docs branch (syncs with GitBook)
+        if: steps.schema.outputs.changed == 'true'
         uses: metalbear-co/github-pages-deploy-action@d92aa235d04922e8f08b40ce78cc5442fcfbfa2f
         with:
           folder: ${{ env.TEMP_DIR_NAME }}
@@ -1008,12 +566,9 @@ jobs:
     needs:
       [
         validate_release_request,
-        build_binaries_aarch64-unknown-linux-gnu,
-        build_binaries_x86_64-unknown-linux-gnu,
+        build_unix_and_release_images,
+        verify_binaries_macos,
         build_binaries_windows,
-        merge_cli_macos_universal,
-        release_docker_image,
-        release_cli_docker_image,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
@@ -1028,60 +583,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.validate_release_request.outputs.sha }}
+      # The artifacts hold the files under the names that the release gives them.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          path: /tmp/artifacts
-          pattern: +(*-unknown-linux-gnu|*-apple-darwin|*-pc-windows-msvc)
-      - uses: metalbear-co/action-zip@0852c26906e00f8a315c704958823928d8018b28
-      - name: Create mirrord linux-x64 zip file
-        run: |
-          zip mirrord_linux_x86_64.zip mirrord
-          shasum -a 256 mirrord_linux_x86_64.zip > mirrord_linux_x86_64.shasum256
-        working-directory: /tmp/artifacts/x86_64-unknown-linux-gnu
-      - name: Create mirrord linux-aarch64 zip file
-        run: |
-          zip mirrord_linux_aarch64.zip mirrord
-          shasum -a 256 mirrord_linux_aarch64.zip > mirrord_linux_aarch64.shasum256
-        working-directory: /tmp/artifacts/aarch64-unknown-linux-gnu
-      - name: Create mirrord macos zip file
-        run: |
-          zip mirrord_mac_universal.zip mirrord
-          shasum -a 256 mirrord_mac_universal.zip > mirrord_mac_universal.shasum256
-        working-directory: /tmp/artifacts/universal-apple-darwin
-      # used for the homebrew formula
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: shasum
-          path: |
-            /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256
-            /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256
-            /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256
-          if-no-files-found: error
-          retention-days: 2
-      - name: Prepare binaries for upload
-        run: |
-          mkdir /tmp/release
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_x86_64.so
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_x86_64
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.zip /tmp/release/mirrord_linux_x86_64.zip
-          mv /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 /tmp/release/mirrord_linux_x86_64.shasum256
-
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/libmirrord_layer.so /tmp/release/libmirrord_layer_linux_aarch64.so
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord /tmp/release/mirrord_linux_aarch64
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.zip /tmp/release/mirrord_linux_aarch64.zip
-          mv /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 /tmp/release/mirrord_linux_aarch64.shasum256
-
-          mv /tmp/artifacts/universal-apple-darwin/libmirrord_layer.dylib /tmp/release/libmirrord_layer_mac_universal.dylib
-          mv /tmp/artifacts/universal-apple-darwin/mirrord /tmp/release/mirrord_mac_universal
-          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.zip /tmp/release/mirrord_mac_universal.zip
-          mv /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 /tmp/release/mirrord_mac_universal.shasum256
-
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord.exe /tmp/release/mirrord.exe
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord_layer_win.dll /tmp/release/mirrord_layer_win.dll
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi /tmp/release/mirrord.msi
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord.exe.sha256 /tmp/release/mirrord.exe.sha256
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/mirrord/mirrord/target/release/mirrord_layer_win.dll.sha256 /tmp/release/mirrord_layer_win.dll.sha256
-          mv /tmp/artifacts/x86_64-pc-windows-msvc/_temp/wix/mirrord.msi.sha256 /tmp/release/mirrord.msi.sha256
+          path: /tmp/release
+          pattern: +(unix|x86_64-pc-windows-msvc)
+          merge-multiple: true
 
       - name: Extract release notes from CHANGELOG.md
         run: |
@@ -1146,10 +653,10 @@ jobs:
       - name: Get release version and hashes
         shell: bash # for -o pipefail, see https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions#exit-codes-and-error-action-preference
         run: |
-          echo "version=$(grep -m 1 version Cargo.toml | cut -d' ' -f3 | tr -d '\"' | cut -d'-' -f1)" >> $GITHUB_ENV
-          echo "sha256_mac=$(cat /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
-          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
+          echo "version=${{ needs.validate_release_request.outputs.version }}" >> $GITHUB_ENV
+          echo "sha256_mac=$(cat /tmp/artifacts/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
+          echo "sha256_linux_aarch64=$(cat /tmp/artifacts/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
+          echo "sha256_linux_x86_64=$(cat /tmp/artifacts/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
       - name: Checkout into homebrew-mirrord
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -1186,20 +693,13 @@ jobs:
           name: x86_64-pc-windows-msvc
           path: artifacts/windows
 
-      - name: Get release version
-        id: version
-        run: |
-          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Build and publish Chocolatey package
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Get version from step output
-          $version = "${{ steps.version.outputs.version }}"
+          $version = "${{ needs.validate_release_request.outputs.version }}"
 
           # Find the MSI file
           $msi = Get-ChildItem "artifacts/windows" -Filter "mirrord.msi" -Recurse | Select-Object -First 1
@@ -1314,12 +814,6 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Get release version
-        id: version
-        run: |
-          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Update WinGet manifest
         env:
           # Classic PAT from a bot account. A GitHub App installation token
@@ -1331,8 +825,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # Get version from step output
-          $version = "${{ steps.version.outputs.version }}"
+          $version = "${{ needs.validate_release_request.outputs.version }}"
 
           # Construct MSI download URL from GitHub release
           $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
@@ -1373,7 +866,7 @@ jobs:
           Write-Host "Successfully updated WinGet manifest"
 
   update_latest:
-    needs: [validate_release_request, release_homebrew, check_for_new_docs]
+    needs: [validate_release_request, release_homebrew]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
     permissions:
@@ -1402,7 +895,7 @@ jobs:
 
   update_infra_cli_version:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
+    needs: [validate_release_request, release_homebrew, update_latest]
     if: needs.validate_release_request.outputs.should_release == 'true'
     steps:
       - name: Create app token for infra workflow dispatch
@@ -1431,7 +924,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
-    needs: [validate_release_request, release_homebrew, check_for_new_docs, update_latest]
+    needs: [validate_release_request, release_homebrew, update_latest]
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:

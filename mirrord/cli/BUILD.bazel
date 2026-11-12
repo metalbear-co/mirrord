@@ -10,7 +10,7 @@
 
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
 load("@rules_distroless//distroless:defs.bzl", "cacerts")
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_load", "oci_push")
 load("@tar.bzl//tar:tar.bzl", "tar")
 load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY")
 load("//bazel:image.bzl", "IMAGE_LABELS", "image_tag")
@@ -127,6 +127,8 @@ rust_binary(
         for condition, files in BUNDLED_FILES.items()
     }),
     rustc_flags = MAIN_THREAD_STACK_FLAGS,
+    # `//release` distributes `:cli_standalone`.
+    visibility = ["//release:__pkg__"],
 )
 
 # The `#[test]` functions in the CLI's sources, like `cargo test --bins`. The test takes the
@@ -325,5 +327,15 @@ oci_image_index(
         ":image_aarch64",
         ":image_x86_64",
     ],
+    tags = ["manual"],
+)
+
+# Pushes `:image_index` to `ghcr.io/metalbear-co/mirrord-cli`, which the release does with
+# `bazel run --config=release //mirrord/cli:push -- --tag <version>`. `--repository` pushes it
+# elsewhere, like a staging repository.
+oci_push(
+    name = "push",
+    image = ":image_index",
+    repository = "ghcr.io/metalbear-co/mirrord-cli",
     tags = ["manual"],
 )
