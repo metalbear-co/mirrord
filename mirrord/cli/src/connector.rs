@@ -122,12 +122,15 @@ pub(crate) struct DirectConnector {
 
 /// Connects to an agent through a mirrord-sessions-manager room.
 ///
-/// Each [`connect`](AgentConnector::connect) call opens a fresh, one-shot data plane connection
-/// to the room. There is no reconnect support: once a connection to the room fails, the session
-/// is over, same as [`DirectConnector`].
+/// The first connection is established while the session is set up, so its wait for an agent
+/// shows up in the progress, and is parked in [`Self::first_conn`], to be handed out on the first
+/// [`connect`](AgentConnector::connect) call. Any later call opens a fresh, one-shot data plane
+/// connection to the room. There is no reconnect support: once a connection to the room fails,
+/// the session is over, same as [`DirectConnector`].
 pub(crate) struct SessionsManagerConnector {
     pub(crate) connect_info: SessionsManagerConnectInfo,
     pub(crate) route: SessionsManagerRoute,
+    pub(crate) first_conn: Option<Box<OperatorConnection>>,
 }
 
 /// How a [`SessionsManagerConnector`] reaches its sessions-manager.
@@ -139,7 +142,11 @@ pub(crate) enum SessionsManagerRoute {
 }
 
 impl SessionsManagerConnector {
-    async fn connect(&self) -> Result<OperatorConnection, SessionsManagerClientError> {
+    /// Takes `&mut self` only to keep the future [`Send`], since [`Self::first_conn`] isn't
+    /// [`Sync`].
+    pub(crate) async fn connect(
+        &mut self,
+    ) -> Result<OperatorConnection, SessionsManagerClientError> {
         match &self.route {
             SessionsManagerRoute::Operator(client) => {
                 self.connect_with(OperatorTransport::new(client.clone()))
@@ -157,7 +164,7 @@ impl SessionsManagerConnector {
 
     /// Generic over the transport because [`SessionsManagerTransport`] isn't object-safe.
     async fn connect_with<T: SessionsManagerTransport>(
-        &self,
+        &mut self,
         transport: T,
     ) -> Result<OperatorConnection, SessionsManagerClientError> {
         let client = IntproxyClient::with_transport(self.connect_info.clone(), transport)?;
@@ -173,6 +180,7 @@ impl fmt::Debug for SessionsManagerConnector {
                 "operator_hosted",
                 &matches!(self.route, SessionsManagerRoute::Operator(_)),
             )
+            .field("has_first_conn", &self.first_conn.is_some())
             .finish()
     }
 }
@@ -369,9 +377,12 @@ impl ProtocolConnector for AgentConnector {
                 Ok(AgentConnection::Direct(Framed::new(stream, Codec)))
             }
             AgentConnector::SessionsManager(sessions_manager) => {
-                let conn = sessions_manager.connect().await?;
+                let conn = match sessions_manager.first_conn.take() {
+                    Some(conn) => conn,
+                    None => Box::new(sessions_manager.connect().await?),
+                };
 
-                Ok(AgentConnection::SessionsManager(Box::new(conn)))
+                Ok(AgentConnection::SessionsManager(conn))
             }
         }
     }
