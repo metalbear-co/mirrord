@@ -165,7 +165,8 @@ impl TcpStealerTask {
                 },
             ) => {
                 tracing::warn!(
-                    connection = ?conn,
+                    source = %conn.info().peer_addr,
+                    destination = %conn.info().original_destination,
                     "Connection on a port stolen with an HTTP filter is not HTTP, or HTTP \
                      detection timed out, passing it to the target without filtering",
                 );
