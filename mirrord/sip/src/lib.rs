@@ -662,6 +662,11 @@ mod main {
     /// entitlement. Binaries with this entitlement allow `DYLD_INSERT_LIBRARIES` even when
     /// restricted, so they don't need SIP patching (node for example, probably for loading 3rd
     /// party dylibs).
+    ///
+    /// The entitlement must be set to `true`: some of Apple's binaries, such as `/usr/bin/aa` on
+    /// newer macOS versions, set it to `false`, and macOS strips the `DYLD_*` variables from those.
+    /// The entitlements blob holds an XML plist, in which the key's value is the element that
+    /// follows the `<key>` element.
     fn has_dyld_entitlement(data: &[u8]) -> bool {
         let Ok(mach) = MachFile::parse(data) else {
             return false;
@@ -669,9 +674,10 @@ mod main {
         for macho in mach.into_iter() {
             if let Ok(Some(signature)) = macho.code_signature()
                 && let Ok(Some(entitlements)) = signature.entitlements()
-                && entitlements
+                && let Some((_, after_key)) = entitlements
                     .as_str()
-                    .contains("com.apple.security.cs.allow-dyld-environment-variables")
+                    .split_once("<key>com.apple.security.cs.allow-dyld-environment-variables</key>")
+                && after_key.trim_start().starts_with("<true/>")
             {
                 return true;
             }
@@ -1082,7 +1088,14 @@ mod main {
                 .env("DYLD_PRINT_LIBRARIES", "1")
                 .output()
                 .unwrap();
-            assert!(String::from_utf8_lossy(&output.stderr).contains("libsystem_kernel.dylib"));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("libsystem_kernel.dylib"),
+                "{} didn't print its libraries, so dyld ignored DYLD_PRINT_LIBRARIES. It exited \
+                 with {}, and printed:\n{stderr}",
+                patched_bin_path.display(),
+                output.status,
+            );
         }
 
         /// Call `patch_binary` directly (it's a private function), verify the patched binary
@@ -1131,33 +1144,25 @@ mod main {
             patch_binary_and_verify_dyld_print("/bin/ls");
         }
 
-        /// `/usr/bin/aa` is restricted but has the `allow-dyld-environment-variables`
-        /// entitlement, so DYLD_INSERT_LIBRARIES works without patching.
-        #[test]
-        fn entitled_binary_is_not_sip() {
-            let result = sip_patch("/usr/bin/aa", SipPatchOptions::default(), None).unwrap();
-            assert!(result.is_none(), "entitled binary should not need patching");
-            // Verify DYLD_* features work on the original binary:
-            run_and_verify_dyld_print(Path::new("/usr/bin/aa"));
-        }
-
-        /// Test that after patching we can Successfully use DYLD features on a binary that had
-        /// [the runtime flag](https://developer.apple.com/documentation/security/seccodesignatureflags/runtime)
-        /// set before the patch.
-        /// No binary in `/bin/` has any flag set, so we first do a kind of an opposite patch to
-        /// create a binary with that flag, then we do our normal patch and test that it worked.
-        #[test]
-        fn patch_binary_with_runtime_flag() {
+        /// Signs a copy of `/bin/wait4path` ad hoc with `flags`, and with the
+        /// `allow-dyld-environment-variables` entitlement set to `dyld_entitlement`, if any.
+        ///
+        /// The tests sign their own binary, because no binary in `/bin/` has a flag set, and the
+        /// entitlements of Apple's binaries change between macOS versions: `/usr/bin/aa` has the
+        /// entitlement set to `true` on some versions and to `false` on others. `wait4path` is the
+        /// smallest binary in `/bin/` that does nothing when it runs without arguments.
+        ///
+        /// The copy holds only the slice that `patch_binary` would take, x86_64 on Apple Silicon,
+        /// because `wait4path`'s other slice is arm64e, which macOS 26.3 stops with SIGILL once the
+        /// binary isn't signed by Apple.
+        fn sign_wait4path(
+            flags: CodeSignatureFlags,
+            dyld_entitlement: Option<bool>,
+        ) -> tempfile::NamedTempFile {
             let signed_temp_file = tempfile::NamedTempFile::new().unwrap();
 
             let mut settings = apple_codesign::SigningSettings::default();
-
-            settings.set_code_signature_flags(
-                apple_codesign::SettingsScope::Main,
-                CodeSignatureFlags::ADHOC
-                    | CodeSignatureFlags::RUNTIME
-                    | CodeSignatureFlags::RESTRICT,
-            );
+            settings.set_code_signature_flags(apple_codesign::SettingsScope::Main, flags);
             settings.set_binary_identifier(
                 apple_codesign::SettingsScope::Main,
                 signed_temp_file
@@ -1166,13 +1171,82 @@ mod main {
                     .unwrap()
                     .to_string_lossy(),
             );
+            if let Some(dyld_entitlement) = dyld_entitlement {
+                settings
+                    .set_entitlements_xml(
+                        apple_codesign::SettingsScope::Main,
+                        format!(
+                            r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>com.apple.security.cs.allow-dyld-environment-variables</key><{dyld_entitlement}/></dict></plist>"#
+                        ),
+                    )
+                    .unwrap();
+            }
+            let data = std::fs::read("/bin/wait4path").unwrap();
+            let slice = BinaryInfo::from_object_bytes(&data).unwrap();
+            let unsigned_temp_file = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(
+                unsigned_temp_file.path(),
+                data.get(slice.offset..slice.offset + slice.size).unwrap(),
+            )
+            .unwrap();
+            // The signed copy, and the binary that `sip_patch` makes of it, take their mode from
+            // this file, so it must be executable like `wait4path`.
+            std::fs::set_permissions(
+                unsigned_temp_file.path(),
+                std::fs::metadata("/bin/wait4path").unwrap().permissions(),
+            )
+            .unwrap();
 
-            let signer = apple_codesign::UnifiedSigner::new(settings);
-            // `wait4path` chosen because it's the lightest file in /bin/ that doesn't do anything
-            // when called without arguments.
-            signer
-                .sign_path("/bin/wait4path", signed_temp_file.path())
+            apple_codesign::UnifiedSigner::new(settings)
+                .sign_path(unsigned_temp_file.path(), signed_temp_file.path())
                 .unwrap();
+
+            signed_temp_file
+        }
+
+        /// A binary with the runtime flag and the `allow-dyld-environment-variables` entitlement
+        /// keeps DYLD_INSERT_LIBRARIES, so it's not patched.
+        #[test]
+        fn entitled_binary_is_not_sip() {
+            let signed_temp_file = sign_wait4path(
+                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+                Some(true),
+            );
+
+            let result = sip_patch(
+                signed_temp_file.path().to_str().unwrap(),
+                SipPatchOptions::default(),
+                None,
+            )
+            .unwrap();
+            assert!(result.is_none(), "entitled binary should not need patching");
+            run_and_verify_dyld_print(signed_temp_file.path());
+        }
+
+        /// macOS removes DYLD_INSERT_LIBRARIES from a binary with the runtime flag whose
+        /// `allow-dyld-environment-variables` entitlement is set to `false`, like `/usr/bin/aa`
+        /// on newer macOS versions, so the binary is patched like one without the entitlement.
+        #[test]
+        fn binary_with_false_entitlement_is_patched() {
+            let signed_temp_file = sign_wait4path(
+                CodeSignatureFlags::ADHOC | CodeSignatureFlags::RUNTIME,
+                Some(false),
+            );
+
+            patch_sip_and_verify_dyld_print(signed_temp_file.path().to_str().unwrap());
+        }
+
+        /// Test that after patching we can Successfully use DYLD features on a binary that had
+        /// [the runtime flag](https://developer.apple.com/documentation/security/seccodesignatureflags/runtime)
+        /// set before the patch.
+        #[test]
+        fn patch_binary_with_runtime_flag() {
+            let signed_temp_file = sign_wait4path(
+                CodeSignatureFlags::ADHOC
+                    | CodeSignatureFlags::RUNTIME
+                    | CodeSignatureFlags::RESTRICT,
+                None,
+            );
 
             patch_sip_and_verify_dyld_print(signed_temp_file.path().to_str().unwrap());
         }
