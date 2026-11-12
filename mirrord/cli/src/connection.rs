@@ -552,22 +552,18 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         let standalone =
             standalone_sessions_manager(config).map_err(CliError::SessionsManagerUrl)?;
         let message = match &standalone {
-            None => "Connecting through the sessions-manager hosted by the mirrord operator, \
-                     because `operator` is `true`"
-                .to_owned(),
-            Some(endpoint) => match endpoint.source {
-                EndpointSource::Explicit => format!(
-                    "Connecting through the sessions-manager at {endpoint}, set by \
-                     `sessions_manager.url` or MIRRORD_SESSIONS_MANAGER_URL"
-                ),
-                EndpointSource::Default => {
-                    format!("Connecting through the MetalBear Cloud sessions-manager at {endpoint}")
+            None => {
+                "connecting through the sessions-manager hosted by the mirrord operator".to_owned()
+            }
+            Some(endpoint) => format!(
+                "connecting through the{} sessions-manager at {endpoint}",
+                match endpoint.source {
+                    EndpointSource::Explicit => "",
+                    EndpointSource::Default => " MetalBear Cloud",
                 }
-            },
+            ),
         };
-        tracing::info!("{message}");
-        progress.info(&message);
-
+        let mut first_connect_progress = progress.subtask(&message);
         let (route, agent_connect_info) = match standalone {
             None => (
                 SessionsManagerRoute::Operator(
@@ -583,14 +579,21 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 )
             }
         };
-        let connector = AgentConnector::SessionsManager(SessionsManagerConnector {
+        let mut connector = SessionsManagerConnector {
             connect_info,
             route,
-        });
+            first_conn: None,
+        };
+        let conn = connector
+            .connect()
+            .await
+            .map_err(CliError::SessionsManagerConnect)?;
+        connector.first_conn = Some(Box::new(conn));
+        first_connect_progress.success(None);
 
         return Ok(ConnectData {
             connect_info: agent_connect_info,
-            connector,
+            connector: AgentConnector::SessionsManager(connector),
             // Implement - see MBE-1981
             api_version: (0, 0),
             target_container_ports: Vec::new(),

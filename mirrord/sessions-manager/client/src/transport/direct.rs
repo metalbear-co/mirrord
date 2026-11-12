@@ -254,7 +254,7 @@ impl SessionsManagerTransport for DirectTransport {
             .header(ACCEPT, "text/event-stream")
             .send();
         let response = with_deadline(Some(deadline), request).await??;
-        if response.status() == StatusCode::UNAUTHORIZED
+        if [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN].contains(&response.status())
             && sent_authorization
             && let Some(error) = self.credentials.unauthorized_error()
         {

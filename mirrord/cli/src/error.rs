@@ -562,6 +562,14 @@ pub(crate) enum CliError {
     ))]
     SessionsManagerUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
 
+    #[error("failed to connect to the serverless target's agent through sessions-manager: {0}")]
+    #[diagnostic(help(
+        "If it timed out, check that the target's workload runs the mirrord remote bootstrap, and \
+        that it reaches the same sessions-manager as this session. Its logs show whether it \
+        registered.{GENERAL_HELP}"
+    ))]
+    SessionsManagerConnect(mirrord_sessions_manager_client::SessionsManagerClientError),
+
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorBranchCreationFailed(OperatorOperation, String),
