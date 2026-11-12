@@ -184,7 +184,7 @@ fn move_to_high_fd(stream: std::net::TcpStream) -> std::net::TcpStream {
 /// Creates a new pair of [`SyncEncoder`] and [`SyncDecoder`], using the given synchronous
 /// [`TcpStream`](std::net::TcpStream).
 ///
-/// On unix, both streams are moved to fds at or above [`SYNC_FRAMED_MIN_FD`].
+/// On unix, both streams are moved to fds at or above `SYNC_FRAMED_MIN_FD`.
 pub fn make_sync_framed<T1, T2>(
     stream: std::net::TcpStream,
 ) -> Result<(

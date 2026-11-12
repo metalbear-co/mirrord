@@ -48,7 +48,7 @@ pub const SHARED_SOCKETS_ENV_VAR: &str = "MIRRORD_SHARED_SOCKETS";
 ///   an [`BASE64_URL_SAFE`] encoded version of our [`SOCKETS`]. The env var is set as
 ///   `MIRRORD_SHARED_SOCKETS=({fd}, {UserSocket}),*`.
 ///
-/// - [`libc::FD_CLOEXEC`] behaviour: While rebuilding sockets from the env var, we also check if
+/// - `libc::FD_CLOEXEC` behaviour: While rebuilding sockets from the env var, we also check if
 ///   they're set with the cloexec flag, so that children processes don't end up using sockets that
 ///   are exclusive for their parents.
 pub static SOCKETS: LazyLock<Mutex<HashMap<SocketDescriptor, Arc<UserSocket>>>> =

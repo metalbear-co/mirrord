@@ -120,7 +120,7 @@ pub(super) enum Commands {
     ///
     /// Extracts mirrord-layer lib (which is compiled into the mirrord CLI binary)
     /// to a file, so that it can be used with
-    /// [`INJECTION_ENV_VAR`](crate::execution::INJECTION_ENV_VAR).
+    /// `INJECTION_ENV_VAR`.
     #[command(hide = true)]
     Extract { path: String },
 
