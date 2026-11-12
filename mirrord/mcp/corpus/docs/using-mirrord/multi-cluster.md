@@ -171,6 +171,8 @@ Most services behave identically everywhere, with small differences in where tem
 
 Everything else behaves the same in both modes. With `replicas`, each cluster serves its own traffic and idles on it independently, and all replicas share one [branch database](../sharing-the-cluster/db-branching.md) - a write from any cluster is visible to all of them, and nothing reaches the source database.
 
+[Code sync](../use-cases/preview-environments-code-sync.md) doesn't run on a multi-cluster operator, in either mode.
+
 Replicas on other clusters reach the branch database through a tunnel between the operators, initiated by the Primary. Workload clusters need no route to the Default cluster, and no cluster credentials are ever placed in your namespaces.
 
 ![Preview replicas: every workload cluster serves its own traffic, and replicas reach the shared branch database through the operator tunnel](../.gitbook/assets/preview-h2.svg)

@@ -21,7 +21,7 @@ This feature is available in mirrord version 3.178.0 and onwards.
 
 ## Launching the wizard
 
-Starting the wizard will open a locally hosted webapp in your browser. To launch the wizard, install mirrord and run the following command:
+Starting the wizard will open a locally hosted webapp in your browser. To launch the wizard, [install mirrord](install-mirrord.md) and run the following command:
 
 ```bash
 mirrord wizard

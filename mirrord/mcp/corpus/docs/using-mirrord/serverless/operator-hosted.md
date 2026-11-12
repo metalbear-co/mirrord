@@ -20,7 +20,7 @@ In the Operator-hosted [deployment mode](README.md#deployment-modes), sessions-m
 
 ## Prerequisites
 
-1. A Kubernetes cluster with mirrord Operator **3.223.0 or later** installed through its Helm chart, and a mirrord Operator license. For initial installation and licensing, follow the [Operator installation guide](../../managing-mirrord/operator.md#installation). The step-by-step workload guides cover EKS; other clusters work through a [kubeconfig context](#connection-variables).
+1. A Kubernetes cluster with mirrord Operator **3.223.0 or later** installed through its Helm chart, and a mirrord Operator license. For initial installation and licensing, follow the [Operator installation guide](../../getting-started/install-the-operator.md#custom-install-with-helm). The step-by-step workload guides cover EKS; other clusters work through a [kubeconfig context](#connection-variables).
 2. `kubectl` and `helm`, with permission to manage the Operator Helm release and cluster RBAC.
 
 ---
