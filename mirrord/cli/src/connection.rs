@@ -565,6 +565,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 }
             },
         };
+        tracing::info!("{message}");
         let mut first_connect_progress = progress.subtask(&message);
         let (route, agent_connect_info) = match standalone {
             None => (
