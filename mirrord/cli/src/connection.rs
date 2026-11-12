@@ -552,16 +552,18 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         let standalone =
             standalone_sessions_manager(config).map_err(CliError::SessionsManagerUrl)?;
         let message = match &standalone {
-            None => {
-                "connecting through the sessions-manager hosted by the mirrord operator".to_owned()
-            }
-            Some(endpoint) => format!(
-                "connecting through the{} sessions-manager at {endpoint}",
-                match endpoint.source {
-                    EndpointSource::Explicit => "",
-                    EndpointSource::Default => " MetalBear Cloud",
+            None => "connecting through the sessions-manager hosted by the mirrord operator, \
+                     because `operator` is `true`"
+                .to_owned(),
+            Some(endpoint) => match endpoint.source {
+                EndpointSource::Explicit => format!(
+                    "connecting through the sessions-manager at {endpoint}, set by \
+                     `sessions_manager.url` or MIRRORD_SESSIONS_MANAGER_URL"
+                ),
+                EndpointSource::Default => {
+                    format!("connecting through the MetalBear Cloud sessions-manager at {endpoint}")
                 }
-            ),
+            },
         };
         let mut first_connect_progress = progress.subtask(&message);
         let (route, agent_connect_info) = match standalone {
