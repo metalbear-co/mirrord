@@ -460,7 +460,7 @@ async fn header_injection(
             http_detection_timeout: Duration::from_secs(2),
             unused_port_linger: Duration::ZERO,
             passthrough_original_dst: false,
-            handle_unsubscribed_connections: false,
+            http_detect_inactive_ports: false,
         },
     )
     .await;
@@ -551,7 +551,7 @@ async fn cache_control_override(
             http_detection_timeout: Duration::from_secs(2),
             unused_port_linger: Duration::ZERO,
             passthrough_original_dst: false,
-            handle_unsubscribed_connections: false,
+            http_detect_inactive_ports: false,
         },
     )
     .await;
