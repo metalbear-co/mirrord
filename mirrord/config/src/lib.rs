@@ -1454,13 +1454,28 @@ impl LayerConfig {
 
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
-        self.feature.split_queues.verify(context)?;
 
-        if self.feature.kafka_branch && matches!(self.target.path, Some(Target::Serverless(_))) {
-            return Err(ConfigError::Conflict(
-                "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
-            ));
+        if matches!(self.target.path, Some(Target::Serverless(_))) {
+            if self.feature.kafka_branch {
+                return Err(ConfigError::Conflict(
+                    "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.split_queues.is_set() {
+                return Err(ConfigError::Conflict(
+                    "`feature.split_queues` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.db_branches.is_empty().not() {
+                return Err(ConfigError::Conflict(
+                    "`feature.db_branches` is not supported with serverless targets.".to_owned(),
+                ));
+            }
         }
+
+        self.feature.split_queues.verify(context)?;
 
         if self.feature.kafka_branch
             && self
