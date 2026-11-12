@@ -166,11 +166,10 @@ where
         let read_size = match tokio::time::timeout(timeout, stream.read_buf(&mut buf)).await {
             Ok(result) => result?,
             Err(_) => {
-                tracing::warn!(
+                tracing::debug!(
                     ?timeout,
                     bytes_received = buf.len(),
-                    "HTTP detection timed out, treating the connection as raw TCP, so HTTP filters \
-                     will not apply to it",
+                    "HTTP detection timed out, treating the connection as raw TCP",
                 );
                 break;
             }

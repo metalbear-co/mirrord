@@ -164,6 +164,11 @@ impl TcpStealerTask {
                     shutdown,
                 },
             ) => {
+                tracing::warn!(
+                    connection = ?conn,
+                    "Connection on a port stolen with an HTTP filter is not HTTP, or HTTP \
+                     detection timed out, passing it to the target without filtering",
+                );
                 join_handle_tx.
                     send(conn.pass_through(shutdown))
                     .expect("RedirectorTask dropped oneshot rx for receiving JoinHandle to IO task for TCP connection");
