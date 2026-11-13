@@ -83,10 +83,22 @@ common --@librdkafka//:with_zstd=false
 build:linux --host_linkopt=-Wno-unused-command-line-argument
 build:macos --host_linkopt=-Wno-unused-command-line-argument
 
-# Keeps symbol tables in binaries, as Cargo and `go build` do. Bazel's default, `sometimes`, strips
-# fastbuild binaries, so rules_go would link the Go test apps with `-s -w`, and the real layer finds
-# Go's runtime in an app by the app's symbols. Optimized builds aren't stripped either way.
+# Keeps the symbol tables of the Go and C programs, as `go build` keeps them. The layer finds Go's
+# runtime in a Go app, or in a Go library that an app loads, by the program's symbols. Bazel's
+# default, `sometimes`, strips fastbuild builds, so rules_go would link the Go apps with `-s -w`,
+# which leave the symbol table out. The flag doesn't apply to Rust, whose programs only lose their
+# symbol tables to `-Cstrip=symbols`, which `--config=release` passes.
 build --strip=never
+
+# `--config=release` builds the files that a release ships, like the CLI, the layer and the images,
+# with optimizations, as `cargo build --release` does. It also leaves the symbol table out of the
+# Rust programs and shared libraries, which rustc would only strip of their debug info. The symbol
+# table would be about a quarter of the Linux CLI, which also pays for the embedded layer's. The
+# dynamic symbols, which `dlsym` and the layer's exports need, stay, and panic backtraces show
+# addresses rather than function names. For MSVC, the flag changes nothing, because rustc already
+# leaves out the PDB when it strips the debug info.
+build:release --compilation_mode=opt
+build:release --@rules_rust//rust/settings:extra_rustc_flag=-Cstrip=symbols
 
 # Names output directories after the target platform. Bazel would otherwise name them after the CPU
 # and compilation mode only, so builds for different platforms of the same CPU, such as

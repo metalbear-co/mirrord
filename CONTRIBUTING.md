@@ -265,8 +265,9 @@ Build the CLI with the layer and the UI embedded:
 bazel build //mirrord/cli:cli_standalone
 ```
 
-The binary is created at `bazel-bin/mirrord/cli/standalone/mirrord`. `-c opt` builds it with optimizations, and
-`--platforms=//bazel/platforms:<platform>` builds it for another platform (see `.bazelrc`).
+The binary is created at `bazel-bin/mirrord/cli/standalone/mirrord`. `--config=release` builds it as a release does,
+with optimizations and without the symbol table, and `--platforms=//bazel/platforms:<platform>` builds it for another
+platform (see `.bazelrc`).
 
 #### Run mirrord with a local process
 
