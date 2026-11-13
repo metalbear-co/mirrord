@@ -106,6 +106,7 @@ fn string_to_u16() {
     assert_eq!(bytes.as_slice(), &[97u16, 98u16, 99u16, 100u16, 0]);
 }
 
+#[cfg(windows)]
 #[test]
 fn try_get_unix_path() {
     use std::path::Path;
@@ -117,6 +118,7 @@ fn try_get_unix_path() {
     assert_eq!(Path::new(&new_path.path), Path::new(UNIX_PATH));
 }
 
+#[cfg(windows)]
 #[test]
 fn try_all_possible_volume_letters_to_unix_path() {
     for c in 'C'..'Z' {
@@ -132,6 +134,7 @@ fn try_all_possible_volume_letters_to_unix_path() {
     }
 }
 
+#[cfg(windows)]
 #[test]
 fn try_just_all_possible_volume_letters_to_unix_path() {
     for c in 'C'..'Z' {
