@@ -33,7 +33,10 @@ def main():
     parser.add_argument("--rustfmt", required=True, help=argparse.SUPPRESS)
     arguments = parser.parse_args()
 
-    rustfmt = Runfiles.Create().Rlocation(arguments.rustfmt)
+    runfiles = Runfiles.Create()
+    if runfiles is None:
+        sys.exit("format.py can't find its runfiles. Run it with `bazel run //:format`.")
+    rustfmt = runfiles.Rlocation(arguments.rustfmt)
     os.chdir(os.environ["BUILD_WORKSPACE_DIRECTORY"])
 
     failed = []

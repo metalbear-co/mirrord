@@ -54,6 +54,7 @@
             python3Packages.towncrier
             bazel-buildtools
             ruff
+            ty
             # The flaky test report's tests run `.github/scripts/flaky-tests.sh`, which unzips the
             # reports.
             unzip

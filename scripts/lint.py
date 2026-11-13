@@ -7,7 +7,8 @@ already lints the Rust code, so these are the other checks:
   dependencies, which matter to Bazel too, because it builds every dependency that a `Cargo.toml`
   lists;
 - the tests of the scripts behind the flaky test report;
-- Ruff on the Python code, with the settings in `ruff.toml`;
+- Ruff on the Python code, with the settings in `ruff.toml`, and ty, which type-checks it with the
+  settings in `ty.toml`, against the packages that Bazel runs it with;
 - ESLint and the TypeScript compiler on the frontends.
 
 It runs as `bazel run //:lint`, which runs it in the workspace, and takes the tools from `PATH`, as
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 from scripts.tools import FRONTENDS, PNPM_INSTALL, run
 
@@ -37,6 +39,22 @@ def git_files(*pathspecs):
 def checks():
     """Returns each check's command by its name, and the names of the frontends' checks, which
     run the tools that the `pnpm-install` check installs."""
+    # Bazel runs this program with rules_python's interpreter, and puts the packages of its `deps`
+    # on its `sys.path`: the `@pip` packages that the test apps run with, and rules_python's
+    # runfiles library, which the scripts import. ty resolves imports from these paths, which are
+    # in the program's runfiles, where this file is `_main/scripts/lint.py`. The runfiles also hold
+    # the interpreter. Its own paths must not be search paths, because its standard library would
+    # then hide ty's stubs for it. So ty gets the interpreter with `--python` instead, and reads the
+    # Python version from it.
+    runfiles = Path(__file__).parents[2]
+    interpreter = [Path(sys.prefix), Path(sys.base_prefix)]
+    search_paths = [
+        path
+        for path in map(Path, sys.path)
+        if path.is_relative_to(runfiles)
+        and not any(path.is_relative_to(prefix) for prefix in interpreter)
+    ]
+
     commands = {
         # The docs and skills vendored for `mirrord mcp` are upstream's, kept byte-identical, so
         # the linters leave them alone.
@@ -60,6 +78,13 @@ def checks():
         "cargo-deny": ["cargo", "deny", "--all-features", "check"],
         "cargo-shear": ["cargo", "shear", "--deny-warnings"],
         "ruff": ["ruff", "check"],
+        "ty": [
+            "ty",
+            "check",
+            "--python",
+            sys.base_prefix,
+            *(f"--extra-search-path={path}" for path in search_paths),
+        ],
     }
 
     # The tests fake `gh` and `curl` with scripts, which only run on Unix, like the flaky test
@@ -79,6 +104,9 @@ def checks():
 
 def main():
     os.chdir(os.environ["BUILD_WORKSPACE_DIRECTORY"])
+    # ty searches the paths in `PYTHONPATH` too, so a shell's `PYTHONPATH`, like the devshell's,
+    # would let it resolve packages that Bazel doesn't run the Python code with.
+    os.environ.pop("PYTHONPATH", None)
     commands, frontend_checks = checks()
 
     parser = argparse.ArgumentParser(

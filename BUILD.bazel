@@ -30,10 +30,10 @@ exports_files([
 ])
 
 # `bazel run //:lint` runs the checks that the Rust build doesn't, like the linters of the docs and
-# the frontends, and `bazel run //:format` formats the Rust code, the Starlark files, the Python
-# code and the frontends, or checks them with `bazel run //:format -- --check`. They change or
-# check the files in the workspace, rather than in Bazel's sandbox, so they're programs to run
-# rather than tests.
+# the frontends, and the type checker of the Python code. `bazel run //:format` formats the Rust
+# code, the Starlark files, the Python code and the frontends, or checks them with
+# `bazel run //:format -- --check`. They change or check the files in the workspace, rather than in
+# Bazel's sandbox, so they're programs to run rather than tests.
 # `scripts/lint.py` and `scripts/format.py` explain where their tools come from.
 alias(
     name = "lint",

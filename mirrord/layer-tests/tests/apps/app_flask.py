@@ -1,5 +1,4 @@
 import logging
-import sys
 import threading
 import time
 from enum import Enum, unique
@@ -10,10 +9,6 @@ from flask import Flask
 
 log = logging.getLogger("werkzeug")
 log.disabled = True
-
-cli = sys.modules["flask.cli"]
-
-cli.show_server_banner = lambda *x: print("Server listening on port 80")
 
 app = Flask(__name__)
 
@@ -67,4 +62,5 @@ def delete():
 
 
 if __name__ == "__main__":
+    print("Server listening on port 80")
     app.run(host="0.0.0.0", port=80)
