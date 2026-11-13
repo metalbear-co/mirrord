@@ -188,7 +188,7 @@ pub const MAX_BODY_BUFFER_TIMEOUT: CheckedEnv<u32> =
 pub const CLEAN_IPTABLES_ON_START: CheckedEnv<bool> =
     CheckedEnv::new("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START");
 
-/// Jaq process time limit (ms)
+/// Jaq process time limit, in seconds.
 pub const JAQ_TIME_LIMIT: CheckedEnv<u64> = CheckedEnv::new("MIRRORD_JAQ_TIME_LIMIT");
 
 /// Enables the fix for applications that listen on the pod's external IP instead of loopback.

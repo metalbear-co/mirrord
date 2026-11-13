@@ -557,7 +557,7 @@ pub struct AgentConfig {
 
     /// ### agent.jaq_time_limit {#agent-jaq_time_limit}
     ///
-    /// Time limit for running jaq queries, in milliseconds. Defaults to 500ms.
+    /// Time limit for running jaq queries, in seconds. Defaults to 1 second.
     #[config(default = 1)]
     pub jaq_time_limit: u64,
 

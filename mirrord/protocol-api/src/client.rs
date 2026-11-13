@@ -9,12 +9,12 @@ use std::{
 
 use futures::{FutureExt, future::Shared};
 use mirrord_protocol::{
-    LogMessage,
+    LogMessage, ResponseError,
     outgoing::UnixAddr,
     tcp::{
         HTTP_BODY_JSON_FILTER_VERSION, HTTP_COMPOSITE_FILTER_VERSION,
-        HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HttpBodyFilter, HttpFilter,
-        MIRROR_HTTP_FILTER_VERSION,
+        HTTP_HEADER_JQ_FILTER_VERSION, HTTP_METHOD_FILTER_VERSION, HTTP_NOT_FILTER_VERSION,
+        HttpBodyFilter, HttpFilter, MIRROR_HTTP_FILTER_VERSION,
     },
 };
 use tokio::{
@@ -297,6 +297,9 @@ impl MirrordClient {
                     HTTP_COMPOSITE_FILTER_VERSION.matches(version)
                         && filters.iter().all(|f| filter_supported(f, version))
                 }
+                HttpFilter::Not(filter) => {
+                    HTTP_NOT_FILTER_VERSION.matches(version) && filter_supported(filter, version)
+                }
             }
         }
 
@@ -314,6 +317,23 @@ impl MirrordClient {
                 }
                 _ => {}
             }
+        }
+
+        if let Some(used_filter) = &filter {
+            used_filter.check_depth().map_err(ResponseError::from)?;
+        }
+
+        // The server hands a request matching several clients' filters to whichever it checks
+        // first, so a filter this wide quietly takes traffic away from everyone else on the port.
+        // Preview pods subscribe with exactly this filter on purpose, on every port and again on
+        // each resubscribe, so this stays at debug rather than warning about every one of them.
+        if let Some(used_filter @ HttpFilter::Not(..)) = &filter {
+            tracing::debug!(
+                port,
+                filter = %used_filter,
+                "the `not (...)` filter matches every request on the port except the excluded \
+                 ones, so it overlaps every other filter on this port",
+            );
         }
 
         let (tx, rx) = oneshot::channel();
