@@ -1297,8 +1297,13 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetV
 
         // `TargetType::compatible_with` never accepts serverless, since it also decides the
         // target types IDEs offer to pick from, and they can't list serverless targets.
+        //
+        // A serverless target can't be copied, so `incoming: replace` is rejected outright, even
+        // when a `config_patch` turns off the `copy_target` it implies. Otherwise the service
+        // would run, replacing nothing, and with its mode's `db_branching` silently dropped.
+        // Enabling `copy_target` on any other mode fails the merged config's verification.
         let compatible = match target_type {
-            TargetType::Serverless => cfg.config.feature.copy_target.enabled.not(),
+            TargetType::Serverless => cfg.incoming != ServiceMode::Replace,
             other => other.compatible_with(&cfg.config.feature),
         };
 
