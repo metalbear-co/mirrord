@@ -30,7 +30,7 @@ You can also visit our [Trust Center](https://trust.metalbear.com) for an overvi
 
 ## I'm a Security Engineer evaluating mirrord for Teams, what do I need to know?
 
-* mirrord for Teams is completely on-prem. The only data sent to our cloud is license verification and usage metrics (see [details below](#what-data-does-the-mirrord-operator-send-to-metalbear-cloud)), which can be customized or disabled upon request. Usage metrics include developer usernames and session targets when identity sharing is on, which is the default for cloud API keys; your organization can turn it off to keep them anonymized.
+* mirrord for Teams is completely on-prem. The only data sent to our cloud is license verification and usage metrics (see [details below](#what-data-does-the-mirrord-operator-send-to-metalbear-cloud)), which can be customized or disabled upon request. Usage metrics include developer usernames and session targets when identity sharing is on. It's ticked by default when an admin creates a key at app.metalbear.com, and a key that `mirrord operator install` creates keeps the organization's earlier choice. Your organization can turn it off to keep the metrics anonymized.
 * mirrord does not require root permissions on the user's machine.
 * mirrord for Teams uses Kubernetes RBAC, meaning it doesn't add a new attack vector to your cluster.
 * Communication between the mirrord client and the mirrord Operator takes place over your existing Kubernetes API. If you’ve configured your cluster to encrypt this communication (as is commonly done), then mirrord for Teams’ client-server communication is encrypted as well.
@@ -44,10 +44,37 @@ You can also visit our [Trust Center](https://trust.metalbear.com) for an overvi
   * `HostPath volume`/`Sharing the host namespace` - to access target pod's file system and networking
 * With the experimental [MetalBear Cloud sessions-manager](../using-mirrord/serverless/metalbear-cloud.md), serverless workloads authenticate with a MetalBear API key exchanged for short-lived tokens, developers with their MetalBear account through `mirrord login`, and every session is scoped to your organization. See [How do serverless workloads authenticate to MetalBear Cloud?](#how-do-serverless-workloads-authenticate-to-metalbear-cloud).
 * With the experimental [Operator-hosted sessions-manager](../using-mirrord/serverless/operator-hosted.md), workloads outside Kubernetes, such as Amazon ECS tasks, reach the Operator through your EKS API server as Kubernetes identities mapped from their IAM roles, with no shared secrets. See [How do ECS workloads authenticate to the Operator?](#how-do-ecs-workloads-authenticate-to-the-operator).
+* The Operator's own permissions are listed in [What can the Operator access in my cluster?](#what-can-the-operator-access-in-my-cluster), with how to limit it to some namespaces.
 * Operator activity is logged per session, including the Kubernetes user, the target, and the traffic filter in use. See [Auditing mirrord usage](#how-do-i-audit-mirrord-usage).
 * mirrord can run fully air-gapped, with no outbound communication to MetalBear. See [Air-gapped operation](#can-mirrord-run-air-gapped).
 * Released container images and CLI binaries carry signed SLSA Build Level 2 provenance, so you can verify what you pulled before installing it. See [How is the Operator built and distributed](#how-is-the-operator-built-and-distributed).
 * Missing anything? Feel free to ask us on [Slack](https://metalbear.com/slack) or hi@metalbear.com
+
+## What can the Operator access in my cluster?
+
+The Operator runs in the `mirrord` namespace with the `mirrord-operator` ClusterRole. By default, it can:
+
+* Read nodes, and read pods, services and workloads (Deployments, StatefulSets, ReplicaSets, Jobs, CronJobs and Argo Rollouts) in every namespace.
+* Create and delete pods and jobs, to run mirrord agents.
+* Patch and scale Deployments, StatefulSets, ReplicaSets and Argo Rollouts, for features such as [copying a target](../using-mirrord/copy-target.md).
+* Create `SubjectAccessReview`s, to check each developer's permissions.
+
+It has no wildcard rules, and it can't impersonate users or change RBAC. It reads Secrets and ConfigMaps only if you turn on queue splitting or database branching. Other features, such as preview environments, add the permissions they need when you turn them on. For the full list, see the chart's [Operator rules](https://github.com/metalbear-co/charts/blob/main/mirrord-operator/templates/_operator-rules.tpl).
+
+Developers can only use mirrord on targets their own RBAC lets them `get`. See [How do I configure Role Based Access Control for mirrord for Teams?](#how-do-i-configure-role-based-access-control-for-mirrord-for-teams). In [multi-cluster](../using-mirrord/multi-cluster.md#access-control) mode, this check doesn't apply: anyone who can reach the Primary cluster's Operator can target workloads on every connected cluster. Control who can reach it with RBAC on the Primary cluster, and use [policies](../sharing-the-cluster/policies.md) to block specific operations, such as stealing traffic, on particular targets.
+
+### Limiting the Operator to some namespaces
+
+If you install with the Helm chart, set `namespaced: true` and list the namespaces in `allowedNamespaces`:
+
+```yaml
+namespaced: true
+allowedNamespaces:
+  - team-a
+  - team-b
+```
+
+The `mirrord-operator` ClusterRole then keeps only the rules for cluster-scoped resources, such as nodes and `SubjectAccessReview`s. The rules for pods, workloads and Secrets move to a Role in each listed namespace and in the Operator's own namespace, and the Operator refuses sessions in any other namespace. The namespaces must exist before you install. If you set `agent.extraConfig.namespace`, `operator.applicationPauseAutoSync` or `operator.suspendFluxControllers`, also list the agent, Argo CD or Flux namespaces. This mode doesn't work with multi-cluster.
 
 ## How do I audit mirrord usage?
 
@@ -113,7 +140,7 @@ None of these fields identify an individual developer or a workload in your clus
 
 ### Sent only with identity sharing enabled
 
-Identity sharing is an organization-level setting. An organization admin chooses it when generating a [cloud API key](operator.md#cloud-api-key) at [app.metalbear.com](https://app.metalbear.com), where it is ticked by default, and can change it later for the current key on the same page. With it enabled, the Operator's events also carry, where applicable:
+Identity sharing is an organization-level setting. An organization admin chooses it when generating a [cloud API key](../getting-started/install-the-operator.md#cloud-api-key) at [app.metalbear.com](https://app.metalbear.com), where it is ticked by default, and can change it later for the current key on the same page. A key that `mirrord operator install` creates keeps the organization's earlier choice, and stays anonymized if the organization never made one. With it enabled, the Operator's events also carry, where applicable:
 
 1. Kubernetes username of the client, as authenticated by your Kubernetes API server
 2. Display name of the local account and hostname of the client machine

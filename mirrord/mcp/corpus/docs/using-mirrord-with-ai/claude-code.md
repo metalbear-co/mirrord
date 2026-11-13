@@ -41,7 +41,7 @@ choco install mirrord
 {% endtab %}
 {% endtabs %}
 
-For other install methods, see [Installing the mirrord CLI](../installing-mirrord/cli.md).
+For other install methods, see [Install mirrord](../getting-started/install-mirrord.md).
 
 Check the install with `mirrord --version`, and check cluster access with `kubectl get pods -n <namespace>`.
 

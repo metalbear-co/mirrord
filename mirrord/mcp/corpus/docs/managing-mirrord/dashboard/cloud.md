@@ -45,7 +45,7 @@ The onboarding in the app does these steps for you and checks each one. To set i
    helm install --set cloud.apiKey.key=<YOUR_API_KEY> mirrord-operator metalbear/mirrord-operator
    ```
    {% hint style="info" %}
-   In production, don't pass the key inline. Put it in a Kubernetes secret and reference it with `cloud.apiKey.keyRef`, or point at Google Secret Manager with `cloud.apiKey.gsmRef`. See [Cloud API key](../operator.md#cloud-api-key).
+   In production, don't pass the key inline. Put it in a Kubernetes secret and name that secret in `cloud.apiKey.keyRef` in your Helm values, or point `cloud.apiKey.gsmRef` at Google Secret Manager. See [Add the key to your values](../../getting-started/install-the-operator.md#add-the-key-to-your-values).
    {% endhint %}
 
 
@@ -70,7 +70,7 @@ cloud:
 helm upgrade mirrord-operator metalbear/mirrord-operator -f values.yaml
 ```
 
-Existing `license.*` values stay as they are. Create the referenced secret as shown in [Cloud API key](../operator.md#cloud-api-key), or use `cloud.apiKey.gsmRef` or an inline key instead. The key is read at startup, so the upgrade's pod restart is what picks it up.
+Existing `license.*` values stay as they are. Create the secret that `keyRef` names in the Operator's namespace (the command is in [Install the chart](../../getting-started/install-the-operator.md#install-the-chart)), or set `cloud.apiKey.gsmRef` in the same values file instead. The key is read at startup, so the upgrade's pod restart is what picks it up.
 
 Your existing anonymized usage is already on the dashboard; it doesn't start from zero. From the upgrade forward, sessions carry identity (if sharing is on). Usernames also fill in on historical sessions once each developer runs a session with the key in place, since names resolve per user across all time; per-service detail for old sessions doesn't backfill.
 

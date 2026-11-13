@@ -27,7 +27,7 @@ use super::{
     tls::{self, StealTlsHandlerStore, handler::PassThroughTlsConnector},
 };
 use crate::{
-    http::HttpVersion,
+    http::{HttpVersion, RawTcpReason},
     metrics::{MetricGuard, REDIRECTED_CONNECTIONS},
 };
 
@@ -233,7 +233,7 @@ where
 /// drop.
 pub struct MaybeHttp {
     pub info: ConnectionInfo,
-    pub http_version: Option<HttpVersion>,
+    pub http_version: Result<HttpVersion, RawTcpReason>,
     pub stream: Box<dyn IncomingIO>,
 }
 
@@ -293,21 +293,23 @@ impl MaybeHttp {
                     io: stream,
                     _metric_guard: metric_guard,
                 }),
-                Some(HttpVersion::V2),
+                Ok(HttpVersion::V2),
             ),
             Some(tls::HTTP_1_1_ALPN_NAME | tls::HTTP_1_0_ALPN_NAME) => (
                 Box::new(IncomingIoWrapper {
                     io: stream,
                     _metric_guard: metric_guard,
                 }),
-                Some(HttpVersion::V1),
+                Ok(HttpVersion::V1),
             ),
-            Some(..) => (
+            Some(protocol) => (
                 Box::new(IncomingIoWrapper {
                     io: stream,
                     _metric_guard: metric_guard,
                 }),
-                None,
+                Err(RawTcpReason::Alpn(
+                    String::from_utf8_lossy(protocol).into_owned(),
+                )),
             ),
             None => {
                 let (stream, http_version) =

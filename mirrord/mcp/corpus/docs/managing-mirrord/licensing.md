@@ -30,7 +30,7 @@ mirrord for Teams is available in two license variants:
 | **Telemetry** | Required | Optional |
 | **License server** | ❌ | ✅ |
 
-**Team** licenses are subscription-based. The Operator authenticates to the mirrord cloud with a [cloud API key](operator.md#cloud-api-key) and obtains its license over the API, so it must be able to reach MetalBear's license endpoint.
+**Team** licenses are subscription-based. The Operator authenticates to the mirrord cloud with a [cloud API key](../getting-started/install-the-operator.md#cloud-api-key) and obtains its license over the API, so it must be able to reach MetalBear's license endpoint.
 
 **Enterprise** licenses can use a cloud API key the same way, or a certificate file (`license.pem`) that works without an internet connection. They also support a [self-hosted License Server](license-server.md) for air-gapped or multi-cluster environments.
 
@@ -110,4 +110,4 @@ Register at [app.metalbear.com](https://app.metalbear.com) and generate a cloud 
 
 An AI coding agent working on an unlicensed cluster can also start a trial itself and hand you a link to claim the organization. See [Agent-Started Trials](../using-mirrord-with-ai/agent-started-trials.md).
 
-Once you have a key, see [Cloud API key](operator.md#cloud-api-key) in the Operator installation guide for setup instructions.
+Once you have a key, see [Cloud API key](../getting-started/install-the-operator.md#cloud-api-key) in the Operator installation guide for setup instructions.

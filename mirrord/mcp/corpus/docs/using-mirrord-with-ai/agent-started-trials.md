@@ -29,7 +29,7 @@ mirrord operator install --from-signup
 
 The trial is a **provisional organization** carrying an Enterprise trial license, good for seven days from the signup.
 
-The Operator is installed from the default Helm chart, without needing Helm itself. If an Operator is already installed in the cluster, or an earlier installation left objects behind, the command stops and says so rather than touching anything, and tells you how to remove them with `mirrord operator uninstall`. For anything beyond the default installation, install with the [Helm chart](../managing-mirrord/operator.md#helm) instead.
+The Operator is installed from the default Helm chart, without needing Helm itself. If an Operator is already installed in the cluster, or an earlier installation left objects behind, the command stops and says so rather than touching anything, and tells you how to remove them with `mirrord operator uninstall`. For anything beyond the default installation, install with the [Helm chart](../getting-started/install-the-operator.md#custom-install-with-helm) instead.
 
 ### Calling the signup endpoint directly
 
@@ -57,7 +57,7 @@ The response describes the provisional organization:
 }
 ```
 
-The agent installs the Operator with that key as `cloud.apiKey.key` (see [Cloud API key](../managing-mirrord/operator.md#cloud-api-key)), then gives you the `claim_url`.
+The agent installs the Operator with that key as `cloud.apiKey.key` (see [Cloud API key](../getting-started/install-the-operator.md#cloud-api-key)), then gives you the `claim_url`.
 
 Because the trial is an Enterprise license, it also covers the features a Team license doesn't, including [Preview Environments](../use-cases/preview-environments.md). The Helm chart enables them by default through `operator.previewEnv`, so an Operator installed by `mirrord operator install` supports them as is.
 

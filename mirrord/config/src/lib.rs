@@ -1455,13 +1455,34 @@ impl LayerConfig {
 
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
-        self.feature.split_queues.verify(context)?;
 
-        if self.feature.kafka_branch && matches!(self.target.path, Some(Target::Serverless(_))) {
-            return Err(ConfigError::Conflict(
-                "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
-            ));
+        if matches!(self.target.path, Some(Target::Serverless(_))) {
+            if self.feature.kafka_branch {
+                return Err(ConfigError::Conflict(
+                    "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.split_queues.is_set() {
+                return Err(ConfigError::Conflict(
+                    "`feature.split_queues` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.db_branches.is_empty().not() {
+                return Err(ConfigError::Conflict(
+                    "`feature.db_branches` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.copy_target.enabled {
+                return Err(ConfigError::Conflict(
+                    "`feature.copy_target` is not supported with serverless targets.".to_owned(),
+                ));
+            }
         }
+
+        self.feature.split_queues.verify(context)?;
 
         if self.feature.kafka_branch
             && self
@@ -2587,6 +2608,46 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(&error, ConfigError::ConflictAt { setting, .. } if setting == "feature.network.incoming.http_filter"),
+            "{error}"
+        );
+    }
+
+    /// Serverless sessions can't split queues, branch databases, or copy the target, so asking for either must fail
+    /// rather than leave the local process on the shared queues and databases. The docs quote
+    /// these messages.
+    #[rstest]
+    #[case::kafka_branch(
+        json!({ "kafka_branch": true }),
+        "`feature.kafka_branch` is not supported with serverless targets."
+    )]
+    #[case::split_queues(
+        json!({ "split_queues": { "queue": { "queue_type": "SQS", "filter": { "metadata": "^a$" } } } }),
+        "`feature.split_queues` is not supported with serverless targets."
+    )]
+    #[case::db_branches(
+        json!({ "db_branches": [{ "type": "pg", "connection": { "url": { "type": "env", "variable": "DB_URL" } } }] }),
+        "`feature.db_branches` is not supported with serverless targets."
+    )]
+    #[case::copy_target(
+        json!({ "copy_target": true }),
+        "`feature.copy_target` is not supported with serverless targets."
+    )]
+    fn verify_rejects_unsupported_serverless_features(
+        #[case] feature: serde_json::Value,
+        #[case] expected: &str,
+    ) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "target": "serverless/service",
+            "feature": feature,
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::Conflict(message) if message == expected),
             "{error}"
         );
     }

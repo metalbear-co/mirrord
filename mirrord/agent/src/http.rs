@@ -1,4 +1,4 @@
-use std::{io, ops::Not, sync::LazyLock, time::Duration};
+use std::{io, sync::LazyLock, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use http::{HeaderValue, Response};
@@ -112,33 +112,26 @@ pub enum DetectedHttpVersion {
     NotHttp,
 }
 
-impl DetectedHttpVersion {
-    /// If the stream is known to be an HTTP connection,
-    /// returns its version.
-    ///
-    /// Otherwise, returns [`None`].
-    pub fn into_version(self) -> Option<HttpVersion> {
-        match self {
-            Self::Http(version) => Some(version),
-            Self::Unknown => None,
-            Self::NotHttp => None,
-        }
-    }
-
-    /// Returns whether it's known whether the stream is an HTTP connection or not.
-    pub fn is_known(&self) -> bool {
-        match self {
-            Self::Http(_) => true,
-            Self::Unknown => false,
-            Self::NotHttp => true,
-        }
-    }
+/// Why a redirected connection is handled as raw TCP rather than HTTP.
+///
+/// HTTP filters only apply to HTTP, so a port stolen with a filter passes such a connection to
+/// its original destination, and the steal task logs this reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawTcpReason {
+    /// No data arrived within the HTTP detection timeout.
+    Timeout,
+    /// The first bytes of the stream are not an HTTP request.
+    NotHttp,
+    /// The client closed the connection before HTTP detection reached a verdict.
+    Closed,
+    /// TLS negotiated this ALPN protocol, which is not HTTP.
+    Alpn(String),
 }
 
 /// Attempts to detect HTTP version from the first bytes of a stream.
 ///
 /// Keeps reading data until we're certain whether the stream is an HTTP connection or not,
-/// or a read attempt fails to produce data within `timeout`.
+/// or a read attempt fails to produce data within `timeout`, and returns the reason when it's not.
 ///
 /// # Notes
 ///
@@ -155,27 +148,32 @@ impl DetectedHttpVersion {
 pub async fn detect_http_version<IO>(
     mut stream: IO,
     timeout: Duration,
-) -> io::Result<(RolledBackStream<IO, BytesMut>, Option<HttpVersion>)>
+) -> io::Result<(
+    RolledBackStream<IO, BytesMut>,
+    Result<HttpVersion, RawTcpReason>,
+)>
 where
     IO: AsyncRead + Unpin,
 {
     let mut buf = BytesMut::with_capacity(1024);
-    let mut detected = DetectedHttpVersion::Unknown;
-
-    while detected.is_known().not() {
+    let detected = loop {
         let read_size = match tokio::time::timeout(timeout, stream.read_buf(&mut buf)).await {
             Ok(result) => result?,
-            Err(_) => break,
+            Err(_) => break Err(RawTcpReason::Timeout),
         };
 
         if read_size == 0 {
-            break;
+            break Err(RawTcpReason::Closed);
         }
 
-        detected = HttpVersion::detect(buf.as_ref());
-    }
+        match HttpVersion::detect(buf.as_ref()) {
+            DetectedHttpVersion::Http(version) => break Ok(version),
+            DetectedHttpVersion::NotHttp => break Err(RawTcpReason::NotHttp),
+            DetectedHttpVersion::Unknown => {}
+        }
+    };
 
-    Ok((RolledBackStream::new(stream, buf), detected.into_version()))
+    Ok((RolledBackStream::new(stream, buf), detected))
 }
 
 #[cfg(test)]
@@ -188,7 +186,7 @@ mod test {
         time::Instant,
     };
 
-    use super::{DetectedHttpVersion, HttpVersion, detect_http_version};
+    use super::{DetectedHttpVersion, HttpVersion, RawTcpReason, detect_http_version};
 
     #[rstest]
     #[case::known_bug(b"hello ther", DetectedHttpVersion::Unknown)]
@@ -225,7 +223,7 @@ mod test {
             .unwrap();
         let elapsed = started.elapsed();
 
-        assert_eq!(version, None);
+        assert_eq!(version, Err(RawTcpReason::Timeout));
         assert!(
             elapsed < Duration::from_millis(900),
             "detect_http_version took {elapsed:?}, expected ~100ms",
@@ -241,7 +239,7 @@ mod test {
         let (_rolled, version) = detect_http_version(client, Duration::ZERO).await.unwrap();
         let elapsed = started.elapsed();
 
-        assert_eq!(version, None);
+        assert_eq!(version, Err(RawTcpReason::Timeout));
         assert!(
             elapsed < Duration::from_millis(50),
             "detect_http_version took {elapsed:?}, expected ~0ms",
@@ -258,7 +256,7 @@ mod test {
         let (mut rolled, version) = detect_http_version(client, Duration::from_secs(5))
             .await
             .unwrap();
-        assert_eq!(version, Some(HttpVersion::V1));
+        assert_eq!(version, Ok(HttpVersion::V1));
 
         let mut buf = [0; 18];
         rolled.read_exact(&mut buf).await.unwrap();

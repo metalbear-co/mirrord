@@ -67,9 +67,9 @@ Setup is split by what it touches, so you only redo the parts that change:
 
 ### Required versions
 
-* **Operator:** version **3.223.0 or later**, installed from the `metalbear/mirrord-operator` Helm chart. Follow the [Operator installation guide](../../managing-mirrord/operator.md), then [enable sessions-manager](operator-hosted.md#enable-sessions-manager).
+* **Operator:** version **3.223.0 or later**, installed from the `metalbear/mirrord-operator` Helm chart. Follow the [Operator installation guide](../../getting-started/install-the-operator.md#custom-install-with-helm), then [enable sessions-manager](operator-hosted.md#enable-sessions-manager).
 * **Remote bootstrap:** `ghcr.io/metalbear-co/mirrord-remote-bootstrap:3.229.0` or later, used in the [ECS task definition](ecs.md#add-the-remote-bootstrap). Bootstrap tags follow Operator release versions, not mirrord CLI versions. Pin a release tag rather than `latest`.
-* **CLI:** mirrord **3.282.0 or later**, a regular release, installed as described in [Installing the mirrord CLI](../../installing-mirrord/cli.md).
+* **CLI:** mirrord **3.282.0 or later**, a regular release, installed as described in [Install mirrord](../../getting-started/install-mirrord.md).
 
 Earlier CLIs and bootstraps don't connect to the MetalBear Cloud sessions-manager by default. To use them with MetalBear Cloud, set `MIRRORD_SESSIONS_MANAGER_URL=https://sm-aws-use1.app.metalbear.com/sm` both in the developer's environment and on the workload, or upgrade.
 
