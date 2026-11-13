@@ -823,7 +823,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to setup mirrord startup retry config with `{0}`")]
     #[diagnostic(help(
-        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not teh case in your config, then this might be a bug!"
+        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not the case in your config, then this might be a bug!"
     ))]
     InvalidBackoff(String),
 
