@@ -2,9 +2,9 @@
 
 use std::ffi::c_void;
 
-use str_win::string_to_u8_buffer;
+use mirrord_str_win::string_to_u8_buffer;
 // Relocated into `utils-win`; re-exported so existing call sites are untouched.
-pub use utils_win::modules::{get_module_base, get_module_from_address, get_module_name};
+pub use mirrord_utils_win::modules::{get_module_base, get_module_from_address, get_module_name};
 use winapi::um::libloaderapi::GetProcAddress;
 
 pub mod elevation;

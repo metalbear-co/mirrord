@@ -56,7 +56,7 @@ group "Installing Node test app dependencies"
 pnpm --filter mirrord-frontends install --frozen-lockfile
 
 group "Building Rust test apps"
-for manifest in tests/*/Cargo.toml; do
+for manifest in mirrord/tests/*/Cargo.toml; do
     cargo_dir="$(dirname "$manifest")"
     echo "Building Rust test app in ${cargo_dir}"
     (cd "$cargo_dir" && cargo build)

@@ -11,9 +11,9 @@ use mirrord_config::{
     MIRRORD_LAYER_TARGET_CONTAINER_PORTS, MIRRORD_LAYER_WAIT_FOR_DEBUGGER,
 };
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
+use mirrord_str_win::string_to_u16_buffer;
+use mirrord_utils_win::diagnostics::monitor::InitReport;
 use stork::{BorrowedTarget, LoadTiming, LoaderState};
-use str_win::string_to_u16_buffer;
-use utils_win::diagnostics::monitor::InitReport;
 use winapi::{
     shared::{
         minwindef::{BOOL, DWORD, LPVOID},
@@ -687,12 +687,14 @@ impl LayerManagedProcess {
         // conflicts with it is refused only here, before anything is loaded into the program.
         // Read through the handle `CreateProcess` returned, which can always query the process.
         let image_stem = || {
-            utils_win::process::process_image_name(managed_process.process_handle()).map(|image| {
-                Path::new(&image)
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().into_owned())
-                    .unwrap_or(image)
-            })
+            mirrord_utils_win::process::process_image_name(managed_process.process_handle()).map(
+                |image| {
+                    Path::new(&image)
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                        .unwrap_or(image)
+                },
+            )
         };
         let debugger_wait = match debugger_setting {
             Some(setting) => {
@@ -1074,7 +1076,7 @@ impl LayerManagedProcess {
             );
             return;
         };
-        utils_win::diagnostics::monitor::report_init_failure_for(
+        mirrord_utils_win::diagnostics::monitor::report_init_failure_for(
             monitor,
             self.process_info.dwProcessId,
             std::process::id(),
@@ -1205,7 +1207,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
+    use mirrord_utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
     use winapi::{
         shared::minwindef::FALSE,
         um::{
@@ -1556,7 +1558,7 @@ mod tests {
                 let process =
                     unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid) };
                 assert!(!process.is_null(), "open the child to watch its modules");
-                while !utils_win::modules::module_inventory(process)
+                while !mirrord_utils_win::modules::module_inventory(process)
                     .to_lowercase()
                     .contains(&loaded_payload)
                 {

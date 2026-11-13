@@ -344,9 +344,10 @@ mod tests {
 
     /// A file in `%TEMP%`, in the forms the Windows layer matches.
     #[cfg(windows)]
-    fn in_temp() -> str_win::UnixPath {
+    fn in_temp() -> mirrord_str_win::UnixPath {
         let temp = std::env::var("TEMP").expect("Windows sets TEMP");
-        str_win::path_to_unix_path(format!(r"{temp}\cor-1467.txt")).expect("TEMP is a rooted path")
+        mirrord_str_win::path_to_unix_path(format!(r"{temp}\cor-1467.txt"))
+            .expect("TEMP is a rooted path")
     }
 
     /// `%TEMP%` is read locally unless a config says otherwise.

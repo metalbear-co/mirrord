@@ -84,8 +84,8 @@ CI runs only what it names: every job is package-scoped and there is no workspac
 a new test, pull the job log and grep for its name rather than trusting a green check.
 
 Grepping the workflows for `-p <package>` is not enough either, since some runs hide behind xtask.
-`mirrord/cli/`, whose package is plain `mirrord`, is tested on Linux by `cargo xtask test-ut` in
-`.github/workflows/test-integration.yaml` and on Windows by `cargo nextest run -p mirrord ...` in
+`mirrord/cli/`, the `mirrord-cli` package, is tested on Linux by `cargo xtask test-ut` in
+`.github/workflows/test-integration.yaml` and on Windows by `cargo nextest run -p mirrord-cli ...` in
 `test-windows.yaml`. macOS never runs those unit tests: it builds the binary and exercises it only through
 `mirrord-layer-tests`, so a macOS-gated test in `mirrord/cli/` never runs while the PR stays green.
 
@@ -110,7 +110,7 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
 - `typos` checks the tracked Markdown outside `mirrord/mcp/corpus`, and Vale the Markdown at the root and every fragment
   in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
-- The CI runner image (`tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
+- The CI runner image (`mirrord/tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
   A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
   when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
 - While the `windows-e2e` label is on a pull request, adding any label runs the Windows end-to-end tests; pushes

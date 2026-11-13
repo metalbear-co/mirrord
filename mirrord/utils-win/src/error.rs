@@ -5,7 +5,7 @@
 
 use std::fmt::{Debug, Display};
 
-use str_win::u16_buffer_to_string;
+use mirrord_str_win::u16_buffer_to_string;
 use thiserror::Error;
 use winapi::{
     shared::ntdef::{MAKELANGID, SUBLANG_ENGLISH_US},

@@ -99,7 +99,7 @@ jobs:
         uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2.2.0
         with:
           context: .
-          file: tests/e2e.Dockerfile
+          file: mirrord/tests/e2e.Dockerfile
           platforms: linux/${{ matrix.platform }}
           tags: ci-runner:ci
           push: false
@@ -111,7 +111,7 @@ jobs:
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294
         with:
           context: .
-          file: tests/e2e.Dockerfile
+          file: mirrord/tests/e2e.Dockerfile
           platforms: linux/${{ matrix.platform }}
           tags: ci-runner:ci
           push: false

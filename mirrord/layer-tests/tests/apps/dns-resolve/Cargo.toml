@@ -1,0 +1,12 @@
+[package]
+name = "mirrord-layer-tests-dns-resolve"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dns_resolve"
+path = "src/main.rs"

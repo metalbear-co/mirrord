@@ -296,7 +296,7 @@ fn startup_worker_not_started() {
         unsafe { TerminateProcess(GetCurrentProcess(), EXIT_FAILURE as u32) };
     }
     // The `SetUnhandledExceptionFilter` hook is off, so the target's filter owns the slot again.
-    utils_win::diagnostics::crash::restore_filter();
+    mirrord_utils_win::diagnostics::crash::restore_filter();
 
     // The parent reports it at once, rather than at its timeout.
     signal_init_failure_to_parent();

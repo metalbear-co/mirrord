@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-use str_win::string_to_u16_buffer;
+use mirrord_str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
         minwindef::{DWORD, FALSE, TRUE},

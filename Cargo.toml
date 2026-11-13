@@ -1,5 +1,5 @@
 # Cross compilable mirrord workspace
-# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
+# On Windows: You can build specific packages like cargo build -p mirrord-cli -p mirrord-layer-win
 # On Unix: Default cargo build will build the Unix-compatible crates
 # All platforms: mirrord/* in members ensures all crates are available for explicit builds
 # This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
@@ -11,10 +11,10 @@ members = [
     "mirrord/agent/iptables",
     "mirrord/layer-tests/tests/apps/fileops",
     "mirrord/layer-tests/tests/apps/outgoing",
-    "mirrord/layer-tests/tests/apps/double_listen",
-    "mirrord/layer-tests/tests/apps/listen_ports",
-    "mirrord/layer-tests/tests/apps/dns_resolve",
-    "mirrord/layer-tests/tests/apps/recv_from",
+    "mirrord/layer-tests/tests/apps/double-listen",
+    "mirrord/layer-tests/tests/apps/listen-ports",
+    "mirrord/layer-tests/tests/apps/dns-resolve",
+    "mirrord/layer-tests/tests/apps/recv-from",
     "mirrord/layer-tests/tests/apps/issue1776",
     "mirrord/layer-tests/tests/apps/issue1776portnot53",
     "mirrord/layer-tests/tests/apps/issue1899",
@@ -22,27 +22,35 @@ members = [
     "mirrord/layer-tests/tests/apps/issue2438",
     "mirrord/layer-tests/tests/apps/issue3248",
     "mirrord/layer-tests/tests/apps/rebind0",
-    "mirrord/layer-tests/tests/apps/dup_listen",
-    "mirrord/layer-tests/tests/apps/posix_spawn_shared_sockets",
+    "mirrord/layer-tests/tests/apps/dup-listen",
+    "mirrord/layer-tests/tests/apps/posix-spawn-shared-sockets",
+    "mirrord/tests/rust-e2e-fileops",
+    "mirrord/tests/rust-unix-socket-client",
+    "mirrord/tests/rust-bypassed-unix-socket",
+    "mirrord/tests/issue1317",
+    "mirrord/tests/rust-websockets",
+    "mirrord/tests/rust-sqs-printer",
+    "mirrord/tests/kafka-consumer",
+    "mirrord/tests/rust-access-denied-server",
+    "mirrord/sessions-manager/client",
+    "mirrord/sessions-manager/protocol",
     "sample/rust",
     "medschool",
-    "tests",
-    "test-utils",
-    "tests/rust-e2e-fileops",
-    "tests/rust-unix-socket-client",
-    "tests/rust-bypassed-unix-socket",
-    "tests/issue1317",
-    "tests/rust-websockets",
-    "tests/rust-sqs-printer",
-    "tests/kafka-consumer",
-    "tests/rust-access-denied-server",
     "xtask",
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
 ]
 
 default-members = [
-    "mirrord/*",
+    # Every crate in `mirrord/` except `tests`, the end-to-end tests, which need a cluster, and
+    # `test-utils`, the helpers of the other crates' tests, which only run with those tests. A glob
+    # can't leave out one name, so this one leaves out every crate whose name starts with `t`, and
+    # the lines after it add the others back. A new crate whose name starts with `t` must be listed
+    # here.
+    "mirrord/[!t]*",
+    "mirrord/test-macros",
+    "mirrord/tls-util",
+    "mirrord/tui",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
     "xtask",

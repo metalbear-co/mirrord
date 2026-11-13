@@ -1,5 +1,5 @@
 [package]
-name = "issue2001"
+name = "mirrord-layer-tests-issue2001"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -18,3 +18,7 @@ workspace = true
 
 [dependencies]
 libc.workspace = true
+
+[[bin]]
+name = "issue2001"
+path = "src/main.rs"

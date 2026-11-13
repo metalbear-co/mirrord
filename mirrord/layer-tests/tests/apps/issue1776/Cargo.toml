@@ -1,5 +1,5 @@
 [package]
-name = "issue1776"
+name = "mirrord-layer-tests-issue1776"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -20,3 +20,7 @@ workspace = true
 libc.workspace = true
 socket2.workspace = true
 errno.workspace = true
+
+[[bin]]
+name = "issue1776"
+path = "src/main.rs"

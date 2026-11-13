@@ -87,7 +87,7 @@ target "cli" {
 
 # Test utility that prints SQS messages; used for manual SQS integration testing.
 target "sqs-printer" {
-  context    = "./tests/rust-sqs-printer"
+  context    = "./mirrord/tests/rust-sqs-printer"
   dockerfile = "Dockerfile"
   platforms  = split(",", PLATFORMS)
   tags       = split(",", SQS_PRINTER_TAGS)

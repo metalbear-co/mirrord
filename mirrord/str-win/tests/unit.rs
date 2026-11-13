@@ -1,7 +1,7 @@
 #[cfg(windows)]
 use std::ptr;
 
-use str_win::*;
+use mirrord_str_win::*;
 #[cfg(windows)]
 use winapi::{
     shared::minwindef::LPVOID,

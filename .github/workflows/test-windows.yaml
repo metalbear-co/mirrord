@@ -37,7 +37,7 @@ jobs:
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
-          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cd mirrord/layer-tests/tests/apps/dns-resolve
           cargo build
       - run: |
           cd mirrord/layer-tests/tests/apps/rebind0
@@ -84,7 +84,7 @@ jobs:
       - name: build layer
         run: cargo build -p mirrord-layer-win
       - name: build mirrord
-        run: cargo build -p mirrord
+        run: cargo build -p mirrord-cli
       - name: mirrord stack check
         run: ./scripts/win_stack_check.ps1 -Exe target/debug/mirrord.exe
       - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
@@ -97,7 +97,7 @@ jobs:
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo nextest run -p mirrord -p mirrord-layer-win -p mirrord-layer-lib -p mirrord-command -p mirrord-up
+          cargo nextest run -p mirrord-cli -p mirrord-layer-win -p mirrord-layer-lib -p mirrord-command -p mirrord-up
       - name: mirrord intproxy UT
         run: |
           $ErrorActionPreference = "Stop"

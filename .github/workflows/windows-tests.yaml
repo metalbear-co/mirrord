@@ -99,7 +99,7 @@ jobs:
           $env:MIRRORD_LAYER_FILE = $dll
 
           Write-Host "Building mirrord binary..."
-          cargo build -p mirrord --bin mirrord --target $Target
+          cargo build -p mirrord-cli --bin mirrord --target $Target
           
           $exe = Join-Path $RelDir "mirrord.exe"
           

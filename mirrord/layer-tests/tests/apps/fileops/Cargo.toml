@@ -1,5 +1,5 @@
 [package]
-name = "fileops"
+name = "mirrord-layer-tests-fileops"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -17,3 +17,7 @@ edition.workspace = true
 
 [dependencies]
 libc.workspace = true
+
+[[bin]]
+name = "fileops"
+path = "src/main.rs"

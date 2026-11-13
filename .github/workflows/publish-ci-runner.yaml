@@ -1,4 +1,4 @@
-# Publishes two images from tests/e2e.Dockerfile: the CI runner (full toolchain,
+# Publishes two images from mirrord/tests/e2e.Dockerfile: the CI runner (full toolchain,
 # default target) and mirrord-e2e-apps (slim deployable-apps target with the test
 # app binaries, deployed to staging by Argo CD).
 name: Build and publish the CI runner and e2e apps images
@@ -11,10 +11,10 @@ on:
   push:
     branches: [main]
     paths:
-      - tests/**
-      - "!tests/src/**"
-      - "!tests/README.md"
-      - "!tests/AGENTS.md"
+      - mirrord/tests/**
+      - "!mirrord/tests/src/**"
+      - "!mirrord/tests/README.md"
+      - "!mirrord/tests/AGENTS.md"
       - scripts/**
       - mirrord/layer-tests/tests/apps/**/*.go
       - mirrord/layer-tests/tests/apps/**/go.mod
@@ -63,7 +63,7 @@ jobs:
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           context: .
-          file: tests/e2e.Dockerfile
+          file: mirrord/tests/e2e.Dockerfile
           platforms: ${{ matrix.docker_platform }}
           tags: ${{ env.REGISTRY_IMAGE }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
@@ -76,7 +76,7 @@ jobs:
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           context: .
-          file: tests/e2e.Dockerfile
+          file: mirrord/tests/e2e.Dockerfile
           target: deployable-apps
           platforms: ${{ matrix.docker_platform }}
           tags: ${{ env.APPS_IMAGE }}

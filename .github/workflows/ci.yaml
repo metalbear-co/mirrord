@@ -125,7 +125,7 @@ jobs:
           files: |
             **/*.rs
             mirrord/**
-            tests/**
+            mirrord/tests/**
             Cargo.toml
             Cargo.lock
             .dockerignore
@@ -138,7 +138,7 @@ jobs:
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            tests/**
+            mirrord/tests/**
             scripts/**
             mirrord/layer-tests/tests/apps/**/*.go
             mirrord/layer-tests/tests/apps/**/go.mod
@@ -152,9 +152,9 @@ jobs:
             pnpm-workspace.yaml
             .github/workflows/build-ci-runner.yaml
           files_ignore: |
-            tests/src/**
-            tests/README.md
-            tests/AGENTS.md
+            mirrord/tests/src/**
+            mirrord/tests/README.md
+            mirrord/tests/AGENTS.md
       - name: get install script changes
         id: changed-install-script
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb

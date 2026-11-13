@@ -1,0 +1,54 @@
+[package]
+name = "mirrord-tests"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+k8s-openapi.workspace = true
+kube.workspace = true
+mirrord-command = { path = "../command", features = ["tokio"] }
+reqwest.workspace = true
+tokio = { workspace = true, features = [
+    "rt",
+    "rt-multi-thread",
+    "net",
+    "macros",
+    "process",
+] }
+serde_json.workspace = true
+mirrord-operator = { path = "../operator", features = ["crd"] }
+serde.workspace = true
+futures.workspace = true
+rand.workspace = true
+fancy-regex.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+rustls.workspace = true
+rstest.workspace = true
+mirrord-kube = { path = "../kube" }
+
+futures-util.workspace = true
+chrono.workspace = true
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
+
+mirrord-test-utils = { path = "../test-utils" }
+
+[features]
+default = ["ephemeral", "job", "cli", "targetless"]
+ephemeral = []
+job = []
+operator = []
+cli = []
+targetless = []
+# Tests that need a single-stack IPv6 cluster (see CONTRIBUTING.md). Not in default
+# features, so they are ignored unless the cluster is actually IPv6.
+ipv6 = []

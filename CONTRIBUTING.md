@@ -202,7 +202,7 @@ Feel free to add instructions on how to make that "manual" step unnecessary.
 
 Tests that need such a cluster are gated on the `ipv6` cargo feature (not in the default
 feature set, so they are ignored everywhere else). The `e2e-ipv6` CI job runs them on a
-single-stack IPv6 kind cluster (`tests/kind-cluster-ipv6-config.yaml`); locally:
+single-stack IPv6 kind cluster (`mirrord/tests/kind-cluster-ipv6-config.yaml`); locally:
 
 ```bash
 cargo xtask test-e2e -- --no-default-features --features ipv6 -E 'test(ipv6)'

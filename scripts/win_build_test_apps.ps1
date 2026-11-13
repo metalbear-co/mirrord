@@ -70,7 +70,7 @@ try {
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
-$testsDir = Join-Path $repoRoot 'tests'
+$testsDir = Join-Path $repoRoot 'mirrord/tests'
 
 if (-not (Test-Path $testsDir)) {
     throw "Tests directory not found at path $testsDir"

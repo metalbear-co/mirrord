@@ -1,5 +1,5 @@
 [package]
-name = "issue1776portnot53"
+name = "mirrord-layer-tests-issue1776portnot53"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -19,3 +19,7 @@ workspace = true
 [dependencies]
 libc.workspace = true
 socket2.workspace = true
+
+[[bin]]
+name = "issue1776portnot53"
+path = "src/main.rs"

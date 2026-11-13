@@ -151,7 +151,7 @@ fn create_owner_only_parent(path: &Path) -> io::Result<()> {
     };
 
     fs::create_dir_all(parent)?;
-    utils_win::security::restrict_path_to_current_user(parent)
+    mirrord_utils_win::security::restrict_path_to_current_user(parent)
 }
 
 /// Restricts an existing file to the current user, see [`update_owner_only_at_path`].
@@ -163,7 +163,7 @@ fn restrict_owner_only_file(path: &Path) -> io::Result<()> {
 /// Restricts an existing file to the current user, see [`update_owner_only_at_path`].
 #[cfg(windows)]
 fn restrict_owner_only_file(path: &Path) -> io::Result<()> {
-    utils_win::security::restrict_path_to_current_user(path)
+    mirrord_utils_win::security::restrict_path_to_current_user(path)
 }
 
 fn create_parent_for_missing_target(path: &Path) -> io::Result<()> {

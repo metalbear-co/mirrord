@@ -8,8 +8,8 @@ whole runtime on that thread. This script checks two things, on patched copies o
 mirrord.exe (the original is never touched):
 
   1. The overflow report works: with a stack far too small, the CLI must overflow and print its
-     report, every frame named and sized (`utils_win::diagnostics::stack`). The report is echoed,
-     so a CI log shows what a real one looks like.
+     report, every frame named and sized (`mirrord_utils_win::diagnostics::stack`). The report is
+     echoed, so a CI log shows what a real one looks like.
   2. The CLI fits its budget: with the stack cut to -Budget, offline runs must finish without an
      overflow. When one does overflow, the report above the failure names the frames that grew.
 

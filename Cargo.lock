@@ -3,14 +3,6 @@
 version = 4
 
 [[package]]
-name = "access-denied-service"
-version = "0.1.0"
-dependencies = [
- "axum",
- "tokio",
-]
-
-[[package]]
 name = "actix-codec"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2481,10 +2473,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dns_resolve"
-version = "0.1.0"
-
-[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2498,13 +2486,6 @@ name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
-
-[[package]]
-name = "double_listen"
-version = "3.287.0"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "downcast"
@@ -2532,13 +2513,6 @@ name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
-
-[[package]]
-name = "dup-listen"
-version = "0.1.0"
-dependencies = [
- "nix 0.31.3",
-]
 
 [[package]]
 name = "dyn-clone"
@@ -2898,13 +2872,6 @@ dependencies = [
  "libc",
  "thiserror 1.0.69",
  "winapi",
-]
-
-[[package]]
-name = "fileops"
-version = "3.287.0"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -4075,58 +4042,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
-name = "issue1317"
-version = "3.287.0"
-dependencies = [
- "axum",
- "env_logger",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "issue1776"
-version = "3.287.0"
-dependencies = [
- "errno 0.3.14",
- "libc",
- "socket2 0.5.10",
-]
-
-[[package]]
-name = "issue1776portnot53"
-version = "3.287.0"
-dependencies = [
- "libc",
- "socket2 0.5.10",
-]
-
-[[package]]
-name = "issue1899"
-version = "3.287.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "issue2001"
-version = "3.287.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "issue2438"
-version = "0.1.0"
-dependencies = [
- "nix 0.31.3",
-]
-
-[[package]]
-name = "issue3248"
-version = "0.1.0"
-
-[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4429,19 +4344,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kafka-consumer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "figment",
- "rdkafka",
- "rust-yaml",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "kasuari"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4711,10 +4613,6 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
-
-[[package]]
-name = "listen_ports"
-version = "3.287.0"
 
 [[package]]
 name = "litemap"
@@ -5063,114 +4961,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mirrord"
-version = "3.287.0"
-dependencies = [
- "actix-codec",
- "atomic-write-file",
- "axum",
- "axum-extra",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "ci_info",
- "clap",
- "clap_complete",
- "const-random",
- "dotenvy",
- "drain",
- "dunce",
- "flate2",
- "fs4",
- "futures",
- "glob",
- "hex",
- "http 1.5.0",
- "http-body-util",
- "humantime",
- "hyper",
- "hyper-util",
- "inquire",
- "itertools 0.14.0",
- "k8s-openapi",
- "kube",
- "local-ip-address",
- "mid",
- "miette",
- "mime_guess",
- "mirrord-analytics",
- "mirrord-auth",
- "mirrord-command",
- "mirrord-config",
- "mirrord-console",
- "mirrord-intproxy",
- "mirrord-intproxy-protocol",
- "mirrord-kube",
- "mirrord-layer-lib",
- "mirrord-macros",
- "mirrord-mcp",
- "mirrord-operator",
- "mirrord-operator-websocket",
- "mirrord-progress",
- "mirrord-protocol",
- "mirrord-protocol-api",
- "mirrord-protocol-io",
- "mirrord-session-monitor-client",
- "mirrord-session-monitor-protocol",
- "mirrord-sessions-manager-client",
- "mirrord-sip",
- "mirrord-tls-util",
- "mirrord-tui",
- "mirrord-up",
- "mirrord-vpn",
- "nix 0.31.3",
- "notify",
- "opener",
- "prettytable-rs",
- "rand 0.10.2",
- "rcgen",
- "regex",
- "reqwest 0.13.4",
- "rstest",
- "rust-embed",
- "rustls",
- "schemars 1.2.2",
- "secrecy",
- "semver 1.0.28",
- "serde",
- "serde-saphyr",
- "serde_json",
- "sha2 0.10.9",
- "shlex 1.3.0",
- "socket2 0.5.10",
- "stork",
- "strum 0.27.2",
- "strum_macros 0.27.2",
- "tar",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "tokio-retry",
- "tokio-rustls",
- "tokio-stream",
- "tokio-tungstenite",
- "tokio-util",
- "tower",
- "tower-http",
- "tower-test",
- "tracing",
- "tracing-subscriber",
- "url",
- "utils-win",
- "uuid",
- "which",
- "whoami",
- "xmas-elf",
- "yamlpatch",
- "yamlpath",
-]
-
-[[package]]
 name = "mirrord-agent"
 version = "3.287.0"
 dependencies = [
@@ -5315,6 +5105,114 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-cli"
+version = "3.287.0"
+dependencies = [
+ "actix-codec",
+ "atomic-write-file",
+ "axum",
+ "axum-extra",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "ci_info",
+ "clap",
+ "clap_complete",
+ "const-random",
+ "dotenvy",
+ "drain",
+ "dunce",
+ "flate2",
+ "fs4",
+ "futures",
+ "glob",
+ "hex",
+ "http 1.5.0",
+ "http-body-util",
+ "humantime",
+ "hyper",
+ "hyper-util",
+ "inquire",
+ "itertools 0.14.0",
+ "k8s-openapi",
+ "kube",
+ "local-ip-address",
+ "mid",
+ "miette",
+ "mime_guess",
+ "mirrord-analytics",
+ "mirrord-auth",
+ "mirrord-command",
+ "mirrord-config",
+ "mirrord-console",
+ "mirrord-intproxy",
+ "mirrord-intproxy-protocol",
+ "mirrord-kube",
+ "mirrord-layer-lib",
+ "mirrord-macros",
+ "mirrord-mcp",
+ "mirrord-operator",
+ "mirrord-operator-websocket",
+ "mirrord-progress",
+ "mirrord-protocol",
+ "mirrord-protocol-api",
+ "mirrord-protocol-io",
+ "mirrord-session-monitor-client",
+ "mirrord-session-monitor-protocol",
+ "mirrord-sessions-manager-client",
+ "mirrord-sip",
+ "mirrord-tls-util",
+ "mirrord-tui",
+ "mirrord-up",
+ "mirrord-utils-win",
+ "mirrord-vpn",
+ "nix 0.31.3",
+ "notify",
+ "opener",
+ "prettytable-rs",
+ "rand 0.10.2",
+ "rcgen",
+ "regex",
+ "reqwest 0.13.4",
+ "rstest",
+ "rust-embed",
+ "rustls",
+ "schemars 1.2.2",
+ "secrecy",
+ "semver 1.0.28",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2 0.10.9",
+ "shlex 1.3.0",
+ "socket2 0.5.10",
+ "stork",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-retry",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower",
+ "tower-http",
+ "tower-test",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "which",
+ "whoami",
+ "xmas-elf",
+ "yamlpatch",
+ "yamlpath",
+]
+
+[[package]]
 name = "mirrord-cluster-auth"
 version = "3.287.0"
 dependencies = [
@@ -5375,6 +5273,7 @@ dependencies = [
  "mirrord-config-derive",
  "mirrord-jaq",
  "mirrord-protocol",
+ "mirrord-str-win",
  "nom",
  "prost",
  "prost-reflect",
@@ -5389,7 +5288,6 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "sha2 0.10.9",
- "str-win",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",
@@ -5456,6 +5354,7 @@ dependencies = [
  "mirrord-session-monitor-protocol",
  "mirrord-sessions-manager-client",
  "mirrord-tls-util",
+ "mirrord-utils-win",
  "nix 0.31.3",
  "prettytable-rs",
  "rand 0.10.2",
@@ -5479,7 +5378,6 @@ dependencies = [
  "tokio-util",
  "tower-http",
  "tracing",
- "utils-win",
  "uuid",
  "winapi",
 ]
@@ -5624,6 +5522,8 @@ dependencies = [
  "mirrord-progress",
  "mirrord-protocol",
  "mirrord-sip",
+ "mirrord-str-win",
+ "mirrord-utils-win",
  "nix 0.31.3",
  "phnt",
  "regex",
@@ -5631,14 +5531,12 @@ dependencies = [
  "serde_json",
  "socket2 0.5.10",
  "stork",
- "str-win",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
  "tracing-subscriber",
- "utils-win",
  "uuid",
  "winapi",
  "windows-strings 0.4.2",
@@ -5681,6 +5579,102 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-layer-tests-dns-resolve"
+version = "0.1.0"
+
+[[package]]
+name = "mirrord-layer-tests-double-listen"
+version = "3.287.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mirrord-layer-tests-dup-listen"
+version = "0.1.0"
+dependencies = [
+ "nix 0.31.3",
+]
+
+[[package]]
+name = "mirrord-layer-tests-fileops"
+version = "3.287.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mirrord-layer-tests-issue1776"
+version = "3.287.0"
+dependencies = [
+ "errno 0.3.14",
+ "libc",
+ "socket2 0.5.10",
+]
+
+[[package]]
+name = "mirrord-layer-tests-issue1776portnot53"
+version = "3.287.0"
+dependencies = [
+ "libc",
+ "socket2 0.5.10",
+]
+
+[[package]]
+name = "mirrord-layer-tests-issue1899"
+version = "3.287.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mirrord-layer-tests-issue2001"
+version = "3.287.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mirrord-layer-tests-issue2438"
+version = "0.1.0"
+dependencies = [
+ "nix 0.31.3",
+]
+
+[[package]]
+name = "mirrord-layer-tests-issue3248"
+version = "0.1.0"
+
+[[package]]
+name = "mirrord-layer-tests-listen-ports"
+version = "3.287.0"
+
+[[package]]
+name = "mirrord-layer-tests-outgoing"
+version = "3.287.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
+name = "mirrord-layer-tests-posix-spawn-shared-sockets"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mirrord-layer-tests-rebind0"
+version = "0.1.0"
+
+[[package]]
+name = "mirrord-layer-tests-recv-from"
+version = "0.1.0"
+dependencies = [
+ "socket2 0.5.10",
+]
+
+[[package]]
 name = "mirrord-layer-win"
 version = "3.287.0"
 dependencies = [
@@ -5692,12 +5686,12 @@ dependencies = [
  "mirrord-layer-macro",
  "mirrord-progress",
  "mirrord-protocol",
+ "mirrord-str-win",
+ "mirrord-utils-win",
  "once_cell",
  "phnt",
  "socket2 0.5.10",
- "str-win",
  "tracing",
- "utils-win",
  "winapi",
  "windows-strings 0.4.2",
 ]
@@ -6008,6 +6002,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-str-win"
+version = "0.1.0"
+dependencies = [
+ "rstest",
+ "winapi",
+]
+
+[[package]]
 name = "mirrord-test-macros"
 version = "3.287.0"
 dependencies = [
@@ -6054,6 +6056,76 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "mirrord-tests-issue1317"
+version = "3.287.0"
+dependencies = [
+ "axum",
+ "env_logger",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "mirrord-tests-kafka-consumer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "figment",
+ "rdkafka",
+ "rust-yaml",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "mirrord-tests-rust-access-denied-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+]
+
+[[package]]
+name = "mirrord-tests-rust-bypassed-unix-socket"
+version = "3.287.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
+name = "mirrord-tests-rust-e2e-fileops"
+version = "3.287.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mirrord-tests-rust-sqs-printer"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-sqs",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "mirrord-tests-rust-unix-socket-client"
+version = "3.287.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
+name = "mirrord-tests-rust-websockets"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
 ]
 
 [[package]]
@@ -6147,6 +6219,26 @@ dependencies = [
  "winapi",
  "yamlpatch",
  "yamlpath",
+]
+
+[[package]]
+name = "mirrord-utils-win"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "chrono",
+ "ci_info",
+ "embed-resource",
+ "mirrord-command",
+ "mirrord-config",
+ "mirrord-str-win",
+ "rand 0.10.2",
+ "rustc-demangle",
+ "thiserror 2.0.20",
+ "tracing",
+ "winapi",
+ "windows-sys 0.59.0",
+ "zip 9.5.1",
 ]
 
 [[package]]
@@ -6707,13 +6799,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "outgoing"
-version = "3.287.0"
-dependencies = [
- "tokio",
-]
-
-[[package]]
 name = "outref"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7201,13 +7286,6 @@ dependencies = [
  "shell-words",
  "winapi",
  "winreg 0.10.1",
-]
-
-[[package]]
-name = "posix-spawn-shared-sockets"
-version = "0.1.0"
-dependencies = [
- "libc",
 ]
 
 [[package]]
@@ -7914,17 +7992,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rebind0"
-version = "0.1.0"
-
-[[package]]
-name = "recv_from"
-version = "0.1.0"
-dependencies = [
- "socket2 0.5.10",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8225,20 +8292,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-bypassed-unix-socket"
-version = "3.287.0"
-dependencies = [
- "tokio",
-]
-
-[[package]]
-name = "rust-e2e-fileops"
-version = "3.287.0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "rust-embed"
 version = "8.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8271,31 +8324,6 @@ checksum = "42ffa149f6aa81b58a5b3011d01a857c4ed12c7a732d2c51947a4c7c692185f0"
 dependencies = [
  "sha2 0.11.0",
  "walkdir",
-]
-
-[[package]]
-name = "rust-sqs-printer"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-sdk-sqs",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "rust-unix-socket-client"
-version = "3.287.0"
-dependencies = [
- "tokio",
-]
-
-[[package]]
-name = "rust-websockets"
-version = "0.1.0"
-dependencies = [
- "axum",
- "tokio",
 ]
 
 [[package]]
@@ -9206,14 +9234,6 @@ dependencies = [
  "thiserror 2.0.20",
  "winapi",
  "wincorda",
-]
-
-[[package]]
-name = "str-win"
-version = "0.1.0"
-dependencies = [
- "rstest",
- "winapi",
 ]
 
 [[package]]
@@ -10430,26 +10450,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "utils-win"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "chrono",
- "ci_info",
- "embed-resource",
- "mirrord-command",
- "mirrord-config",
- "rand 0.10.2",
- "rustc-demangle",
- "str-win",
- "thiserror 2.0.20",
- "tracing",
- "winapi",
- "windows-sys 0.59.0",
- "zip 9.5.1",
-]
 
 [[package]]
 name = "uuid"

@@ -1,5 +1,5 @@
 [package]
-name = "outgoing"
+name = "mirrord-layer-tests-outgoing"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -18,3 +18,7 @@ workspace = true
 
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
+
+[[bin]]
+name = "outgoing"
+path = "src/main.rs"

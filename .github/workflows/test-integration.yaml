@@ -64,9 +64,9 @@ jobs:
             for app in issue1123 issue1054 issue1458 issue1458portnot53 issue2058 issue2204; do
               (cd "$app" && rustc "$app.rs" --out-dir target)
             done
-            for app in fileops outgoing recv_from dns_resolve listen_ports issue1776 \
-              issue1776portnot53 issue1899 issue2001 issue2438 issue3248 rebind0 dup_listen \
-              double_listen posix_spawn_shared_sockets; do
+            for app in fileops outgoing recv-from dns-resolve listen-ports issue1776 \
+              issue1776portnot53 issue1899 issue2001 issue2438 issue3248 rebind0 dup-listen \
+              double-listen posix-spawn-shared-sockets; do
               (cd "$app" && cargo build)
             done
             ./dlopen_cgo/build_test_app.sh
@@ -80,7 +80,7 @@ jobs:
       - uses: ./.github/actions/run-in-ci-runner
         with:
           command: |
-            cargo build -p mirrord
+            cargo build -p mirrord-cli
       - name: mirrord layer integration tests
         uses: ./.github/actions/run-in-ci-runner
         with:

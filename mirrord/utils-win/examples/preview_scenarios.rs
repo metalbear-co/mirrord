@@ -3,11 +3,11 @@
 //! Calls `report::write_artifacts` and then `report::show_dialog`, as the monitor does, so each
 //! scenario writes the same artifacts and shows exactly the dialog a user would see.
 //!
-//! Run: `cargo run -p utils-win --example preview_scenarios -- <scenario>`
+//! Run: `cargo run -p mirrord-utils-win --example preview_scenarios -- <scenario>`
 //! where `<scenario>` is one of: `crash`, `kill`, `fastfail`, `initfail`.
 
 #[cfg(windows)]
-use utils_win::diagnostics::report::{
+use mirrord_utils_win::diagnostics::report::{
     CrashReport, Incident, Outcome, ProcessNode, show_dialog, write_artifacts,
 };
 
