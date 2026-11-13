@@ -50,8 +50,7 @@ BUNDLED_FILES = {
 }
 
 # The CLI polls its whole runtime on the main thread, and Windows gives that thread 1 MiB unless
-# the binary asks for more, so the CLI asks for 4 MiB. Bazel doesn't run `build.rs`, which asks for
-# the same stack in Cargo builds.
+# the binary asks for more, so the CLI asks for 4 MiB.
 MAIN_THREAD_STACK_FLAGS = select({
     "@llvm//constraints/windows/abi:msvc": ["-Clink-arg=/STACK:4194304"],
     "//conditions:default": [],

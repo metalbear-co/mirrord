@@ -5,7 +5,7 @@
 //! a footer band with flat owner-drawn buttons (Report Crash / Copy / Open folder / Close).
 //!
 //! It is shown by the monitor, never by a crashing process. The logo is the metalbear mark, an
-//! embedded bitmap resource (`logo.rc`, compiled by `build.rs`).
+//! embedded bitmap resource (`logo.rc`, compiled by `:logo_res` in `BUILD.bazel`).
 //!
 //! The pieces split across submodules: `theme` holds the look (geometry, palette, fonts),
 //! `state` the per-window data, and `build` the control construction. This file owns the

@@ -13,12 +13,16 @@ use serde_json::Value;
 use thiserror::Error;
 
 /// The `corpus/` files as a gzipped tar, at the path that the build passes in
-/// `MIRRORD_BUNDLED_MCP_CORPUS`: Bazel packs them (`:corpus` in `BUILD.bazel`), and Cargo builds
-/// pack them in `build.rs`.
+/// `MIRRORD_BUNDLED_MCP_CORPUS`. Bazel packs them (`:corpus` in `BUILD.bazel`). A plain Cargo build
+/// gets an empty placeholder from `.cargo/config.toml`, so that it compiles, and has no corpus.
 static ARCHIVE: &[u8] = include_bytes!(env!("MIRRORD_BUNDLED_MCP_CORPUS"));
 
 /// Every vendored file, keyed by its path in `corpus/`, e.g. `skills/mirrord-up/SKILL.md`.
 pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+    if ARCHIVE.is_empty() {
+        return BTreeMap::new();
+    }
+
     let mut archive = tar::Archive::new(GzDecoder::new(ARCHIVE));
     let entries = archive.entries().expect("the build packs a valid archive");
     entries

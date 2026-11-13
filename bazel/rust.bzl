@@ -191,7 +191,6 @@ def _cargo_files():
         srcs = native.glob(
             [
                 "Cargo.toml",
-                "build.rs",
                 "src/lib.rs",
                 "src/main.rs",
                 "src/bin/*.rs",

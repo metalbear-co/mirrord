@@ -14,9 +14,7 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# The logo's resource, compiled into a `.res` file by the toolchain's `llvm-windres`. Cargo builds
-# compile it in `build.rs` with `embed-resource`, which runs whichever resource compiler the host
-# has, and Bazel doesn't run that script.
+# The logo's resource, compiled into a `.res` file by the toolchain's `llvm-windres`.
 #
 # The resource is a `.res` file rather than a COFF object because `lld-link` takes a binary's
 # resources either from `.res` files or from a single object, never from both. The workspace's
