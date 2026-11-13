@@ -3,9 +3,9 @@
 
 /// Silences `deny(unused_crate_dependencies)`.
 ///
-/// These dependencies are only used in the console binary.
-#[cfg(feature = "binary")]
+/// These dependencies are only used in the console binary, and `futures` also in `async_logger`.
 mod binary_deps {
+    use futures as _;
     use mirrord_protocol as _;
     use tokio as _;
     use tracing as _;
