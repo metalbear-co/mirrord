@@ -355,6 +355,9 @@ pub struct SpecifiedTarget {
     pub(crate) path: Option<Target>,
 
     /// Namespace of the target workload. Defaults to the namespace of the kube context.
+    ///
+    /// For a serverless target, the environment of its service in sessions-manager, `default`
+    /// when not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) namespace: Option<Arc<str>>,
 }
@@ -984,10 +987,14 @@ impl ServiceConfig {
             cfg = apply_config_patch(cfg, patch, &key, invocation_directory)?;
         }
 
-        // `incoming: replace` splits no queues.
+        // `incoming: replace` splits no queues, and serverless sessions can't split any.
         let splits_queues = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
             && patch_sets_split_queues.not()
-            && matches!(cfg.target.path, Some(Target::Label(_))).not()
+            && matches!(
+                cfg.target.path,
+                Some(Target::Label(_) | Target::Serverless(_))
+            )
+            .not()
             && (preview.not()
                 || matches!(
                     cfg.target.path,
@@ -1288,7 +1295,14 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetV
             })
         }
 
-        if target_type.compatible_with(&cfg.config.feature).not() {
+        // `TargetType::compatible_with` never accepts serverless, since it also decides the
+        // target types IDEs offer to pick from, and they can't list serverless targets.
+        let compatible = match target_type {
+            TargetType::Serverless => cfg.config.feature.copy_target.enabled.not(),
+            other => other.compatible_with(&cfg.config.feature),
+        };
+
+        if compatible.not() {
             incompatible.push(IncompatibleTarget {
                 service: cfg.service_name.clone(),
                 mode: cfg.mode.clone(),
@@ -1837,10 +1851,22 @@ impl UpConfig {
                         service: service_name.clone(),
                         source,
                     })?;
+                let serverless =
+                    matches!(service.config.target.path, Some(Target::Serverless(_)));
+                if kind == SessionKind::Up
+                    && serverless
+                    && matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
+                {
+                    eprintln!(
+                        "{service_name}: serverless targets can't split queues or branch \
+                         databases, so `{mode_name}` mode runs without either",
+                    );
+                }
                 let asks_for_branches = mode
                     .db_branching
                     .is_some_and(|branching| branching != DbBranching::Off);
                 if kind == SessionKind::Up
+                    && serverless.not()
                     && asks_for_branches
                     && is_single_workload(service.config.target.path.as_ref()).not()
                     && service.config.feature.db_branches.is_empty()
