@@ -72,7 +72,8 @@ bazel run //mirrord/tests:e2e_setup
 bazel test //mirrord/tests:e2e --test_env=KUBECONFIG=<the path that e2e_setup prints>
 bazel run //mirrord/tests:e2e_setup -- --delete
 
-# lint the docs and the frontends, check the changelog fragment and the dependencies, and check the formatting
+# lint the docs, the frontends and the Python code, check the changelog fragment and the dependencies, and check the
+# formatting
 bazel run //:lint
 bazel run //:format -- --check
 ```
@@ -96,7 +97,7 @@ job log and grep for its name rather than trusting a green check.
 ### Styling
 
 ```bash
-# format the Rust code, the Starlark files and the frontends
+# format the Rust code, the Starlark files, the Python code and the frontends
 bazel run //:format
 ```
 

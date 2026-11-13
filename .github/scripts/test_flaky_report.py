@@ -40,6 +40,7 @@ else:
 # Answers Linear's GraphQL API from the environment: $REPEAT has an open issue already track the
 # test, $FAIL names the operations Linear answers with errors, and $REFUSE the ones it reports as
 # unsuccessful.
+# The script's dicts have braces, which a format string would have to escape.
 CURL = """
 import json, os, sys
 from pathlib import Path
@@ -84,7 +85,7 @@ elif operation == 'fileUpload':
     print(json.dumps({'data': {operation: {'success': True, 'uploadFile': upload}}}))
 else:
     print(json.dumps({'data': {operation: {'success': operation not in refuse, 'issue': issue}}}))
-""" % (OPERATIONS, ASSET_URL)
+""" % (OPERATIONS, ASSET_URL)  # noqa: UP031
 
 
 class FlakyReportTests(unittest.TestCase):
@@ -140,10 +141,7 @@ class FlakyReportTests(unittest.TestCase):
         )
 
     def requests(self):
-        return [
-            json.loads(line)
-            for line in (self.root / "requests").read_text().splitlines()
-        ]
+        return [json.loads(line) for line in (self.root / "requests").read_text().splitlines()]
 
     def operations(self):
         return [

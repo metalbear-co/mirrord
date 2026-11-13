@@ -7,8 +7,9 @@
 #     bazel build --config=clippy //... //mirrord/tests:e2e  # lint the Rust code
 #     bazel build --config=doc //...                         # build the Rust docs
 #     bazel test //...                                       # unit and integration tests
-#     bazel run //:lint                                      # lint the docs and the frontends, and
-#                                                            # check the changelog and the deps
+#     bazel run //:lint                                      # lint the docs, the Python code and
+#                                                            # the frontends, and check the
+#                                                            # changelog and the deps
 #     bazel run //:format -- --check                         # check the formatting
 #
 # The `build-test` job runs the first four on each platform, as separate steps, so that the job's

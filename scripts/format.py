@@ -1,12 +1,13 @@
-"""Formats the workspace's Rust code with rustfmt, its Starlark files with buildifier, and the
-frontends' code with Prettier. With `--check`, it changes nothing and fails if a file isn't
-formatted. It runs as `bazel run //:format`, which runs it in the workspace.
+"""Formats the workspace's Rust code with rustfmt, its Starlark files with buildifier, its Python
+code with Ruff, and the frontends' code with Prettier. With `--check`, it changes nothing and fails
+if a file isn't formatted. It runs as `bazel run //:format`, which runs it in the workspace.
 
 rustfmt is the one of the Rust toolchain that Bazel builds with. rules_rust's runner, which queries
 Bazel for the Rust targets, formats each target's sources with the target's edition, as `cargo fmt`
 formats each crate with the edition in its `Cargo.toml`. buildifier comes from `PATH`, and also
-applies its lint fixes, or reports its lint warnings with `--check`. Prettier comes from the
-frontends' `node_modules`, which pnpm, from `PATH`, installs.
+applies its lint fixes, or reports its lint warnings with `--check`. Ruff comes from `PATH`, with
+the settings in `ruff.toml`. Prettier comes from the frontends' `node_modules`, which pnpm, from
+`PATH`, installs.
 """
 
 import argparse
@@ -21,7 +22,7 @@ from scripts.tools import FRONTENDS, PNPM_INSTALL, run
 def main():
     parser = argparse.ArgumentParser(
         prog="bazel run //:format --",
-        description="Formats the Rust code, the Starlark files and the frontends.",
+        description="Formats the Rust code, the Starlark files, the Python code and the frontends.",
     )
     parser.add_argument(
         "--check",
@@ -48,6 +49,10 @@ def main():
         buildifier = ["buildifier", "-r", "-lint=fix", "."]
     if not run(buildifier):
         failed.append("buildifier")
+
+    print("=== ruff", flush=True)
+    if not run(["ruff", "format", "--check"] if arguments.check else ["ruff", "format"]):
+        failed.append("ruff")
 
     print("=== prettier", flush=True)
     if not run(PNPM_INSTALL):

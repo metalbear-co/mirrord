@@ -1,6 +1,6 @@
 import os
-import uuid
 import unittest
+import uuid
 
 TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\n"
 
@@ -40,10 +40,8 @@ class FileOpsTest(unittest.TestCase):
         Opens a directory i.e. "/tmp", then opens a file in temp using openat give the directory file desciptor for "/tmp".
         Asserts, data written to the file is the same as being expected.
         """
-        file_path, file_name = self._create_new_tmp_file()
-        dir = os.open(
-            "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
-        )
+        _, file_name = self._create_new_tmp_file()
+        dir = os.open("/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY)
         file = os.open(file_name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir)
         read = os.read(file, len(TEXT) + 1)
         self.assertEqual(read.decode("utf-8"), TEXT)
@@ -61,9 +59,7 @@ class FileOpsTest(unittest.TestCase):
         """
         Creates a new directory in "/tmp" using mkdirat given the directory file descriptor for "/tmp" and verifies if the directory exists.
         """
-        dir = os.open(
-            "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
-        )
+        dir = os.open("/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY)
         os.mkdir("test_mkdirat", dir_fd=dir)
         self.assertTrue(os.path.isdir("/tmp/test_mkdirat"))
         os.close(dir)
@@ -80,9 +76,7 @@ class FileOpsTest(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             os.mkdir("/tmp/test_mkdir_error_already_exists")
 
-        dir = os.open(
-            "/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY
-        )
+        dir = os.open("/tmp", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_DIRECTORY)
         with self.assertRaises(FileExistsError):
             os.mkdir("test_mkdir_error_already_exists", dir_fd=dir)
 

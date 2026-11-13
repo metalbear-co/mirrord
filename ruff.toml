@@ -1,0 +1,11 @@
+# Ruff formats and lints the workspace's Python, through `bazel run //:format` and
+# `bazel run //:lint`. Lines are as long as in the Rust code and the Starlark files.
+line-length = 100
+
+# The docs and skills vendored for `mirrord mcp` are upstream's, kept byte-identical.
+extend-exclude = ["mirrord/mcp/corpus"]
+
+# The end-to-end tests' apps decide when each file closes, because the tests check how the layer
+# handles the files that stay open.
+[lint.per-file-ignores]
+"mirrord/tests/python-e2e/*" = ["SIM115"]

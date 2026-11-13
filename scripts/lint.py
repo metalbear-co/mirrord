@@ -7,6 +7,7 @@ already lints the Rust code, so these are the other checks:
   dependencies, which matter to Bazel too, because it builds every dependency that a `Cargo.toml`
   lists;
 - the tests of the scripts behind the flaky test report;
+- Ruff on the Python code, with the settings in `ruff.toml`;
 - ESLint and the TypeScript compiler on the frontends.
 
 It runs as `bazel run //:lint`, which runs it in the workspace, and takes the tools from `PATH`, as
@@ -58,6 +59,7 @@ def checks():
         "towncrier": ["towncrier", "check"],
         "cargo-deny": ["cargo", "deny", "--all-features", "check"],
         "cargo-shear": ["cargo", "shear", "--deny-warnings"],
+        "ruff": ["ruff", "check"],
     }
 
     # The tests fake `gh` and `curl` with scripts, which only run on Unix, like the flaky test

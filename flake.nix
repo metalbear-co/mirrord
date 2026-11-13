@@ -53,6 +53,7 @@
             cargo-shear
             python3Packages.towncrier
             bazel-buildtools
+            ruff
             # The flaky test report's tests run `.github/scripts/flaky-tests.sh`, which unzips the
             # reports.
             unzip

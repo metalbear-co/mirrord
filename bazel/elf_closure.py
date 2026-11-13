@@ -68,7 +68,8 @@ class Archive:
     """The members of a tar archive of a root file system, by their absolute paths."""
 
     def __init__(self, path):
-        self.tar = tarfile.open(path)
+        # The archive stays open while the object reads it.
+        self.tar = tarfile.open(path)  # noqa: SIM115
         self.members = {}
         for member in self.tar.getmembers():
             self.members[posixpath.normpath(posixpath.join("/", member.name))] = member
@@ -102,7 +103,10 @@ class Archive:
         return resolved
 
     def read(self, path):
-        return self.tar.extractfile(self.members[path]).read()
+        # `extractfile` only returns `None` for a member that isn't a file, which `keep` never reads.
+        file = self.tar.extractfile(self.members[path])
+        assert file is not None
+        return file.read()
 
 
 def main():

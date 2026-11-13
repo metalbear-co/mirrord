@@ -2,9 +2,9 @@
 This is an application that listens to a socket and accepts 1 connection, and closes the socket once that connection is
 closed.
 """
-import socket
-import fileinput
 
+import fileinput
+import socket
 from sys import stderr
 
 LISTEN_ADDR = ("127.0.0.1", 80)
@@ -25,5 +25,5 @@ def main():
     fileinput.input().readline()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

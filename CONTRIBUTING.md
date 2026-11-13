@@ -32,9 +32,10 @@ The following guide details the steps to setup a local development environment f
   with, like Rust, a C/C++ compiler, Go, Node.js and Python, and builds the apps that the tests run.
 - [pnpm](https://pnpm.io/), [typos](https://github.com/crate-ci/typos), [Vale](https://vale.sh/),
   [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2), [towncrier](https://towncrier.readthedocs.io/),
-  [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), [cargo-shear](https://github.com/Boshen/cargo-shear) and
-  [buildifier](https://github.com/bazelbuild/buildtools), which `bazel run //:lint` and `bazel run //:format` run. The
-  `lint` devshell (`nix develop .#lint`) has only these, at the versions that CI runs.
+  [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), [cargo-shear](https://github.com/Boshen/cargo-shear),
+  [buildifier](https://github.com/bazelbuild/buildtools) and [Ruff](https://docs.astral.sh/ruff/), which
+  `bazel run //:lint` and `bazel run //:format` run. The `lint` devshell (`nix develop .#lint`) has only these, at the
+  versions that CI runs.
 - For the E2E tests, [Docker](https://www.docker.com/), [kubectl](https://kubernetes.io/docs/tasks/tools/), and
   [kind](https://kind.sigs.k8s.io/) or [minikube](https://minikube.sigs.k8s.io/).
 
