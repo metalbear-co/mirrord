@@ -1320,8 +1320,31 @@ mod tests {
     }
 
     /// Keeps what the launcher reports, so a test can tell which path it took.
-    #[derive(Clone, Default)]
-    struct Recorder(Arc<Mutex<Vec<String>>>);
+    ///
+    /// It also keeps the launcher from resuming a program whose layer loads on resume before the
+    /// fake layer is done. A real layer opens its events inside `DllMain`, which the loader runs
+    /// before the program's entry point, so the program cannot end before its layer found them.
+    /// The fake layer is a thread of the test, and the launcher drops the events as soon as the
+    /// program exits. `cmd.exe /c exit 7` exits within a few milliseconds of its resume, which
+    /// can be before the fake layer looks for the events. The launcher finishes its progress as
+    /// the last thing before that resume, while it holds the events, so that is where the
+    /// recorder waits for the fake layer.
+    #[derive(Clone)]
+    struct Recorder {
+        messages: Arc<Mutex<Vec<String>>>,
+        /// `None` once the fake layer was joined.
+        fake_layer: Arc<Mutex<Option<JoinHandle<()>>>>,
+    }
+
+    impl Recorder {
+        /// Waits until the fake layer is done, unless an earlier call already waited for it.
+        fn join_fake_layer(&self) {
+            let fake_layer = self.fake_layer.lock().expect("fake layer").take();
+            if let Some(fake_layer) = fake_layer {
+                fake_layer.join().expect("fake layer");
+            }
+        }
+    }
 
     impl mirrord_progress::Progress for Recorder {
         fn subtask(&self, _: &str) -> Self {
@@ -1329,14 +1352,21 @@ mod tests {
         }
 
         fn success(&mut self, message: Option<&str>) {
-            self.0
+            let message = message.unwrap_or_default();
+            self.messages
                 .lock()
                 .expect("progress")
-                .push(message.unwrap_or_default().to_owned());
+                .push(message.to_owned());
+            if message == "layer loading on resume" {
+                self.join_fake_layer();
+            }
         }
 
         fn print(&self, message: &str) {
-            self.0.lock().expect("progress").push(message.to_owned());
+            self.messages
+                .lock()
+                .expect("progress")
+                .push(message.to_owned());
         }
     }
 
@@ -1459,7 +1489,10 @@ mod tests {
             } else {
                 0
             };
-            let recorder = Recorder::default();
+            let recorder = Recorder {
+                messages: Arc::default(),
+                fake_layer: Arc::new(Mutex::new(Some(fake_layer))),
+            };
             let result = LayerManagedProcess::execute_with_closure(
                 &self.parent,
                 Some(environment),
@@ -1473,13 +1506,13 @@ mod tests {
                     .map(|(_, announce_to)| announce_to as &mut dyn Write),
                 Some(recorder.clone()),
             );
-            fake_layer.join().expect("fake layer");
+            recorder.join_fake_layer();
             // Closing the write end ends the IDE's read when nothing was announced.
             let announcement = ide.and_then(|(fake_ide, announce_to)| {
                 drop(announce_to);
                 fake_ide.join().expect("fake IDE")
             });
-            let progress = recorder.0.lock().expect("progress").clone();
+            let progress = recorder.messages.lock().expect("progress").clone();
 
             Launched {
                 result,
