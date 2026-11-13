@@ -1153,12 +1153,21 @@ jobs:
           echo "sha256_mac=$(cat /tmp/artifacts/universal-apple-darwin/mirrord_mac_universal.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
           echo "sha256_linux_aarch64=$(cat /tmp/artifacts/aarch64-unknown-linux-gnu/mirrord_linux_aarch64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
           echo "sha256_linux_x86_64=$(cat /tmp/artifacts/x86_64-unknown-linux-gnu/mirrord_linux_x86_64.shasum256 | awk '{ print $1 }')" >> $GITHUB_ENV
+      - name: Create GitHub App token (homebrew-mirrord repo)
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: homebrew-mirrord
+          permission-contents: write
       - name: Checkout into homebrew-mirrord
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: metalbear-co/homebrew-mirrord
           path: ./
-          token: ${{ secrets.BREW_GITHUB_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
       - name: Update hashes and urls
         run: |
           sed -i -e 's/\([0-9]\+\.[0-9]\+\.[0-9]\+\)/${{ env.version }}/g' mirrord.rb
@@ -1169,8 +1178,8 @@ jobs:
         run: cat mirrord.rb
       - name: Commit to metalbear-co/homebrew-mirrord
         run: |
-          git config --global user.email "eyal@metalbear.co"
-          git config --global user.name "Eyal Bukchin"
+          git config --global user.email "273354325+cubby-mb[bot]@users.noreply.github.com"
+          git config --global user.name "cubby-mb[bot]"
           git add .
           git commit -m "Update to ${{ env.version }}"
           git push
