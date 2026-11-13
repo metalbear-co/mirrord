@@ -21,11 +21,10 @@ mod file_ops_tests {
         client::kube_client,
         kube_service::KubeService,
         services::{basic_service, go_statfs_service},
-        KubeClient,
+        AgentMode, KubeClient,
     };
 
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test]
@@ -34,14 +33,13 @@ mod file_ops_tests {
         #[notrace]
         basic_service: KubeService,
         #[values(FileOps::Python, FileOps::Rust)] ops: FileOps,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
     ) {
         let service = basic_service.await;
         let command = ops.command();
 
         let mut args = vec!["--fs-mode", "read"];
-        if cfg!(feature = "ephemeral") {
-            args.extend(["-e"].into_iter());
-        }
+        args.extend(agent_mode.flags());
 
         let env = vec![("MIRRORD_FILE_READ_WRITE_PATTERN", "/tmp.*")];
         let mut process = run_exec_with_target(
@@ -57,7 +55,6 @@ mod file_ops_tests {
         ops.assert(process).await;
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test]
@@ -92,7 +89,6 @@ mod file_ops_tests {
     }
 
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test]
@@ -221,7 +217,6 @@ mod file_ops_tests {
     /// This is an E2E test and not an integration test in order to test the agent side of the
     /// detours.
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[trace]
     #[tokio::test]
@@ -230,15 +225,14 @@ mod file_ops_tests {
         #[notrace]
         basic_service: KubeService,
         #[values(GoVersion::GO_1_25, GoVersion::GO_1_26, GoVersion::GO_1_27)] go_version: GoVersion,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
     ) {
         let service = basic_service.await;
         let command = FileOps::GoDir(go_version).command();
 
         let mut args = Vec::new();
 
-        if cfg!(feature = "ephemeral") {
-            args.extend(["-e"].into_iter());
-        }
+        args.extend(agent_mode.flags());
 
         let mut process = run_exec_with_target(
             command,
@@ -293,13 +287,13 @@ mod file_ops_tests {
     /// This is to prevent a regression to a bug we had where because of `statfs`/`statfs64`
     /// struct conversions, we were returning an invalid struct to go when it called SYS_statfs.
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
     pub async fn go_statfs(
         #[future] go_statfs_service: KubeService,
         #[future] kube_client: KubeClient,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
     ) {
         let app = FileOps::GoStatfs(GoVersion::GO_1_25);
         let service = go_statfs_service.await;
@@ -308,9 +302,7 @@ mod file_ops_tests {
 
         let mut args = vec!["--fs-mode", "read"];
 
-        if cfg!(feature = "ephemeral") {
-            args.extend(["-e"].into_iter());
-        }
+        args.extend(agent_mode.flags());
 
         let mut process = run_exec_with_target(
             command,

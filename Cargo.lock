@@ -6034,7 +6034,6 @@ dependencies = [
 name = "mirrord-tests"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "fancy-regex 0.14.0",
  "futures",
  "futures-util",

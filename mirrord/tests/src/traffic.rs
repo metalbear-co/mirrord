@@ -24,7 +24,6 @@ mod traffic_tests {
         KubeClient, CONTAINER_NAME,
     };
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn remote_dns_enabled_works(#[future] basic_service: KubeService) {
@@ -48,7 +47,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn remote_dns_lookup_google(#[future] basic_service: KubeService) {
@@ -75,7 +73,6 @@ mod traffic_tests {
     // TODO: change outgoing TCP tests to use the same setup as in the outgoing UDP test so that
     //       they actually verify that the traffic is intercepted and forwarded (and isn't just
     //       directly sent out from the local application).
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_traffic_single_request_enabled(#[future] basic_service: KubeService) {
@@ -101,7 +98,6 @@ mod traffic_tests {
 
     /// With `MIRRORD_ENABLE_IPV6=false`, opening an IPv6 socket fails with `EAFNOSUPPORT`,
     /// so the request never leaves the app and the process exits with an error.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     #[should_panic]
@@ -131,7 +127,6 @@ mod traffic_tests {
     /// With IPv6 enabled by default on a cluster without an IPv6 route, an app that tries
     /// IPv6 first must still be able to fall back to IPv4 and succeed. Runs on the regular
     /// (IPv4) CI cluster with default config.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_traffic_ipv6_fallback_to_ipv4(#[future] basic_service: KubeService) {
@@ -155,7 +150,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_traffic_single_request_disabled(#[future] basic_service: KubeService) {
@@ -180,7 +174,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_traffic_make_request_after_listen(#[future] basic_service: KubeService) {
@@ -206,7 +199,6 @@ mod traffic_tests {
     /// Currently, mirrord only intercepts and forwards outgoing udp traffic if the application
     /// binds a non-0 port and calls `connect`. This test runs with mirrord a node app that does
     /// that and verifies that mirrord intercepts and forwards the outgoing udp message.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_traffic_udp_with_connect(
@@ -292,7 +284,6 @@ mod traffic_tests {
 
     /// Very similar to [`outgoing_traffic_udp_with_connect`], but it uses the outgoing traffic
     /// filter to resolve the remote host names.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_traffic_filter_udp_with_connect(
@@ -418,7 +409,6 @@ mod traffic_tests {
 
     /// Test that the process does not crash and messages are sent out normally when the
     /// application calls `connect` on a UDP socket with outgoing traffic disabled on mirrord.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_disabled_udp(#[future] basic_service: KubeService) {
@@ -478,7 +468,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn go_outgoing_traffic_single_request_enabled(
@@ -493,7 +482,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn go_dns_lookup(
@@ -508,7 +496,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn listen_localhost(#[future] basic_service: KubeService) {
@@ -528,7 +515,6 @@ mod traffic_tests {
         assert!(res.success());
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
@@ -551,7 +537,6 @@ mod traffic_tests {
     /// its echo and panics if anything went wrong
     /// 3. Verify the client app did not panic.
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_unix_stream_pathname(
@@ -585,7 +570,6 @@ mod traffic_tests {
     /// socket that is NOT configured to happen remotely works fine locally (testing the Bypass
     /// case of connections to unix sockets).
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn outgoing_bypassed_unix_stream_pathname(#[future] basic_service: KubeService) {
@@ -622,7 +606,6 @@ mod traffic_tests {
     ///
     /// We take the first 10 live servers and pass them to the app.
     /// If we don't have at least 10, we fail.
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[case::outgoing_enabled(true)]
     #[case::outgoing_disabled(false)]

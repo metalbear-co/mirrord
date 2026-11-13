@@ -4,8 +4,9 @@ slow-timeout = { period = "1m", terminate-after = 3 }
 failure-output = "immediate-final"
 final-status-level = "fail"
 # The `operator_install` tests install the cluster-wide operator, which the sessions of all other
-# e2e tests would use. So only the `operator-install` profile runs them.
-default-filter = "not (package(mirrord-tests) & test(/^operator_install::/))"
+# e2e tests would use. So only the `operator-install` profile runs them. The `traffic::ipv6` tests
+# need a cluster that only has IPv6 addresses, so only the `ipv6` profile runs them.
+default-filter = "not (package(mirrord-tests) & (test(/^operator_install::/) | test(/^traffic::ipv6::/)))"
 
 [[profile.default.overrides]]
 filter = "package(mirrord-tests)"
@@ -17,4 +18,8 @@ path = "junit.xml"
 [profile.operator-install]
 default-filter = "package(mirrord-tests) & test(/^operator_install::/)"
 # Each test installs the cluster-wide operator, so they must not run at the same time.
+test-threads = 1
+
+[profile.ipv6]
+default-filter = "package(mirrord-tests) & test(/^traffic::ipv6::/)"
 test-threads = 1

@@ -30,10 +30,9 @@ mod steal_tests {
             basic_service, http2_service, pod_ip_http_echo_service, tcp_echo_service,
             websocket_service,
         },
-        KubeClient,
+        AgentMode, KubeClient,
     };
 
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test]
     async fn steal_http_traffic(
@@ -45,6 +44,7 @@ mod steal_tests {
             Application::NodeHTTP
         )]
         application: Application,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
@@ -58,9 +58,7 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
         let mut flags = vec!["--steal"];
 
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
+        flags.extend(agent_mode.flags());
 
         let process = application
             .run(
@@ -84,7 +82,6 @@ mod steal_tests {
         application.assert(&process).await;
     }
 
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[cfg(target_os = "linux")]
     #[rstest]
     #[tokio::test]
@@ -97,6 +94,7 @@ mod steal_tests {
             Application::NodeHTTP
         )]
         application: Application,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
     ) {
         let service = basic_service.await;
         let kube_client = kube_client.await;
@@ -110,9 +108,7 @@ mod steal_tests {
         let url = format!("http://{}", portforwarder.address());
         let mut flags = vec!["--steal"];
 
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
+        flags.extend(agent_mode.flags());
 
         let process = application
             .run(
@@ -137,19 +133,20 @@ mod steal_tests {
 
     /// Test the app continues running with mirrord and traffic is no longer stolen after the app
     /// closes a socket.
-    #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
     #[rstest]
     #[tokio::test]
-    async fn close_socket(#[future] basic_service: KubeService, #[future] kube_client: KubeClient) {
+    async fn close_socket(
+        #[future] basic_service: KubeService,
+        #[future] kube_client: KubeClient,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
+    ) {
         let application = Application::PythonCloseSocket;
         // Start the test app with mirrord
         let service = basic_service.await;
         let kube_client = kube_client.await;
         let mut flags = vec!["--steal"];
 
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
+        flags.extend(agent_mode.flags());
 
         let mut process = application
             .run(
@@ -256,6 +253,7 @@ mod steal_tests {
     async fn close_socket_keep_connection(
         #[future] basic_service: KubeService,
         #[future] kube_client: KubeClient,
+        #[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode,
     ) {
         let application = Application::PythonCloseSocketKeepConnection;
         // Start the test app with mirrord
@@ -263,9 +261,7 @@ mod steal_tests {
         let kube_client = kube_client.await;
         let mut flags = vec!["--steal"];
 
-        if cfg!(feature = "ephemeral") {
-            flags.extend(["-e"].into_iter());
-        }
+        flags.extend(agent_mode.flags());
 
         let mut process = application
             .run(
@@ -339,7 +335,6 @@ mod steal_tests {
     /// To run on mac, first build the universal binary from the repo root with
     /// `cargo xtask build-cli --platform macos-universal`, then run the test with
     /// `MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord`.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn filter_with_single_client_and_only_matching_requests(
@@ -388,7 +383,6 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn filter_with_single_client_and_only_matching_requests_new(
@@ -435,7 +429,6 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn filter_with_single_client_requests_by_path(
@@ -521,7 +514,6 @@ mod steal_tests {
         application.assert(&client).await;
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn test_filter_with_single_client_and_only_matching_requests_http2(
@@ -597,7 +589,6 @@ mod steal_tests {
     /// To run on mac, first build the universal binary from the repo root with
     /// `cargo xtask build-cli --platform macos-universal`, then run the test with
     /// `MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord`.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn filter_with_single_client_and_some_matching_requests(
@@ -668,7 +659,6 @@ mod steal_tests {
     /// connection of an unsupported protocol.
     /// We verify that the traffic is forwarded to- and handled by the deployed app, and the local
     /// app does not see the traffic.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn complete_passthrough(
@@ -745,7 +735,6 @@ mod steal_tests {
     /// loopback inside the pod, making the original destination loopback). The passthrough must
     /// reach the app on its original destination (the pod IP); an agent that passes through to
     /// loopback (the pre-fix behavior) would fail here, because nothing is listening on loopback.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn passthrough_to_app_listening_on_pod_ip(
@@ -830,7 +819,6 @@ mod steal_tests {
     ///
     /// We verify that the traffic is handled by the deployed app, and the local
     /// app does not see the traffic.
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     async fn websocket_upgrade_no_filter_match(

@@ -22,8 +22,6 @@ use crate::utils::{
     random_string, set_ipv6_only, watch, KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
 };
 
-pub(crate) mod operator;
-
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
 /// This behavior can be changed, see [`PRESERVE_FAILED_ENV_NAME`].
@@ -395,27 +393,6 @@ pub async fn internal_service(
         guards,
         workload_type,
     }
-}
-
-#[cfg(not(feature = "operator"))]
-#[fixture]
-pub async fn service_for_mirrord_ls(
-    #[default("default")] namespace: &str,
-    #[default("NodePort")] service_type: &str,
-    #[default(PYTEST_IMAGE)] image: &str,
-    #[default("http-echo")] service_name: &str,
-    #[default(true)] randomize_name: bool,
-    #[future] kube_client: KubeClient,
-) -> KubeService {
-    basic_service(
-        namespace,
-        service_type,
-        image,
-        service_name,
-        randomize_name,
-        kube_client,
-    )
-    .await
 }
 
 /// Service that should only be reachable from inside the cluster, as a communication partner

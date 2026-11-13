@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![cfg(all(not(feature = "operator"), feature = "job"))]
 //! Test that the agent can successfully detect and exit on dirty IP tables in the target.
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};

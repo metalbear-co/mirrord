@@ -111,14 +111,14 @@ pub async fn run_port_forward(namespace: &str, port_mapping: &str) -> TestProces
     run_mirrord(mirrord_args, env, None).await
 }
 
-/// Runs `mirrord ls` command.
-pub async fn run_ls(namespace: &str, use_operator: bool) -> TestProcess {
+/// Runs `mirrord ls` command, without the operator, which `mirrord ls` would otherwise use when the
+/// cluster has one.
+pub async fn run_ls(namespace: &str) -> TestProcess {
     let mut mirrord_args = vec!["ls"];
     mirrord_args.extend(vec!["--namespace", namespace]);
 
     let mut env = HashMap::new();
-    let use_operator = use_operator.to_string();
-    env.insert("MIRRORD_OPERATOR_ENABLE", use_operator.as_str());
+    env.insert("MIRRORD_OPERATOR_ENABLE", "false");
 
     run_mirrord(mirrord_args, env, None).await
 }

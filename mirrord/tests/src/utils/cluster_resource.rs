@@ -18,8 +18,6 @@ use crate::utils::{
     CONTAINER_NAME, TEST_RESOURCE_LABEL,
 };
 
-pub(crate) mod operator;
-
 /// List of test images that run a TCP server on port 80.
 ///
 /// For deployed test targets using these images, we will use a TCP startup probe.

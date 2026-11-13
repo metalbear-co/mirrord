@@ -1,8 +1,7 @@
-//! Tests that need a single-stack IPv6 cluster, compiled only with the `ipv6` cargo
-//! feature - the regular e2e jobs never see them. The `e2e-ipv6` CI job runs them on an
-//! IPv6 kind cluster; see the IPv6 section of CONTRIBUTING.md for running them locally.
+//! Tests that need a single-stack IPv6 cluster. Only nextest's `ipv6` profile runs them (see
+//! `.config/nextest.toml`), which CI runs on an IPv6 kind cluster. The IPv6 section of
+//! CONTRIBUTING.md says how to run them locally.
 #![cfg(test)]
-#![cfg(feature = "ipv6")]
 
 use std::time::Duration;
 
@@ -29,11 +28,7 @@ async fn steal_http_ipv6_traffic(
     let service = ipv6_service.await;
     let kube_client = kube_client.await;
 
-    let mut flags = vec!["--steal"];
-
-    if cfg!(feature = "ephemeral") {
-        flags.extend(["-e"].into_iter());
-    }
+    let flags = vec!["--steal"];
 
     let mut process = application
         .run(

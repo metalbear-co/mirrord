@@ -100,11 +100,6 @@ jobs:
       - name: Load test image into kind
         if: ${{ matrix.cluster-runtime == 'kind' }}
         run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
-      - name: Run cli E2E tests
-        if: ${{ matrix.container-runtime == 'docker' }}
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features cli --test-threads=6
       - name: Smoke-test mirrord wizard (alias to mirrord ui)
         uses: ./.github/actions/run-in-ci-runner
         with:
@@ -112,20 +107,17 @@ jobs:
             ./target/debug/mirrord wizard --no-browser &&
             curl -sf localhost:59281/health &&
             (./target/debug/mirrord ui stop || true)
-      - name: Run targetless E2E test
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features targetless --test-threads=6 -- targetless
       - name: Deploy ArgoCD Rollouts
         run: |
           kubectl create namespace argo-rollouts
           kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml
+      # The `cli` and `ls` tests only run on kind.
       - name: Run all E2E tests
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: >-
-            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features job --test-threads=6 &&
-            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features ephemeral --test-threads=6
+            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --test-threads=6
+            ${{ matrix.cluster-runtime == 'minikube' && '-E "not (test(/^cli::/) | test(/^ls::/))"' || '' }}
       # Runs after the other tests, which would use the operator that these tests install.
       - name: Run operator install E2E tests
         if: ${{ matrix.cluster-runtime == 'kind' }}
@@ -216,7 +208,7 @@ jobs:
         uses: ./.github/actions/run-in-ci-runner
         with:
           command: >-
-            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --no-default-features --features ipv6 --test-threads=1 -E 'test(ipv6)'
+            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --profile ipv6
       - name: Collect logs
         if: ${{ failure() }}
         run: |
