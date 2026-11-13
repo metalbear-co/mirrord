@@ -315,10 +315,6 @@ use no_layer::NoLayer;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
 use regex::Regex;
-// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
-// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
-#[cfg(debug_assertions)]
-use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;

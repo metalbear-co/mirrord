@@ -18,6 +18,9 @@ jobs:
     env:
       MIRRORD_TESTS_USE_BINARY: ${{ github.workspace }}/target/debug/mirrord.exe
       MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
+      # The layer that `cargo build -p mirrord-cli` embeds, for the tests that run the CLI without
+      # `MIRRORD_LAYER_FILE`. Every step sees the same value, so no step rebuilds the CLI for it.
+      MIRRORD_BUNDLED_LAYER: ${{ github.workspace }}/target/debug/mirrord_layer_win.dll
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3

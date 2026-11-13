@@ -590,7 +590,6 @@ jobs:
       - name: Build x86_64 CLI
         env:
           MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/aarch64-apple-darwin/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo xtask build-cli --platform macos-x86_64 --release
@@ -642,7 +641,6 @@ jobs:
       - name: Build aarch64 CLI
         env:
           MIRRORD_LAYER_FILE: ${{ github.workspace }}/target/universal-apple-darwin/release/libmirrord_layer.dylib
-          MIRRORD_LAYER_FILE_MACOS_ARM64: ${{ github.workspace }}/target/release/libmirrord_layer.dylib
           AC_USERNAME: ${{ secrets.APPLE_DEVELOPER }}
           AC_PASSWORD: ${{ secrets.APPLE_DEVELOPER_PASSWORD }}
         run: cargo xtask build-cli --platform macos-aarch64 --release

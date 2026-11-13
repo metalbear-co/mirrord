@@ -39,8 +39,8 @@ The following guide details the steps to setup a local development environment f
 If you run integration or e2e tests, both are automatically built.
 To build it from scratch, run `cargo xtask build-layer`.
 The layer is at `target/debug/<layer binary name>`.
-Then, build the project with `MIRRORD_LAYER_FILE=$(pwd)/target/debug/<layer binary name> cargo build --all`.
-On macOS, when you give an explicit path to the layer binary, use the universal layer at `target/universal-apple-darwin/debug/<layer binary name>`.
+Then, build the CLI with that layer embedded: `cargo xtask build-cli`.
+On macOS, when you pass a layer to the tests, in `MIRRORD_LAYER_FILE` or with `--layer`, use the universal layer at `target/universal-apple-darwin/debug/<layer binary name>`.
 
 <layer binary name> is OS specific:
 - Linux: libmirrord_layer.so
@@ -359,18 +359,6 @@ cargo xtask build-cli --release --platform linux-x86_64
 ```
 
 See [xtask/README.md](xtask/README.md) for complete documentation.
-
-**Alternative (platform-specific methods):**
-
-#### macOS
-```bash
-scripts/build_fat_mac.sh
-```
-
-#### Linux
-```bash
-cargo build
-```
 
 The binary is created at `./target/<platform>/debug/mirrord`
 
@@ -691,11 +679,7 @@ You can check the run as it progresses and download the completed artifacts from
 
 ## Changing the release on macOS
 
-If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
-- [xtask/](/xtask/) - the recommended build automation tool
-- [scripts/build_fat_mac.sh](/scripts/build_fat_mac.sh) - the legacy build script (still supported)
-
-The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
+If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, you need to update the build logic in [xtask/](/xtask/). See [xtask/README.md](xtask/README.md) for details.
 
 # Submitting a Pull Request
 

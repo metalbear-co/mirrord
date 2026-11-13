@@ -1,5 +1,5 @@
 [build.env]
-passthrough = ["MIRRORD_LAYER_FILE"]
+passthrough = ["MIRRORD_BUNDLED_LAYER"]
 # Dockerfile used for building mirrord-layer for x64 with very old libc
 # this to support centos7 or Amazon Linux 2.
 [target.x86_64-unknown-linux-gnu]

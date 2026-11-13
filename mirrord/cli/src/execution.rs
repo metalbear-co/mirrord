@@ -66,7 +66,7 @@ use crate::{
 
 #[cfg(target_os = "macos")]
 pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
+    include_bytes!(env!("MIRRORD_BUNDLED_SIP_BINARIES"));
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -430,10 +430,24 @@ impl MirrordExecution {
 
         #[cfg(target_os = "macos")]
         {
-            env_vars.insert(
-                "MIRRORD_MACOS_ARM64_LIBRARY".to_owned(),
-                extract_arm64(progress, true)?.to_string_lossy().into(),
-            );
+            // A CLI without an arm64 layer of its own (see `CliError::EmptyBundledLayer`) can still
+            // run with the layer from `MIRRORD_LAYER_FILE`, but arm64e programs then get the arm64
+            // layer only from a `MIRRORD_MACOS_ARM64_LIBRARY` that the user sets.
+            match extract_arm64(progress, true) {
+                Ok(path) => {
+                    env_vars.insert(
+                        "MIRRORD_MACOS_ARM64_LIBRARY".to_owned(),
+                        path.to_string_lossy().into(),
+                    );
+                }
+                Err(CliError::EmptyBundledLayer) => {
+                    progress.warning(
+                        "This mirrord binary has no arm64 layer, so programs with the arm64e ABI \
+                         run without mirrord, unless MIRRORD_MACOS_ARM64_LIBRARY points at one.",
+                    );
+                }
+                Err(error) => return Err(error),
+            }
 
             // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
             // by disabling the fork safety check in the Objective-C runtime.

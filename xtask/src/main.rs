@@ -105,7 +105,7 @@ enum Commands {
         release: bool,
     },
 
-    /// Run `cargo doc --document-private-items --no-deps` with dummy layer artifacts
+    /// Run `cargo doc --document-private-items --no-deps`
     TestDoc {
         /// Additional arguments passed to `cargo doc`
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]

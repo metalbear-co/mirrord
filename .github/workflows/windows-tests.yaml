@@ -95,8 +95,8 @@ jobs:
           $dll = Join-Path $RelDir "mirrord_layer_win.dll"
           if (-not (Test-Path $dll)) { throw "mirrord_layer_win.dll not found" }
 
-          # Set for the next build command in this session
-          $env:MIRRORD_LAYER_FILE = $dll
+          # The layer that `cargo build` embeds in the CLI.
+          $env:MIRRORD_BUNDLED_LAYER = $dll
 
           Write-Host "Building mirrord binary..."
           cargo build -p mirrord-cli --bin mirrord --target $Target

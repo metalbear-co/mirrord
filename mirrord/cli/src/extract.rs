@@ -60,11 +60,7 @@ where
     P: Progress,
 {
     let mut progress = progress.subtask("extracting layer");
-    let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let extension = std::env::consts::DLL_EXTENSION;
 
     let file_name = if prefix {
         format!("{}-libmirrord_layer.{extension}", const_random!(u64))
@@ -76,10 +72,13 @@ where
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => default_layer_dir(&temp_dir(), &progress)?.join(file_name),
     };
+    let bytes = include_bytes!(env!("MIRRORD_BUNDLED_LAYER"));
+    if bytes.is_empty() {
+        return Err(CliError::EmptyBundledLayer);
+    }
     if !file_path.exists() {
         let mut file = File::create(&file_path)
             .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
-        let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
         file.write_all(bytes).unwrap();
         debug!("Extracted library file to {:?}", &file_path);
     }
@@ -98,11 +97,7 @@ where
     P: Progress,
 {
     let mut progress = progress.subtask("extracting arm64 layer library");
-    let extension = Path::new(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"))
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let extension = std::env::consts::DLL_EXTENSION;
 
     let file_name = if prefix {
         format!("{}-libmirrord_layer_arm64.{extension}", const_random!(u64))
@@ -111,10 +106,13 @@ where
     };
 
     let file_path = temp_dir().as_path().join(file_name);
+    let bytes = include_bytes!(env!("MIRRORD_BUNDLED_LAYER_MACOS_ARM64"));
+    if bytes.is_empty() {
+        return Err(CliError::EmptyBundledLayer);
+    }
     if !file_path.exists() {
         let mut file = File::create(&file_path)
             .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
-        let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"));
         file.write_all(bytes).unwrap();
         debug!("Extracted arm64 layer library to {:?}", &file_path);
     }

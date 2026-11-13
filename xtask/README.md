@@ -170,30 +170,10 @@ brew install mitchellh/gon/gon
 
 ## CI/CD Integration
 
-This xtask workflow is designed to replace the manual build steps in `.github/workflows/release.yaml` and `./scripts/build_fat_mac.sh`. The main advantages:
+This xtask workflow is designed to replace the manual build steps in `.github/workflows/release.yaml`. The main advantages:
 
 - **Type-safe**: Rust compiler ensures correctness
 - **Composable**: Tasks can be run independently or orchestrated
 - **Cross-platform**: Same tool works on all platforms
 - **Maintainable**: All build logic in one place
 - **Reusable**: Can be called from CI or run locally
-
-## Comparison with Current Scripts
-
-### Before (shell scripts)
-
-```bash
-./scripts/build_fat_mac.sh --release
-```
-
-### After (xtask)
-
-```bash
-cargo xtask build-cli --release
-```
-
-Both do the same thing, but xtask:
-- Provides better error messages
-- Has consistent behavior across platforms
-- Is easier to extend with new tasks
-- Can be tested like any Rust code

@@ -44,8 +44,6 @@ use mirrord_session_monitor_client::{
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-#[cfg(not(debug_assertions))]
-use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
@@ -66,10 +64,15 @@ mod v2;
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
-#[cfg(not(debug_assertions))]
-#[derive(Embed)]
-#[folder = "../../packages/ui/dist/"]
+/// The built UI from `packages/ui`, in the folder at `MIRRORD_BUNDLED_UI`. Release builds embed the
+/// files, and debug builds read them from the folder when they serve them.
+#[derive(rust_embed::Embed)]
+#[folder = "$MIRRORD_BUNDLED_UI"]
 struct FrontendAssets;
+
+/// Makes Cargo rebuild the crate when `MIRRORD_BUNDLED_UI` changes. rust-embed reads the variable
+/// in its proc macro, which Cargo can't track, while rustc records the variables that `env!` reads.
+const _: &str = env!("MIRRORD_BUNDLED_UI");
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -994,15 +997,7 @@ fn guess_mime(path: &str) -> &'static str {
 }
 
 fn get_asset(path: &str) -> Option<Vec<u8>> {
-    #[cfg(debug_assertions)]
-    {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/ui/dist/");
-        std::fs::read(format!("{base}{path}")).ok()
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        FrontendAssets::get(path).map(|f| f.data.to_vec())
-    }
+    FrontendAssets::get(path).map(|f| f.data.to_vec())
 }
 
 async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {

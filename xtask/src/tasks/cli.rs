@@ -11,9 +11,9 @@ use crate::relative_to_root;
 
 /// Builds the mirrord CLI for the specified target.
 ///
-/// The merged UI frontend (`packages/ui/dist`) is embedded via rust-embed at compile time, so it
-/// only needs to exist on disk before this runs (see [`super::ui::build_ui`]); there is no build
-/// feature or env var to wire up here.
+/// The CLI embeds the merged UI frontend from `packages/ui/dist` when it exists, so the UI should
+/// be built before this runs (see [`super::ui::build_ui`]). Otherwise it embeds the placeholder UI
+/// from `.cargo/config.toml`.
 pub fn build_cli(
     target: Target,
     options: CargoOptions,
@@ -25,9 +25,8 @@ pub fn build_cli(
     let mut cmd = layer::cargo_build(target, options);
     cmd.arg("-p").arg("mirrord-cli");
 
-    // Set layer file environment variable
     cmd.env(
-        "MIRRORD_LAYER_FILE",
+        "MIRRORD_BUNDLED_LAYER",
         layer_path
             .canonicalize()
             .context("Failed to canonicalize layer path")?,
@@ -40,7 +39,7 @@ pub fn build_cli(
     ) {
         let sip_binaries_archive = sip_binaries::download()?;
         cmd.env(
-            "MIRRORD_SIP_BINARIES_TAR",
+            "MIRRORD_BUNDLED_SIP_BINARIES",
             sip_binaries_archive
                 .canonicalize()
                 .context("Failed to canonicalize SIP utilities bundle path")?,
@@ -48,11 +47,16 @@ pub fn build_cli(
 
         let arm_layer = Target::MacosAarch64.layer_file(options);
         cmd.env(
-            "MIRRORD_LAYER_FILE_MACOS_ARM64",
+            "MIRRORD_BUNDLED_LAYER_MACOS_ARM64",
             arm_layer
                 .canonicalize()
                 .context("Failed to canonicalize ARM64 layer path")?,
         );
+    }
+
+    let ui_dist = relative_to_root(Path::new("packages/ui/dist"));
+    if ui_dist.is_dir() {
+        cmd.env("MIRRORD_BUNDLED_UI", ui_dist);
     }
 
     cmd.args(cargo_args);

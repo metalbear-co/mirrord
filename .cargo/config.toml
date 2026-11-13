@@ -15,3 +15,22 @@ debug = 2  # full debug info
 overflow-checks = true
 debug-assertions = true
 incremental = false
+
+[env]
+# The paths of the files that the CLI bundles. They point at placeholders, so that a plain
+# `cargo build` or `cargo clippy` can compile the CLI. A CLI built this way has no layer, and says
+# so when it runs. `cargo xtask build-cli` builds the real files, like the layer and the UI, and
+# passes rustc the path of each one in these variables, which take precedence over the values
+# here. An empty file stands in for the layers and the SIP
+# utilities, and a UI with only an index page stands in for the UI.
+#
+# Cargo also sets these for the programs that `cargo run` starts, so their names mustn't be ones
+# that programs read at run time, like `MIRRORD_LAYER_FILE`, which makes the CLI load that layer.
+#
+# `relative = true` makes each path absolute, because the two macros that read these paths resolve
+# relative ones from different directories: `include_bytes!` from the source file that calls it,
+# and rust-embed from the crate's manifest directory.
+MIRRORD_BUNDLED_LAYER = { value = ".cargo/placeholders/empty", relative = true }
+MIRRORD_BUNDLED_LAYER_MACOS_ARM64 = { value = ".cargo/placeholders/empty", relative = true }
+MIRRORD_BUNDLED_SIP_BINARIES = { value = ".cargo/placeholders/empty", relative = true }
+MIRRORD_BUNDLED_UI = { value = ".cargo/placeholders/ui", relative = true }

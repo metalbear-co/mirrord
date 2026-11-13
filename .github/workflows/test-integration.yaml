@@ -43,6 +43,9 @@ jobs:
     env:
       MIRRORD_TESTS_USE_BINARY: /workspace/mirrord/target/debug/mirrord
       MIRRORD_LAYER_FILE: /workspace/mirrord/target/debug/libmirrord_layer.so
+      # The layer that `cargo build -p mirrord-cli` embeds, for the tests that run the CLI without
+      # `MIRRORD_LAYER_FILE`. Every step sees the same value, so no step rebuilds the CLI for it.
+      MIRRORD_BUNDLED_LAYER: /workspace/mirrord/target/debug/libmirrord_layer.so
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Rust links x86_64 with `rust-lld` but aarch64 with GNU ld, which is several times slower.
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: -Clink-arg=-fuse-ld=mold
@@ -86,11 +89,8 @@ jobs:
         with:
           command: |
             cargo nextest run -p mirrord-layer-tests --no-default-features
-      # Runs after the integration tests, since `test-ut` (which adds `-p mirrord` with placeholder
-      # CLI assets) replaces the `target/debug/mirrord` they run.
-      #
-      # Also checks the vendored docs and skills, so a release PR whose bumped corpus doesn't hold
-      # up fails here.
+      # Besides the unit tests, this checks the vendored docs and skills, so a release PR whose bumped
+      # corpus doesn't hold up fails here.
       - name: mirrord UT
         uses: ./.github/actions/run-in-ci-runner
         with:

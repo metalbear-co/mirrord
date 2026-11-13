@@ -336,8 +336,9 @@ mod steal_tests {
         .await;
     }
 
-    /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
-    /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
+    /// To run on mac, first build the universal binary from the repo root with
+    /// `cargo xtask build-cli --platform macos-universal`, then run the test with
+    /// `MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord`.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
@@ -593,8 +594,9 @@ mod steal_tests {
         application.assert(&mirrored_process).await;
     }
 
-    /// To run on mac, first build universal binary: (from repo root) `scripts/build_fat_mac.sh`
-    /// then run test with MIRRORD_TESTS_USE_BINARY=../target/universal-apple-darwin/debug/mirrord
+    /// To run on mac, first build the universal binary from the repo root with
+    /// `cargo xtask build-cli --platform macos-universal`, then run the test with
+    /// `MIRRORD_TESTS_USE_BINARY=../../target/universal-apple-darwin/debug/mirrord`.
     #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]

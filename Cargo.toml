@@ -261,7 +261,13 @@ rmcp = { version = "3.5", default-features = false, features = [
     "transport-io",
 ] }
 rstest = { version = "0.23", default-features = false, features = ["crate-name"] }
-rust-embed = "8"
+# `interpolate-folder-path` lets the CLI take the UI's folder from `MIRRORD_BUNDLED_UI`.
+# `deterministic-timestamps` embeds a fixed modification time for each file rather than the one on
+# disk, so that the CLI's bytes don't depend on when the UI was built.
+rust-embed = { version = "8", features = [
+    "deterministic-timestamps",
+    "interpolate-folder-path",
+] }
 rustls = "0.23"
 rustls-pemfile = "2"
 schemars = { version = "1.0" }

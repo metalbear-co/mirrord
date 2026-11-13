@@ -48,7 +48,8 @@ pub struct BuildOptions {
     pub platform: Platform,
     pub cargo: CargoOptions,
     /// Build the merged UI frontend (`packages/ui`) before building the CLI. When false, the CLI
-    /// embeds whatever is already in `packages/ui/dist` (or an empty placeholder).
+    /// embeds whatever is already in `packages/ui/dist` (or the placeholder UI from
+    /// `.cargo/config.toml`).
     pub build_ui: bool,
     pub cargo_args: Vec<String>,
     pub quiet: bool,

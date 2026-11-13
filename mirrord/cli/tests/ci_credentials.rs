@@ -195,10 +195,17 @@ impl Fixture {
     }
 
     async fn run_ci(&self, subcommand: &str, api_key: Option<&str>) -> Output {
+        // The tests check how `mirrord ci` handles credentials, not the layer, which a CLI built
+        // with `.cargo/config.toml`'s placeholders doesn't have. So the process gets an empty layer
+        // file, which the CLI uses rather than extract its own.
+        let layer = self.directory.path().join("empty-layer");
+        std::fs::write(&layer, []).unwrap();
+
         let mut command = resolve_tokio_command(env!("CARGO_BIN_EXE_mirrord"));
         command
             .current_dir(self.directory.path())
             .env_clear()
+            .env("MIRRORD_LAYER_FILE", &layer)
             .env("HOME", self.directory.path())
             .env("TMPDIR", self.directory.path().join("tmp"))
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())

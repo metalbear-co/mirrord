@@ -48,6 +48,7 @@ runs:
           -e MIRRORD_AGENT_RUST_LOG="$MIRRORD_AGENT_RUST_LOG" \
           -e MIRRORD_TESTS_USE_BINARY \
           -e MIRRORD_LAYER_FILE \
+          -e MIRRORD_BUNDLED_LAYER \
           -e CI=true \
           -w /workspace/mirrord \
           ci-runner:ci \
