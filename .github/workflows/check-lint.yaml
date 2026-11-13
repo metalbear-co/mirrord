@@ -175,7 +175,7 @@ jobs:
         continue-on-error: true
         env:
           CARGO_BUILD_WARNINGS: deny
-        run: cargo clippy --all-targets --all-features ${{ matrix.cross && format('--target {0}', matrix.target) || '' }} --keep-going --quiet -- "-Wclippy::indexing_slicing"
+        run: cargo clippy --all-targets --all-features ${{ matrix.cross && format('--target {0}', matrix.target) || '' }} --keep-going --quiet
       - name: cargo fmt (run only on one platform)
         id: cargo_fmt
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}

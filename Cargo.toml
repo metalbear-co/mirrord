@@ -358,7 +358,10 @@ yamlpath = "0.32.0"
 private_intra_doc_links = "allow"
 
 [workspace.lints.clippy]
-"str_to_string" = "warn"
+# Indexing and slicing panic when the index is out of bounds, so the code uses methods like `get`,
+# which make it handle that case.
+indexing_slicing = "warn"
+str_to_string = "warn"
 
 [profile.release]
 strip = "debuginfo"

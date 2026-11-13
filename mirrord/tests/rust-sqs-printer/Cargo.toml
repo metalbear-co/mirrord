@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 aws-config = { workspace = true, default-features = false, features = [
     "behavior-version-latest",

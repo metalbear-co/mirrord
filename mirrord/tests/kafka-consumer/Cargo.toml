@@ -19,6 +19,7 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 pedantic = "warn"
+indexing_slicing = "warn"
 inline_always = "allow"
 missing_errors_doc = "allow"
 too_many_lines = "allow"

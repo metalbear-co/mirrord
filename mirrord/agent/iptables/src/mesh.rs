@@ -79,7 +79,7 @@ impl MeshRedirect {
                     .flatten()
                     .and_then(|capture| capture.get(1))
             })
-            .map(|m| m.as_str().to_string())
+            .map(|m| m.as_str().to_owned())
             .collect();
 
         Ok(skipped_ports)
