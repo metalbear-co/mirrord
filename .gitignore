@@ -56,3 +56,6 @@ wizard-frontend.tar.gz
 # Bazel's convenience symlinks into its output base. Bazel names one of them after the
 # workspace directory, so the pattern covers every `bazel-*` entry at the root.
 /bazel-*
+
+# A developer's own Bazel flags (see the end of `.bazelrc`).
+/user.bazelrc

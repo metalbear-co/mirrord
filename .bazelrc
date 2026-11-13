@@ -192,3 +192,7 @@ test:ci --test_env=NEXTEST_PROFILE=ci
 # program under mirrord dies, which waits for someone to close it unless mirrord runs in CI. The
 # layer tests' Python apps end by killing themselves, so the monitor would keep the test waiting.
 test:ci --test_env=CI=true
+
+# A developer's own flags, like `--jobs` or a disk cache, which git ignores. It comes last, so that
+# it overrides the flags above.
+try-import %workspace%/user.bazelrc
