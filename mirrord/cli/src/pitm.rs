@@ -47,7 +47,7 @@ use mirrord_layer_lib::process::windows::{
 use mirrord_progress::NullProgress;
 use serde::Deserialize;
 
-use crate::{CliResult, config::PitmArgs, error::CliError, extract::extract_library};
+use crate::{CliResult, config::PitmArgs, error::CliError, extract::layer_file};
 
 /// Name of the env var the plugin uses to ferry the child environment
 /// into `pitm` without polluting `pitm`'s own process environment.
@@ -140,8 +140,8 @@ pub(crate) fn pitm_command(args: PitmArgs) -> CliResult<()> {
         .map_err(|e| CliError::PitmInvalidChildEnv(format!("json parse: {e}")))?;
 
     // A build-specific file name prevents a newer CLI from reusing a stale layer left by an
-    // older `pitm` invocation.
-    let lib_path = extract_library(None, &NullProgress, true)?;
+    // older `pitm` invocation (see `extract_library`).
+    let lib_path = layer_file(&NullProgress)?;
     let child = child_environment(
         WindowsEnv::inherited(),
         child_env,

@@ -59,7 +59,7 @@ use crate::{
     CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
     error::{CliError, LocalShareError},
-    extract::extract_library,
+    extract::layer_file,
     up::MirrordUp,
     util::remove_proxy_env,
 };
@@ -72,7 +72,7 @@ pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 
 /// Environment variable pointing to the mirrord layer DLL/dylib/so path.
-const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
+pub(crate) const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
@@ -394,21 +394,7 @@ impl MirrordExecution {
         mirrord_for_ci: Option<&MirrordCi>,
         #[cfg_attr(not(windows), allow(unused_variables))] crash_reporting: CrashReporting,
     ) -> CliResult<Self> {
-        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
-        // debugging)
-        let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
-            Ok(existing_path) => {
-                tracing::debug!(
-                    "Using existing library file from {MIRRORD_LAYER_FILE_ENV}: {}",
-                    existing_path
-                );
-                std::path::PathBuf::from(existing_path)
-            }
-            Err(_) => {
-                tracing::debug!("{MIRRORD_LAYER_FILE_ENV} not set, extracting library from binary");
-                extract_library(None, progress, true)?
-            }
-        };
+        let lib_path = layer_file(progress)?;
 
         if !config.use_proxy {
             remove_proxy_env();

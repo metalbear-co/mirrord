@@ -74,7 +74,7 @@ async fn exec_extracts_layer_without_env() {
     process.wait_assert_success().await;
     process.assert_stdout_contains("hi").await;
     process
-        .assert_stderr_contains("MIRRORD_LAYER_FILE not set, extracting library from binary")
+        .assert_stderr_contains("MIRRORD_LAYER_FILE isn't set, so using the CLI's own layer")
         .await;
     if let Some(message) = intproxy.try_recv().await {
         panic!("unexpected message from layer: {message:?}");

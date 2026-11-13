@@ -7,7 +7,7 @@ use mirrord_layer_lib::process::windows::{
 use mirrord_progress::Progress;
 use stork::{LoaderState, OwnedTarget};
 
-use crate::{CliResult, config::AttachArgs, error::CliError, extract::extract_library};
+use crate::{CliResult, config::AttachArgs, error::CliError, extract::layer_file};
 
 const ATTACH_SIGNAL_TIMEOUT_MS: u32 = 30_000;
 
@@ -41,7 +41,7 @@ where
 {
     let mut sub_progress = progress.subtask("attaching to process");
 
-    let lib_path = extract_library(None, progress, true)?;
+    let lib_path = layer_file(progress)?;
 
     unsafe { std::env::set_var("MIRRORD_LAYER_FILE", &lib_path) };
 

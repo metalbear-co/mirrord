@@ -8,7 +8,22 @@ use const_random::const_random;
 use mirrord_progress::Progress;
 use tracing::debug;
 
-use crate::{CliResult, error::CliError};
+use crate::{CliResult, error::CliError, execution::MIRRORD_LAYER_FILE_ENV};
+
+/// Returns the layer that the CLI loads into the programs that it runs: the file at
+/// `MIRRORD_LAYER_FILE`, which developers set to try a layer that they built, or the CLI's own.
+pub(crate) fn layer_file<P: Progress>(progress: &P) -> CliResult<PathBuf> {
+    match std::env::var_os(MIRRORD_LAYER_FILE_ENV) {
+        Some(path) => {
+            debug!("Using the layer from {MIRRORD_LAYER_FILE_ENV}: {path:?}");
+            Ok(PathBuf::from(path))
+        }
+        None => {
+            debug!("{MIRRORD_LAYER_FILE_ENV} isn't set, so using the CLI's own layer");
+            extract_library(None, progress, true)
+        }
+    }
+}
 
 /// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
 #[cfg(target_os = "macos")]
