@@ -6167,6 +6167,7 @@ dependencies = [
  "mirrord-session-monitor-protocol",
  "portable-pty",
  "ratatui",
+ "rustls",
  "serde",
  "serde-saphyr",
  "serde_json",

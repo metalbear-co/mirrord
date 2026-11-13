@@ -20,6 +20,11 @@ async fn main() -> anyhow::Result<()> {
             .init();
     }
 
+    // rustls can't pick a crypto provider when it's built with more than one, as it is under Bazel
+    // (see `MODULE.bazel`), so this installs `aws_lc_rs` as the default, as the CLI's `main` does.
+    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+        .expect("Failed to install crypto provider");
+
     // No telemetry: this binary exists for working on the interface itself.
     mirrord_tui::run(None, None).await
 }

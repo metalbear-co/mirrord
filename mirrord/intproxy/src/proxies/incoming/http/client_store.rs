@@ -487,6 +487,10 @@ mod test {
     /// share a connection.
     #[tokio::test]
     async fn does_not_reuse_tls_client_across_client_certificates() {
+        // rustls can't pick a crypto provider when it's built with more than one, as it is under
+        // Bazel (see `MODULE.bazel`).
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
