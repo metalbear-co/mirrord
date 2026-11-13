@@ -1,0 +1,3 @@
+# The docs and skills that `mirrord mcp` vendors stay byte-identical to upstream's, whose pins hash
+# them, so git never converts their line endings, as it does on Windows checkouts by default.
+mirrord/mcp/corpus/** -text
