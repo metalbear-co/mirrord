@@ -446,9 +446,10 @@ fn layer_start(config: LayerConfig) {
     #[cfg(target_os = "macos")]
     collect_sip_x64_fallback();
 
-    // remove resolved encoded config from env vars when logging them
+    // remove the resolved encoded config and the CI API key (a secret) from env vars when logging
+    // them
     let env_vars_print_only: Vec<_> = std::env::vars()
-        .filter(|(k, _v)| k != LayerConfig::RESOLVED_CONFIG_ENV)
+        .filter(|(k, _v)| k != LayerConfig::RESOLVED_CONFIG_ENV && k != "MIRRORD_CI_API_KEY")
         .collect();
     tracing::info!("Initializing mirrord-layer!");
     #[cfg(target_os = "linux")]
@@ -459,7 +460,7 @@ fn layer_start(config: LayerConfig) {
         pid = std::process::id(),
         parent_pid = parent_id(),
         env_vars = ?env_vars_print_only,
-        "Loaded into executable (base64 config omitted)",
+        "Loaded into executable (base64 config and CI API key omitted)",
     );
 
     if is_trace_only_mode() {
