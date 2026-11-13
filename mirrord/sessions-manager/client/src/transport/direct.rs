@@ -246,13 +246,16 @@ impl SessionsManagerTransport for DirectTransport {
         let credentials =
             with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
         let sent_authorization = credentials.contains_key(AUTHORIZATION);
-        let request = self
+        let mut request = self
             .http
             .get(endpoint)
             .query(subscription)
             .headers(credentials)
-            .header(ACCEPT, "text/event-stream")
-            .send();
+            .header(ACCEPT, "text/event-stream");
+        if let Some((name, value)) = subscription.agent_metadata_header() {
+            request = request.header(name, value);
+        }
+        let request = request.send();
         let response = with_deadline(Some(deadline), request).await??;
         if response.status() == StatusCode::UNAUTHORIZED
             && sent_authorization

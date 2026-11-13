@@ -31,7 +31,9 @@ pub use credentials::{
     SESSIONS_MANAGER_URL_DEFAULT, SharedSecretCredentials, cloud_url_from_env,
 };
 pub use error::{Result, SessionsManagerClientError};
-pub use mirrord_sessions_manager_protocol::{IntproxyIdentity, ReplicaId, ServiceScope};
+pub use mirrord_sessions_manager_protocol::{
+    AgentMetadata, IntproxyIdentity, ReplicaId, ServiceScope,
+};
 pub use transport::{
     DirectTransport, EndpointSource, OperatorTransport, SESSIONS_MANAGER_URL_ENV,
     SessionsManagerEndpoint, SessionsManagerTransport,

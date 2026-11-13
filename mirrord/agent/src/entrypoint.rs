@@ -30,8 +30,8 @@ use mirrord_cluster_auth::{AuthMethod, ClusterClientFactory, ClusterCredentials,
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_client::{
-    AgentClient, DirectTransport, EndpointSource, OperatorTransport, ReplicaId, ServiceScope,
-    SessionsManagerClientError, SessionsManagerEndpoint,
+    AgentClient, AgentMetadata, DirectTransport, EndpointSource, OperatorTransport, ReplicaId,
+    ServiceScope, SessionsManagerClientError, SessionsManagerEndpoint,
 };
 use socket2::SockRef;
 use tokio::{
@@ -1263,6 +1263,16 @@ async fn start_control_plane(
     };
     let required =
         |env: &CheckedEnv<String>| optional(env).ok_or(AgentError::MissingOperatorConfig(env.name));
+    let metadata = optional(&envs::REMOTE_AGENT_METADATA).and_then(|value| {
+        let metadata = AgentMetadata::lenient(value);
+        if metadata.is_none() {
+            warn!(
+                variable = envs::REMOTE_AGENT_METADATA.name,
+                "Ignoring agent metadata this agent doesn't accept; registering without it"
+            );
+        }
+        metadata
+    });
 
     let api_url = match select_sessions_manager(
         optional(&envs::OPERATOR_API_URL),
@@ -1293,6 +1303,7 @@ async fn start_control_plane(
                 AgentClient::start(
                     scope,
                     replica_id,
+                    metadata,
                     DirectTransport::from_env(endpoint)?,
                     cancellation_token,
                 )?,
@@ -1324,7 +1335,7 @@ async fn start_control_plane(
     let token_refresh = Box::pin(async move { factory.run_token_refresh(connection).await });
 
     Ok((
-        AgentClient::start(scope, replica_id, transport, cancellation_token)?,
+        AgentClient::start(scope, replica_id, metadata, transport, cancellation_token)?,
         Some(token_refresh),
     ))
 }
