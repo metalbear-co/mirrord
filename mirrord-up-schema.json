@@ -805,7 +805,7 @@
       "type": "object",
       "properties": {
         "namespace": {
-          "description": "Namespace of the target workload. Defaults to the namespace of the kube context.",
+          "description": "Namespace of the target workload. Defaults to the namespace of the kube context.\n\nFor a serverless target, the environment of its service in sessions-manager, `default`\nwhen not set.",
           "type": [
             "string",
             "null"

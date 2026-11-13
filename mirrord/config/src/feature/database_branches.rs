@@ -1699,7 +1699,7 @@ impl ConnectionParamsVars {
 ///   "name": "my-database-name",
 ///   "ttl_secs": 120,
 ///   "type": "mysql",
-///   "version": "8.0",
+///   "version": "8.4",
 ///   "connection": {
 ///     "url": {
 ///       "type": "env",
