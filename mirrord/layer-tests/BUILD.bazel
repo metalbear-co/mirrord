@@ -286,6 +286,10 @@ TESTS = {
         "apps": [c_app("readlink")],
         "platforms": "unix",
     },
+    "realpath": {
+        "apps": [c_app("realpath")],
+        "platforms": "unix",
+    },
     "rebind0": {
         "apps": [APPS + "/rebind0"],
         "configs": ["http_filter_for_rebind0.json"],

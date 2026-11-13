@@ -32,6 +32,7 @@ load(":go_test_app.bzl", "go_test_app")
         "mkdir_rmdir": UNIX_ONLY,
         "open_file": UNIX_ONLY,
         "readlink": UNIX_ONLY,
+        "realpath": UNIX_ONLY,
         "sendfile_eagain": UNIX_ONLY,
         "sendfile_partial": LINUX_ONLY,
         "statfs_fstatfs": UNIX_ONLY,
