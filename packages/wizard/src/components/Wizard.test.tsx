@@ -135,6 +135,27 @@ describe('Wizard', () => {
     ).toBeInTheDocument()
   })
 
+  it('says what the traffic defaults are until the user customizes them', async () => {
+    render(<Wizard open={true} onClose={onClose} />)
+
+    await pickMode('Split')
+    await pickOption(/server-echo deployment/)
+    next()
+
+    const toggle = screen.getByLabelText(
+      'Customize the header filter and ports?',
+    )
+    expect(toggle).toHaveAccessibleDescription(/header filter on every port/)
+    expect(screen.getByRole('link', { name: 'Learn more' })).toHaveAttribute(
+      'href',
+      'https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions/#service-modes',
+    )
+    fireEvent.click(toggle)
+    expect(
+      screen.queryByText(/header filter on every port/),
+    ).not.toBeInTheDocument()
+  })
+
   it('offers no targetless option and no header filter in replace mode', async () => {
     render(<Wizard open={true} onClose={onClose} />)
 

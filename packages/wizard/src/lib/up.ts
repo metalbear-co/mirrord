@@ -18,6 +18,8 @@ export interface ModeInfo {
   http_filter: boolean
   /** The yes/no question before the traffic ones. */
   traffic_question: string
+  /** What `mirrord up` does when `traffic_question` is answered no. */
+  traffic_default: string
 }
 
 export interface PickedWorkload {

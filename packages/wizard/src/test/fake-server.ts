@@ -14,6 +14,8 @@ export const MODES: ModeInfo[] = [
     targetless: true,
     http_filter: true,
     traffic_question: 'Customize the header filter and ports?',
+    traffic_default:
+      'Default: `baggage: .*mirrord-session={key}.*` header filter on every port your app listens on.',
   },
   {
     id: 'mirror',
@@ -25,6 +27,8 @@ export const MODES: ModeInfo[] = [
     targetless: false,
     http_filter: true,
     traffic_question: 'Customize the header filter and ports?',
+    traffic_default:
+      'Default: `baggage: .*mirrord-session={key}.*` header filter on every port your app listens on.',
   },
   {
     id: 'replace',
@@ -36,6 +40,8 @@ export const MODES: ModeInfo[] = [
     targetless: false,
     http_filter: false,
     traffic_question: 'Customize ports?',
+    traffic_default:
+      'Default: all traffic on every port your app listens on, unfiltered.',
   },
 ]
 

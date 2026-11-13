@@ -30,9 +30,10 @@ The steps follow `mirrord up init` (`mirrord/up/src/init.rs`):
    named after the workload (`<workload>-2` and so on when the name is taken); a targetless
    service is named by the user.
 3. **Traffic** (`TrafficStep`), skipped for a targetless service: the mode's `traffic_question`,
-   off by default. When on: the HTTP header filter (not in Replace), the ports the target
-   declares (from `GET /api/v1/up/ports`) to intercept (all ticked; unticked ones are ignored),
-   and other ports to ignore.
+   off by default. When off: the mode's `traffic_default`, what `mirrord up` does without
+   customizing, linking to the service modes docs. When on: the HTTP header filter (not in
+   Replace), the ports the target declares (from `GET /api/v1/up/ports`) to intercept (all
+   ticked; unticked ones are ignored), and other ports to ignore.
 4. **Run** (`RunStep`): the local command (required) and the working directory.
 5. **Export** (`ExportStep`): the services so far, "Add another service" (back to Mode), the YAML
    from `POST /api/v1/up/render`, copy and download as `mirrord-up.yaml`, and how to run it. It
