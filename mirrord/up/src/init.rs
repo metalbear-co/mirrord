@@ -28,6 +28,7 @@ use mirrord_kube::{
     api::kubernetes::create_kube_config, error::KubeApiError,
     resolved::ResolvedTarget as KubeResolvedTarget,
 };
+use modes::MODES_DOCS_URL;
 pub use skeleton::{
     PickedService, PickedWorkload, SkeletonError, render_skeleton, service_name_for,
 };
@@ -313,9 +314,15 @@ async fn prompt_traffic(
     namespace: &str,
 ) -> Result<(Option<String>, BTreeSet<u16>), InitError> {
     let message = mode.traffic_question();
-    if prompt(move || Confirm::new(message).with_default(false).prompt())
-        .await?
-        .not()
+    let help = format!("{} See {MODES_DOCS_URL}", mode.traffic_default());
+    if prompt(move || {
+        Confirm::new(message)
+            .with_default(false)
+            .with_help_message(&help)
+            .prompt()
+    })
+    .await?
+    .not()
     {
         return Ok(Default::default());
     }

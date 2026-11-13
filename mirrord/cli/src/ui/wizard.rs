@@ -73,6 +73,7 @@ struct ModeInfo {
     targetless: bool,
     http_filter: bool,
     traffic_question: &'static str,
+    traffic_default: &'static str,
 }
 
 /// ### Response for `GET /api/v1/up/modes`
@@ -95,6 +96,7 @@ async fn up_modes() -> Json<ModesResponse> {
             targetless: mode.allows_targetless(),
             http_filter: mode.uses_http_filter(),
             traffic_question: mode.traffic_question(),
+            traffic_default: mode.traffic_default(),
         })
         .collect();
     Json(ModesResponse { modes })

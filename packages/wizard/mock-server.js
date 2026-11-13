@@ -13,7 +13,9 @@ const mockData = {
       target_types: ["deployment", "statefulset", "rollout", "pod"],
       targetless: true,
       http_filter: true,
-      traffic_question: "Configure traffic filtering and ports?",
+      traffic_question: "Customize the header filter and ports?",
+      traffic_default:
+        "Default: `baggage: .*mirrord-session={key}.*` header filter on every port your app listens on.",
     },
     {
       id: "mirror",
@@ -24,7 +26,9 @@ const mockData = {
       target_types: ["deployment", "statefulset", "rollout", "pod"],
       targetless: false,
       http_filter: true,
-      traffic_question: "Configure traffic filtering and ports?",
+      traffic_question: "Customize the header filter and ports?",
+      traffic_default:
+        "Default: `baggage: .*mirrord-session={key}.*` header filter on every port your app listens on.",
     },
     {
       id: "replace",
@@ -35,7 +39,9 @@ const mockData = {
       target_types: ["deployment", "statefulset"],
       targetless: false,
       http_filter: false,
-      traffic_question: "Configure ports?",
+      traffic_question: "Customize ports?",
+      traffic_default:
+        "Default: all traffic on every port your app listens on, unfiltered.",
     },
   ],
   contexts: {

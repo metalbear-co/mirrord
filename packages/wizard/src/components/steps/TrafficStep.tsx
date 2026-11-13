@@ -37,11 +37,29 @@ const TrafficStep = () => {
       </div>
 
       <div className="flex items-center justify-between gap-4">
-        <Label htmlFor="configure-traffic" className="text-sm font-medium">
-          {mode?.traffic_question}
-        </Label>
+        <div className="space-y-1">
+          <Label htmlFor="configure-traffic" className="text-sm font-medium">
+            {mode?.traffic_question}
+          </Label>
+          {!draft.configureTraffic && (
+            <p id="traffic-default" className="text-muted-foreground text-xs">
+              {mode?.traffic_default}{' '}
+              <a
+                href={strings.trafficStep.modesDocsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                {strings.trafficStep.modesDocs}
+              </a>
+            </p>
+          )}
+        </div>
         <Switch
           id="configure-traffic"
+          aria-describedby={
+            draft.configureTraffic ? undefined : 'traffic-default'
+          }
           checked={draft.configureTraffic}
           onCheckedChange={(configureTraffic: boolean) =>
             setDraft({ ...draft, configureTraffic })
