@@ -1305,10 +1305,11 @@ fn main() -> miette::Result<()> {
                 ..
             } => {
                 let config = mirrord_config::util::read_resolved_config()?;
-                let shutdown_handler = internal_proxy::install_ci_shutdown_handler(mirrord_for_ci)?;
+                let shutdown_handler =
+                    internal_proxy::install_ci_shutdown_handler(mirrord_for_ci.is_some())?;
 
-                if mirrord_for_ci {
-                    MirrordCi::prepare_intproxy(&shutdown_handler).await?;
+                if let Some(session_id) = mirrord_for_ci {
+                    MirrordCi::prepare_intproxy(session_id, &shutdown_handler).await?;
                 }
 
                 logging::init_intproxy_tracing_registry(&config).await?;

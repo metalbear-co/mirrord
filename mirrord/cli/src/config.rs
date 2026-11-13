@@ -35,6 +35,7 @@ use mirrord_layer_lib::process::windows::injection::{
 use strum_macros::Display;
 use thiserror::Error;
 use url::Url;
+use uuid::Uuid;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
@@ -183,12 +184,13 @@ pub(super) enum Commands {
         #[arg(long, default_value_t = 0)]
         port: u16,
 
-        /// Set this when starting the internal proxy from `mirrord ci start`.
+        /// Id of the CI session that `mirrord ci start` starts this internal proxy for.
         ///
-        /// Enables mirrord-for-ci intproxy pid saving, and checking for the `MIRRORD_CI_API_KEY`
-        /// env var.
-        #[arg(long, default_value_t = false)]
-        mirrord_for_ci: bool,
+        /// With it, the intproxy records its pid in that session's state, so that
+        /// `mirrord ci stop` can find it, and handles the `SIGTERM` that `mirrord ci stop` sends it
+        /// by shutting down gracefully.
+        #[arg(long, value_name = "SESSION_ID")]
+        mirrord_for_ci: Option<Uuid>,
 
         /// Debug arguments.
         ///

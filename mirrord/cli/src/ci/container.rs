@@ -45,7 +45,7 @@ impl<'a> CiContainerCommandHandler<'a> {
     ) -> CiResult<Self> {
         let progress = ProgressTracker::from_env("mirrord ci container");
 
-        let mirrord_for_ci = MirrordCi::new(container_args.ci_common_args).await?;
+        let mirrord_for_ci = MirrordCi::new(container_args.ci_common_args)?;
 
         let (runtime_args, exec_params) = container_args.container_args.into_parts();
 

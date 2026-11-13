@@ -1,7 +1,12 @@
 #![cfg_attr(windows, allow(unused))]
 #[cfg(not(target_os = "windows"))]
 use std::future::Future;
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    ops::Not,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 #[cfg(not(target_os = "windows"))]
 use futures::{StreamExt, stream};
@@ -13,12 +18,13 @@ use nix::{
     sys::signal::{Signal, kill, killpg},
     unistd::Pid,
 };
+use tokio::fs;
 use tracing::Level;
 
 use super::CiResult;
 #[cfg(not(target_os = "windows"))]
 use crate::ci::CiError;
-use crate::ci::{CiStoreLock, MirrordCiManagedContainer, MirrordCiStore};
+use crate::ci::{MirrordCiManagedContainer, MirrordCiStore};
 
 /// Something `mirrord ci stop` has to terminate.
 ///
@@ -212,35 +218,25 @@ async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContaine
 
 /// Handles the `mirrord ci stop` command.
 ///
-/// Builds a [`MirrordCiStore`] to kill the intproxy and the user's binary that was started by
-/// `mirrord ci start`.
+/// Stops every CI session recorded under [`MirrordCiStore::sessions_dir`], killing the intproxy,
+/// the user's binary, and whatever else `mirrord ci start` or `mirrord ci container` started.
 pub(super) struct CiStopCommandHandler {
-    /// The [`MirrordCiStore`] we retrieve from the user's environment (env var and temp files) so
-    /// we can kill the intproxy and the user's process.
-    pub(crate) store: MirrordCiStore,
-
     progress: ProgressTracker,
-    store_path: PathBuf,
-    lock: CiStoreLock,
+
+    /// Holds one directory per CI session, see [`MirrordCiStore::sessions_dir`].
+    sessions_dir: PathBuf,
 }
 
 impl CiStopCommandHandler {
-    /// Locks before loading state so a contested writer cannot leave already-signalled targets
-    /// in the persisted ledger after cleanup.
-    #[tracing::instrument(level = Level::TRACE, err)]
-    pub(super) async fn new(store_path: PathBuf, progress: ProgressTracker) -> CiResult<Self> {
-        let lock = MirrordCiStore::lock_file(&store_path).await?;
-        let store = MirrordCiStore::read_from_file_or_default(&store_path).await?;
-
-        Ok(Self {
-            store,
+    pub(super) fn new(sessions_dir: PathBuf, progress: ProgressTracker) -> Self {
+        Self {
             progress,
-            store_path,
-            lock,
-        })
+            sessions_dir,
+        }
     }
 
-    /// Terminates the processes recorded in [`MirrordCiStore`], and removes the state file.
+    /// Terminates the processes recorded in each session's [`MirrordCiStore`], and removes the
+    /// directory of each session whose targets are all gone.
     ///
     /// The recorded user process groups are signaled as groups, so that descendants of a wrapper
     /// command (the server an `npm start` left behind, for instance) are terminated too.
@@ -250,21 +246,80 @@ impl CiStopCommandHandler {
         self.handle_with(runtime_remove_container).await
     }
 
+    /// Stops the sessions one at a time, each under its own lock, so no lock is held across
+    /// sessions.
+    ///
+    /// A session whose lock another process holds is skipped without waiting for the lock. That
+    /// process is usually another `mirrord ci stop`, and that stop holds the session's lock while
+    /// it stops the session. Stopping a `mirrord ci container` session can take up to 10 seconds,
+    /// so a wait could hold up this stop for that long per session. When parallel CI jobs on one
+    /// runner each run `mirrord ci stop` in their teardown, one stop therefore skips the sessions
+    /// that the other is stopping, rather than waiting for them. The skipped sessions are named in
+    /// a warning, and the stop still succeeds; running it again is up to the user.
+    ///
+    /// A session that fails is reported and left for a later stop, and the stop goes on with the
+    /// other sessions. It then fails with [`CiError::SessionsNotStopped`], which lists the
+    /// sessions it could not stop, the skipped ones included.
     #[cfg(not(target_os = "windows"))]
-    async fn handle_with<Remove, Removal>(self, remove_container: Remove) -> CiResult<()>
+    async fn handle_with<Remove, Removal>(self, mut remove_container: Remove) -> CiResult<()>
     where
         Remove: FnMut(MirrordCiManagedContainer) -> Removal,
         Removal: Future<Output = CiResult<()>>,
     {
         let Self {
-            mut store,
             mut progress,
-            store_path,
-            lock,
+            sessions_dir,
         } = self;
 
+        let session_dirs = Self::session_dirs(&sessions_dir).await?;
+        let total = session_dirs.len();
+        let mut found_targets = false;
+        let mut failures = Vec::new();
+        let mut skipped = Vec::new();
+        for session_dir in session_dirs {
+            match Self::stop_session(&session_dir, &mut remove_container).await {
+                Ok(had_targets) => found_targets |= had_targets,
+                Err(CiError::SessionLocked { .. }) => skipped.push(session_dir),
+                Err(error) => {
+                    progress.warning(&format!(
+                        "could not stop the mirrord ci session in {}: {error}",
+                        session_dir.display()
+                    ));
+                    failures.push((session_dir, error));
+                }
+            }
+        }
+
+        if failures.is_empty().not() {
+            return Err(CiError::SessionsNotStopped {
+                total,
+                failures,
+                skipped,
+            });
+        }
+
+        if skipped.is_empty().not() {
+            let warning = format!(
+                "`mirrord ci stop` skipped these mirrord ci sessions, because another mirrord \
+                 process held their lock:{}\n\
+                 To stop them, run `mirrord ci stop` again once the other mirrord process is done.",
+                skipped
+                    .iter()
+                    .map(|session_dir| format!("\n- {}", session_dir.display()))
+                    .collect::<String>()
+            );
+            // The spinner (`line_mode` is `None`) shows a warning only on a terminal, but it prints
+            // its print buffer everywhere, so a CI log shows the warning too.
+            match progress.line_mode() {
+                Some(_) => progress.warning(&warning),
+                None => progress.add_to_print_buffer(&warning),
+            }
+            progress.success(None);
+            return Ok(());
+        }
+
         // If `ci stop` is issued multiple time, we should exit with success status.
-        if store.is_empty() {
+        if found_targets.not() {
             progress.success(Some(
                 "No mirrord ci processes found. \
                 You can also manually stop mirrord by searching for the pids with \
@@ -274,16 +329,75 @@ impl CiStopCommandHandler {
             return Ok(());
         }
 
+        progress.success(None);
+        Ok(())
+    }
+
+    /// Lists the session directories in `sessions_dir`, which doesn't exist before the first
+    /// session starts.
+    #[cfg(not(target_os = "windows"))]
+    async fn session_dirs(sessions_dir: &Path) -> CiResult<Vec<PathBuf>> {
+        let mut entries = match fs::read_dir(sessions_dir).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let mut session_dirs = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            match entry.file_type().await {
+                Ok(file_type) if file_type.is_dir() => session_dirs.push(entry.path()),
+                Ok(_) => {}
+                // On a filesystem that doesn't report the type of a directory entry, `file_type`
+                // has to stat the entry, and another stop can remove a session's directory
+                // between the listing and that stat. Such a session has nothing left to stop.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(session_dirs)
+    }
+
+    /// Stops the session in `session_dir` if its lock is free, and returns whether it had anything
+    /// to stop.
+    ///
+    /// Fails with [`CiError::SessionLocked`] right away, without waiting, if another process holds
+    /// the lock, so that [`Self::handle_with`] can skip the session.
+    ///
+    /// Holds the lock from before it reads the state until it writes the state back or removes the
+    /// session, so that no process of the session can write the state in between. Such a write
+    /// would bring back targets that the stop already signalled, or the stop's write would drop a
+    /// target that the stop never saw. The session's directory is removed under the same lock once
+    /// every target is gone; otherwise only the failed targets are written back, for a later stop
+    /// to retry. A session whose directory is gone by the time the stop takes its lock was
+    /// removed by another stop, so it has nothing left to stop.
+    #[cfg(not(target_os = "windows"))]
+    async fn stop_session<Remove, Removal>(
+        session_dir: &Path,
+        remove_container: Remove,
+    ) -> CiResult<bool>
+    where
+        Remove: FnMut(MirrordCiManagedContainer) -> Removal,
+        Removal: Future<Output = CiResult<()>>,
+    {
+        let Some(lock) = MirrordCiStore::lock_existing_session(session_dir, Duration::ZERO).await?
+        else {
+            return Ok(false);
+        };
+        let mut store =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(session_dir))
+                .await?;
+        let had_targets = store.is_empty().not();
+
         let cleanup_result = store.terminate_with(remove_container).await;
         if store.is_empty() {
-            MirrordCiStore::remove_file(&store_path, &lock).await?;
+            MirrordCiStore::remove_session(session_dir, &lock).await?;
         } else {
-            store.write_locked(&store_path, &lock).await?;
+            store.write_locked(session_dir, &lock).await?;
         }
         cleanup_result?;
-        progress.success(None);
 
-        Ok(())
+        Ok(had_targets)
     }
 
     #[cfg_attr(windows, allow(unused))]
@@ -317,6 +431,8 @@ mod tests {
         CiError, MirrordCiManagedContainer, MirrordCiStore, spawn_background_user_command,
     };
 
+    /// Timeout of the lock waits of the sessions' own processes in these tests, so that a test
+    /// whose lock stays held fails after a second.
     const LOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
     /// Spawns `script` the same way a CI user command is spawned, recording its process group in
@@ -531,96 +647,213 @@ mod tests {
         child.wait().await.unwrap();
     }
 
-    /// Contention must fail before signalling; a failed state update after signalling would leave
-    /// stale numeric IDs on disk for a later stop to target again.
+    /// A stop that can't take a session's lock must skip that session right away and leave its
+    /// targets alone, because a failed state update after signalling would leave stale numeric
+    /// IDs on disk for a later stop to target again. The stop must still stop the other sessions
+    /// and succeed, and once the lock is free, a later stop must hold the session's lock while it
+    /// cleans the session up.
     #[tokio::test]
-    async fn contested_state_lock_prevents_stop_from_signalling() {
+    async fn contested_session_lock_skips_only_that_session() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store_path = temp_dir.path().join("mirrord-for-ci.json");
-        let mut store = MirrordCiStore::default();
-        let (mut child, _stdout) =
-            spawn_ready_script("echo ready; while :; do :; done", &mut store).await;
-        MirrordCiStore::update(&store_path, LOCK_TIMEOUT, |persisted| {
-            *persisted = store.clone()
+        let sessions_dir = temp_dir.path();
+        let contested_dir = sessions_dir.join("contested");
+        let free_dir = sessions_dir.join("free");
+
+        let mut contested = MirrordCiStore::default();
+        let (mut contested_child, _contested_stdout) =
+            spawn_ready_script("echo ready; while :; do :; done", &mut contested).await;
+        contested
+            .sidecar_containers
+            .insert(MirrordCiManagedContainer {
+                runtime: ContainerRuntime::Podman,
+                container_id: "test-container".to_owned(),
+            });
+        let mut free = MirrordCiStore::default();
+        let (mut free_child, _free_stdout) =
+            spawn_ready_script("echo ready; while :; do :; done", &mut free).await;
+        for (session_dir, store) in [(&contested_dir, &contested), (&free_dir, &free)] {
+            MirrordCiStore::update(session_dir, LOCK_TIMEOUT, |persisted| {
+                *persisted = store.clone()
+            })
+            .await
+            .unwrap();
+        }
+
+        let lock = MirrordCiStore::lock_or_create_session(&contested_dir, Duration::ZERO)
+            .await
+            .unwrap();
+        timeout(
+            Duration::from_secs(1),
+            CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
+                .handle_with(runtime_remove_container),
+        )
+        .await
+        .expect("the stop skips the contested session without waiting for its lock")
+        .unwrap();
+        timeout(Duration::from_secs(5), free_child.wait())
+            .await
+            .expect("the uncontested session is stopped")
+            .unwrap();
+        assert!(free_dir.exists().not());
+        assert!(contested_child.try_wait().unwrap().is_none());
+        let persisted =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(&contested_dir))
+                .await
+                .unwrap();
+        assert_eq!(persisted.user_process_groups, contested.user_process_groups);
+        assert_eq!(persisted.sidecar_containers, contested.sidecar_containers);
+        drop(lock);
+
+        let stop = CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null());
+        stop.handle_with(|_| {
+            let contested_dir = contested_dir.clone();
+            async move {
+                assert!(matches!(
+                    MirrordCiStore::update(&contested_dir, Duration::from_millis(100), |_| {})
+                        .await,
+                    Err(CiError::SessionLocked { .. })
+                ));
+                Ok(())
+            }
         })
         .await
         .unwrap();
-
-        let lock = MirrordCiStore::lock_file(&store_path).await.unwrap();
-        let attempted_stop =
-            CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null()).await;
-        assert!(matches!(
-            attempted_stop,
-            Err(CiError::IO(error)) if error.kind() == std::io::ErrorKind::WouldBlock
-        ));
-        assert!(child.try_wait().unwrap().is_none());
-        assert_eq!(
-            MirrordCiStore::read_from_file_or_default(&store_path)
-                .await
-                .unwrap()
-                .user_process_groups,
-            store.user_process_groups
-        );
-        drop(lock);
-
-        let stop = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
-            .await
-            .unwrap();
-        assert!(matches!(
-            MirrordCiStore::update(&store_path, Duration::from_millis(100), |_| {}).await,
-            Err(CiError::IO(error)) if error.kind() == std::io::ErrorKind::WouldBlock
-        ));
-        stop.handle().await.unwrap();
-        timeout(Duration::from_secs(5), child.wait())
+        timeout(Duration::from_secs(5), contested_child.wait())
             .await
             .expect("group exits after successful stop")
             .unwrap();
-        assert!(!store_path.exists());
+        assert!(contested_dir.exists().not());
+    }
+
+    /// Two stops that run concurrently (parallel CI jobs on one runner, each with `mirrord ci stop`
+    /// in its teardown) both go over every session. When one stop removes a session after the other
+    /// stop listed it, the other stop must find nothing left to stop there rather than fail, and
+    /// leave no session directory behind.
+    #[tokio::test]
+    async fn session_removed_by_another_stop_has_nothing_to_stop() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sessions_dir = temp_dir.path();
+        for name in ["session-1", "session-2", "session-3"] {
+            MirrordCiStore::update(&sessions_dir.join(name), LOCK_TIMEOUT, |store| {
+                store.sidecar_containers.insert(MirrordCiManagedContainer {
+                    runtime: ContainerRuntime::Podman,
+                    container_id: "test-container".to_owned(),
+                });
+            })
+            .await
+            .unwrap();
+        }
+
+        // The other stop holds the lock of the session that the directory listing puts last, and
+        // removes that session while this stop removes the container of the first session. This
+        // stop lists the unchanged directory in the same order, so it reaches the removed session
+        // only afterwards, whatever order the filesystem lists the names in.
+        let session_dirs = std::fs::read_dir(sessions_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        let [stopped_dirs @ .., removed_dir] = session_dirs.as_slice() else {
+            panic!("the test created three sessions, found {session_dirs:?}");
+        };
+        let mut other_stop_lock = Some(
+            MirrordCiStore::lock_or_create_session(removed_dir, Duration::ZERO)
+                .await
+                .unwrap(),
+        );
+        let mut removals = 0;
+        CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
+            .handle_with(|_| {
+                removals += 1;
+                let other_stop_lock = other_stop_lock.take();
+                let removed_dir = removed_dir.clone();
+                async move {
+                    if let Some(lock) = other_stop_lock {
+                        MirrordCiStore::remove_session(&removed_dir, &lock)
+                            .await
+                            .unwrap();
+                    }
+                    Ok(())
+                }
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(removals, stopped_dirs.len());
+        assert!(std::fs::read_dir(sessions_dir).unwrap().next().is_none());
+    }
+
+    /// A writer that is killed after it created its temporary state file, and before it replaced
+    /// the state file with it, leaves that file in the session's directory. The stop must still
+    /// remove the directory, or every later stop would go over the session again.
+    #[tokio::test]
+    async fn stop_removes_temporary_state_file_of_killed_writer() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let sessions_dir = temp_dir.path();
+        let session_dir = sessions_dir.join("session");
+        MirrordCiStore::update(&session_dir, LOCK_TIMEOUT, |_| {})
+            .await
+            .unwrap();
+        tempfile::Builder::new()
+            .prefix(MirrordCiStore::TEMPORARY_STATE_FILE_PREFIX)
+            .tempfile_in(&session_dir)
+            .unwrap()
+            .keep()
+            .unwrap();
+
+        CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
+            .handle_with(runtime_remove_container)
+            .await
+            .unwrap();
+        assert!(session_dir.exists().not());
     }
 
     /// A failed container removal must not leave an already-signalled group in the retry ledger.
     #[tokio::test]
     async fn partial_failure_retries_only_failed_container() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store_path = temp_dir.path().join("mirrord-for-ci.json");
+        let sessions_dir = temp_dir.path();
+        let session_dir = sessions_dir.join("session");
         let mut store = MirrordCiStore::default();
         let (mut child, _stdout) =
             spawn_ready_script("echo ready; while :; do :; done", &mut store).await;
-        let pgid = child.id().unwrap();
         let container = MirrordCiManagedContainer {
             runtime: ContainerRuntime::Podman,
             container_id: "test-container".to_owned(),
         };
         store.sidecar_containers.insert(container.clone());
-        MirrordCiStore::update(&store_path, LOCK_TIMEOUT, |persisted| {
+        MirrordCiStore::update(&session_dir, LOCK_TIMEOUT, |persisted| {
             *persisted = store.clone()
         })
         .await
         .unwrap();
 
-        let first = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
-            .await
-            .unwrap();
-        let error = first
+        let error = CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
             .handle_with(|_| async {
                 Err(CiError::IO(std::io::Error::other("runtime unavailable")))
             })
             .await
             .unwrap_err();
-        assert!(matches!(error, CiError::IO(_)));
+        assert!(matches!(
+            error,
+            CiError::SessionsNotStopped { failures, .. }
+                if matches!(failures.as_slice(), [(_, CiError::IO(_))])
+        ));
         timeout(Duration::from_secs(5), child.wait())
             .await
             .expect("the user group was signalled")
             .unwrap();
 
-        let retry = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
+        let retained =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(&session_dir))
+                .await
+                .unwrap();
+        assert!(retained.user_process_groups.is_empty());
+        assert_eq!(retained.sidecar_containers, HashSet::from([container]));
+        CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
+            .handle_with(|_| async { Ok(()) })
             .await
             .unwrap();
-        assert!(retry.store.user_process_groups.is_empty());
-        assert_eq!(retry.store.sidecar_containers, HashSet::from([container]));
-        assert!(!retry.store.user_process_groups.contains(&pgid));
-        retry.handle_with(|_| async { Ok(()) }).await.unwrap();
-        assert!(!store_path.exists());
+        assert!(session_dir.exists().not());
     }
 
     /// Errors on one process retain that PID, while successful signals remove every role for
@@ -647,13 +880,14 @@ mod tests {
         assert!(store.user_process_groups.is_empty());
     }
 
-    /// The second invocation must load the absence left by the first invocation, rather than reuse
-    /// an already-empty in-memory store. CI cleanup commonly invokes stop unconditionally, so both
-    /// the deletion and the load-from-absent path are part of its idempotency contract.
+    /// CI cleanup commonly runs `mirrord ci stop` unconditionally, so the stop must be idempotent:
+    /// the first stop removes the session's directory, and a second stop finds no session and
+    /// still succeeds.
     #[tokio::test]
     async fn ci_stop_removes_persisted_state_and_second_stop_succeeds() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let store_path = temp_dir.path().join("mirrord-for-ci.json");
+        let sessions_dir = temp_dir.path();
+        let session_dir = sessions_dir.join("session");
         let mut store = MirrordCiStore::default();
         let (mut child, _stdout) = spawn_ready_script(
             "trap 'exit 0' TERM; echo ready; while :; do :; done",
@@ -661,27 +895,29 @@ mod tests {
         )
         .await;
         assert!(store.is_empty().not());
-        tokio::fs::write(&store_path, serde_json::to_vec(&store).unwrap())
-            .await
-            .unwrap();
+        tokio::fs::create_dir_all(&session_dir).await.unwrap();
+        tokio::fs::write(
+            MirrordCiStore::state_path(&session_dir),
+            serde_json::to_vec(&store).unwrap(),
+        )
+        .await
+        .unwrap();
 
-        let first = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
+        CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
+            .handle()
             .await
             .unwrap();
-        assert!(first.store.is_empty().not());
-        first.handle().await.unwrap();
 
         timeout(Duration::from_secs(5), child.wait())
             .await
             .expect("persisted target exits")
             .unwrap();
-        assert!(store_path.exists().not());
+        assert!(session_dir.exists().not());
 
-        let second = CiStopCommandHandler::new(store_path.clone(), ProgressTracker::null())
+        CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
+            .handle()
             .await
             .unwrap();
-        assert!(second.store.is_empty());
-        second.handle().await.unwrap();
-        assert!(store_path.exists().not());
+        assert!(session_dir.exists().not());
     }
 }
