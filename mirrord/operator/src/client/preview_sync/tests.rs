@@ -295,9 +295,10 @@ fn a_file_that_fails_to_pack_is_named() {
     fs::remove_file(local.path().join("src/app.js")).unwrap();
     let error = pack_listing(&listing, 0, local.path()).unwrap_err();
     assert!(
-        error
-            .to_string()
-            .contains(&format!("`{}`", local.path().join("src/app.js").display())),
+        error.to_string().contains(&format!(
+            "`{}`",
+            local.path().join("src").join("app.js").display()
+        )),
         "{error}"
     );
 }
