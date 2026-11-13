@@ -72,7 +72,7 @@ jobs:
     steps:
       - name: Trigger operator E2E workflow and wait for completion
         id: trigger-e2e
-        uses: metalbear-co/return-dispatch@main
+        uses: metalbear-co/return-dispatch@dac7338c24ea3a5c470ba13f9c3425537afa3439 # main
         continue-on-error: true
         with:
           # This PAT is only used to dispatch the workflow in
@@ -96,7 +96,7 @@ jobs:
           echo ${{steps.trigger-e2e.outputs.run_url}}
 
       - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
-        uses: metalbear-co/await-remote-run@main
+        uses: metalbear-co/await-remote-run@1fef79c6a9f061b4acf1773834285709fa4a7d5f # main
         with:
           # This PAT is only used to read workflow runs in
           # `metalbear-co/operator`.
