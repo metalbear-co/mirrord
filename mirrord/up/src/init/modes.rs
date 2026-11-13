@@ -70,9 +70,9 @@ impl ServiceMode {
     /// The yes/no question before the traffic questions.
     pub fn traffic_question(self) -> &'static str {
         if self.uses_http_filter() {
-            "Configure traffic filtering and ports?"
+            "Customize the header filter and ports?"
         } else {
-            "Configure ports?"
+            "Customize ports?"
         }
     }
 }

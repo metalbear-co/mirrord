@@ -75,7 +75,7 @@ describe('Wizard', () => {
     next()
 
     fireEvent.click(
-      screen.getByLabelText('Configure traffic filtering and ports?'),
+      screen.getByLabelText('Customize the header filter and ports?'),
     )
     typeInto(/HTTP header filter/, 'x-user: me')
     fireEvent.click(await screen.findByLabelText('intercept port 9090'))
@@ -145,7 +145,7 @@ describe('Wizard', () => {
     ).not.toBeInTheDocument()
     next()
 
-    fireEvent.click(screen.getByLabelText('Configure ports?'))
+    fireEvent.click(screen.getByLabelText('Customize ports?'))
     expect(
       screen.queryByLabelText(/HTTP header filter/),
     ).not.toBeInTheDocument()
@@ -158,7 +158,7 @@ describe('Wizard', () => {
     await pickOption(/server-echo deployment/)
     next()
     fireEvent.click(
-      screen.getByLabelText('Configure traffic filtering and ports?'),
+      screen.getByLabelText('Customize the header filter and ports?'),
     )
     await screen.findByLabelText('intercept port 80')
     typeInto(/Other ports to ignore/, 'http')

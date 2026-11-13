@@ -13,7 +13,7 @@ export const MODES: ModeInfo[] = [
     target_types: ['deployment', 'statefulset', 'rollout', 'pod'],
     targetless: true,
     http_filter: true,
-    traffic_question: 'Configure traffic filtering and ports?',
+    traffic_question: 'Customize the header filter and ports?',
   },
   {
     id: 'mirror',
@@ -24,7 +24,7 @@ export const MODES: ModeInfo[] = [
     target_types: ['deployment', 'statefulset', 'rollout', 'pod'],
     targetless: false,
     http_filter: true,
-    traffic_question: 'Configure traffic filtering and ports?',
+    traffic_question: 'Customize the header filter and ports?',
   },
   {
     id: 'replace',
@@ -35,7 +35,7 @@ export const MODES: ModeInfo[] = [
     target_types: ['deployment', 'statefulset'],
     targetless: false,
     http_filter: false,
-    traffic_question: 'Configure ports?',
+    traffic_question: 'Customize ports?',
   },
 ]
 
