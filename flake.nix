@@ -1,10 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
@@ -72,59 +68,20 @@
             packages =
               with pkgs;
               let
-                # Packages required to build the rust workspace
-                rustPackages =
-                  let
-                    rustToolchain =
-                      if stdenv.hostPlatform.isDarwin then
-                        # On darwin we need the standard library for x86 too in order to compile universal binaries,
-                        # as well as the one for linux in order to work on the agent, which is linux-only. nixpkgs'
-                        # toolchain only ships the host's standard library, so we use rust-overlay to add the
-                        # cross-compilation ones.
-                        let
-                          rust-bin = inputs.rust-overlay.lib.mkRustBin { } pkgs;
-                        in
-                        [
-                          (rust-bin.stable.latest.default.override {
-                            extensions = [ "rust-src" ];
-                            targets = [
-                              "x86_64-apple-darwin"
-                              "x86_64-unknown-linux-gnu"
-                            ];
-                          })
-                          # The wrapper points `RUST_SRC_PATH` to nixpkgs' rust toolchain, but we use rust-overlay's,
-                          # so let rust-analyzer find out where it is on its own with `rustc --print sysroot`.
-                          rust-analyzer-unwrapped
-                        ]
-                      else
-                        [
-                          cargo
-                          clippy
-                          rustc
-                          rustfmt
-                          rust-analyzer
-                        ];
-                  in
-                  rustToolchain
-                  ++ [
-                    rustPlatform.bindgenHook
-                    # Required to build `containerd-client`
-                    protobuf
-                    # Required to build `rdkafka-sys`, which the end-to-end tests' Kafka consumer uses
-                    cmake
-                  ];
-
-                # Packages to run tests locally
-                testsPackages = [
-                  cargo-nextest
-                  go
-                  (python3.withPackages (
-                    pypkgs: with pypkgs; [
-                      fastapi
-                      flask
-                      uvicorn
-                    ]
-                  ))
+                # The Rust toolchain, and the tools that the build scripts need, for rust-analyzer's
+                # `cargo check`. Bazel brings its own toolchains, and the tools that the tests run,
+                # like Go, Python and cargo-nextest.
+                rustPackages = [
+                  cargo
+                  clippy
+                  rustc
+                  rustfmt
+                  rust-analyzer
+                  rustPlatform.bindgenHook
+                  # Required to build `containerd-client`
+                  protobuf
+                  # Required to build `rdkafka-sys`, which the end-to-end tests' Kafka consumer uses
+                  cmake
                 ];
 
                 # Bazel builds and tests the workspace with toolchains that it downloads itself
@@ -134,19 +91,7 @@
                   starpls
                 ];
               in
-              rustPackages ++ testsPackages ++ bazelPackages ++ lintPackages;
-
-            env =
-              with pkgs;
-              let
-                x86-gcc = lib.getExe pkgsCross.gnu64.stdenv.cc;
-              in
-              lib.optionalAttrs stdenv.hostPlatform.isDarwin {
-                # Tells bindgen/cargo which C/C++ toolchain to use when targetting linux
-                CC_x86_64_unknown_linux_gnu = x86-gcc;
-                CXX_x86_64_unknown_linux_gnu = x86-gcc;
-                CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = x86-gcc;
-              };
+              rustPackages ++ bazelPackages ++ lintPackages;
           };
 
           # CI's lint job runs `bazel run //:lint` and `bazel run //:format` in this shell, so that
