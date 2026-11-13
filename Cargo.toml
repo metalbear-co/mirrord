@@ -260,7 +260,9 @@ rmcp = { version = "3.5", default-features = false, features = [
     "server",
     "transport-io",
 ] }
-rstest = { version = "0.23", default-features = false, features = ["crate-name"] }
+# Without `crate-name`, which makes rstest's macros read the package's `Cargo.toml` when they
+# expand. No package renames `rstest`, and Bazel's compile actions don't have the manifests.
+rstest = { version = "0.23", default-features = false }
 # `interpolate-folder-path` lets the CLI take the UI's folder from `MIRRORD_BUNDLED_UI`.
 # `deterministic-timestamps` embeds a fixed modification time for each file rather than the one on
 # disk, so that the CLI's bytes don't depend on when the UI was built.

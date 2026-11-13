@@ -8281,7 +8281,6 @@ checksum = "825ea780781b15345a146be27eaefb05085e337e869bff01b4306a4fd4a9ad5a"
 dependencies = [
  "cfg-if",
  "glob",
- "proc-macro-crate",
  "proc-macro2",
  "quote",
  "regex",
