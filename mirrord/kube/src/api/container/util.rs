@@ -50,6 +50,7 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
         envs::MAX_BODY_BUFFER_SIZE.as_k8s_spec(&agent.max_body_buffer_size),
         envs::MAX_BODY_BUFFER_TIMEOUT.as_k8s_spec(&agent.max_body_buffer_timeout),
         envs::HTTP_DETECTION_TIMEOUT.as_k8s_spec(&agent.http_detection_timeout),
+        envs::HTTP_DETECT_INACTIVE_PORTS.as_k8s_spec(&agent.http_detect_inactive_ports),
         envs::JAQ_TIME_LIMIT.as_k8s_spec(&agent.jaq_time_limit),
     ];
 

@@ -138,6 +138,10 @@ RabbitMQ splitting in `mirrord up` requires an operator that supports it. Agains
 {% endhint %}
 
 {% hint style="info" %}
+A service in `mirror` mode asks for `mirror` on every one of its Kafka queues. With the Java Kafka client ([`mirrord.client_implementation: java`](../sharing-the-cluster/queue-splitting/kafka.md#configure-the-operators-kafka-client), required for Kafka Streams) this needs mirrord operator `3.232.0` or later, and with Kafka Streams the deployed service can still get its copy of a message whose copy to your machine the broker rejected, and then processes it a second time when it is redelivered. See [`queue_mode`](../sharing-the-cluster/queue-splitting.md#setting-a-filter-for-a-mirrord-run) for the operator versions that fail or steal instead.
+{% endhint %}
+
+{% hint style="info" %}
 Only messages containing the session key (`checkout-debug` in this case) are routed to your local session. All other messages continue to the deployed target.
 {% endhint %}
 
@@ -291,6 +295,43 @@ run:
   pre_command: ["npm", "run", "build"]
   command: ["node", "dist/app.js"]
 ```
+
+##### `services.*.sync`
+
+Syncs your local code into the service's preview with `mirrord preview sync`. See [Sync Your Local Code to a Preview Environment](../use-cases/preview-environments-code-sync.md) for how it works. `mirrord up` and `mirrord preview up` ignore it. Requires mirrord `3.286.0` or later. Has the following fields:
+
+- `files`: The local directories to sync. Each entry has these fields:
+  - `local`: The local directory. Relative paths are resolved against the directory that contains `mirrord-up.yaml`.
+  - `remote`: The absolute path in the preview's container that the directory is synced to. A sync makes it match `local`, so it deletes the image's files there, except at ignored paths. It can't be `/`, and can't be under `/mirrord`, `/mirrord-state`, `/mirrord-code`, or `/mirrord-sync-tls`. It can't equal, contain, or be inside another `remote` or `prepare.persist` path.
+  - `ignore`: More paths to leave out, written as lines of a `.gitignore` in `local`, such as `coverage/`. They take precedence over git's rules, so `!.env.preview` syncs a file that a `.gitignore` excludes.
+- `prepare`: A command that prepares the synced code, such as an install of dependencies. Requires `run`. Has the following fields:
+  - `command`: Array of strings containing the program and its arguments, such as `["npm", "ci"]`. It runs before the app first starts, and after each sync that changes a `triggered_by` file. The app restarts after it succeeds.
+  - `directory`: The absolute working directory of `command` in the preview's container, such as `/app`. Defaults to the container's working directory.
+  - `triggered_by`: Globs of the files whose changes run `command` again, such as `frontend/package-lock.json`. They're relative to the directory that contains `mirrord-up.yaml`, and each must start with the `local` of a `files` entry. Name specific files rather than a `**` glob over a large directory, because the pod reads every matching file after each sync.
+  - `persist`: The absolute paths outside every `remote` that `command` writes to, such as `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the code volume, so they survive a restart of the pod. List every such path, because the pod doesn't run `prepare` again after a restart when nothing changed.
+- `run`: How the preview pod runs the app. Without it, the container runs its own command, such as nginx serving the synced files. Has the following fields:
+  - `command`: Array of strings containing the program and its arguments, such as `["npm", "run", "dev"]`. It replaces the container's own command.
+  - `directory`: The absolute working directory of `command` in the preview's container, such as `/app`. Defaults to the container's working directory.
+  - `restart`: When the app restarts. `on_prepare` restarts it only after `prepare` runs, and `on_sync` restarts it after every sync. A successful `prepare` restarts it either way. Defaults to `on_prepare`.
+
+```yaml
+sync:
+  files:
+    - local: frontend
+      remote: /app
+      ignore: ["coverage/"]
+  prepare:
+    command: ["npm", "ci"]
+    directory: /app
+    triggered_by: ["frontend/package-lock.json"]
+  run:
+    command: ["npm", "run", "dev"]
+    directory: /app
+```
+
+##### `services.*.skip`
+
+Don't launch this service unless it's named on the `mirrord up` command line. `mirrord preview sync` also leaves it out. If the service has `sync`, an image passed with `--image` or `MIRRORD_<SERVICE>_IMAGE` previews it anyway. `mirrord preview up` ignores `skip`, because it previews exactly the services that have an image. Defaults to `false`.
 
 ##### `services.*.context`
 The name of the Kubernetes context to run this service in. See [Context](#context) for precedence rules when used with `common.context`.

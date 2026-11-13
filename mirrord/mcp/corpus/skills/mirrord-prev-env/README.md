@@ -65,6 +65,6 @@ mirrord preview stop --key pr-123
 ## Learn more
 
 - [mirrord Preview Environments docs](https://metalbear.com/mirrord/docs/use-cases/preview-environments)
-- [Preview Environments in CI docs](https://metalbear.com/mirrord/docs/use-cases/preview-environments-in-ci)
+- [Preview Environments in CI docs](https://metalbear.com/mirrord/docs/use-cases/preview-environments/preview-environments-in-ci)
 - [mirrord-preview GitHub Action](https://github.com/metalbear-co/mirrord-preview)
 - [Reference workflow (playground)](https://github.com/metalbear-co/playground/blob/main/.github/workflows/preview-shop-pr.yml)

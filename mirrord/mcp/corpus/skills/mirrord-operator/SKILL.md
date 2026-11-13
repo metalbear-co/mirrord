@@ -3,7 +3,7 @@ name: mirrord-operator
 description: Help users install and configure the mirrord Operator for team/enterprise environments. Use when users ask about operator setup, Helm installation, cloud API key or license configuration, air-gapped/offline licensing, enabling features (queue splitting, DB branching, preview environments, multi-cluster), internal registries, OpenShift/GKE Autopilot, RBAC, or multi-user mirrord deployments. Also use when an AI agent hits a Team or Enterprise feature on a cluster with no license and needs to offer the user a trial (agent-started trial; the trial is Enterprise tier).
 metadata:
   author: MetalBear
-  version: "2.24"
+  version: "2.25"
 ---
 
 # Mirrord Operator Skill
@@ -52,7 +52,8 @@ Trigger on questions like:
 - `references/values.yaml` — verbatim upstream chart `values.yaml`, kept in sync automatically. **Read this for exact current defaults or any value the digest doesn't list.**
 
 Authoritative upstream sources:
-- [Operator install docs](https://metalbear.com/mirrord/docs/getting-started/installing-mirrord/operator)
+- [Operator install docs](https://metalbear.com/mirrord/docs/getting-started/quick-start/install-the-operator)
+- [Operator reference](https://metalbear.com/mirrord/docs/reference/operator)
 - Chart `values.yaml`: https://raw.githubusercontent.com/metalbear-co/charts/main/mirrord-operator/values.yaml
 
 ## Prerequisites
@@ -362,7 +363,8 @@ Coordinate upgrades: in-flight sessions can break. Check with `kubectl get sessi
 
 ## Learn More
 
-- [Operator install docs](https://metalbear.com/mirrord/docs/getting-started/installing-mirrord/operator)
+- [Operator install docs](https://metalbear.com/mirrord/docs/getting-started/quick-start/install-the-operator)
+- [Operator reference](https://metalbear.com/mirrord/docs/reference/operator)
 - [Chart values.yaml](https://raw.githubusercontent.com/metalbear-co/charts/main/mirrord-operator/values.yaml)
 - [License server (self-hosted)](https://metalbear.com/mirrord/docs/managing-mirrord/license-server)
 - [Pricing & plan tiers](https://metalbear.com/mirrord/pricing/)

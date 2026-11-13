@@ -16,7 +16,7 @@ description: >
   mirrord-header-propagation skill.
 metadata:
   author: MetalBear
-  version: "1.1"
+  version: "1.2"
 ---
 
 # mirrord Propagation Discovery Skill
@@ -63,7 +63,7 @@ brew install metalbear-co/mirrord/mirrord      # macOS / Linux
 choco install --pre mirrord                     # Windows
 ```
 
-Anything else (no package manager, locked-down machines): point to the [CLI install docs](https://metalbear.com/mirrord/docs/getting-started/installing-mirrord/cli) and let the user install a release binary. Version notes: port auto-detection in `mirrord dump` needs **3.191.0+**, jq header filters (`header_filter_jq` / `{ "query" }`) need **3.194.0+** on the CLI and the agent image, and the Operator (if installed) must be current enough for either. A local `jq` is optional but useful for testing jq programs before they go into the config.
+Anything else (no package manager, locked-down machines): point to the [CLI install docs](https://metalbear.com/mirrord/docs/getting-started/quick-start/install-mirrord) and let the user install a release binary. Version notes: port auto-detection in `mirrord dump` needs **3.191.0+**, jq header filters (`header_filter_jq` / `{ "query" }`) need **3.194.0+** on the CLI and the agent image, and the Operator (if installed) must be current enough for either. A local `jq` is optional but useful for testing jq programs before they go into the config.
 
 Confirm with the user which namespace, which cluster, and which request flow they want to isolate (for example "a `POST /v1/orders` from the gateway through orders, inventory and billing"). If they want "all my traffic", you are looking for an identity-bound identifier; if they want "the requests I send from my terminal", an injectable one.
 

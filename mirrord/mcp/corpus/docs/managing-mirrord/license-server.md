@@ -135,7 +135,7 @@ sa:
 
 ### Connecting Operators to the License Server
 
-First update your operator `values.yaml` file ([see this page](../getting-started/quick-start.md#helm) for quickstart helm setup for operator):
+First update your operator `values.yaml` file (see [Custom install with Helm](../getting-started/install-the-operator.md#custom-install-with-helm)):
 
 ```yaml
 # ./values.yaml

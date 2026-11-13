@@ -28,7 +28,18 @@ mirrord also supports [Go](https://metalbear.com/blog/hooking-go-from-rust-hitch
 
 ## Which Kubernetes versions does mirrord support?
 
-Basic mirrord setups can support Kubernetes versions as old as `1.22`, but some features require newer versions. See [Cluster Requirements](../installing-mirrord/README.md#cluster-requirements).
+mirrord supports Kubernetes `1.22` or later. For the node requirements, see [Cluster Requirements](../getting-started/install-mirrord.md#cluster-requirements).
+
+Some features need a newer version:
+
+| Feature | Minimum Kubernetes version |
+| --- | --- |
+| Agent as an [ephemeral container](https://metalbear.com/mirrord/docs/config/options#agent-ephemeral) | `1.23` |
+| AppArmor profile for the agent ([`agent.security_context`](https://metalbear.com/mirrord/docs/config/options#agent-security_context)) | `1.30` |
+| [Queue splitting](../sharing-the-cluster/queue-splitting.md) | `1.30` |
+| [Multi-cluster](../using-mirrord/multi-cluster-setup.md#prerequisites) | `1.30` on the Primary cluster |
+| [Multi-cluster preview replicas](../using-mirrord/multi-cluster-setup.md#preview-environment-replicas) with database branching | `1.29` on the workload clusters |
+| [Syncing local code to a preview environment](../use-cases/preview-environments-code-sync.md) | `1.29` on the API server and the nodes |
 
 ## Does mirrord support clusters with a service mesh like Istio or Linkerd?
 
