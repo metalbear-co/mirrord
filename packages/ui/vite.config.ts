@@ -20,6 +20,14 @@ if (!mirrordVersion) {
 // (`packages/monitor`) and the config wizard (`packages/wizard`) — which are compiled straight from
 // source via the aliases below. The shell in `src/` lazy-loads whichever one the current route
 // needs, so each feature's (conflicting) CSS tokens only ever load on its own page.
+//
+// The aliases are resolved from the directory that Vite runs in, `packages/ui`, rather than from
+// `__dirname`. Vite bundles this config before it runs it, which resolves symlinks, and in Bazel's
+// sandbox every file is a symlink into Bazel's output tree. So `__dirname` would point outside the
+// sandbox, and the features would import their dependencies, like `@tanstack/react-query`, from
+// there, as second copies of the ones that the shell imports.
+const packages = path.resolve(process.cwd(), '..')
+
 export default defineConfig({
   plugins: [react()],
   define: {
@@ -30,16 +38,13 @@ export default defineConfig({
       // Order matters: the more specific `/theme` subpath must precede the package root so it is
       // not shadowed. The shell imports just the theme module (no monitor component graph) to
       // apply the shared light/dark preference on both routes.
-      '@mirrord/monitor/theme': path.resolve(
-        __dirname,
-        '../monitor/src/theme.ts',
-      ),
+      '@mirrord/monitor/theme': path.resolve(packages, 'monitor/src/theme.ts'),
       '@mirrord/monitor/events': path.resolve(
-        __dirname,
-        '../monitor/src/events.tsx',
+        packages,
+        'monitor/src/events.tsx',
       ),
-      '@mirrord/monitor': path.resolve(__dirname, '../monitor/src/index.tsx'),
-      '@mirrord/wizard': path.resolve(__dirname, '../wizard/src/index.tsx'),
+      '@mirrord/monitor': path.resolve(packages, 'monitor/src/index.tsx'),
+      '@mirrord/wizard': path.resolve(packages, 'wizard/src/index.tsx'),
     },
   },
   server: {
