@@ -869,8 +869,10 @@ impl MirrordExecution {
             resolve_tokio_command(std::env::current_exe().map_err(CliError::CliPathError)?);
         proxy_command.arg("intproxy");
 
-        if mirrord_for_ci.is_some() {
-            proxy_command.arg("--mirrord-for-ci");
+        if let Some(mirrord_for_ci) = mirrord_for_ci {
+            proxy_command
+                .arg("--mirrord-for-ci")
+                .arg(mirrord_for_ci.session_id().to_string());
         }
 
         proxy_command
