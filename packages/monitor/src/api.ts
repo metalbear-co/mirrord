@@ -46,11 +46,41 @@ async function chaosErrorMessage(r: Response): Promise<string> {
   return body || `${r.status} ${r.statusText}`
 }
 
+// A request that never completed rejects with the same `Failed to fetch` for every endpoint,
+// so the message alone cannot say which one it was, nor that the server never answered.
+export class RequestFailedError extends Error {
+  constructor(
+    message: string,
+    readonly endpoint: string,
+  ) {
+    super(message)
+    this.name = 'RequestFailedError'
+  }
+}
+
+export function failureFields(err: unknown): Record<string, unknown> {
+  if (!(err instanceof RequestFailedError)) return {}
+  return { endpoint: err.endpoint, reached_server: false }
+}
+
+async function apiFetch(
+  endpoint: string,
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(withToken(path), { credentials: 'include', ...init })
+  } catch (err) {
+    throw new RequestFailedError(
+      err instanceof Error ? err.message : String(err),
+      endpoint,
+    )
+  }
+}
+
 export const api = {
   listSessions: async (): Promise<SessionInfo[]> => {
-    const r = await fetch(withToken('/api/v2/local/sessions'), {
-      credentials: 'include',
-    })
+    const r = await apiFetch('sessions', '/api/v2/local/sessions')
     if (!r.ok) {
       throw new Error(`Failed to fetch sessions: ${r.status} ${r.statusText}`)
     }
@@ -59,11 +89,9 @@ export const api = {
   },
 
   getSession: async (sessionId: string): Promise<SessionInfo | null> => {
-    const r = await fetch(
-      withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`),
-      {
-        credentials: 'include',
-      },
+    const r = await apiFetch(
+      'session',
+      `/api/v2/local/sessions/${encodeURIComponent(sessionId)}`,
     )
     if (!r.ok) {
       if (r.status !== HTTP_NOT_FOUND) {
@@ -85,17 +113,16 @@ export const api = {
   killSession: async (sessionId: string): Promise<void> => {
     let r: Response
     try {
-      r = await fetch(
-        withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}`),
-        {
-          method: 'DELETE',
-          credentials: 'include',
-        },
+      r = await apiFetch(
+        'session_kill',
+        `/api/v2/local/sessions/${encodeURIComponent(sessionId)}`,
+        { method: 'DELETE' },
       )
     } catch (err) {
       emitUserBlocked('session_kill_failed', {
         session_id: sessionId,
         error: err instanceof Error ? err.message : String(err),
+        ...failureFields(err),
       })
       return
     }
@@ -127,9 +154,7 @@ export const api = {
   },
 
   listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {
-    const r = await fetch(withToken(chaosRulesPath(sessionId)), {
-      credentials: 'include',
-    })
+    const r = await apiFetch('chaos_rules', chaosRulesPath(sessionId))
     if (!r.ok) {
       if (r.status === HTTP_NOT_FOUND) return []
       throw new Error(await chaosErrorMessage(r))
@@ -141,9 +166,8 @@ export const api = {
     sessionId: string,
     rule: ChaosRuleRequest,
   ): Promise<ChaosRule> => {
-    const r = await fetch(withToken(chaosRulesPath(sessionId)), {
+    const r = await apiFetch('chaos_rule_create', chaosRulesPath(sessionId), {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rule),
     })
@@ -164,12 +188,15 @@ export const api = {
     ruleId: string,
     rule: ChaosRuleRequest,
   ): Promise<ChaosRule> => {
-    const r = await fetch(withToken(chaosRulesPath(sessionId, ruleId)), {
-      method: 'PUT',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(rule),
-    })
+    const r = await apiFetch(
+      'chaos_rule_update',
+      chaosRulesPath(sessionId, ruleId),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rule),
+      },
+    )
     if (!r.ok) {
       emitUserBlocked('chaos_rule_update_failed', {
         session_id: sessionId,
@@ -185,10 +212,11 @@ export const api = {
   },
 
   deleteChaosRule: async (sessionId: string, ruleId: string): Promise<void> => {
-    const r = await fetch(withToken(chaosRulesPath(sessionId, ruleId)), {
-      method: 'DELETE',
-      credentials: 'include',
-    })
+    const r = await apiFetch(
+      'chaos_rule_delete',
+      chaosRulesPath(sessionId, ruleId),
+      { method: 'DELETE' },
+    )
     if (!r.ok) {
       emitUserBlocked('chaos_rule_delete_failed', {
         session_id: sessionId,
@@ -214,7 +242,7 @@ export const api = {
     const path = qs
       ? `/api/v2/operator/sessions?${qs}`
       : '/api/v2/operator/sessions'
-    const r = await fetch(withToken(path), { credentials: 'include' })
+    const r = await apiFetch('operator_sessions', path)
     if (!r.ok) {
       throw new Error(
         `Failed to fetch operator sessions: ${r.status} ${r.statusText}`,
@@ -237,9 +265,7 @@ export const api = {
     if (logs) params.set('logs', 'true')
     const qs = params.toString()
     const base = `/api/v2/operator/previews/${encodeURIComponent(id)}`
-    const r = await fetch(withToken(qs ? `${base}?${qs}` : base), {
-      credentials: 'include',
-    })
+    const r = await apiFetch('preview_detail', qs ? `${base}?${qs}` : base)
     // A preview the operator has already cleaned up is gone, not an error worth surfacing.
     if (r.status === HTTP_NOT_FOUND) return null
     if (!r.ok) {
@@ -253,11 +279,9 @@ export const api = {
   getOperatorLicense: async (
     context: string | null,
   ): Promise<OperatorLicense | null> => {
-    const r = await fetch(
-      withToken(`/api/v2/operator/license${contextParam(context)}`),
-      {
-        credentials: 'include',
-      },
+    const r = await apiFetch(
+      'operator_license',
+      `/api/v2/operator/license${contextParam(context)}`,
     )
     if (!r.ok) return null
     const data = (await r.json()) as OperatorLicense
@@ -265,9 +289,7 @@ export const api = {
   },
 
   listContexts: async (): Promise<ContextsResponse> => {
-    const r = await fetch(withToken('/api/v2/kube/contexts'), {
-      credentials: 'include',
-    })
+    const r = await apiFetch('kube_contexts', '/api/v2/kube/contexts')
     if (!r.ok)
       throw new Error(`Failed to fetch contexts: ${r.status} ${r.statusText}`)
     const data = (await r.json()) as ContextsResponse
@@ -277,11 +299,9 @@ export const api = {
   listNamespaces: async (
     context: string | null,
   ): Promise<NamespacesResponse> => {
-    const r = await fetch(
-      withToken(`/api/v2/kube/namespaces${contextParam(context)}`),
-      {
-        credentials: 'include',
-      },
+    const r = await apiFetch(
+      'kube_namespaces',
+      `/api/v2/kube/namespaces${contextParam(context)}`,
     )
     if (!r.ok)
       throw new Error(`Failed to fetch namespaces: ${r.status} ${r.statusText}`)
@@ -292,11 +312,9 @@ export const api = {
   currentUser: async (
     context: string | null,
   ): Promise<{ k8sUsername: string | null }> => {
-    const r = await fetch(
-      withToken(`/api/v2/kube/user${contextParam(context)}`),
-      {
-        credentials: 'include',
-      },
+    const r = await apiFetch(
+      'kube_user',
+      `/api/v2/kube/user${contextParam(context)}`,
     )
     if (!r.ok) {
       emitUserBlocked('me_fetch_failed', {
