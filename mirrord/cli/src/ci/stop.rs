@@ -218,12 +218,13 @@ async fn runtime_remove_container(container: crate::ci::MirrordCiManagedContaine
 
 /// Handles the `mirrord ci stop` command.
 ///
-/// Stops every CI session recorded under [`MirrordCiStore::sessions_dir`], killing the intproxy,
-/// the user's binary, and whatever else `mirrord ci start` or `mirrord ci container` started.
+/// Stops every CI session recorded under [`MirrordCiStore::SESSIONS_DIR_NAME`], killing the
+/// intproxy, the user's binary, and whatever else `mirrord ci start` or `mirrord ci container`
+/// started.
 pub(super) struct CiStopCommandHandler {
     progress: ProgressTracker,
 
-    /// Holds one directory per CI session, see [`MirrordCiStore::sessions_dir`].
+    /// Holds one directory per CI session, see [`MirrordCiStore::SESSIONS_DIR_NAME`].
     sessions_dir: PathBuf,
 }
 

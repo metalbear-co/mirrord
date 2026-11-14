@@ -93,7 +93,7 @@ pub(crate) async fn ci_command(
         .handle()
         .await?),
         CiCommand::Stop => Ok(stop::CiStopCommandHandler::new(
-            MirrordCiStore::sessions_dir(),
+            temp_dir().join(MirrordCiStore::SESSIONS_DIR_NAME),
             ProgressTracker::from_env("mirrord ci stop"),
         )
         .handle()
@@ -165,8 +165,8 @@ pub(crate) struct MirrordCiManagedContainer {
 
 /// Stores the [`MirrordCi`] information we need to execute commands like `mirrord ci start|stop`.
 ///
-/// Each CI session has its own store, in its own directory under [`Self::sessions_dir`], so the
-/// sessions that run on one machine never wait on each other, and `mirrord ci stop` can stop
+/// Each CI session has its own store, in its own directory under [`Self::SESSIONS_DIR_NAME`], so
+/// the sessions that run on one machine never wait on each other, and `mirrord ci stop` can stop
 /// them one at a time.
 ///
 /// - Note that it does **not** store the [`CiApiKey`], this one lives only as an env var.
@@ -247,13 +247,11 @@ impl MirrordCiStore {
     /// process of that session can fail.
     const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
-    fn sessions_dir() -> PathBuf {
-        temp_dir().join(Self::SESSIONS_DIR_NAME)
-    }
-
-    /// Directory of the session with `session_id`, under [`Self::sessions_dir`].
+    /// Directory of the session with `session_id`, under [`Self::SESSIONS_DIR_NAME`].
     fn session_dir(session_id: Uuid) -> PathBuf {
-        Self::sessions_dir().join(session_id.to_string())
+        temp_dir()
+            .join(Self::SESSIONS_DIR_NAME)
+            .join(session_id.to_string())
     }
 
     fn state_path(session_dir: &Path) -> PathBuf {
@@ -494,7 +492,7 @@ pub(super) struct MirrordCi {
     ci_api_key: Option<CiApiKey>,
 
     /// Id of this CI session, picked by [`MirrordCi::new`]. It names the session's directory under
-    /// [`MirrordCiStore::sessions_dir`], and `mirrord ci start` passes it to its intproxy in
+    /// [`MirrordCiStore::SESSIONS_DIR_NAME`], and `mirrord ci start` passes it to its intproxy in
     /// `--mirrord-for-ci`.
     session_id: Uuid,
 
