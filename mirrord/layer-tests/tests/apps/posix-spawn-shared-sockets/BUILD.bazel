@@ -1,0 +1,8 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "posix-spawn-shared-sockets",
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

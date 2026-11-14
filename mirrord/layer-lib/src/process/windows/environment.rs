@@ -13,7 +13,7 @@
 
 use std::{cmp::Ordering, collections::BTreeMap};
 
-use str_win::{MultiBufferChar, multi_buffer_ptr_to_strings};
+use mirrord_str_win::{MultiBufferChar, multi_buffer_ptr_to_strings};
 use winapi::{shared::minwindef::TRUE, um::stringapiset::CompareStringOrdinal};
 
 // `CompareStringOrdinal` results, from `winnls.h`. The winapi crate does not define them.

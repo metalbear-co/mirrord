@@ -4,12 +4,7 @@
 //! [`McpTool`](crate::telemetry::McpTool); telemetry for every call is handled by
 //! [`McpServer::call_tool`](rmcp::ServerHandler::call_tool).
 
-use rmcp::{
-    Json,
-    handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock},
-    tool, tool_router,
-};
+use rmcp::{Json, handler::server::wrapper::Parameters, tool, tool_router};
 
 use crate::{McpServer, corpus::SKILLS};
 
@@ -42,10 +37,10 @@ impl McpServer {
     fn validate_config(
         &self,
         Parameters(args): Parameters<ValidateConfigArgs>,
-    ) -> Result<Json<ValidateConfigOutput>, CallToolResult> {
+    ) -> Result<Json<ValidateConfigOutput>, String> {
         validate_config::validate_config(args)
             .map(Json)
-            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+            .map_err(|error| error.to_string())
     }
 
     /// Describe one config option from the schema of the installed mirrord version.
@@ -64,10 +59,10 @@ impl McpServer {
     fn explain_config_option(
         &self,
         Parameters(args): Parameters<ExplainConfigOptionArgs>,
-    ) -> Result<Json<ExplainConfigOptionOutput>, CallToolResult> {
+    ) -> Result<Json<ExplainConfigOptionOutput>, String> {
         explain_config_option::explain_config_option(args)
             .map(Json)
-            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+            .map_err(|error| error.to_string())
     }
 
     /// List the vendored skills, or get one of them or a file bundled with it.
@@ -81,12 +76,8 @@ impl McpServer {
         skill bundles, which are listed after its `SKILL.md`.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
-    fn get_skill(
-        &self,
-        Parameters(args): Parameters<GetSkillArgs>,
-    ) -> Result<String, CallToolResult> {
-        get_skill::get_skill(&SKILLS, args)
-            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+    fn get_skill(&self, Parameters(args): Parameters<GetSkillArgs>) -> Result<String, String> {
+        get_skill::get_skill(&SKILLS, args).map_err(|error| error.to_string())
     }
 
     /// Keyword search over the vendored docs and skills.
@@ -102,10 +93,10 @@ impl McpServer {
     fn search_docs(
         &self,
         Parameters(args): Parameters<SearchDocsArgs>,
-    ) -> Result<Json<SearchDocsOutput>, CallToolResult> {
+    ) -> Result<Json<SearchDocsOutput>, String> {
         search_docs::search_docs(args)
             .map(Json)
-            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+            .map_err(|error| error.to_string())
     }
 
     /// Serve one page of the vendored docs and skills, or list them.
@@ -118,11 +109,7 @@ impl McpServer {
         paths.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
-    fn read_doc(
-        &self,
-        Parameters(args): Parameters<ReadDocArgs>,
-    ) -> Result<String, CallToolResult> {
-        read_doc::read_doc(args)
-            .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
+    fn read_doc(&self, Parameters(args): Parameters<ReadDocArgs>) -> Result<String, String> {
+        read_doc::read_doc(args).map_err(|error| error.to_string())
     }
 }

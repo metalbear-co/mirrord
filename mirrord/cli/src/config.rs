@@ -64,6 +64,8 @@ macro_rules! windows_unsupported {
 
 #[derive(Debug, Parser)]
 #[command(
+    // Otherwise clap names the command after the package, `mirrord-cli`, as in `--version`.
+    name = "mirrord",
     author,
     version,
     about,
@@ -118,7 +120,7 @@ pub(super) enum Commands {
     ///
     /// Extracts mirrord-layer lib (which is compiled into the mirrord CLI binary)
     /// to a file, so that it can be used with
-    /// [`INJECTION_ENV_VAR`](crate::execution::INJECTION_ENV_VAR).
+    /// `INJECTION_ENV_VAR`.
     #[command(hide = true)]
     Extract { path: String },
 

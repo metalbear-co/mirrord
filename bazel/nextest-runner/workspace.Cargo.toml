@@ -1,0 +1,3 @@
+# The `Cargo.toml` at the workspace's root in the runfiles of each test that runs with nextest.
+# nextest only checks that the workspace's manifest exists, so this empty one stands in for the real
+# one, whose changes would otherwise run every test again (see `//bazel:nextest.bzl`).

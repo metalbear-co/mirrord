@@ -4085,9 +4085,9 @@ mod tests {
 mod schema {
     use super::UpConfig;
 
-    /// The `mirrord-up.yaml` schema at the repo root, next to `mirrord-schema.json`.
-    const SCHEMA_FILE_PATH: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../mirrord-up-schema.json");
+    /// The `mirrord-up.yaml` schema at the repo root, next to `mirrord-schema.json`, from the
+    /// crate's directory, where Cargo and nextest run its tests.
+    const SCHEMA_FILE_PATH: &str = "../../mirrord-up-schema.json";
 
     fn generate() -> String {
         serde_json::to_string_pretty(&schemars::schema_for!(UpConfig))
@@ -4109,12 +4109,15 @@ mod schema {
 
     #[test]
     fn up_schema_file_is_up_to_date() {
-        let existing = std::fs::read_to_string(SCHEMA_FILE_PATH)
-            .expect("Schema file doesn't exist!")
-            .replace("\r\n", "\n");
+        let existing =
+            std::fs::read_to_string(SCHEMA_FILE_PATH).expect("Schema file doesn't exist!");
 
+        // Compared as JSON values, because Bazel's builds turn on `serde_json`'s `preserve_order`,
+        // which changes the order of the keys (see `MODULE.bazel`).
+        let existing: serde_json::Value = serde_json::from_str(&existing).unwrap();
+        let generated: serde_json::Value = serde_json::from_str(&generate()).unwrap();
         assert!(
-            existing == generate(),
+            existing == generated,
             "mirrord-up-schema.json is outdated, regenerate it with \
              `cargo test -p mirrord-up generate_up_schema -- --ignored`"
         );

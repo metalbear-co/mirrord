@@ -1,0 +1,9 @@
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "rust-unix-socket-client",
+    target_compatible_with = UNIX_ONLY,
+    # The end-to-end tests run it.
+    visibility = ["//mirrord/tests:__pkg__"],
+)

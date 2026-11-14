@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use mirrord_layer_lib::detour::DetourGuard;
-use utils_win::internal_thread::InternalGuard;
+use mirrord_utils_win::internal_thread::InternalGuard;
 
 type ProbeFn = unsafe extern "system" fn(u32) -> u32;
 

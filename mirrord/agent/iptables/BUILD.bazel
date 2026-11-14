@@ -1,0 +1,13 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "iptables",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":iptables",
+    target_compatible_with = LINUX_ONLY,
+)

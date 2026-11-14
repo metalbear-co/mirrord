@@ -1,0 +1,45 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/monitor:vitest/package_json.bzl", vitest_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+# `packages/ui` compiles the session monitor straight from its sources, together with its
+# dependencies.
+js_library(
+    name = "monitor",
+    srcs = glob(
+        ["src/**"],
+        exclude = [
+            "src/**/*.test.*",
+            "src/test/**",
+        ],
+    ) + [
+        "package.json",
+        # Vite compiles each file with the options of its nearest `tsconfig.json`, like
+        # `useDefineForClassFields`.
+        "tsconfig.json",
+    ],
+    visibility = ["//packages/ui:__pkg__"],
+    # The packages that the sources import, without the tools that only lint and test them.
+    deps = [
+        ":node_modules/@metalbear/ui",
+        ":node_modules/lucide-react",
+        ":node_modules/posthog-js",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+    ],
+)
+
+# The unit tests, which vitest runs as `pnpm --filter <package> run test:run` does.
+vitest_bin.vitest_test(
+    name = "unit_tests",
+    args = ["run"],
+    chdir = package_name(),
+    data = glob(["src/**"]) + [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        ":node_modules",
+    ],
+)

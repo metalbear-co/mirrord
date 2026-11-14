@@ -1,0 +1,13 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+
+# The Kafka consumer that the operator's queue-splitting tests run in the cluster. `MODULE.bazel`
+# explains how Bazel builds the C libraries that it links. It only builds for Linux, which is where
+# it runs: the `openssl` module that it links doesn't build for macOS or Windows with the llvm
+# toolchain.
+rust_binary(
+    name = "kafka-consumer",
+    target_compatible_with = LINUX_ONLY,
+    # The image of the end-to-end tests' apps holds it.
+    visibility = ["//mirrord/tests:__pkg__"],
+)

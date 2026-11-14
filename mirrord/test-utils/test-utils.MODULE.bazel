@@ -1,0 +1,49 @@
+# The interpreters that the layer tests and the end-to-end tests run their Node and Python apps
+# with, which `node()` and `bazel_python()` in `src/lib.rs` find. `MODULE.bazel` includes this file.
+
+bazel_dep(name = "rules_python", version = "2.4.6")
+bazel_dep(name = "rules_nodejs", version = "6.7.7")
+
+# The Node.js that runs the Node apps, the one that rules_js builds the UI with, for each platform
+# that the tests run on (see `:node` in `BUILD.bazel`). The version is pinned here, because
+# rules_nodejs's default changes with its releases.
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+node.toolchain(node_version = "24.22.1")
+use_repo(
+    node,
+    "nodejs_darwin_amd64",
+    "nodejs_darwin_arm64",
+    "nodejs_linux_amd64",
+    "nodejs_linux_arm64",
+    "nodejs_windows_amd64",
+)
+
+# The Python interpreter for the Python apps, and their pip packages, from a lock that
+# `uv pip compile --generate-hashes --universal requirements.in -o requirements.txt` writes.
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.13",
+)
+
+# Python targets would otherwise get an empty `__init__.py` in every directory of their runfiles,
+# which rules_python deprecated. The apps are single files, and the pip packages ship their own
+# `__init__.py` files, so nothing relies on the generated ones.
+rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")
+rules_python_config.explicit_init_py(default = True)
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pip",
+    python_version = "3.13",
+    requirements_lock = "//mirrord/test-utils:requirements.txt",
+    # By default, only the host's wheels resolve, so builds for other platforms would fail.
+    target_platforms = [
+        "linux_aarch64",
+        "linux_x86_64",
+        "osx_aarch64",
+        "osx_x86_64",
+        "windows_x86_64",
+    ],
+)
+use_repo(pip, "pip")

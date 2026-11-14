@@ -3,8 +3,8 @@
 //! `WindowsError` itself now lives in the `utils-win` crate. It is re-exported here.
 //! Existing call sites (`crate::error::windows::WindowsError`) keep working unchanged.
 
+pub use mirrord_utils_win::error::{WindowsError, WindowsResult};
 use thiserror::Error;
-pub use utils_win::error::{WindowsError, WindowsResult};
 
 #[derive(Error, Debug)]
 pub enum ConsoleError {

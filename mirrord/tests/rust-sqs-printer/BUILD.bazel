@@ -1,0 +1,54 @@
+load("@rules_distroless//distroless:defs.bzl", "cacerts")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@tar.bzl//tar:tar.bzl", "tar")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "rust-sqs-printer",
+    # The end-to-end tests run it.
+    visibility = ["//mirrord/tests:__pkg__"],
+)
+
+# An image that runs the printer, for testing mirrord with SQS by hand with `sqs-printer.yaml`:
+# `bazel run //mirrord/tests/rust-sqs-printer:image_load` loads it into Docker as
+# `ghcr.io/metalbear-co/test-sqs-printer:dev`.
+tar(
+    name = "image_layer",
+    srcs = [":rust-sqs-printer"],
+    compress = "gzip",
+    mtree = [
+        "./app uid=0 gid=0 time=0 mode=0755 type=dir",
+        "./app/rust-sqs-printer uid=0 gid=0 time=0 mode=0755 type=file content=$(execpath :rust-sqs-printer)",
+    ],
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The trust store, which the AWS SDK needs to reach SQS.
+cacerts(
+    name = "image_cacerts",
+    package = "@trixie//ca-certificates:data",
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+oci_image(
+    name = "image",
+    base = "@debian",
+    cmd = ["/app/rust-sqs-printer"],
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+    tars = [
+        ":image_cacerts",
+        ":image_layer",
+    ],
+)
+
+oci_load(
+    name = "image_load",
+    image = ":image",
+    repo_tags = ["ghcr.io/metalbear-co/test-sqs-printer:dev"],
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)

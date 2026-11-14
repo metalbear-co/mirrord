@@ -44,8 +44,6 @@ use mirrord_session_monitor_client::{
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-#[cfg(not(debug_assertions))]
-use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
@@ -66,10 +64,19 @@ mod v2;
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
-#[cfg(not(debug_assertions))]
-#[derive(Embed)]
-#[folder = "../../packages/ui/dist/"]
+/// The built UI from `packages/ui`, in the folder at `MIRRORD_BUNDLED_UI` (see `bundle.rs`).
+/// Under Cargo, release builds embed the files, and debug builds read them from the folder when
+/// they serve them. Bazel embeds them in every build without `bazel-runfiles` (see `debug-embed` in
+/// `cli.MODULE.bazel`), and a build with it has no UI.
+#[cfg(not(feature = "bazel-runfiles"))]
+#[derive(rust_embed::Embed)]
+#[folder = "$MIRRORD_BUNDLED_UI"]
 struct FrontendAssets;
+
+/// Makes Cargo rebuild the crate when `MIRRORD_BUNDLED_UI` changes. rust-embed reads the variable
+/// in its proc macro, which Cargo can't track, while rustc records the variables that `env!` reads.
+#[cfg(not(feature = "bazel-runfiles"))]
+const _: &str = env!("MIRRORD_BUNDLED_UI");
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -993,16 +1000,21 @@ fn guess_mime(path: &str) -> &'static str {
         .unwrap_or("application/octet-stream")
 }
 
+#[cfg(not(feature = "bazel-runfiles"))]
 fn get_asset(path: &str) -> Option<Vec<u8>> {
-    #[cfg(debug_assertions)]
-    {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/ui/dist/");
-        std::fs::read(format!("{base}{path}")).ok()
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        FrontendAssets::get(path).map(|f| f.data.to_vec())
-    }
+    FrontendAssets::get(path).map(|f| f.data.to_vec())
+}
+
+/// A `bazel-runfiles` build has no UI, so that a change to the UI doesn't run every test that runs
+/// the CLI again (see `BUILD.bazel`). Its `mirrord ui` still serves the API, and answers every
+/// request for a page with one that names the build that has the UI.
+#[cfg(feature = "bazel-runfiles")]
+fn get_asset(path: &str) -> Option<Vec<u8>> {
+    const INDEX: &str = "<!doctype html>\n<title>mirrord</title>\n\
+        <p>This build of mirrord has no UI. \
+        <code>bazel run //mirrord/cli:cli_standalone -- ui</code> runs one that has it.</p>\n";
+
+    (path == "index.html").then(|| INDEX.as_bytes().to_vec())
 }
 
 async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {

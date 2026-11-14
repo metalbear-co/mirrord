@@ -1,0 +1,15 @@
+[package]
+name = "mirrord-layer-tests-dup-listen"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nix = { workspace = true, features = ["fs"] }
+
+[[bin]]
+name = "dup-listen"
+path = "src/main.rs"

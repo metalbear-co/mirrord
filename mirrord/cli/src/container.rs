@@ -67,36 +67,34 @@ fn get_mirrord_console_addr() -> Option<String> {
     }
 }
 
-/// Resolves the architecture-specific library path based on the platform configuration.
-///
-/// When a platform is specified (e.g., "linux/amd64"), this function returns the
-/// architecture-specific path within the multi-architecture container.
-/// If no platform is specified, returns the default path.
-fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
+/// Returns the path of the layer that the user's container loads. The CLI's image has a layer for
+/// each Linux CPU, in `/opt/mirrord/lib/<cpu>/`, and the container needs the one for its own CPU:
+/// the CPU of `container.platform` when the config names one, and otherwise the CPU of the
+/// sidecar's image, because both containers then run on the container runtime's own platform.
+async fn resolve_library_path(
+    config: &LayerConfig,
+    sidecar: &IntproxySidecar,
+) -> CliResult<String> {
     if let Some(path) = &config.container.cli_image_lib_path {
         return Ok(path.clone());
     }
 
-    if let Some(platform) = &config.container.platform {
-        // Extract architecture from platform string (e.g., "linux/amd64" -> "amd64")
-        let arch = platform
+    // A platform is `<os>/<architecture>[/<variant>]`, like `linux/arm64/v8`.
+    let architecture = match &config.container.platform {
+        Some(platform) => platform
             .split('/')
-            .next_back()
-            .ok_or_else(|| ContainerError::UnsupportedPlatform(platform.clone()))?;
-        let arch_suffix = match arch {
-            "amd64" | "x86_64" => "x86_64",
-            "arm64" | "aarch64" => "aarch64",
-            _ => Err(ContainerError::UnsupportedPlatform(arch.to_owned()))?,
-        };
+            .nth(1)
+            .ok_or_else(|| ContainerError::UnsupportedPlatform(platform.clone()))?
+            .to_owned(),
+        None => sidecar.image_architecture().await?,
+    };
+    let cpu = match architecture.as_str() {
+        "amd64" | "x86_64" => "x86_64",
+        "arm64" | "aarch64" => "aarch64",
+        _ => Err(ContainerError::UnsupportedPlatform(architecture))?,
+    };
 
-        // Return architecture-specific path
-        return Ok(format!(
-            "/opt/mirrord/lib/{}/libmirrord_layer.so",
-            arch_suffix
-        ));
-    }
-
-    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_owned())
+    Ok(format!("/opt/mirrord/lib/{cpu}/libmirrord_layer.so"))
 }
 
 /// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.
@@ -223,7 +221,10 @@ async fn prepare_proxies(
     // Add the layer file to the user application container.
     runtime_command.add_volumes_from(sidecar.container_id());
     // Inject the layer into the user application.
-    runtime_command.add_env(LINUX_INJECTION_ENV_VAR, &resolve_library_path(config)?);
+    runtime_command.add_env(
+        LINUX_INJECTION_ENV_VAR,
+        &resolve_library_path(config, &sidecar).await?,
+    );
     runtime_command.add_env(LayerConfig::RESOLVED_CONFIG_ENV, &config.encode()?);
 
     // Add platform specification if configured

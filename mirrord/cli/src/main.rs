@@ -314,10 +314,16 @@ use nix::errno::Errno;
 use no_layer::NoLayer;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
+// Suppressor for the `unused_crate_dependencies` lint: only the integration tests in `tests/` use
+// this dev-dependency, but Cargo and Bazel pass it to the unit tests too.
+#[cfg(test)]
+use mirrord_test_utils as _;
 use regex::Regex;
-// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
-// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
-#[cfg(debug_assertions)]
+// `bazel-runfiles` builds read the layer's files from their runfiles rather than embed them, and
+// have no UI, so they don't use these crates.
+#[cfg(feature = "bazel-runfiles")]
+use const_random as _;
+#[cfg(feature = "bazel-runfiles")]
 use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
@@ -326,6 +332,8 @@ use which::which;
 #[cfg(windows)]
 mod attach;
 mod browser;
+#[cfg(feature = "bazel-runfiles")]
+mod bundle;
 mod ci;
 mod config;
 mod connection;
@@ -1204,7 +1212,7 @@ fn main() -> miette::Result<()> {
     // Armed before anything else runs: in a debug build, parsing the arguments alone takes about
     // half a megabyte of stack.
     #[cfg(target_os = "windows")]
-    utils_win::diagnostics::stack::report_stack_overflows();
+    mirrord_utils_win::diagnostics::stack::report_stack_overflows();
 
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");

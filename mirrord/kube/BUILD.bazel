@@ -1,0 +1,20 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "kube",
+    visibility = ["//visibility:public"],
+)
+
+# The library with its `incluster` feature too. Only crates outside the workspace turn the feature
+# on, like the operator's, so `:kube` doesn't compile the code behind it. This target compiles that
+# code, and clippy lints it, as `cargo clippy --all-features` would.
+rust_library(
+    name = "kube_incluster",
+    crate_features = ["incluster"],
+    doc = False,
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":kube",
+)

@@ -32,14 +32,15 @@ async fn local_share_resolved_config_keeps_port_order() {
         config.feature.network.incoming.ports,
         Some(vec![9000, 8080])
     );
-    let output =
-        mirrord_command::resolve_tokio_command(std::env::var("MIRRORD_TESTS_USE_BINARY").unwrap())
-            .env("TMPDIR", tmpdir)
-            .args(["verify-config", "--resolved"])
-            .arg(file.path())
-            .output()
-            .await
-            .unwrap();
+    let output = mirrord_command::resolve_tokio_command(
+        mirrord_test_utils::env_path("MIRRORD_TESTS_USE_BINARY").unwrap(),
+    )
+    .env("TMPDIR", tmpdir)
+    .args(["verify-config", "--resolved"])
+    .arg(file.path())
+    .output()
+    .await
+    .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -97,20 +98,21 @@ async fn local_share_exec_rejects_unsupported_config(
     let tmpdir = scenario.path().to_str().unwrap();
     let mut config = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
     config.write_all(contents.as_bytes()).unwrap();
-    let output =
-        mirrord_command::resolve_tokio_command(std::env::var("MIRRORD_TESTS_USE_BINARY").unwrap())
-            .env("TMPDIR", tmpdir)
-            .args([
-                "exec",
-                "--share",
-                "--disable-version-check",
-                "--config-file",
-            ])
-            .arg(config.path())
-            .args(["--", "true"])
-            .output()
-            .await
-            .unwrap();
+    let output = mirrord_command::resolve_tokio_command(
+        mirrord_test_utils::env_path("MIRRORD_TESTS_USE_BINARY").unwrap(),
+    )
+    .env("TMPDIR", tmpdir)
+    .args([
+        "exec",
+        "--share",
+        "--disable-version-check",
+        "--config-file",
+    ])
+    .arg(config.path())
+    .args(["--", "true"])
+    .output()
+    .await
+    .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success().not(), "{stderr}");
     assert!(stderr.contains(message), "{stderr}");

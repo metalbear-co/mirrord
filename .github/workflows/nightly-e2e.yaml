@@ -7,43 +7,17 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  # These jobs intentionally run concurrently. The E2E workflow builds the CLI and
-  # prepares its clusters before polling for the agent image artifact.
-  build-agent-image:
-    uses: ./.github/workflows/build-agent-image.yaml
-    with:
-      runner: blacksmith-8vcpu-ubuntu-2404
-
   e2e:
-    permissions:
-      contents: read
-      actions: read
     uses: ./.github/workflows/test-e2e.yaml
-    secrets: inherit
 
-  nightly-e2e-success:
-    name: Nightly E2E
-    if: always()
-    needs: [build-agent-image, e2e]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - name: Check required jobs passed
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          failing=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"')
-          if [ -n "$failing" ]; then
-            echo "$failing"
-            exit 1
-          fi
-
+  # `needs.e2e.result` is `success` only when every job of the reusable workflow passed, so a run
+  # that was cancelled or timed out notifies too.
   notify-nightly-failure:
     name: "Notify #ci-alerts"
-    if: ${{ always() && github.event_name == 'schedule' && needs.nightly-e2e-success.result == 'failure' }}
-    needs: [nightly-e2e-success]
+    if: ${{ always() && github.event_name == 'schedule' && needs.e2e.result != 'success' }}
+    needs: [e2e]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Send Slack notification

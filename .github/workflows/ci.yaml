@@ -1,41 +1,46 @@
 # Hello traveler!
 # This is the CI workflow for mirrord.
-# It is a bit complicated, but it is also very powerful.
-# We try to optimize for speed, but sometimes there are limitations.
-# Please try to document it here so people won't try repeating your errors.
-# 1. GitHub cache is limited to 10GB, so we try to have less jobs to not exceed it, since if we get over 10GB
-#    the cache will be evicted then builds will be slower, so it's better to have less jobs.
-# 2. I (Aviram) tried to use a container to build the Linux stuff, but couldn't get the e2e to work and (minikube in container)
-#    and the benefit seemed little.
-# 3. Please be mindful, we try to target less than 30 minutes for the CI to run. In a perfect world it'd be less than 5m.
-#     If you're adding something, please make sure it doesn't impact too much, and if you're reviewing please have it in mind.
-# 4. Pass `--target` to cargo only when cross-compiling. `cargo build --target X` on an X host and `cargo build`
-#    do not share the cache, because cargo puts the artifacts in different directories:
-#    https://doc.rust-lang.org/cargo/guide/build-cache.html. So all cargo invocations in a job, and in all jobs
-#    with the same rust-cache `shared-key`, must agree on `--target`.
+#
+# Bazel builds, lints and tests everything, so CI runs the same commands that a developer runs:
+#
+#     bazel build //...                                      # build
+#     bazel build --config=clippy //... //mirrord/tests:e2e  # lint the Rust code
+#     bazel build --config=doc //...                         # build the Rust docs
+#     bazel test //...                                       # unit and integration tests
+#     bazel run //:lint                                      # lint the docs, the Python code and
+#                                                            # the frontends, and check the
+#                                                            # changelog and the deps
+#     bazel run //:format -- --check                         # check the formatting
+#
+# The `build-test` job runs the first four on each platform, as separate steps, so that the job's
+# summary shows which of them failed. `.github/actions/setup-bazel` turns on the `ci` config of
+# `.bazelrc` for every command. The `lint` job runs the last two, with the tools of the `lint`
+# devshell in `flake.nix`. The end-to-end tests run in `test-e2e.yaml`. On a release branch, the
+# `*_on_release_branch` jobs build what the release builds, with `--config=release`, and run the
+# end-to-end tests of the IDE extensions with it.
+#
+# Please be mindful, we try to target less than 30 minutes for the CI to run. If you're adding
+# something, please make sure it doesn't impact too much, and if you're reviewing please have it in
+# mind.
 #
 # - Adding a compiled app to e2e:
 #
-# If you want to add a rust/go/[other compiled language] to the list of e2e apps, then you have to check 2 other
-# places.
+# If you want to add a rust/go/[other compiled language] to the list of e2e apps, then you have to
+# check 2 other places.
 #
 # 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
-# 2. `scripts/prepare_e2e.sh`, where you should add the compilation call. It builds the apps into the CI runner
-#    image; the CI section of `AGENTS.md` says when that image is rebuilt.
+# 2. `:apps` in `mirrord/tests/BUILD.bazel`, which builds the apps that the tests run.
 #
-# Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
-# while forgetting (1) nets you a message saying that the service could not be reached/found.
-#
-# Caveats:
-#
-# You cannot use `workspace` dependencies in the test app, it fails to build, must fully specify the dependency.
+# Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path
+# of the app, while forgetting (1) nets you a message saying that the service could not be
+# reached/found.
 name: CI
 
 on:
   merge_group:
   workflow_dispatch:
   push:
-    branches: [main, "*staging*", "windows-support", "gh-readonly-queue*"]
+    branches: [main, "*staging*", "windows-support"]
   pull_request:
     branches: [main, "*staging*", "windows-support"]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -49,9 +54,6 @@ permissions:
   contents: read
 
 env:
-  # Some crates have no tests on some platforms; nextest treats that as an error by default.
-  NEXTEST_NO_TESTS: warn
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
 
 jobs:
@@ -62,99 +64,43 @@ jobs:
     # don't run CI on drafts
     if: github.event.pull_request.draft == false
     outputs:
-      rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-      vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
-      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
-      markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
+      # Whether anything that Bazel builds changed. A change to the docs alone skips the build
+      # jobs, which would only fetch every output from the cache and start every runner for it.
+      build_changed: ${{ steps.changed-build.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
-      flaky_report_changed: ${{ steps.changed-flaky-report.outputs.any_changed }}
-      protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       corpus_changed: ${{ steps.changed-corpus.outputs.any_changed }}
-      dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
-      runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
-      frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
-      # There are a couple of (rare) cases where `frontend_changed`, but no other mirrord changes
-      # skips building some of our e2e stuff (like skips building the agent), but it doesn't skip
-      # running some other stuff (`download image`), which, of course, breaks. We have this
-      # here so we can skip unwanted stuff when the changes are frontend exclusive.
-      run_e2e: ${{ steps.changed-frontend-only.outputs.only_changed != 'true' && (steps.changed-rs.outputs.any_changed == 'true' || steps.changed-ci.outputs.any_changed == 'true' || steps.changed-dockerfile.outputs.any_changed == 'true' || steps.changed-runner-image.outputs.any_changed == 'true') }}
+      # Whether anything changed that the end-to-end tests build or run with. Bazel never caches
+      # their results, because they depend on the cluster, so they take their whole time whenever
+      # they run.
+      run_e2e: ${{ steps.changed-e2e.outputs.any_changed }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
-      runner_4: ${{ steps.runners.outputs.runner_4 }}
-      runner_8: ${{ steps.runners.outputs.runner_8 }}
-      runner_8_arm: ${{ steps.runners.outputs.runner_8_arm }}
-      runner_16: ${{ steps.runners.outputs.runner_16 }}
-      blacksmith: ${{ steps.runners.outputs.blacksmith }}
     steps:
-      # Keep runner sizing in one place so every Linux job uses the same Blacksmith runner labels,
-      # including pull requests from forks.
-      - name: Pick runners
-        id: runners
-        run: |
-          {
-            echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
-            echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
-            echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
-            echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
-            echo "blacksmith=true"
-          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+
       - name: get CI changes
         id: changed-ci
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             .github/workflows/**
-      - name: get changed flaky report files
-        id: changed-flaky-report
+            .github/actions/**
+
+      # Everything but the Markdown files at the root and the changelog fragments. The Markdown
+      # files elsewhere can be part of the build, like the docs that `mirrord mcp` embeds.
+      - name: get build changes
+        id: changed-build
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            .github/scripts/flaky-*
-            .github/scripts/test_flaky_report.py
-            .github/workflows/check-flaky-report.yaml
-            .github/workflows/flaky-test-report.yaml
-            .github/workflows/ci.yaml
-      - name: get changed rs files
-        id: changed-rs
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            **/*.rs
-            mirrord/**
-            tests/**
-            Cargo.toml
-            Cargo.lock
-            .dockerignore
-            rust-toolchain.toml
-            rustfmt.toml
-            deny.toml
-            .cargo/**
-      - name: get CI runner image changes
-        id: changed-runner-image
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            tests/**
-            scripts/**
-            mirrord/layer-tests/tests/apps/**/*.go
-            mirrord/layer-tests/tests/apps/**/go.mod
-            mirrord/layer-tests/tests/apps/**/go.sum
-            mirrord/layer-tests/tests/apps/**/*.c
-            rust-toolchain.toml
-            Cargo.toml
-            Cargo.lock
-            package.json
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            .github/workflows/build-ci-runner.yaml
+            **
           files_ignore: |
-            tests/src/**
-            tests/README.md
-            tests/AGENTS.md
+            *.md
+            changelog.d/**
+
       - name: get install script changes
         id: changed-install-script
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -162,32 +108,8 @@ jobs:
           files: |
             scripts/install.sh
             .github/workflows/test-install-script.yaml
-      - name: get vale changes
-        id: changed-vale
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            *.md
-            changelog.d/*.md
-      - name: get changed windows files
-        id: changed-windows
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            mirrord/layer-win/**
-            mirrord/str-win/**
-            mirrord/**/windows/**
-            mirrord/**/win32/**
-            mirrord/**/win/**
-            scripts/**/*.ps1
-            **/*.ps1
-            .github/workflows/windows-build.yaml
-      - name: get markdown changes
-        id: changed-markdown
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            README.md
+
+      # The docs and the Bazel build of the crate don't change the protocol.
       - name: get protocol changes
         id: changed-protocol
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -196,53 +118,55 @@ jobs:
             mirrord/protocol/**
           files_ignore: |
             mirrord/protocol/**/*.md
+            mirrord/protocol/**/BUILD.bazel
+
       - name: get protocol toml changes
         id: changed-protocol-toml
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/protocol/Cargo.toml
-      - name: get dockerfile changes
-        id: changed-dockerfile
+
+      # The crates, the tests and their apps, which are all in `mirrord/`, the dependencies, the
+      # Bazel rules and flags, and the workflows that run the tests. The frontends in `packages/`
+      # aren't here, because a change to them doesn't reach the cluster.
+      - name: get e2e changes
+        id: changed-e2e
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            mirrord/agent/Dockerfile
-            mirrord/cli/Dockerfile
-      - name: get frontend changes
-        id: changed-wizard-frontend
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            packages/**
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            package.json
-      # `run-e2e` uses this to skip running e2e tests when only the frontend changes.
-      # See that step for more info on why we need this.
-      - name: get frontend-only changes
-        id: changed-frontend-only
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            packages/**
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            package.json
-            changelog.d/**
+            mirrord/**
+            Cargo.toml
+            Cargo.lock
+            MODULE.bazel
+            MODULE.bazel.lock
+            BUILD.bazel
+            bazel/**
+            .bazelrc
+            .bazelversion
+            .config/nextest.toml
+            go_apps.work
+            .github/workflows/ci.yaml
+            .github/workflows/test-e2e.yaml
+            .github/actions/setup-bazel/**
+          files_ignore: |
+            mirrord/**/AGENTS.md
+
       - name: verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
             echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
             exit 1
           fi
+
       - name: get corpus changes
         id: changed-corpus
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/mcp/corpus/**
-            xtask/src/tasks/corpus.rs
+            mirrord/mcp/vendor/**
+
       - name: get config changes
         id: changed-config-schema
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -250,132 +174,94 @@ jobs:
           files: |
             mirrord-schema.json
             mirrord-up-schema.json
-      # `auto-release-pr` names release branches `releases/<version>`, so the
-      # bare-version pattern this used to match stopped matching anything and
-      # the IDE end-to-end jobs below have been silently skipping. Match the
-      # same prefix that `release.yaml` and `auto-release-pr.yaml` use.
+
+      # `auto-release-pr` names release branches `releases/<version>`, which `release.yaml` and
+      # `auto-release-pr.yaml` match by the same prefix.
       #
-      # This is false in the merge queue, where the ref is
-      # `gh-readonly-queue/...` and carries a pull request number rather than a
-      # branch name. The pull request run is the one that matters here.
+      # This is false in the merge queue, where the ref is `gh-readonly-queue/...` and carries a
+      # pull request number rather than a branch name. The pull request run is the one that matters
+      # here.
       - id: release-branch
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           echo "branch=$([[ "$BRANCH" == releases/* ]] && echo "true" || echo "false")" >> "$GITHUB_OUTPUT"
-      - name: output test
-        run: |
-          echo ${{ steps.changed-rs.outputs.any_changed }};
-          echo ${{ steps.changed-rs.outputs.all_changed_files }};
-          echo ${{ steps.changed-vale.outputs.any_changed }};
-          echo ${{ steps.changed-vale.outputs.all_changed_files }};
-          echo ${{ steps.changed-markdown.outputs.any_changed }};
-          echo ${{ steps.changed-markdown.outputs.all_changed_files }};
-          echo ${{ steps.changed-ci.outputs.any_changed }};
-          echo ${{ steps.changed-ci.outputs.all_changed_files }};
-          echo ${{ steps.changed-protocol.outputs.any_changed }};
-          echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
-          echo ${{ steps.changed-windows.outputs.any_changed }};
-          echo ${{ steps.changed-dockerfile.outputs.any_changed }};
-          echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-corpus.outputs.any_changed }};
-          echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
-          echo ${{ steps.changed-frontend-only.outputs.only_changed }};
-          echo ${{ steps.changed-install-script.outputs.any_changed }};
-          echo ${{ steps.release-branch.outputs.branch }};
 
-  # ── checks (no build deps) ─────────────────────────────────────────
+  # ── checks (no build) ───────────────────────────────────────────────
 
-  build-ci-runner:
+  install_script:
     needs: [plan]
-    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-ci-runner.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
-      blacksmith: ${{ needs.plan.outputs.blacksmith == 'true' }}
-      build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
-    secrets: inherit
+    if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    uses: ./.github/workflows/test-install-script.yaml
 
-  towncrier_check:
-    uses: ./.github/workflows/check-towncrier.yaml
+  # ── lint and format ─────────────────────────────────────────────────
 
+  # `bazel run //:lint` and `bazel run //:format` take their tools from `PATH`, which the `lint`
+  # devshell of `flake.nix` provides, so that CI runs them at the versions that developers run.
   lint:
     needs: plan
-    uses: ./.github/workflows/check-lint.yaml
-    with:
-      run_markdown: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_rust: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_vale: ${{ needs.plan.outputs.vale_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_wizard_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_ui_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    secrets: inherit
-
-  cargo-deny:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.windows_changed == 'true' }}
-    uses: ./.github/workflows/check-cargo-deny.yaml
-
-  check-flaky-report:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.flaky_report_changed == 'true' }}
-    uses: ./.github/workflows/check-flaky-report.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_4 }}
-
-  check-rust-docs:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/check-rust-docs.yaml
-    secrets: inherit
-
-  # The vendored docs and skills must be byte-identical to their pinned upstream commits, and the
-  # config blocks in the skills repo at its pinned commit must validate against the schemas of this
-  # commit. A change to the schemas runs it, so that a change that breaks a pinned skill fails on
-  # its own PR rather than on the next release PR. Release PRs always run it, because they ship the
-  # corpus with the schemas of their head even when the pins didn't move.
-  corpus_check:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.release_branch == 'true' }}
-    runs-on: ${{ needs.plan.outputs.runner_4 }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The corpus upstream check reads the pull request's labels.
+      pull-requests: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          # towncrier compares the branch with `origin/main`.
+          fetch-depth: 0
           # `release.yaml` builds the head of the release branch rather than its merge with main,
-          # so a release PR checks the schemas of that head. Other runs keep the default ref.
+          # so a release PR checks the corpus against the schemas of that head. Other runs keep the
+          # default ref.
           ref: ${{ needs.plan.outputs.release_branch == 'true' && github.event.pull_request.head.sha || '' }}
-      # `cargo xtask corpus check` runs the skills repo's config check through uv.
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: mirrord
-      - run: cargo xtask corpus check
 
-  # The next release PR bumps the corpus pins to upstream HEAD, so this checks the config blocks in
-  # the skills repo at HEAD against the schemas of this PR, to fail a schema change that breaks
-  # them here rather than on the release PR. A change the skills repo can only follow once it ships,
-  # such as renaming an option, can't pass: add the `skip-corpus-upstream` label, re-run the failed
-  # jobs, and update the skills repo before the next release. The label is read when the job runs,
-  # since a re-run gets the labels of the original event. The merge queue doesn't run it, as a PR
-  # in the queue has already passed it or been labeled to skip it.
-  corpus_upstream_check:
-    needs: [plan]
-    if: ${{ github.event_name == 'pull_request' && (needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true') }}
-    runs-on: ${{ needs.plan.outputs.runner_4 }}
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - name: Check for the skip label
-        id: skip
+      # The action downloads the newest installer unless it's given a version.
+      - uses: metalbear-co/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # v1.0.0
+        with:
+          installer-version: 2.35.4
+          extra-conf: experimental-features = nix-command flakes
+
+      - uses: ./.github/actions/setup-bazel
+
+      # A change to the modules must come with the lockfile that they resolve to, and with the
+      # `use_repo` calls that `bazel mod tidy` writes, or every developer's next build would change
+      # the lockfile. Any other Bazel command updates the lockfile in place, so this step runs
+      # before the others.
+      - name: Bazel modules
+        run: |
+          bazel mod deps --lockfile_mode=error
+          bazel mod tidy
+          git diff --exit-code
+
+      - name: lint
+        if: ${{ !cancelled() }}
+        run: nix develop .#lint --command bazel run //:lint
+
+      - name: format
+        if: ${{ !cancelled() }}
+        run: nix develop .#lint --command bazel run //:format -- --check
+
+      # The vendored docs and skills must be byte-identical to their pinned upstream commits, and
+      # the config blocks in the skills repo at its pinned commit must validate against the schemas
+      # of this commit. A change to the schemas runs it, so that a change that breaks a pinned skill
+      # fails on its own PR rather than on the next release PR. Release PRs always run it, because
+      # they ship the corpus with the schemas of their head even when the pins didn't move. It
+      # fetches the upstream repositories, so it only runs when its inputs change.
+      - name: corpus
+        if: ${{ !cancelled() && (needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.release_branch == 'true') }}
+        run: nix develop .#lint --command bazel run //mirrord/mcp/vendor -- check
+
+      # The next release PR bumps the corpus pins to upstream HEAD, so this checks the config blocks
+      # in the skills repo at HEAD against the schemas of this PR, to fail a schema change that
+      # breaks them here rather than on the release PR. A change the skills repo can only follow
+      # once it ships, such as renaming an option, can't pass: add the `skip-corpus-upstream` label,
+      # re-run the failed jobs, and update the skills repo before the next release. The label is
+      # read when the job runs, since a re-run gets the labels of the original event. The merge
+      # queue doesn't run it, as a PR in the queue has already passed it or been labeled to skip it.
+      - name: corpus upstream
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -383,185 +269,259 @@ jobs:
           labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
           if grep -qx skip-corpus-upstream <<< "$labels"; then
             echo "Skipped by the skip-corpus-upstream label."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            nix develop .#lint --command bazel run //mirrord/mcp/vendor -- check-upstream
           fi
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-      - name: Rust cache
-        if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: mirrord
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        run: cargo xtask corpus check-upstream
 
-  install_script:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/test-install-script.yaml
+  # ── build and test ──────────────────────────────────────────────────
 
-  # ── builds ──────────────────────────────────────────────────────────
-
-  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
-  # building concurrently can run faster the release ide tests
-  build_mirrord_on_release_branch:
-    name: build mirrord CLI
-    needs: [plan]
-    if: ${{ needs.plan.outputs.release_branch == 'true' }}
-    uses: ./.github/workflows/build-mirrord-cli.yaml
-    secrets: inherit
-
-  test_agent_image:
+  build-test:
     needs: plan
-    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-agent-image.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
-
-  test_cli_image:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-cli-image.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
-
-  # ── tests ───────────────────────────────────────────────────────────
-
-  test_agent:
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    container:
-      image: ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405
+    if: ${{ needs.plan.outputs.build_changed == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: blacksmith-16vcpu-ubuntu-2404
+          - name: linux-aarch64
+            runner: blacksmith-8vcpu-ubuntu-2404-arm
+          - name: macos
+            runner: blacksmith-6vcpu-macos-latest
+          - name: windows
+            runner: blacksmith-16vcpu-windows-2025
+    name: build-test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      # Git Bash, the Windows runners' `bash`, rewrites arguments that look like Unix paths for
+      # Windows programs, which would turn `//...` into `/...`. Other platforms ignore it.
+      MSYS2_ARG_CONV_EXCL: "*"
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # The image may predate a toolchain bump, so install the one in `rust-toolchain.toml`.
-      - run: rustup toolchain install
-      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
+          persist-credentials: false
+
+      # Of the jobs that run on each platform, this one downloads the most, so it's the one that
+      # saves the cache of the downloads, and only on `main`, whose caches every branch and the
+      # merge queue can read.
+      - uses: ./.github/actions/setup-bazel
         with:
-          shared-key: agent
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      # Each step after this one runs even when an earlier one fails, so that the job reports every
+      # failing step, and each step keeps going after a failing target. The build only checks that
+      # everything builds, so it leaves the outputs in the remote cache rather than download them.
+      # The steps that read files from `bazel-bin` or `bazel-testlogs` keep Bazel's default, which
+      # downloads the outputs of the targets that they name.
+      - name: build
+        run: bazel build --remote_download_outputs=minimal //...
+
+      # `//...` leaves out the end-to-end tests, which are `manual` (see `.bazelrc`).
+      - name: clippy
+        if: ${{ !cancelled() }}
+        run: bazel build --config=clippy //... //mirrord/tests:e2e
+
+      - name: docs
+        if: ${{ !cancelled() }}
+        run: bazel build --config=doc //...
+
+      # A test that Bazel takes from the remote cache brings back the `test.xml` of the run that
+      # cached it, with that run's retries, so the flaky test report would count them again on every
+      # later run. On `main`, nearly every test would come from the cache, since `main` gets the
+      # tree that its merge queue run tested. So `main` runs every test again, and its reports only
+      # hold the retries of its own run.
+      - name: test
+        if: ${{ !cancelled() }}
+        run: bazel test ${{ github.ref == 'refs/heads/main' && '--nocache_test_results' || '' }} //...
+
+      # Windows gives the CLI's main thread only the stack that the binary asks for, so this checks
+      # that the CLI that mirrord distributes fits in it. The build step compiled that CLI as part
+      # of `//...`, so this build only fetches the binary and its PDB, which is in an output group
+      # that Bazel only builds when it's asked for. The script finds the CLI's frames in the PDB
+      # next to the binary. The other steps run in Git Bash, whose Bazel server found Git's
+      # `usr\bin\bash.exe`. PowerShell would find `bin\bash.exe`, and Bazel would then start another
+      # server, which analyzes the workspace again, so `BAZEL_SH` names the same shell.
+      - name: stack check
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: pwsh
+        env:
+          BAZEL_SH: C:\Program Files\Git\usr\bin\bash.exe
+        run: |
+          $ErrorActionPreference = "Stop"
+          bazel build //mirrord/cli:cli_standalone --output_groups=+pdb_file
+          if ($LASTEXITCODE -ne 0) { throw "bazel build failed" }
+          ./scripts/win_stack_check.ps1 -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe
+
+      # The layer tests write the intproxy's logs to their outputs, which Bazel keeps in each test's
+      # `test.outputs`.
+      - name: upload the intproxy logs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          tool: cargo-nextest
-      - name: mirrord-agent UT
-        run: cargo nextest run -p mirrord-agent
-      - name: mirrord-agent-env UT
-        run: cargo nextest run -p mirrord-agent-env
-      - name: mirrord-agent-iptables UT
-        run: cargo nextest run -p mirrord-agent-iptables
+          name: intproxy_logs_${{ matrix.name }}
+          path: bazel-testlogs/mirrord/layer-tests/**/test.outputs/**
+          if-no-files-found: ignore
+          retention-days: 2
 
-  integration_tests:
-    needs: [plan, build-ci-runner]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/test-integration.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_16 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
-      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
+      # `ci-success` merges the reports into the `nextest-junit` artifact that
+      # `flaky-test-report.yaml` reads. Bazel keeps each test's JUnit report as its `test.xml`.
+      - name: upload the test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nextest-junit-${{ github.job }}-${{ matrix.name }}
+          path: bazel-testlogs/**/test.xml
+          if-no-files-found: ignore
+          # Only `main`'s reports feed the flaky test report.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 30 || 2 }}
 
-  macos_tests:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/test-macos.yaml
-    secrets: inherit
-
-  # NOTE: e2e intentionally does not `need` test_agent_image so the two run concurrently.
-  # e2e spends its first ~9 min on cluster setup + building the CLI before it actually
-  # needs the agent image, so overlapping that with the ~10 min image build keeps the
-  # build off the critical path. The `download image` step polls for the artifact.
   e2e:
-    needs: [plan, build-ci-runner]
+    needs: [plan]
     if: ${{ needs.plan.outputs.run_e2e == 'true' }}
-    # A `workflow_call` job only passes down scopes the caller holds.
-    permissions:
-      contents: read
-      actions: read
-      packages: read
     uses: ./.github/workflows/test-e2e.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_16 }}
-      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
-    secrets: inherit
 
-  windows_tests:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.windows_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/test-windows.yaml
+  # ── release branches ────────────────────────────────────────────────
 
-  # ── external calls ──────────────────────────────────────────────────
+  # A release pull request builds what `release.yaml` builds, with `--config=release`, so that it
+  # finds what fails to build only with optimizations, like code that only debug assertions use,
+  # or only for the release, before the release itself does, which has pushed its images by the
+  # time that a later job of it fails. Three jobs build it.
+  #
+  # `build_e2e_files_on_release_branch` builds the two files that the IDE extensions' end-to-end
+  # tests run, so that the tests start without waiting for the other platforms. They download the
+  # Linux CLI, with the layer and the UI that it embeds, from the `mirrord-artifacts` artifact, and
+  # load the agent's image as the image `test` from the `test.tar` of the `test` artifact.
+  build_e2e_files_on_release_branch:
+    name: build release (e2e files)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
-  # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
-  # `build_mirrord_on_release_branch` depends on `plan`
-  # which checks if the branch is a release branch
+      - uses: ./.github/actions/setup-bazel
+
+      # `image_load`'s `tarball` output is the archive that `docker load` takes.
+      - name: Build the CLI and the agent image
+        run: |
+          bazel build --config=release --//mirrord/agent:image_tag=test:latest --output_groups=+tarball \
+            //release:mirrord_linux_x86_64 //mirrord/agent:image_load
+          mkdir "$RUNNER_TEMP/cli"
+          cp bazel-bin/release/mirrord_linux_x86_64 "$RUNNER_TEMP/cli/mirrord"
+          cp bazel-bin/mirrord/agent/image_load/tarball.tar "$RUNNER_TEMP/test.tar"
+
+      - name: Upload the CLI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mirrord-artifacts
+          path: ${{ runner.temp }}/cli/mirrord
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload the agent image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test
+          path: ${{ runner.temp }}/test.tar
+          if-no-files-found: error
+          retention-days: 2
+
+  # Builds the targets that the `build_unix_and_release_images` job of `release.yaml` builds: the
+  # files for Linux and macOS, with the macOS files signed ad hoc, and the images. It runs after
+  # `build_e2e_files_on_release_branch`, whose outputs it takes from the remote cache rather than
+  # build the Linux x86-64 CLI and the agent again.
+  build_on_release_branch:
+    name: build release (unix)
+    needs: [plan, build_e2e_files_on_release_branch]
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the release files and the images
+        run: |
+          bazel build --config=release --remote_download_outputs=minimal \
+            //release:unix \
+            //mirrord/agent:push //mirrord/agent:image_index.digest \
+            //mirrord/cli:push //mirrord/cli:image_index.digest
+
+  # Builds the targets that the `build_binaries_windows` job of `release.yaml` builds, which only
+  # a Windows machine builds as the release does. Every crate fails on a warning, so a warning
+  # that only an optimized build for Windows gives would otherwise first fail in the release.
+  build_windows_on_release_branch:
+    name: build release (windows)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    runs-on: blacksmith-16vcpu-windows-2025
+    timeout-minutes: 150
+    env:
+      # See `build-test`.
+      MSYS2_ARG_CONV_EXCL: "*"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the release files
+        run: |
+          bazel build --config=release --remote_download_outputs=minimal \
+            //mirrord/cli:cli_standalone //mirrord/layer-win
+
   intellij_e2e_on_release_branch:
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [build_e2e_files_on_release_branch]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [build_e2e_files_on_release_branch]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   # ── gate ────────────────────────────────────────────────────────────
 
-  # We need some "accumulation" job here because bors fails (timeouts) to
-  # listen on matrix builds.
-  # Hence, we have some kind of dummy here that bors can listen on
+  # The one required check, so that branch protection doesn't have to list every job, including
+  # the matrix jobs and the ones that a change skips.
   ci-success:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
-    # This job prunes the run's inter-job artifacts, so every job that downloads one has to be
-    # listed here. Dropping a job from this list lets the prune run while that job is still going,
-    # and it then fails on a missing artifact.
     needs:
       [
-        towncrier_check,
         plan,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
-        test_agent_image,
-        test_cli_image,
-        macos_tests,
-        integration_tests,
+        build_e2e_files_on_release_branch,
+        build_on_release_branch,
+        build_windows_on_release_branch,
+        build-test,
         e2e,
-        test_agent,
         lint,
-        check-rust-docs,
-        check-flaky-report,
-        cargo-deny,
-        windows_tests,
         install_script,
-        corpus_check,
-        corpus_upstream_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
+      # Merging the test reports deletes the per-job ones.
       actions: write
     steps:
       # Both report steps run ahead of the gate below, because a run that failed still retried the
@@ -597,13 +557,3 @@ jobs:
             echo "$failing"
             exit 1
           fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
-      - name: Delete inter-job artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/prune-artifacts.sh run "$GITHUB_RUN_ID"

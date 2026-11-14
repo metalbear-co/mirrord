@@ -1,0 +1,7 @@
+load("//bazel:rust.bzl", "rust_binary")
+
+# `bazel run //mirrord/mcp/vendor -- <sync | check | check-upstream>`, which vendors the corpus of
+# `mirrord mcp` or checks it (see `src/main.rs`).
+rust_binary(
+    name = "vendor",
+)

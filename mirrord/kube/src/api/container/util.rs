@@ -115,6 +115,8 @@ pub(super) fn agent_env(agent: &AgentConfig, params: &ContainerParams) -> Vec<En
 pub(super) const AGENT_COMMAND: &str = "./mirrord-agent";
 
 pub(super) fn agent_base_args(agent: &AgentConfig, params: &ContainerParams) -> Vec<String> {
+    // Only builds with debug assertions add to the arguments below.
+    #[cfg_attr(not(debug_assertions), allow(unused_mut))]
     let mut args = vec![
         "-l".to_owned(),
         params.port.to_string(),

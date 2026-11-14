@@ -171,6 +171,7 @@ impl IntproxySidecarError {
 pub struct IntproxySidecar {
     container_id: String,
     runtime_binary: String,
+    image: String,
     extproxy_addr: SocketAddr,
 }
 
@@ -295,8 +296,24 @@ impl IntproxySidecar {
         Ok(IntproxySidecar {
             container_id,
             runtime_binary,
+            image: config.container.cli_image.clone(),
             extproxy_addr,
         })
+    }
+
+    /// Returns the CPU architecture of the sidecar's image, as the container runtime names it,
+    /// like `amd64` or `arm64`. Creating the container pulled the image for the runtime's own
+    /// platform.
+    pub async fn image_architecture(&self) -> Result<String, IntproxySidecarError> {
+        let mut command = resolve_tokio_command(&self.runtime_binary);
+        command.args([
+            "image",
+            "inspect",
+            "--format",
+            "{{.Architecture}}",
+            &self.image,
+        ]);
+        exec_and_get_first_line(command).await
     }
 
     /// Returns the id of the created container.

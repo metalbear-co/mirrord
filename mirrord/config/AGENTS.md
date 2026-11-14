@@ -20,7 +20,9 @@ it, the release workflow publishes them as the configuration reference, onto thi
 `<!--${internal}-->` keeps a doc comment out of the reference. `typos` checks this crate's Rust in CI.
 
 After any change to the types or their docs, regenerate the schema, or `schema_file_is_up_to_date` fails. The same
-change can reach `mirrord-up-schema.json`, which `mirrord/up/AGENTS.md` covers.
+change can reach `mirrord-up-schema.json`, which `mirrord/up/AGENTS.md` covers. Regenerate it with Cargo rather than
+Bazel: Bazel's builds turn on `serde_json`'s `preserve_order` (see `MODULE.bazel`), so they would write each type's
+properties in the order of its fields rather than sorted, and change most of the file.
 
 ```bash
 cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture

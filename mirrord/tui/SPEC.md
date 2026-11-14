@@ -9,8 +9,8 @@ This document describes the behavior of the application as a user experiences it
 There are two ways in:
 
 - `mirrord tui`, the CLI subcommand;
-- the standalone `mirrord-tui` binary (`cargo run -p mirrord-tui`), which is what the crate builds on
-  its own.
+- the standalone `mirrord-tui` binary (`bazel run //mirrord/tui:mirrord-tui`), which is what the crate
+  builds on its own.
 
 Both run exactly the same interface. The only difference is logging (below).
 
@@ -40,10 +40,10 @@ the CLI's logger writes to standard error, which is this same redirected pipe, s
 would feed it straight back in without bound. The terminal's own stderr is restored before the application
 exits, including when it exits by panicking, so error and panic messages still reach the terminal.
 
-Example (from the README), run from this crate's directory:
+Example (from the README):
 
 ```bash
-MIRRORD_LOG_FILE=/tmp/mirrord-tui.log MIRRORD_LOG=debug cargo run
+MIRRORD_LOG_FILE=/tmp/mirrord-tui.log MIRRORD_LOG=debug bazel run //mirrord/tui:mirrord-tui
 ```
 
 ## Screen layout

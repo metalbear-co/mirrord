@@ -2562,7 +2562,16 @@ mod tests {
             .unwrap()
             .read_to_string(&mut existing_content);
 
-        assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
+        // Compared as JSON values, because Bazel's builds turn on `serde_json`'s `preserve_order`,
+        // which changes the order of the keys (see `MODULE.bazel`).
+        let existing: serde_json::Value = serde_json::from_str(&existing_content).unwrap();
+        let generated: serde_json::Value = serde_json::from_str(&compare_content).unwrap();
+        assert!(
+            existing == generated,
+            "mirrord-schema.json is outdated, regenerate it with \
+             `cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- \
+             --ignored`"
+        );
     }
 
     /// Users copy parts of the config examples in the docs into their own config, so each example

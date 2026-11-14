@@ -35,8 +35,8 @@ once_cell.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi.workspace = true
-str-win = { path = "../str-win" }
-utils-win = { path = "../utils-win" }
+mirrord-str-win = { path = "../str-win" }
+mirrord-utils-win = { path = "../utils-win" }
 minhook-detours-rs.workspace = true
 windows-strings.workspace = true
 

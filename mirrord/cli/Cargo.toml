@@ -1,5 +1,5 @@
 [package]
-name = "mirrord"
+name = "mirrord-cli"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -111,7 +111,7 @@ sha2.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
-utils-win = { path = "../utils-win" }
+mirrord-utils-win = { path = "../utils-win" }
 stork = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
@@ -123,8 +123,12 @@ mirrord-sip = { path = "../sip" }
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf.workspace = true
 
+[[bin]]
+name = "mirrord"
+path = "src/main.rs"
 
 [dev-dependencies]
+mirrord-test-utils = { path = "../test-utils" }
 rstest.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
@@ -140,4 +144,7 @@ tar.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
+# Reads the layer's files from Bazel's runfiles at run time rather than embedding them, and leaves
+# out the UI. Only Bazel's `//mirrord/cli` turns it on (see `src/bundle.rs`).
+bazel-runfiles = []
 windows_build = []

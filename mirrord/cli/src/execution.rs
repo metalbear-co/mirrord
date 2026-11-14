@@ -59,20 +59,37 @@ use crate::{
     CliResult, MirrordCi,
     connection::{AGENT_CONNECT_INFO_ENV_KEY, ConnectData, create_and_connect},
     error::{CliError, LocalShareError},
-    extract::extract_library,
+    extract::layer_file,
     up::MirrordUp,
     util::remove_proxy_env,
 };
 
+/// Returns the macOS utilities that the CLI copies to run SIP-protected programs, as the gzipped
+/// tar from `MIRRORD_BUNDLED_SIP_BINARIES`, which the CLI embeds unless it reads it from Bazel's
+/// runfiles (see `bundle.rs`).
 #[cfg(target_os = "macos")]
-pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
+fn compressed_sip_binaries() -> std::borrow::Cow<'static, [u8]> {
+    #[cfg(not(feature = "bazel-runfiles"))]
+    let archive = include_bytes!(env!("MIRRORD_BUNDLED_SIP_BINARIES"))
+        .as_slice()
+        .into();
+
+    #[cfg(feature = "bazel-runfiles")]
+    let archive = {
+        let path = crate::bundle::runfile(env!("MIRRORD_BUNDLED_SIP_BINARIES"));
+        std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("can't read {}: {error}", path.display()))
+            .into()
+    };
+
+    archive
+}
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
 
 /// Environment variable pointing to the mirrord layer DLL/dylib/so path.
-const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
+pub(crate) const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
@@ -382,7 +399,7 @@ impl MirrordExecution {
     /// # Returns
     ///
     /// Returned [`MirrordExecution::environment`] contains everything that the user application
-    /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
+    /// might need, including `INJECTION_ENV_VAR` and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal(
         config: &mut LayerConfig,
@@ -394,21 +411,7 @@ impl MirrordExecution {
         mirrord_for_ci: Option<&MirrordCi>,
         #[cfg_attr(not(windows), allow(unused_variables))] crash_reporting: CrashReporting,
     ) -> CliResult<Self> {
-        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
-        // debugging)
-        let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
-            Ok(existing_path) => {
-                tracing::debug!(
-                    "Using existing library file from {MIRRORD_LAYER_FILE_ENV}: {}",
-                    existing_path
-                );
-                std::path::PathBuf::from(existing_path)
-            }
-            Err(_) => {
-                tracing::debug!("{MIRRORD_LAYER_FILE_ENV} not set, extracting library from binary");
-                extract_library(None, progress, true)?
-            }
-        };
+        let lib_path = layer_file(progress)?;
 
         if !config.use_proxy {
             remove_proxy_env();
@@ -430,10 +433,24 @@ impl MirrordExecution {
 
         #[cfg(target_os = "macos")]
         {
-            env_vars.insert(
-                "MIRRORD_MACOS_ARM64_LIBRARY".to_owned(),
-                extract_arm64(progress, true)?.to_string_lossy().into(),
-            );
+            // A CLI without an arm64 layer of its own (see `CliError::EmptyBundledLayer`) can still
+            // run with the layer from `MIRRORD_LAYER_FILE`, but arm64e programs then get the arm64
+            // layer only from a `MIRRORD_MACOS_ARM64_LIBRARY` that the user sets.
+            match extract_arm64(progress, true) {
+                Ok(path) => {
+                    env_vars.insert(
+                        "MIRRORD_MACOS_ARM64_LIBRARY".to_owned(),
+                        path.to_string_lossy().into(),
+                    );
+                }
+                Err(CliError::EmptyBundledLayer) => {
+                    progress.warning(
+                        "This mirrord binary has no arm64 layer, so programs with the arm64e ABI \
+                         run without mirrord, unless MIRRORD_MACOS_ARM64_LIBRARY points at one.",
+                    );
+                }
+                Err(error) => return Err(error),
+            }
 
             // Fixes <https://github.com/metalbear-co/mirrord/issues/1745>
             // by disabling the fork safety check in the Objective-C runtime.
@@ -494,7 +511,10 @@ impl MirrordExecution {
                             load_type: None,
                         });
                 if config.experimental.sip_utils {
-                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
+                    extract_sip_binaries(
+                        &MIRRORD_BINARIES_DIR_PATH_BUF,
+                        &compressed_sip_binaries(),
+                    )?;
                 }
 
                 let result = executable

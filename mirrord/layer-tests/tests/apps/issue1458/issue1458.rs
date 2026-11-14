@@ -12,7 +12,7 @@ fn main() {
     let socket = UdpSocket::bind(local_addr).unwrap();
 
     // mirrord should intercept this
-    let amount = socket.send_to(&vec![0; 1], remote_addr).unwrap();
+    let amount = socket.send_to(&[0; 1], remote_addr).unwrap();
     assert_eq!(amount, 1);
 
     let mut recv_buffer = vec![0; 1];

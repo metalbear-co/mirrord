@@ -1,0 +1,13 @@
+# ty type-checks the workspace's Python through `bazel run //:lint`, which gives it the packages
+# that Bazel runs the code with (see `scripts/lint.py`).
+
+[src]
+exclude = [
+    # The docs and skills vendored for `mirrord mcp` are upstream's, kept byte-identical.
+    "mirrord/mcp/corpus",
+    # These two run outside Bazel, with packages that Bazel doesn't have: uv installs the action's
+    # `tomlkit` from the script's inline metadata, and the operator's staging image installs the
+    # worker's `temporalio` from its `requirements.txt`.
+    ".github/actions/next-release-version/version.py",
+    "mirrord/tests/temporal-worker-py",
+]

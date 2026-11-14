@@ -1,0 +1,7 @@
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "rust-websockets",
+    # The end-to-end tests run it.
+    visibility = ["//mirrord/tests:__pkg__"],
+)

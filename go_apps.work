@@ -1,0 +1,23 @@
+// The Go apps that import modules besides the standard library, except `mirrord/tests/go-e2e`, which
+// builds with the modules of the layer tests' `app_go` (see `mirrord/tests/BUILD.bazel`). `go_deps`
+// reads the modules that the apps require from their `go.mod` files (see
+// `mirrord/layer-tests/tests/apps/apps.MODULE.bazel`), and takes only one file, so this workspace
+// lists them all. Each app must be a Bazel package, so that `go_deps` can name its `go.mod` with a
+// label. Naming this file `go.work` would make the go command use it for every module under the
+// repository's root, even the ones that it doesn't list.
+go 1.25
+
+use (
+	./mirrord/layer-tests/tests/apps/app_go
+	./mirrord/layer-tests/tests/apps/issue834
+	./mirrord/tests/go-azure-servicebus-queue-consumer
+	./mirrord/tests/go-azure-servicebus-sender
+	./mirrord/tests/go-bullmq-consumer
+	./mirrord/tests/go-gcp-pubsub-consumer
+	./mirrord/tests/go-nats-consumer
+	./mirrord/tests/go-nats-pubsub-consumer
+	./mirrord/tests/go-redis-pubsub-consumer
+	./mirrord/tests/go-rmq-consumer
+	./mirrord/tests/temporal-starter
+	./mirrord/tests/temporal-worker
+)

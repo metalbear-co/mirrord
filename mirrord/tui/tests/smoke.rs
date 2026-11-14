@@ -25,6 +25,14 @@ const ROWS: u16 = 30;
 const COLS: u16 = 100;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The `mirrord-tui` binary that the build system built for these tests. Bazel passes it in
+/// `MIRRORD_TUI_FILE`. It also sets `CARGO_BIN_EXE_mirrord-tui`, but relative to the runfiles
+/// directory, which isn't the test's working directory.
+fn tui_path() -> PathBuf {
+    mirrord_test_utils::env_path("MIRRORD_TUI_FILE")
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_mirrord-tui")))
+}
+
 /// Feeds the captured stream into an emulator until the rendered screen contains `needle`.
 fn wait_for(rx: &Receiver<Vec<u8>>, parser: &mut vt100::Parser, needle: &str) -> String {
     let deadline = Instant::now() + TIMEOUT;
@@ -115,7 +123,7 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    let mut cmd = CommandBuilder::new(tui_path());
     cmd.env("TERM", "xterm-256color");
     // A login shell with the developer's rc files would make the assertions non-deterministic.
     cmd.env("SHELL", "/bin/sh");
@@ -226,7 +234,7 @@ fn a_session_under_the_shell_brings_the_panel_in() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    let mut cmd = CommandBuilder::new(tui_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
     cmd.env("PS1", "$ ");
@@ -370,7 +378,7 @@ fn a_failing_credential_plugin_stays_out_of_the_interface() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    let mut cmd = CommandBuilder::new(tui_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
     cmd.env("PS1", "$ ");

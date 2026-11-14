@@ -1,0 +1,46 @@
+# The toolchains and modules of the Go test apps. `MODULE.bazel` includes this file.
+
+bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "gazelle", version = "0.54.0")
+
+# The Go versions that the Go apps are built with, which the tests pick with `GoVersion`. The first
+# one is the default, which a `go_binary` that doesn't pick a version builds with, like the staging
+# apps in `//mirrord/tests`.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.27.3")
+go_sdk.download(version = "1.26.10")
+go_sdk.download(version = "1.25.14")
+
+# The Go modules that the Go apps import, from the `go.mod` and `go.sum` of each app that
+# `//:go_apps.work` lists. Each app's target depends on them by repository, like
+# `@com_github_gin_gonic_gin//:gin`. Every app gets the same version of a module: the highest that
+# any of the files, or any Bazel module that uses `go_deps`, like rules_go, requires. That's Go's
+# minimal version selection over all of them, so an app can build with a newer version than its own
+# `go.mod` requires.
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:go_apps.work")
+use_repo(
+    go_deps,
+    "com_github_azure_azure_sdk_for_go_sdk_messaging_azservicebus",
+    "com_github_gin_gonic_gin",
+    "com_github_nats_io_nats_go",
+    "com_github_rabbitmq_amqp091_go",
+    "com_github_redis_go_redis_v9",
+    "com_google_cloud_go_pubsub",
+    "com_rogchap_v8go",
+    "io_temporal_go_api",
+    "io_temporal_go_sdk",
+    "net_kuoruan_go_v8go_polyfills",
+    "org_golang_google_grpc",
+)
+
+# v8go links the V8 archive in its module's `deps/<platform>` with `-L` and `-lv8`. gazelle copies
+# those flags into the BUILD file that it generates, but nothing there makes the archive an input of
+# the link, so the linker doesn't find it. The patch adds the archive as a C dependency of the
+# package, which makes it an input. It also compiles v8go's C++ without warnings, like the rest of
+# the build's third-party code, which `.bazelrc` can't reach in cgo's compiles.
+go_deps.module_override(
+    patch_strip = 1,
+    patches = ["//bazel/third_party/v8go:libv8.patch"],
+    path = "rogchap.com/v8go",
+)

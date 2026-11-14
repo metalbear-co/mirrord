@@ -1,0 +1,3 @@
+# Cargo's build directory, which holds no packages and can be very large. `//...` would walk it,
+# and fail when Cargo or rust-analyzer writes to it at the same time (see `REPO.bazel`).
+target

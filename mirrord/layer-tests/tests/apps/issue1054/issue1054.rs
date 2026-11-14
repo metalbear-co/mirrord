@@ -8,9 +8,7 @@ fn main() {
     println!("test issue 1054: START");
     let address: SocketAddr = "0.0.0.0:80".parse().expect("failed to bind");
     let listener = TcpListener::bind(address).unwrap();
-    let cloned = listener
-        .try_clone()
-        .expect("failed to clone listneer");
+    let cloned = listener.try_clone().expect("failed to clone listneer");
 
     assert_eq!(listener.local_addr().unwrap(), address);
     assert_eq!(listener.local_addr().unwrap(), cloned.local_addr().unwrap());
@@ -28,7 +26,7 @@ fn main() {
     let mut buf = [0_u8; 16];
     let bytes_read = connection.read(&mut buf).expect("failed to read");
     assert_eq!(bytes_read, 5);
-    assert_eq!(&buf[..bytes_read], b"hello");
+    assert_eq!(buf.get(..bytes_read), Some(b"hello".as_slice()));
 
     assert_eq!(
         connection.local_addr().unwrap(),

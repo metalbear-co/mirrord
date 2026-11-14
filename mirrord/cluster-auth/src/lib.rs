@@ -6,9 +6,8 @@
 //! its CA, and the [`AuthMethod`]. Bearer tokens are kept in token files that the client
 //! reloads at least once per minute, so new requests use refreshed tokens without rebuilding
 //! the client. Existing streams remain authenticated for their lifetime. With the `eks`
-//! feature, [`ClusterClientFactory::connect_eks`] authenticates as the
-//! workload's AWS IAM identity and [`ClusterClientFactory::run_token_refresh`] keeps its token
-//! fresh.
+//! feature, `ClusterClientFactory::connect_eks` authenticates as the workload's AWS IAM identity
+//! and `ClusterClientFactory::run_token_refresh` keeps its token fresh.
 //!
 //! The code is kept close to the mirrord operator's multi-cluster connections (`operator-envoy`),
 //! which are meant to move onto this crate.

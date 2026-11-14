@@ -2,7 +2,7 @@
 //! network access.
 //!
 //! They are vendored into `corpus/` from pinned commits of `metalbear-co/docs` and
-//! `metalbear-co/skills` by `cargo xtask corpus`, which the release PR runs to bump the pins. The
+//! `metalbear-co/skills` by `//mirrord/mcp/vendor`, which the release PR runs to bump the pins. The
 //! tests below are the checks the content has to pass to ship, so a bad bump fails the release PR.
 
 use std::{collections::BTreeMap, io::Read, ops::Not, sync::LazyLock};
@@ -12,19 +12,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-/// The `corpus/` files, packed by `build.rs`.
-static ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/corpus.tar.gz"));
+/// The `corpus/` files as a gzipped tar, at the path that the build passes in
+/// `MIRRORD_BUNDLED_MCP_CORPUS`. Bazel packs them (`:corpus` in `BUILD.bazel`). A plain Cargo build
+/// gets an empty placeholder from `.cargo/config.toml`, so that it compiles, and has no corpus.
+static ARCHIVE: &[u8] = include_bytes!(env!("MIRRORD_BUNDLED_MCP_CORPUS"));
 
 /// Every vendored file, keyed by its path in `corpus/`, e.g. `skills/mirrord-up/SKILL.md`.
 pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+    if ARCHIVE.is_empty() {
+        return BTreeMap::new();
+    }
+
     let mut archive = tar::Archive::new(GzDecoder::new(ARCHIVE));
-    let entries = archive.entries().expect("build.rs packs a valid archive");
+    let entries = archive.entries().expect("the build packs a valid archive");
     entries
         .map(|entry| {
-            let mut entry = entry.expect("build.rs packs a valid archive");
+            let mut entry = entry.expect("the build packs a valid archive");
             let path = entry
                 .path()
-                .expect("build.rs packs valid paths")
+                .expect("the build packs valid paths")
                 .components()
                 .map(|component| component.as_os_str().to_string_lossy())
                 .collect::<Vec<_>>()
@@ -32,9 +38,9 @@ pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
             let mut contents = Vec::with_capacity(entry.size() as usize);
             entry
                 .read_to_end(&mut contents)
-                .expect("build.rs packs a valid archive");
+                .expect("the build packs a valid archive");
             let contents = String::from_utf8(contents).unwrap_or_else(|_| {
-                panic!("`cargo xtask corpus` vendors only UTF-8 files, but `{path}` isn't")
+                panic!("`//mirrord/mcp/vendor` vendors only UTF-8 files, but `{path}` isn't")
             });
             (path, contents)
         })

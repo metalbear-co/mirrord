@@ -16,14 +16,14 @@ impl MeshExclusion {
 
     /// Create a new `chain` and mount it.
     pub fn create(ipt: Arc<IPTablesBackend>, chain: &str) -> IPTablesResult<Self> {
-        let managed = IPTableChain::create(ipt, chain.to_string())?;
+        let managed = IPTableChain::create(ipt, chain.to_owned())?;
 
         Ok(Self { managed })
     }
 
     /// Load existing `chain` and mount it.
     pub fn load(ipt: Arc<IPTablesBackend>, chain: &str) -> IPTablesResult<Self> {
-        let managed = IPTableChain::load(ipt, chain.to_string())?;
+        let managed = IPTableChain::load(ipt, chain.to_owned())?;
 
         Ok(Self { managed })
     }

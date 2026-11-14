@@ -15,23 +15,24 @@ Runs a program under cdb and reports on its stack, in one of three modes:
             first. MSVC-target code probes any frame larger than a page through __chkstk, with
             the frame size in rax, so a conditional breakpoint there sees each large frame.
 
-Frame sizes come from the PDB next to the program, so build with debug info (the dev profile has
-it). Only the top-level process is followed, not the processes it spawns.
+Frame sizes come from the PDB next to the program, which Bazel only builds when it's asked for, as
+in `bazel build //mirrord/cli:cli_standalone --output_groups=+pdb_file`. Only the top-level process
+is followed, not the processes it spawns.
 
 Needs cdb (Debugging Tools for Windows, or WinDbg from the Store) and, for -Stack, editbin from
 the MSVC build tools.
 
 .EXAMPLE
-# Why does a debug mirrord.exe overflow a 1 MB stack? (offline: the empty kubeconfig keeps it
-# away from any cluster, and the overflow happens before the cluster is contacted)
+# Why does an unoptimized mirrord.exe overflow a 1 MB stack? (offline: the empty kubeconfig keeps
+# it away from any cluster, and the overflow happens before the cluster is contacted)
 $env:KUBECONFIG = "$env:TEMP\empty-kubeconfig.yaml"
 Set-Content $env:KUBECONFIG "apiVersion: v1`nkind: Config`nclusters: []`ncontexts: []`nusers: []"
 .\scripts\win_stack_report.ps1 -Mode Overflow -Stack 1MB `
-    -Exe target\x86_64-pc-windows-msvc\debug\mirrord.exe `
+    -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe `
     -Arguments exec, --target, targetless, --, cmd.exe, /c, 'exit 0'
 
 .EXAMPLE
-.\scripts\win_stack_report.ps1 -Mode Peak -Exe target\x86_64-pc-windows-msvc\debug\mirrord.exe -Arguments verify-config, mirrord.json
+.\scripts\win_stack_report.ps1 -Mode Peak -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe -Arguments verify-config, mirrord.json
 #>
 [CmdletBinding()]
 param(

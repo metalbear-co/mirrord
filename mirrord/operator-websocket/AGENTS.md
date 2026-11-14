@@ -12,7 +12,7 @@ Keep this crate limited to transport concerns. It is used by the agent, so it mu
 ## Command Reference
 
 ```bash
-CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-operator-websocket --all-targets --keep-going
+bazel build --config=clippy //mirrord/operator-websocket/...
 ```
 
 ## Compatibility

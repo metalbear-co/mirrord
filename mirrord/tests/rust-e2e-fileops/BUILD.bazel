@@ -1,0 +1,7 @@
+load("//bazel:rust.bzl", "rust_binary")
+
+rust_binary(
+    name = "rust-e2e-fileops",
+    # The end-to-end tests run it.
+    visibility = ["//mirrord/tests:__pkg__"],
+)

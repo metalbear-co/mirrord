@@ -1,0 +1,6 @@
+load("//bazel:rust.bzl", "rust_library")
+
+rust_library(
+    name = "operator-websocket",
+    visibility = ["//visibility:public"],
+)

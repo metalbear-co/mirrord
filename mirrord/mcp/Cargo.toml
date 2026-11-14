@@ -41,10 +41,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["io-std", "rt", "macros"] }
 uuid.workspace = true
 
-[build-dependencies]
-flate2.workspace = true
-tar.workspace = true
-
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client"] }
 rstest.workspace = true

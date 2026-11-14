@@ -27,6 +27,7 @@ use mirrord_up::{
     PrepareConfig, RequestOrigin, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncConfig,
     SyncEntry, SyncRestart, SyncRunConfig,
 };
+use notify::{RecursiveMode, Watcher};
 use tokio::{io::DuplexStream, sync::mpsc, task::JoinHandle};
 use tokio_tungstenite::{
     WebSocketStream,
@@ -258,6 +259,10 @@ fn start_with(
     mpsc::UnboundedReceiver<Operator>,
     tokio::sync::watch::Receiver<SyncActivity>,
 ) {
+    if watch {
+        wait_for_earlier_fs_events();
+    }
+
     let (operators, operators_rx) = mpsc::unbounded_channel();
     let connect: Connect<DuplexStream> = Box::new(move || {
         let operators = operators.clone();
@@ -284,6 +289,46 @@ fn start_with(
     )
     .unwrap();
     (tokio::spawn(driver.run()), operators_rx, activity)
+}
+
+/// Returns once the file-system watcher reported every change that the test made so far, so that
+/// the driver's watcher, which starts later, reports none of them.
+///
+/// FSEvents on macOS can report a change from shortly before a watch started as if it came
+/// after. A test makes its tree right before the driver starts watching it, so the creation of
+/// the entry's directory could reach the driver as an event. The driver would take the directory
+/// for replaced, and make a full push where the test expects an incremental one or none.
+///
+/// FSEvents reports the changes of a volume in the order that they were made. So this makes
+/// one more change, the marker file, and waits for a watcher of its own to report it.
+fn wait_for_earlier_fs_events() {
+    let marker_dir = tempfile::tempdir().unwrap();
+    // The watcher's handler sends each event of `marker_dir` to this function.
+    let (events_tx, events_rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let _ = events_tx.send(event);
+    })
+    .unwrap();
+    watcher
+        .watch(marker_dir.path(), RecursiveMode::NonRecursive)
+        .unwrap();
+    write(marker_dir.path(), "marker", "");
+
+    loop {
+        let event = events_rx
+            .recv_timeout(FRAME_TIMEOUT)
+            .expect("the watcher didn't report the marker file in time")
+            .unwrap();
+        // The watcher reports the path as it is on disk, which the temporary directory of macOS
+        // reaches through a symlink, so only the name tells the marker.
+        if event
+            .paths
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == "marker"))
+        {
+            break;
+        }
+    }
 }
 
 /// The next connection that the driver opens.

@@ -31,7 +31,7 @@
       "name": "[win] test mirrord (lldb)",
       "cargo": {
         "args": [
-          "test", "traffic_tests", "--manifest-path", "tests/Cargo.toml", "--no-run",
+          "test", "traffic_tests", "--manifest-path", "mirrord/tests/Cargo.toml", "--no-run",
           "--target", "x86_64-pc-windows-msvc"
         ],
         "env": {
@@ -45,7 +45,7 @@
           "name": "tests"
         },
       },
-      "cwd": "${workspaceFolder}/tests",
+      "cwd": "${workspaceFolder}/mirrord/tests",
       "args": [
         "traffic_tests",
         "--", "--nocapture", "--test-threads=1", 
@@ -76,7 +76,7 @@
       "args": [
         "exec", "-c", "--target", "pod/hostname-echo-vmfbvdd-cff7dd694-wgzx4/container/test", "--", "python3", "-u", "C:\\Users\\Daniel\\git\\mirrord\\tests\\debug_python.py"
       ],
-      "cwd": "${workspaceFolder}/tests",
+      "cwd": "${workspaceFolder}/mirrord/tests",
       "environment": [
         {
           "name": "MIRRORD_DISABLE_VERSION_CHECK",

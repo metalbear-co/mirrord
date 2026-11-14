@@ -31,7 +31,7 @@ fn main() {
     });
 
     // mirrord should NOT intercept this
-    let amount = socket.send_to(&vec![0; 1], remote_addr).unwrap();
+    let amount = socket.send_to(&[0; 1], remote_addr).unwrap();
     assert_eq!(amount, 1);
 
     recv_thread.join().unwrap();

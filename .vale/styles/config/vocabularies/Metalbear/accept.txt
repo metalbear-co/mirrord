@@ -7,7 +7,7 @@ kube
 kubectl
 kubeconfig
 Kubernetes
-Minikube
+minikube
 namespace
 namespaces
 namespaced
@@ -273,3 +273,5 @@ Nagle
 Zooplus
 eMudhra
 ```
+Bazel
+toolchains?

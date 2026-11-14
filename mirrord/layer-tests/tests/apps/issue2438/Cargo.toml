@@ -1,8 +1,15 @@
 [package]
-name = "issue2438"
+name = "mirrord-layer-tests-issue2438"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 nix.workspace = true
+
+[[bin]]
+name = "issue2438"
+path = "src/main.rs"

@@ -1,0 +1,22 @@
+load("//bazel:rust.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "protocol-io",
+    visibility = ["//visibility:public"],
+)
+
+# The library with its `websocket` feature too, which only crates outside the workspace turn on, so
+# that the code behind it compiles and clippy lints it (see `//mirrord/kube:kube_incluster`). The
+# target names the feature's optional dependency, because `@crates` only gives a package the
+# optional dependencies that the workspace's features turn on.
+rust_library(
+    name = "protocol-io_websocket",
+    crate_features = ["websocket"],
+    doc = False,
+    deps = ["@crates//tokio-tungstenite"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":protocol-io",
+)

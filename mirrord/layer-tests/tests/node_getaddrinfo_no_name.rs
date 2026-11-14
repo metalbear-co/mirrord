@@ -98,10 +98,8 @@ dns.lookup("missing.example.test", (err) => {
         )
         .unwrap();
 
-    let application = Application::DynamicApp(
-        "node".to_owned(),
-        vec![app.path().to_string_lossy().to_string()],
-    );
+    let application =
+        Application::DynamicApp(node(), vec![app.path().to_string_lossy().to_string()]);
 
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_REMOTE_DNS", "true")], None)

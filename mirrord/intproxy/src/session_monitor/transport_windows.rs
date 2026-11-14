@@ -19,8 +19,8 @@ use std::{
 
 use axum::serve::Listener;
 use mirrord_session_monitor_protocol::pipe_name_for_session;
+use mirrord_utils_win::security::CurrentUserSecurityAttributes;
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
-use utils_win::security::CurrentUserSecurityAttributes;
 
 /// Writes the session sentinel marker file and binds the named pipe with a current-user-only
 /// DACL. Returns the listener and a [`SessionTransportCleanup`] guard that removes the

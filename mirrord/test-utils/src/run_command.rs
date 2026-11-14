@@ -1,0 +1,194 @@
+#![allow(dead_code)]
+use std::{collections::HashMap, process::Stdio};
+
+use mirrord_command::resolve_tokio_command;
+use tempfile::tempdir;
+
+use crate::{TestProcess, bazel_python, env_path, output_label};
+
+/// Returns the agent image that the tests run.
+///
+/// It's the image in `MIRRORD_AGENT_IMAGE`, so that developers can pick one, like a released agent.
+/// Otherwise, under Bazel, it's the image whose name is in the file at
+/// `MIRRORD_TESTS_AGENT_IMAGE_FILE`, a name that changes with the agent's build, so that a cluster
+/// without that build fails the tests rather than running an older agent (see
+/// `mirrord/tests/BUILD.bazel`). Otherwise, it's `test`, which a cluster can get from
+/// `bazel run //mirrord/agent:image_load --//mirrord/agent:image_tag=test`.
+pub fn agent_image() -> String {
+    if let Ok(image) = std::env::var("MIRRORD_AGENT_IMAGE") {
+        return image;
+    }
+
+    match env_path("MIRRORD_TESTS_AGENT_IMAGE_FILE") {
+        Some(file) => std::fs::read_to_string(file).unwrap().trim().to_owned(),
+        None => "test".to_owned(),
+    }
+}
+
+/// See [`run_exec`].
+pub async fn run_exec_with_target(
+    process_cmd: Vec<String>,
+    target: &str,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+) -> TestProcess {
+    run_exec(process_cmd, Some(target), namespace, args, env, None).await
+}
+
+/// Run `mirrord exec` without specifying a target, to run in targetless mode.
+pub async fn run_exec_targetless(
+    process_cmd: Vec<String>,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+) -> TestProcess {
+    run_exec(process_cmd, None, namespace, args, env, None).await
+}
+
+/// Run `mirrord exec` with the given cmd, optional target (`None` for targetless), namespace,
+/// mirrord args, and env vars.
+pub async fn run_exec(
+    process_cmd: Vec<String>,
+    target: Option<&str>,
+    namespace: Option<&str>,
+    args: Option<Vec<&str>>,
+    env: Option<Vec<(&str, &str)>>,
+    env_remove: Option<&[&str]>,
+) -> TestProcess {
+    let mut mirrord_args = vec!["exec", "-c"];
+    if let Some(target) = target {
+        mirrord_args.extend(["--target", target]);
+    }
+    if let Some(namespace) = namespace {
+        mirrord_args.extend(["--target-namespace", namespace]);
+    }
+
+    if let Some(args) = args {
+        mirrord_args.extend(args);
+    }
+    mirrord_args.push("--");
+    let args: Vec<&str> = mirrord_args
+        .into_iter()
+        .chain(process_cmd.iter().map(String::as_str))
+        .collect();
+    let agent_image = agent_image();
+    let mut base_env = HashMap::new();
+    base_env.insert("MIRRORD_AGENT_IMAGE", agent_image.as_str());
+    // Bazel's interpreter finds the apps' pip packages through `PYTHONPATH` (see
+    // [`bazel_python`]).
+    if let Some(python) = bazel_python() {
+        base_env.insert("PYTHONPATH", python.python_path.as_str());
+    }
+    base_env.insert("MIRRORD_CHECK_VERSION", "false");
+    base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
+    base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
+    base_env.insert("MIRRORD_LOG", "warn,mirrord=debug");
+    base_env.insert("MIRRORD_PROGRESS_MODE", "off");
+
+    if let Some(env) = env {
+        for (key, value) in env {
+            base_env.insert(key, value);
+        }
+    }
+
+    run_mirrord(args, base_env, env_remove).await
+}
+
+/// Runs `mirrord port-forward` in targetless mode, forwarding a local port to a remote address
+/// through an agent.
+///
+/// Because the forwarding is done by a (targetless) agent running in the cluster, the connection to
+/// `port_mapping`'s remote address originates from inside the cluster. This is unlike
+/// `kubectl port-forward`, which connects to loopback inside the target pod.
+///
+/// `port_mapping` uses the `-L` format: `[local_port:]remote_ip_or_hostname:remote_port`.
+pub async fn run_port_forward(namespace: &str, port_mapping: &str) -> TestProcess {
+    let mirrord_args = vec![
+        "port-forward",
+        "--target-namespace",
+        namespace,
+        "-L",
+        port_mapping,
+    ];
+
+    let agent_image = agent_image();
+    let mut env = HashMap::new();
+    env.insert("MIRRORD_AGENT_IMAGE", agent_image.as_str());
+    env.insert("MIRRORD_CHECK_VERSION", "false");
+    env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
+    env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
+    env.insert("MIRRORD_LOG", "warn,mirrord=debug");
+    env.insert("MIRRORD_PROGRESS_MODE", "off");
+
+    run_mirrord(mirrord_args, env, None).await
+}
+
+/// Runs `mirrord ls` command, without the operator, which `mirrord ls` would otherwise use when the
+/// cluster has one.
+pub async fn run_ls(namespace: &str) -> TestProcess {
+    let mut mirrord_args = vec!["ls"];
+    mirrord_args.extend(vec!["--namespace", namespace]);
+
+    let mut env = HashMap::new();
+    env.insert("MIRRORD_OPERATOR_ENABLE", "false");
+
+    run_mirrord(mirrord_args, env, None).await
+}
+
+/// Runs `mirrord verify-config [--ide] "/path/config.json"`.
+///
+/// ## Attention
+///
+/// The `verify-config` tests are here to guarantee that your changes do not break backwards
+/// compatability, so you should not modify them, only add new tests (unless breakage is
+/// wanted/required).
+pub async fn run_verify_config(args: Option<Vec<&str>>) -> TestProcess {
+    let mut mirrord_args = vec!["verify-config"];
+    if let Some(args) = args {
+        mirrord_args.extend(args);
+    }
+
+    run_mirrord(mirrord_args, Default::default(), None).await
+}
+
+pub async fn run_mirrord(
+    args: Vec<&str>,
+    env: HashMap<&str, &str>,
+    env_remove: Option<&[&str]>,
+) -> TestProcess {
+    let path = crate::env_path("MIRRORD_TESTS_USE_BINARY")
+        .expect("MIRRORD_TESTS_USE_BINARY must point to an external mirrord binary");
+    let temp_dir = tempdir().unwrap();
+
+    // Print the mirrord path used to ease MIRRORD_TESTS_USE_BINARY possible misuse investigation
+    // efforts
+    println!("CWD: {:?}", std::env::current_dir().unwrap());
+    println!("Using mirrord path: {path:?}");
+
+    // Used for debugging with breakpoint on `let server` to debug mirrord execution
+    println!("executing mirrord with args {args:?}",);
+    let mut server = resolve_tokio_command(&path);
+    server
+        .args(&args)
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    if let Some(env_remove) = env_remove {
+        for key in env_remove {
+            server.env_remove(key);
+        }
+    }
+
+    let server = server.spawn().unwrap();
+    println!(
+        "executed mirrord with args {args:?} pid {}",
+        server.id().unwrap()
+    );
+    // We need to hold temp dir until the process is finished
+    let label = output_label(&path.to_string_lossy(), &args);
+    TestProcess::from_child_labeled(server, Some(temp_dir), &label)
+}

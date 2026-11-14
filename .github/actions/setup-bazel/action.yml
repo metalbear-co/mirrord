@@ -1,0 +1,60 @@
+name: "Set up Bazel"
+description: >-
+  Installs bazelisk, which runs the Bazel version in `.bazelversion`, turns on the `ci` config of
+  `.bazelrc` for every Bazel command of the job, and restores the cache of what Bazel downloads.
+inputs:
+  cache-save:
+    description: >-
+      Whether the job saves the cache of what Bazel downloads. Every job of a platform restores the
+      same cache, so only the job that downloads the most should save it, and only on `main`, whose
+      caches every branch can read.
+    default: "false"
+  publishes:
+    description: >-
+      Whether the job publishes or signs what it builds, or runs Bazel with credentials that can
+      write. Such a job runs every action itself rather than take its result from the remote cache.
+    default: "false"
+runs:
+  using: "composite"
+  steps:
+    # setup-bazel writes the job's flags to the runner's `~/.bazelrc`, which Bazel reads after the
+    # workspace's `.bazelrc`. On its Linux and macOS runners, Blacksmith configures its remote cache
+    # in the system rc, which Bazel reads first, so that the workspace's `.bazelrc` can override it.
+    # Its Windows runners have none, so the Windows jobs run every action themselves.
+    #
+    # The GitHub cache keeps what the job downloads for Bazel: the Bazel release, and the repository
+    # cache, which holds the toolchains, crates and packages that the modules fetch. A job then
+    # doesn't download them again, and fails less often on a flaky download. The cache's name ends
+    # with a hash of the files that decide what Bazel downloads, so a change to one of them makes a
+    # new cache, and a job that finds none with its name restores the newest one of its platform.
+    # Bazel's outputs are too large for the GitHub cache, so they go in Blacksmith's Bazel cache.
+    - uses: metalbear-co/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
+      with:
+        bazelisk-version: 1.30.0
+        bazelisk-cache: true
+        repository-cache: |
+          - MODULE.bazel
+          - MODULE.bazel.lock
+          - "**/*.MODULE.bazel"
+          - Cargo.lock
+          - pnpm-lock.yaml
+          - "**/go.sum"
+          - "**/requirements.txt"
+        cache-save: ${{ inputs.cache-save }}
+        # - `--repo_contents_cache=` keeps the extracted repositories out of the repository cache,
+        #   where Bazel would put them, so that the GitHub cache only holds downloads. The extracted
+        #   repositories are several times their size, and a job on a new machine extracts every
+        #   repository once either way.
+        # - On Windows, Bazel copies every file into a runfiles directory, unless it may create
+        #   symlinks, which takes Developer Mode or admin rights. GitHub's and Blacksmith's Windows
+        #   runners run jobs as admin, so they get symlinks, which take less time and disk space
+        #   than copies of large files like the layer and the CLI. Other platforms ignore the flag.
+        # - Pull request jobs write to the remote cache that every job reads, so a result in it can
+        #   come from a pull request's code. A job that publishes runs every action itself, so that
+        #   what it publishes only comes from the commit that it checked out. It still uploads its
+        #   results for other jobs.
+        bazelrc: |
+          common --config=ci
+          common --repo_contents_cache=
+          startup --windows_enable_symlinks
+          ${{ inputs.publishes == 'true' && 'common --noremote_accept_cached' || '' }}

@@ -1,0 +1,49 @@
+#![cfg(test)]
+
+mod env_tests {
+
+    use mirrord_test_utils::run_command::run_exec_with_target;
+    use rstest::*;
+
+    use crate::utils::{
+        application::{env::EnvApp, GoVersion},
+        kube_service::KubeService,
+        services::basic_service,
+    };
+
+    #[cfg_attr(target_os = "windows", ignore)]
+    #[rstest]
+    #[tokio::test]
+    pub async fn bash_remote_env_vars(
+        #[future] basic_service: KubeService,
+        #[values(EnvApp::BashInclude, EnvApp::BashExclude, EnvApp::Bash)] application: EnvApp,
+    ) {
+        remote_env_vars_works(basic_service, application).await;
+    }
+
+    #[rstest]
+    #[tokio::test]
+    pub async fn remote_env_vars_works(
+        #[future] basic_service: KubeService,
+        #[values(
+            EnvApp::Go(GoVersion::GO_1_25),
+            EnvApp::Go(GoVersion::GO_1_26),
+            EnvApp::Go(GoVersion::GO_1_27),
+            EnvApp::NodeInclude,
+            EnvApp::NodeExclude
+        )]
+        application: EnvApp,
+    ) {
+        let service = basic_service.await;
+        let mut process = run_exec_with_target(
+            application.command(),
+            &service.pod_container_target(),
+            None,
+            application.mirrord_args(),
+            None,
+        )
+        .await;
+        let res = process.wait().await;
+        assert!(res.success());
+    }
+}

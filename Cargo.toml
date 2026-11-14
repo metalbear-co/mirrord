@@ -1,20 +1,25 @@
-# Cross compilable mirrord workspace
-# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
-# On Unix: Default cargo build will build the Unix-compatible crates
-# All platforms: mirrord/* in members ensures all crates are available for explicit builds
-# This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
+# The mirrord workspace. Every member builds on every platform: a crate that only works on some
+# platforms, like the agent or the layer, builds as an empty crate or program on the others. So a
+# plain `cargo build` or `cargo clippy` covers the whole workspace everywhere.
 [workspace]
 
 members = [
     "mirrord/*",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
+    # Cargo would find these through the path dependencies on them, but Bazel's `@cargo_packages`
+    # only reads this list.
+    "mirrord/config/derive",
+    "mirrord/intproxy/protocol",
+    "mirrord/layer/core",
+    "mirrord/layer/macro",
+    "mirrord/mcp/vendor",
     "mirrord/layer-tests/tests/apps/fileops",
     "mirrord/layer-tests/tests/apps/outgoing",
-    "mirrord/layer-tests/tests/apps/double_listen",
-    "mirrord/layer-tests/tests/apps/listen_ports",
-    "mirrord/layer-tests/tests/apps/dns_resolve",
-    "mirrord/layer-tests/tests/apps/recv_from",
+    "mirrord/layer-tests/tests/apps/double-listen",
+    "mirrord/layer-tests/tests/apps/listen-ports",
+    "mirrord/layer-tests/tests/apps/dns-resolve",
+    "mirrord/layer-tests/tests/apps/recv-from",
     "mirrord/layer-tests/tests/apps/issue1776",
     "mirrord/layer-tests/tests/apps/issue1776portnot53",
     "mirrord/layer-tests/tests/apps/issue1899",
@@ -22,33 +27,25 @@ members = [
     "mirrord/layer-tests/tests/apps/issue2438",
     "mirrord/layer-tests/tests/apps/issue3248",
     "mirrord/layer-tests/tests/apps/rebind0",
-    "mirrord/layer-tests/tests/apps/dup_listen",
-    "mirrord/layer-tests/tests/apps/posix_spawn_shared_sockets",
+    "mirrord/layer-tests/tests/apps/dup-listen",
+    "mirrord/layer-tests/tests/apps/posix-spawn-shared-sockets",
+    "mirrord/tests/rust-e2e-fileops",
+    "mirrord/tests/rust-unix-socket-client",
+    "mirrord/tests/rust-bypassed-unix-socket",
+    "mirrord/tests/issue1317",
+    "mirrord/tests/rust-websockets",
+    "mirrord/tests/rust-sqs-printer",
+    "mirrord/tests/kafka-consumer",
+    "mirrord/tests/rust-access-denied-server",
+    "mirrord/sessions-manager/client",
+    "mirrord/sessions-manager/protocol",
     "sample/rust",
     "medschool",
-    "tests",
-    "test-utils",
-    "tests/rust-e2e-fileops",
-    "tests/rust-unix-socket-client",
-    "tests/rust-bypassed-unix-socket",
-    "tests/issue1317",
-    "tests/rust-websockets",
-    "tests/rust-sqs-printer",
-    "tests/kafka-consumer",
-    "tests/rust-access-denied-server",
-    "xtask",
-    "mirrord/sessions-manager/client",
-    "mirrord/sessions-manager/protocol",
+    # Bazel's test runner (see `//bazel:nextest.bzl`). It's a member so that it takes its
+    # dependencies from this workspace, like the other crates.
+    "bazel/nextest-runner",
 ]
 
-default-members = [
-    "mirrord/*",
-    "mirrord/agent/env",
-    "mirrord/agent/iptables",
-    "xtask",
-    "mirrord/sessions-manager/client",
-    "mirrord/sessions-manager/protocol",
-]
 exclude = [
     "mirrord/sessions-manager",
 ]
@@ -129,7 +126,6 @@ containerd-client = "0.9"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 ctor = "0.2"
 derive_more = "2.0.1"
-dirs = "6"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
@@ -252,8 +248,16 @@ rmcp = { version = "3.5", default-features = false, features = [
     "server",
     "transport-io",
 ] }
-rstest = { version = "0.23", default-features = false, features = ["crate-name"] }
-rust-embed = "8"
+# Without `crate-name`, which makes rstest's macros read the package's `Cargo.toml` when they
+# expand. No package renames `rstest`, and Bazel's compile actions don't have the manifests.
+rstest = { version = "0.23", default-features = false }
+# `interpolate-folder-path` lets the CLI take the UI's folder from `MIRRORD_BUNDLED_UI`.
+# `deterministic-timestamps` embeds a fixed modification time for each file rather than the one on
+# disk, so that the CLI's bytes don't depend on when the UI was built.
+rust-embed = { version = "8", features = [
+    "deterministic-timestamps",
+    "interpolate-folder-path",
+] }
 rustls = "0.23"
 rustls-pemfile = "2"
 schemars = { version = "1.0" }
@@ -360,7 +364,10 @@ yamlpath = "0.32.0"
 private_intra_doc_links = "allow"
 
 [workspace.lints.clippy]
-"str_to_string" = "warn"
+# Indexing and slicing panic when the index is out of bounds, so the code uses methods like `get`,
+# which make it handle that case.
+indexing_slicing = "warn"
+str_to_string = "warn"
 
 [profile.release]
 strip = "debuginfo"

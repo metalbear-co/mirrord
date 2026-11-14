@@ -433,6 +433,16 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     OperatorStatusNotFound,
 
+    #[error(
+        "This mirrord binary has no layer: it was built with an empty placeholder in its place"
+    )]
+    #[diagnostic(help(
+        "A plain `cargo build` embeds an empty placeholder for the layer (see `.cargo/config.toml`). \
+        Build the CLI with `bazel build //mirrord/cli:cli_standalone`, which builds the layer and \
+        embeds it, or point `MIRRORD_LAYER_FILE` at a layer that you built."
+    ))]
+    EmptyBundledLayer,
+
     #[error("Failed to extract mirrord-layer to `{0}`: {1}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     LayerExtractError(PathBuf, std::io::Error),

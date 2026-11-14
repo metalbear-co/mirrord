@@ -4,8 +4,9 @@ slow-timeout = { period = "1m", terminate-after = 3 }
 failure-output = "immediate-final"
 final-status-level = "fail"
 # The `operator_install` tests install the cluster-wide operator, which the sessions of all other
-# e2e tests would use. So only the `operator-install` profile runs them.
-default-filter = "not (package(mirrord-tests) & test(/^operator_install::/))"
+# e2e tests would use. So only the `operator-install` profile runs them. The `traffic::ipv6` tests
+# need a cluster that only has IPv6 addresses, so only the `ipv6` profile runs them.
+default-filter = "not (package(mirrord-tests) & (test(/^operator_install::/) | test(/^traffic::ipv6::/)))"
 
 [[profile.default.overrides]]
 filter = "package(mirrord-tests)"
@@ -18,3 +19,23 @@ path = "junit.xml"
 default-filter = "package(mirrord-tests) & test(/^operator_install::/)"
 # Each test installs the cluster-wide operator, so they must not run at the same time.
 test-threads = 1
+
+# The `dirty_iptables` tests start their target with an init container that runs `iptables-legacy`,
+# which needs the kernel's legacy iptables tables. Some kernels leave them out, and there the tests
+# wait for a pod that never starts until they time out. Bazel's `//mirrord/tests:e2e` runs
+# `without-dirty-iptables`, and `//mirrord/tests:e2e_dirty_iptables` runs `dirty-iptables`.
+[profile.without-dirty-iptables]
+default-filter = "not (package(mirrord-tests) & (test(/^operator_install::/) | test(/^traffic::ipv6::/) | test(/^dirty_iptables::/)))"
+
+[profile.dirty-iptables]
+default-filter = "package(mirrord-tests) & test(/^dirty_iptables::/)"
+
+[profile.ipv6]
+default-filter = "package(mirrord-tests) & test(/^traffic::ipv6::/)"
+test-threads = 1
+
+# The profile that CI's tests run with (see `.bazelrc`). It runs every test of a target, rather than
+# stop at the first failing one, so that one run reports every failure. A target that passes its own
+# `--profile`, like the end-to-end ones, keeps its profile.
+[profile.ci]
+fail-fast = false

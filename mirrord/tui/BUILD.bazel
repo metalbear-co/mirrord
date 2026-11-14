@@ -1,0 +1,33 @@
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//bazel:rust.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_library(
+    name = "tui",
+    compile_data = [
+        "resources/logo-big",
+        "resources/logo-small",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    compile_data = ["src/screens/targets/testdata/mirrord-up-example.yaml"],
+    crate = ":tui",
+)
+
+rust_binary(
+    name = "mirrord-tui",
+    # Cargo only documents the library of a package that has both.
+    doc = False,
+    deps = [":tui"],
+)
+
+# The test runs the binary, which it finds by its runfiles path in `MIRRORD_TUI_FILE`.
+rust_test(
+    name = "smoke",
+    data = [":mirrord-tui"],
+    env = {"MIRRORD_TUI_FILE": "$(rlocationpath :mirrord-tui)"},
+    target_compatible_with = UNIX_ONLY,
+    deps = [":tui"],
+)

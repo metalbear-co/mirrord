@@ -1,0 +1,5 @@
+# Directories that globs skip, and that Bazel doesn't look for packages in. pnpm installs packages
+# into `node_modules/` directories, which rules_js requires Bazel to ignore, because it lays out the
+# packages itself (see `//:node_modules`). Cargo's `target/` is in `.bazelignore`, because the walk
+# of `//...` still enters directories that are only listed here.
+ignore_directories(["**/node_modules"])

@@ -8,7 +8,7 @@
 //! then opens a remote file. When the connection is on one of these fds, the layer loses it, and
 //! the remote `open` never reaches the internal proxy.
 
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use mirrord_intproxy_protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage};
 use mirrord_layer_tests::fake_intproxy::FakeIntProxy;
@@ -38,7 +38,7 @@ async fn app_reuses_low_fds() {
             ("MIRRORD_FILE_READ_WRITE_PATTERN", "^/mirrord-test/"),
         ],
     );
-    let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/apps/low_fd_reuse.py");
+    let app_path = common::manifest_dir().join("tests/apps/low_fd_reuse.py");
     let application = Application::DynamicApp(
         Application::get_python3_executable().await,
         vec!["-u".to_owned(), app_path.to_string_lossy().into_owned()],

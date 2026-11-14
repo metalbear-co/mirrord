@@ -1,0 +1,2 @@
+# The patch that `MODULE.bazel` applies to the `librdkafka` module. The package exists so that
+# `MODULE.bazel` can name the patch with a label.

@@ -8,23 +8,25 @@ whole runtime on that thread. This script checks two things, on patched copies o
 mirrord.exe (the original is never touched):
 
   1. The overflow report works: with a stack far too small, the CLI must overflow and print its
-     report, every frame named and sized (`utils_win::diagnostics::stack`). The report is echoed,
-     so a CI log shows what a real one looks like.
+     report, every frame named and sized (`mirrord_utils_win::diagnostics::stack`). The report is
+     echoed, so a CI log shows what a real one looks like.
   2. The CLI fits its budget: with the stack cut to -Budget, offline runs must finish without an
      overflow. When one does overflow, the report above the failure names the frames that grew.
 
 The copies sit next to the original, so the report finds the same PDB.
 
 .EXAMPLE
-.\scripts\win_stack_check.ps1 -Exe target\debug\mirrord.exe
+# The PDB is in an output group that Bazel only builds when it's asked for.
+bazel build //mirrord/cli:cli_standalone --output_groups=+pdb_file
+.\scripts\win_stack_check.ps1 -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$Exe,
 
-    # The stack the CLI must fit in. Kept well under what build.rs links, so growth shows up here
-    # before it reaches a user.
+    # The stack the CLI must fit in. Kept well under what `mirrord/cli/BUILD.bazel` links, so growth
+    # shows up here before it reaches a user.
     [long]$Budget = 1MB,
 
     # Small enough that any build overflows, to exercise the report.
@@ -65,6 +67,8 @@ function ConvertTo-CommandLineArgument([string]$Argument) {
 function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
     $copy = Join-Path $dir ("mirrord-stack-{0}k.exe" -f ($Stack / 1KB))
     Copy-Item $Exe $copy -Force
+    # Bazel's outputs are read-only, and the copy keeps that attribute, so editbin couldn't change it.
+    (Get-Item $copy).IsReadOnly = $false
     & $editbin /nologo "/STACK:$Stack" $copy | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "editbin failed with exit code $LASTEXITCODE" }
 

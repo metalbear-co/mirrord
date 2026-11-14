@@ -1,0 +1,69 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:compatibility.bzl", "WINDOWS_ONLY")
+load("//bazel:rust.bzl", "rust_binary", "rust_library", "rust_test")
+
+# The library isn't marked incompatible with other platforms, even though only Windows builds use
+# it (see `//bazel:compatibility.bzl`).
+rust_library(
+    name = "utils-win",
+    link_deps = select({
+        "@platforms//os:windows": [":logo"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# The logo's resource, compiled into a `.res` file by the toolchain's `llvm-windres`.
+#
+# The resource is a `.res` file rather than a COFF object because `lld-link` takes a binary's
+# resources either from `.res` files or from a single object, never from both. The workspace's
+# programs for MSVC embed an application manifest (see `//bazel:rust.bzl`), which `lld-link` turns
+# into a resource of its own, so a logo in an object would fail their links.
+run_binary(
+    name = "logo_res",
+    srcs = [
+        "src/diagnostics/logo.bmp",
+        "src/diagnostics/logo.rc",
+    ],
+    outs = ["logo.res"],
+    args = [
+        "--no-preprocess",
+        "--output-format=res",
+        "--input=$(execpath src/diagnostics/logo.rc)",
+        "--output=$(execpath logo.res)",
+    ],
+    target_compatible_with = WINDOWS_ONLY,
+    tool = "@llvm//tools:llvm-windres",
+)
+
+# Passes the `.res` file to the link of every binary that depends on the library. The linker
+# recognizes the file by its contents, and links every `.res` file that it's given.
+cc_library(
+    name = "logo",
+    additional_linker_inputs = [":logo_res"],
+    linkopts = ["$(execpath :logo_res)"],
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":utils-win",
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+# The examples that show the crash dialog, which `bazel run //mirrord/utils-win:<example>` runs.
+[
+    rust_binary(
+        name = example,
+        srcs = ["examples/{}.rs".format(example)],
+        crate_name = example,
+        doc = False,
+        target_compatible_with = WINDOWS_ONLY,
+        deps = [":utils-win"],
+    )
+    for example in [
+        "preview_dialog",
+        "preview_scenarios",
+    ]
+]

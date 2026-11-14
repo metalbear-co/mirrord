@@ -1,0 +1,18 @@
+load("//bazel:rust.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_library(
+    name = "console",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "unit_tests",
+    crate = ":console",
+)
+
+rust_binary(
+    name = "mirrord-console",
+    # Cargo only documents the library of a package that has both.
+    doc = False,
+    deps = [":console"],
+)
