@@ -1,10 +1,11 @@
-#[cfg(not(target_os = "windows"))]
-use std::path::PathBuf;
 use std::time::Duration;
 
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use thiserror::Error;
+
+#[cfg(not(target_os = "windows"))]
+use crate::ci::stop::StopTarget;
 
 #[derive(Error, Debug, Diagnostic)]
 pub(crate) enum CiError {
@@ -43,35 +44,21 @@ pub(crate) enum CiError {
     ))]
     SessionLocked { timeout: Duration },
 
-    /// Lists every session that `mirrord ci stop` could not stop, with the reason, including the
-    /// sessions it skipped because another mirrord process held their lock. Without interactive
-    /// progress output, as in a CI log, this error is all that the user sees of the stop.
+    /// Lists each process, process group, and container that `mirrord ci stop` could not stop,
+    /// and each session whose lock or state it could not open, read, write, or remove, with the
+    /// reason. The stop prints no other report of these failures, so the user needs the pids and
+    /// container ids here to find what is still running.
     #[cfg(not(target_os = "windows"))]
     #[error(
-        "`mirrord ci stop` stopped {} of the {total} mirrord ci sessions it found, and could not \
-         stop these:{}{}",
-        .total - .failures.len() - .skipped.len(),
+        "`mirrord ci stop` failed on these:{}",
         .failures
             .iter()
-            .map(|(session_dir, error)| format!("\n- {}: {error}", session_dir.display()))
-            .collect::<String>(),
-        .skipped
-            .iter()
-            .map(|session_dir| format!(
-                "\n- {}: skipped, another mirrord process held the session's lock; run \
-                 `mirrord ci stop` again once that process is done",
-                session_dir.display()
-            ))
+            .map(|(target, error)| format!("\n- {target}: {error}"))
             .collect::<String>()
     )]
-    #[diagnostic(help(
-        "Run `mirrord ci stop` again to retry the sessions that it could not stop."
-    ))]
-    SessionsNotStopped {
-        total: usize,
-        failures: Vec<(PathBuf, CiError)>,
-        /// Sessions whose lock another mirrord process held, so the stop left them alone.
-        skipped: Vec<PathBuf>,
+    #[diagnostic(help("Fix the reasons above, then run `mirrord ci stop` again to retry them."))]
+    TargetsNotStopped {
+        failures: Vec<(StopTarget, CiError)>,
     },
 
     #[error(

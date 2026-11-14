@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::{
     collections::HashSet,
+    fmt,
     ops::Not,
     path::{Path, PathBuf},
     time::Duration,
@@ -33,7 +34,7 @@ use crate::ci::{MirrordCiManagedContainer, MirrordCiStore};
 /// `npm` exits without taking down the server child that actually holds the port.
 #[cfg(not(target_os = "windows"))]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum TerminationTarget {
+pub(crate) enum TerminationTarget {
     /// Signaled with [`kill`], used for the proxies and sidecars we spawn ourselves.
     Process(Pid),
 
@@ -69,6 +70,46 @@ impl TerminationTarget {
     }
 }
 
+/// Something that `mirrord ci stop` could not stop, as [`CiError::TargetsNotStopped`] lists it:
+/// a [`TerminationTarget`] that it could not signal, a container that it could not remove, or a
+/// session that it could not finish.
+///
+/// The user needs the pid, process group, or container id to find what is still running.
+#[cfg(not(target_os = "windows"))]
+#[derive(Debug)]
+pub(crate) enum StopTarget {
+    /// A process or process group, which the stop signals.
+    Signaled(TerminationTarget),
+
+    /// A sidecar container, which the stop removes with its runtime.
+    Container(MirrordCiManagedContainer),
+
+    /// A session whose lock or state the stop could not open, read, write, or remove. When it
+    /// can't read the state, it can't tell which of the session's targets are still running.
+    Session(PathBuf),
+}
+
+#[cfg(not(target_os = "windows"))]
+impl fmt::Display for StopTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Signaled(TerminationTarget::Process(pid)) => write!(f, "process {pid}"),
+            Self::Signaled(TerminationTarget::ProcessGroup(pgid)) => {
+                write!(f, "process group {pgid}")
+            }
+            Self::Container(container) => write!(
+                f,
+                "{} container {}",
+                container.runtime.command(),
+                container.container_id
+            ),
+            Self::Session(session_dir) => {
+                write!(f, "state of the session in {}", session_dir.display())
+            }
+        }
+    }
+}
+
 /// Asks intproxy to shut down its registered layers, and kills other targets once.
 ///
 /// Intproxy completes registration quiescence after receiving `SIGTERM`; `ci stop` does not wait
@@ -94,11 +135,13 @@ fn terminate_targets(
 impl MirrordCiStore {
     /// Successful signal attempts are removed from the retry ledger so a later stop cannot
     /// re-signal their numeric IDs merely because an unrelated cleanup operation failed.
+    ///
+    /// Returns the targets that could not be signalled, with the reason.
     fn record_signal_results(
         &mut self,
         results: Vec<(TerminationTarget, CiResult<()>)>,
-    ) -> Option<CiError> {
-        let mut first_error = None;
+    ) -> Vec<(TerminationTarget, CiError)> {
+        let mut failures = Vec::new();
         for (target, result) in results {
             match result {
                 Ok(()) => match target {
@@ -112,19 +155,18 @@ impl MirrordCiStore {
                         self.user_process_groups.remove(&(pgid.as_raw() as u32));
                     }
                 },
-                Err(error) => {
-                    first_error.get_or_insert(error);
-                }
+                Err(error) => failures.push((target, error)),
             }
         }
-        first_error
+        failures
     }
 
-    /// Attempts every cleanup action even if one fails, leaving only failed targets for retry.
+    /// Attempts every cleanup action even if one fails, leaving only failed targets for retry, and
+    /// fails with every target that it could not stop.
     async fn terminate_with<Remove, Removal>(
         &mut self,
         mut remove_container: Remove,
-    ) -> CiResult<()>
+    ) -> Result<(), Vec<(StopTarget, CiError)>>
     where
         Remove: FnMut(MirrordCiManagedContainer) -> Removal,
         Removal: Future<Output = CiResult<()>>,
@@ -151,8 +193,11 @@ impl MirrordCiStore {
         // A PID recorded under two roles still belongs to intproxy's graceful shutdown path.
         other_targets.retain(|target| !intproxy_targets.contains(target));
 
-        let mut first_error =
-            self.record_signal_results(terminate_targets(intproxy_targets, other_targets));
+        let mut failures = self
+            .record_signal_results(terminate_targets(intproxy_targets, other_targets))
+            .into_iter()
+            .map(|(target, error)| (StopTarget::Signaled(target), error))
+            .collect::<Vec<_>>();
         let containers = std::mem::take(&mut self.sidecar_containers);
         let removals = stream::iter(containers)
             .then(|container| {
@@ -163,14 +208,15 @@ impl MirrordCiStore {
             .await;
         for (container, result) in removals {
             if let Err(error) = result {
-                self.sidecar_containers.insert(container);
-                first_error.get_or_insert(error);
+                self.sidecar_containers.insert(container.clone());
+                failures.push((StopTarget::Container(container), error));
             }
         }
 
-        match first_error {
-            Some(error) => Err(error),
-            None => Ok(()),
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures)
         }
     }
 }
@@ -256,11 +302,12 @@ impl CiStopCommandHandler {
     /// so a wait could hold up this stop for that long per session. When parallel CI jobs on one
     /// runner each run `mirrord ci stop` in their teardown, one stop therefore skips the sessions
     /// that the other is stopping, rather than waiting for them. The skipped sessions are named in
-    /// a warning, and the stop still succeeds; running it again is up to the user.
+    /// a warning, and skipping alone doesn't fail the stop; running it again is up to the user.
     ///
-    /// A session that fails is reported and left for a later stop, and the stop goes on with the
-    /// other sessions. It then fails with [`CiError::SessionsNotStopped`], which lists the
-    /// sessions it could not stop, the skipped ones included.
+    /// What a session fails to stop is left for a later stop, and the stop goes on with the other
+    /// sessions. It then fails with [`CiError::TargetsNotStopped`], which lists the processes,
+    /// process groups, and containers that it could not stop, and the sessions whose lock or state
+    /// it could not open, read, write, or remove.
     #[cfg(not(target_os = "windows"))]
     async fn handle_with<Remove, Removal>(self, mut remove_container: Remove) -> CiResult<()>
     where
@@ -272,31 +319,15 @@ impl CiStopCommandHandler {
             sessions_dir,
         } = self;
 
-        let session_dirs = Self::session_dirs(&sessions_dir).await?;
-        let total = session_dirs.len();
         let mut found_targets = false;
         let mut failures = Vec::new();
         let mut skipped = Vec::new();
-        for session_dir in session_dirs {
-            match Self::stop_session(&session_dir, &mut remove_container).await {
+        for session_dir in Self::session_dirs(&sessions_dir).await? {
+            match Self::stop_session(&session_dir, &mut remove_container, &mut failures).await {
                 Ok(had_targets) => found_targets |= had_targets,
                 Err(CiError::SessionLocked { .. }) => skipped.push(session_dir),
-                Err(error) => {
-                    progress.warning(&format!(
-                        "could not stop the mirrord ci session in {}: {error}",
-                        session_dir.display()
-                    ));
-                    failures.push((session_dir, error));
-                }
+                Err(error) => failures.push((StopTarget::Session(session_dir), error)),
             }
-        }
-
-        if failures.is_empty().not() {
-            return Err(CiError::SessionsNotStopped {
-                total,
-                failures,
-                skipped,
-            });
         }
 
         if skipped.is_empty().not() {
@@ -309,18 +340,22 @@ impl CiStopCommandHandler {
                     .map(|session_dir| format!("\n- {}", session_dir.display()))
                     .collect::<String>()
             );
-            // The spinner (`line_mode` is `None`) shows a warning only on a terminal, but it prints
-            // its print buffer everywhere, so a CI log shows the warning too.
-            match progress.line_mode() {
-                Some(_) => progress.warning(&warning),
-                None => progress.add_to_print_buffer(&warning),
+            // The spinner shows a warning only on a terminal, and prints its print buffer only when
+            // the task succeeds, so a CI log would miss the warning of a stop that also fails.
+            // Every other tracker prints it as it prints its other warnings, which with
+            // `MIRRORD_PROGRESS_MODE=off` means not at all.
+            match &progress {
+                ProgressTracker::SpinnerProgress(_) => progress.suspend(|| eprintln!("{warning}")),
+                _ => progress.warning(&warning),
             }
-            progress.success(None);
-            return Ok(());
+        }
+
+        if failures.is_empty().not() {
+            return Err(CiError::TargetsNotStopped { failures });
         }
 
         // If `ci stop` is issued multiple time, we should exit with success status.
-        if found_targets.not() {
+        if found_targets.not() && skipped.is_empty() {
             progress.success(Some(
                 "No mirrord ci processes found. \
                 You can also manually stop mirrord by searching for the pids with \
@@ -360,10 +395,11 @@ impl CiStopCommandHandler {
     }
 
     /// Stops the session in `session_dir` if its lock is free, and returns whether it had anything
-    /// to stop.
+    /// to stop. Adds each target that it could not stop to `failures`.
     ///
     /// Fails with [`CiError::SessionLocked`] right away, without waiting, if another process holds
-    /// the lock, so that [`Self::handle_with`] can skip the session.
+    /// the lock, so that [`Self::handle_with`] can skip the session. Any other error means that
+    /// the session's lock or state could not be opened, read, written, or removed.
     ///
     /// Holds the lock from before it reads the state until it writes the state back or removes the
     /// session, so that no process of the session can write the state in between. Such a write
@@ -376,6 +412,7 @@ impl CiStopCommandHandler {
     async fn stop_session<Remove, Removal>(
         session_dir: &Path,
         remove_container: Remove,
+        failures: &mut Vec<(StopTarget, CiError)>,
     ) -> CiResult<bool>
     where
         Remove: FnMut(MirrordCiManagedContainer) -> Removal,
@@ -390,13 +427,14 @@ impl CiStopCommandHandler {
                 .await?;
         let had_targets = store.is_empty().not();
 
-        let cleanup_result = store.terminate_with(remove_container).await;
+        if let Err(not_stopped) = store.terminate_with(remove_container).await {
+            failures.extend(not_stopped);
+        }
         if store.is_empty() {
             MirrordCiStore::remove_session(session_dir, &lock).await?;
         } else {
             store.write_locked(session_dir, &lock).await?;
         }
-        cleanup_result?;
 
         Ok(had_targets)
     }
@@ -427,7 +465,7 @@ mod tests {
         time::timeout,
     };
 
-    use super::{CiStopCommandHandler, TerminationTarget, runtime_remove_container};
+    use super::{CiStopCommandHandler, StopTarget, TerminationTarget, runtime_remove_container};
     use crate::ci::{
         CiError, MirrordCiManagedContainer, MirrordCiStore, spawn_background_user_command,
     };
@@ -836,8 +874,11 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            CiError::SessionsNotStopped { failures, .. }
-                if matches!(failures.as_slice(), [(_, CiError::IO(_))])
+            CiError::TargetsNotStopped { failures }
+                if matches!(
+                    failures.as_slice(),
+                    [(StopTarget::Container(failed), CiError::IO(_))] if *failed == container
+                )
         ));
         timeout(Duration::from_secs(5), child.wait())
             .await
@@ -866,7 +907,7 @@ mod tests {
         store.extproxy_pids.insert(111);
         store.sidecar_pids.insert(222);
         store.user_process_groups.insert(333);
-        let error = store.record_signal_results(vec![
+        let failures = store.record_signal_results(vec![
             (TerminationTarget::process(111), Ok(())),
             (
                 TerminationTarget::process(222),
@@ -874,7 +915,10 @@ mod tests {
             ),
             (TerminationTarget::process_group(333), Ok(())),
         ]);
-        assert!(matches!(error, Some(CiError::IO(_))));
+        assert!(matches!(
+            failures.as_slice(),
+            [(target, CiError::IO(_))] if *target == TerminationTarget::process(222)
+        ));
         assert!(store.intproxy_pids.is_empty());
         assert!(store.extproxy_pids.is_empty());
         assert_eq!(store.sidecar_pids, HashSet::from([222]));
