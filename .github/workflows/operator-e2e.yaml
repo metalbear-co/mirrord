@@ -10,10 +10,10 @@ name: Operator E2E Test
 # when commits are pushed to those branches in `metalbear-co/mirrord`, so fork
 # PRs do not trigger this workflow.
 #
-# `OPERATOR_E2E_PAT` requirements for the remote operator workflow:
-# - Classic PAT: `repo`
-# - Fine-grained PAT:
-#   - `metalbear-co/operator`: `Actions: read` and `Actions: write`
+# The remote operator workflow is dispatched and polled with Cubby app tokens
+# scoped to `metalbear-co/operator` (`Actions: write` to dispatch, `Actions:
+# read` to poll). App tokens expire after one hour, so a fresh one is minted
+# before waiting on the run, and both timeouts stay under an hour.
 #
 # Automatic runs only proceed when the pushed branch matches
 # `releases/<major>.<minor>.<patch>`.
@@ -70,14 +70,22 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     continue-on-error: true
     steps:
+      - name: Create GitHub App token (operator repo, dispatch)
+        id: dispatch-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: operator
+          permission-actions: write
+
       - name: Trigger operator E2E workflow and wait for completion
         id: trigger-e2e
-        uses: metalbear-co/return-dispatch@main
+        uses: metalbear-co/return-dispatch@dac7338c24ea3a5c470ba13f9c3425537afa3439 # main
         continue-on-error: true
         with:
-          # This PAT is only used to dispatch the workflow in
-          # `metalbear-co/operator`.
-          token: ${{ secrets.OPERATOR_E2E_PAT }}
+          token: ${{ steps.dispatch-token.outputs.token }}
           ref: ${{ needs.resolve_trigger_context.outputs.operator_branch }}
           repo: operator
           owner: metalbear-co
@@ -87,7 +95,7 @@ jobs:
               "mirrord_commit": "${{ needs.resolve_trigger_context.outputs.mirrord_commit }}",
               "mirrord_branch": "${{ needs.resolve_trigger_context.outputs.mirrord_branch }}"
             }
-          workflow_timeout_seconds: 7200
+          workflow_timeout_seconds: 3300
           workflow_job_steps_retry_seconds: 30
 
       - name: Use the output run ID and URL
@@ -95,16 +103,25 @@ jobs:
           echo ${{steps.trigger-e2e.outputs.run_id}}
           echo ${{steps.trigger-e2e.outputs.run_url}}
 
-      - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
-        uses: metalbear-co/await-remote-run@main
+      # Minted after the dispatch so the full hour is available while waiting.
+      - name: Create GitHub App token (operator repo, await)
+        id: await-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         with:
-          # This PAT is only used to read workflow runs in
-          # `metalbear-co/operator`.
-          token: ${{ secrets.OPERATOR_E2E_PAT }}
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: operator
+          permission-actions: read
+
+      - name: Await Run ID ${{ steps.trigger-e2e.outputs.run_id }}
+        uses: metalbear-co/await-remote-run@1fef79c6a9f061b4acf1773834285709fa4a7d5f # main
+        with:
+          token: ${{ steps.await-token.outputs.token }}
           repo: operator
           owner: metalbear-co
           run_id: ${{ steps.trigger-e2e.outputs.run_id }}
-          run_timeout_seconds: 7200 # Optional
+          run_timeout_seconds: 3300 # Optional
           poll_interval_ms: 5000 # Optional
 
       - name: Show operator E2E results
