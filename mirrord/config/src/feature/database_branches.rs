@@ -1621,7 +1621,8 @@ impl ConnectionParamsVars {
 ///
 /// The timeout in seconds to wait for a database branch to become ready after creation.
 /// Defaults to 60 seconds. Adjust this value based on your database size and cluster
-/// performance.
+/// performance. While the operator builds or pulls the copy-on-write snapshot a branch starts
+/// from, mirrord keeps waiting past this timeout, which starts over for the rest of the start.
 ///
 /// #### feature.db_branches[].version (type: mysql, mariadb, pg, mongodb, mssql, redis) {#feature-db_branches-sql-version}
 ///

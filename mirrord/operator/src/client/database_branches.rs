@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     iter,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -42,8 +43,9 @@ use crate::{
             TurbopufferOptions,
         },
         core::{
-            BranchDatabasePhase, ConnectionParamsSpec, ConnectionSource as CrdConnectionSource,
-            IamAuthConfig as CrdIamAuthConfig, MigrationPhase,
+            BranchDatabasePhase, BranchDatabaseStatus, ConnectionParamsSpec,
+            ConnectionSource as CrdConnectionSource, IamAuthConfig as CrdIamAuthConfig,
+            MigrationPhase,
         },
         mongodb::{MongodbBranchDatabase, MongodbBranchDatabaseSpec},
         mysql::{MysqlBranchDatabase, MysqlBranchDatabaseSpec},
@@ -1229,27 +1231,21 @@ pub async fn create_branches<P: Progress>(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let snapshot_waits = SnapshotWaits::default();
     let ready_or_failed = branch_names
         .iter()
-        .map(|name| {
-            await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
-                db.and_then(|db| {
-                    db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhase::Ready
-                            || status.phase == BranchDatabasePhase::Failed
-                    })
-                })
-                .unwrap_or(false)
-            })
-        })
+        .map(|name| await_settled(api.clone(), name.clone(), snapshot_waits.clone()))
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    let results = tokio::time::timeout(timeout, futures::future::join_all(ready_or_failed))
-        .await
-        .map_err(|_| OperatorApiError::OperationTimeout {
-            operation: OperatorOperation::DbBranching,
-        })?;
+    let results = wait_allowing_snapshot_builds(
+        &snapshot_waits,
+        timeout,
+        &mut subtask,
+        settle_all(ready_or_failed),
+    )
+    .await?
+    .map_err(|failed| failed_branch(&failed))?;
 
     for result in results {
         let Ok(Some(db)) = result else {
@@ -1283,6 +1279,209 @@ pub async fn create_branches<P: Progress>(
     }
 
     Ok(outcome)
+}
+
+/// How often a session past its creation timeout checks whether a snapshot still holds one of
+/// its branches up.
+const SNAPSHOT_RECHECK: Duration = Duration::from_secs(15);
+
+/// The branches whose latest status says they wait for a copy-on-write snapshot, as the watches
+/// in [`await_settled`] saw them, and when the latest such wait ended.
+#[derive(Clone, Default)]
+struct SnapshotWaits {
+    state: Arc<Mutex<SnapshotWaitsState>>,
+    /// Told when a branch's wait ends, so that the timeout is counted from then at once.
+    ended: Arc<tokio::sync::Notify>,
+}
+
+#[derive(Default)]
+struct SnapshotWaitsState {
+    waiting: HashSet<String>,
+    ended: Option<tokio::time::Instant>,
+    /// What each branch that is not ready yet says it waits for: the message of its `Ready`
+    /// condition.
+    unready: HashMap<String, String>,
+}
+
+impl SnapshotWaits {
+    /// Records the latest status of the branch `name`: whether it waits for a snapshot, and
+    /// what it says it waits for while it is not ready, if anything.
+    fn state(&self) -> std::sync::MutexGuard<'_, SnapshotWaitsState> {
+        // Only the methods here take the lock, and none of them can panic while holding it:
+        // they insert into and remove from the maps and read a field. So it is never poisoned.
+        self.state.lock().expect("never poisoned")
+    }
+
+    fn record(&self, name: &str, waits: bool, unready: Option<&str>) {
+        let mut state = self.state();
+        match unready {
+            Some(message) => state.unready.insert(name.to_owned(), message.to_owned()),
+            None => state.unready.remove(name),
+        };
+        if waits {
+            state.waiting.insert(name.to_owned());
+        } else if state.waiting.remove(name) {
+            state.ended = Some(tokio::time::Instant::now());
+            self.ended.notify_one();
+        }
+    }
+
+    /// Drops what was recorded of the branch `name`, whose watch ended without it settling:
+    /// nothing would update its record anymore.
+    fn forget(&self, name: &str) {
+        self.record(name, false, None);
+    }
+
+    fn any(&self) -> bool {
+        !self.state().waiting.is_empty()
+    }
+
+    /// When the latest wait of any branch for its snapshot ended, if one did.
+    fn ended(&self) -> Option<tokio::time::Instant> {
+        self.state().ended
+    }
+
+    /// The branches that are not ready, each with what it says it waits for, by name.
+    fn unready(&self) -> Vec<(String, String)> {
+        let state = self.state();
+        let mut unready: Vec<_> = state
+            .unready
+            .iter()
+            .map(|(name, message)| (name.clone(), message.clone()))
+            .collect();
+        unready.sort();
+        unready
+    }
+}
+
+/// Waits until the branch `name` is Ready or Failed, recording in `waits` whether it waits for
+/// a snapshot meanwhile.
+async fn await_settled(
+    api: Api<BranchDatabase>,
+    name: String,
+    waits: SnapshotWaits,
+) -> Result<Option<BranchDatabase>, kube::runtime::wait::Error> {
+    let recorded = name.clone();
+    let watched = waits.clone();
+    let result = await_condition(api, &name, move |db: Option<&BranchDatabase>| {
+        let status = db.and_then(|db| db.status.as_ref());
+        let settled = status.is_some_and(|status| {
+            status.phase == BranchDatabasePhase::Ready
+                || status.phase == BranchDatabasePhase::Failed
+        });
+        let unready = status
+            .filter(|_| !settled)
+            .and_then(|status| {
+                status
+                    .conditions
+                    .iter()
+                    .find(|condition| condition.type_ == "Ready")
+            })
+            .map(|condition| condition.message.as_str())
+            .filter(|message| !message.is_empty());
+        watched.record(
+            &recorded,
+            status.is_some_and(BranchDatabaseStatus::waits_for_snapshot),
+            unready,
+        );
+        settled
+    })
+    .await;
+    if result.is_err() {
+        waits.forget(&name);
+    }
+    result
+}
+
+/// Awaits every watch of `waits`, in their order, or only until one of them finds its branch
+/// failed: that fails the session whatever becomes of the others, which may still wait long
+/// for a snapshot.
+async fn settle_all<E>(
+    waits: Vec<impl std::future::Future<Output = Result<Option<BranchDatabase>, E>>>,
+) -> Result<Vec<Result<Option<BranchDatabase>, E>>, Box<BranchDatabase>> {
+    use futures::StreamExt;
+
+    let mut results: Vec<_> = waits.iter().map(|_| None).collect();
+    let mut pending: futures::stream::FuturesUnordered<_> = waits
+        .into_iter()
+        .enumerate()
+        .map(|(index, wait)| async move { (index, wait.await) })
+        .collect();
+    while let Some((index, result)) = pending.next().await {
+        if let Ok(Some(db)) = &result
+            && db
+                .status
+                .as_ref()
+                .is_some_and(|status| status.phase == BranchDatabasePhase::Failed)
+        {
+            return Err(Box::new(db.clone()));
+        }
+        if let Some(slot) = results.get_mut(index) {
+            *slot = Some(result);
+        }
+    }
+    Ok(results.into_iter().flatten().collect())
+}
+
+fn failed_branch(db: &BranchDatabase) -> OperatorApiError {
+    branch_failed_error(
+        OperatorOperation::DbBranching,
+        db,
+        db.status
+            .as_ref()
+            .and_then(|status| status.error.as_deref()),
+    )
+}
+
+/// Awaits `wait` for `timeout`, and after that for as long as any branch waits for its
+/// copy-on-write snapshot. The first branch of a configuration copies the source into the
+/// snapshot and then pulls it, which takes as long as the copy does; the creation timeout is
+/// sized for starting a branch, and would cut that off. What is left of the start once no
+/// branch waits anymore (migrations, say) gets the whole `timeout`, counted from the end of
+/// the last wait, however short that wait was.
+async fn wait_allowing_snapshot_builds<F: std::future::Future>(
+    waits: &SnapshotWaits,
+    timeout: Duration,
+    subtask: &mut impl Progress,
+    wait: F,
+) -> Result<F::Output, OperatorApiError> {
+    tokio::pin!(wait);
+    let mut deadline = tokio::time::Instant::now() + timeout;
+    let mut told = false;
+    loop {
+        tokio::select! {
+            output = &mut wait => return Ok(output),
+            () = tokio::time::sleep_until(deadline) => {}
+            // A wait that ended moves the deadline, maybe to before the next recheck.
+            () = waits.ended.notified() => {}
+        }
+        let now = tokio::time::Instant::now();
+        if waits.any() {
+            if now >= deadline {
+                if !told {
+                    subtask.info(
+                        "waiting for a copy-on-write snapshot of the source to be built or \
+                         pulled; later branches of this configuration start from it",
+                    );
+                    told = true;
+                }
+                deadline = now + SNAPSHOT_RECHECK;
+            }
+        } else if let Some(restarted) = waits.ended().map(|ended| ended + timeout)
+            && restarted > now
+        {
+            deadline = restarted;
+        } else if now >= deadline {
+            // The timeout alone says nothing about what held a branch up, and the operator
+            // may know: a node with no room for the branch's clone, say.
+            for (name, message) in waits.unready() {
+                subtask.warning(&format!("branch database `{name}` is not ready: {message}"));
+            }
+            return Err(OperatorApiError::OperationTimeout {
+                operation: OperatorOperation::DbBranching,
+            });
+        }
+    }
 }
 
 /// Condition type the operator sets to `False` on a branch whose source differs from it in a way
@@ -1493,27 +1692,21 @@ pub async fn wait_for_pending_branches<P: Progress>(
 
     let mut subtask = progress.subtask("waiting for in-progress branch databases");
 
+    let snapshot_waits = SnapshotWaits::default();
     let wait_futures = pending
         .keys()
-        .map(|name| {
-            await_condition(api.clone(), name, |db: Option<&BranchDatabase>| {
-                db.and_then(|db| {
-                    db.status.as_ref().map(|status| {
-                        status.phase == BranchDatabasePhase::Ready
-                            || status.phase == BranchDatabasePhase::Failed
-                    })
-                })
-                .unwrap_or(false)
-            })
-        })
+        .map(|name| await_settled(api.clone(), name.clone(), snapshot_waits.clone()))
         .collect::<Vec<_>>();
 
     subtask.info("waiting for readiness");
-    let results = tokio::time::timeout(timeout, futures::future::join_all(wait_futures))
-        .await
-        .map_err(|_| OperatorApiError::OperationTimeout {
-            operation: OperatorOperation::DbBranching,
-        })?;
+    let results = wait_allowing_snapshot_builds(
+        &snapshot_waits,
+        timeout,
+        &mut subtask,
+        settle_all(wait_futures),
+    )
+    .await?
+    .map_err(|failed| failed_branch(&failed))?;
 
     let mut ready_branches = HashMap::new();
     for (result, name) in results.into_iter().zip(pending.keys()) {
@@ -2842,6 +3035,80 @@ mod test {
             status,
         };
         (branch.name_any(), branch)
+    }
+
+    /// A snapshot wait that ends before the creation timeout still restarts it, from its end;
+    /// without one, the timeout stands.
+    #[tokio::test(start_paused = true)]
+    async fn creation_timeout_restarts_when_a_short_snapshot_wait_ends() {
+        let timeout = Duration::from_millis(300);
+        let start = async { tokio::time::sleep(Duration::from_millis(450)).await };
+
+        let waits = super::SnapshotWaits::default();
+        waits.record("branch", true, None);
+        let ending = waits.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            ending.record("branch", false, None);
+        });
+        super::wait_allowing_snapshot_builds(&waits, timeout, &mut NullProgress, start)
+            .await
+            .expect("the start fits the timeout counted from the end of the wait");
+
+        let start = async { tokio::time::sleep(Duration::from_millis(450)).await };
+        let result = super::wait_allowing_snapshot_builds(
+            &super::SnapshotWaits::default(),
+            timeout,
+            &mut NullProgress,
+            start,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(OperatorApiError::OperationTimeout { .. })
+        ));
+    }
+
+    /// A wait that ends after the timeout has passed is noticed then, not at the next recheck:
+    /// the start gets the timeout from the end of the wait and no longer.
+    #[tokio::test(start_paused = true)]
+    async fn creation_timeout_counts_from_the_end_of_a_wait_at_once() {
+        let timeout = Duration::from_secs(5);
+        let waits = super::SnapshotWaits::default();
+        waits.record("branch", true, None);
+        let ending = waits.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(6)).await;
+            ending.record("branch", false, None);
+        });
+        let began = tokio::time::Instant::now();
+        let never = std::future::pending::<()>();
+        let result =
+            super::wait_allowing_snapshot_builds(&waits, timeout, &mut NullProgress, never).await;
+        assert!(matches!(
+            result,
+            Err(OperatorApiError::OperationTimeout { .. })
+        ));
+        assert_eq!(began.elapsed(), Duration::from_secs(11));
+    }
+
+    /// A branch that failed ends the wait while another still waits for its snapshot, and a
+    /// watch that broke leaves no wait behind it.
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_branch_does_not_wait_for_the_others() {
+        let (_, failed) = found_branch("failed", Some(BranchDatabasePhase::Failed));
+        let name = failed.name_any();
+        let settled = super::settle_all(vec![
+            futures::future::Either::Left(std::future::pending::<Result<_, ()>>()),
+            futures::future::Either::Right(async move { Ok(Some(failed)) }),
+        ])
+        .await;
+        assert_eq!(settled.unwrap_err().name_any(), name);
+
+        let waits = super::SnapshotWaits::default();
+        waits.record("branch", true, None);
+        waits.forget("branch");
+        assert!(!waits.any());
     }
 
     /// A branch this session creates reaches the caller as it was once ready, so the conditions
