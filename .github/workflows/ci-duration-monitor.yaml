@@ -24,8 +24,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Compare the run against its budgets
         env:
-          CI_OVERTIME_EXEC_BUDGET_MINS: ${{ vars.CI_OVERTIME_EXEC_BUDGET_MINS || '40' }}
-          CI_OVERTIME_IDLE_BUDGET_MINS: ${{ vars.CI_OVERTIME_IDLE_BUDGET_MINS || '10' }}
+          CI_OVERTIME_EXEC_BUDGET_MINS: ${{ vars.CI_OVERTIME_EXEC_BUDGET_MINS || '20' }}
+          CI_OVERTIME_IDLE_BUDGET_MINS: ${{ vars.CI_OVERTIME_IDLE_BUDGET_MINS || '5' }}
           CI_OVERTIME_SAMPLES: ${{ vars.CI_OVERTIME_SAMPLES || '20' }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
