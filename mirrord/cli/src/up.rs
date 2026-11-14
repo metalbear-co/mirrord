@@ -200,7 +200,8 @@ pub(crate) async fn up_command(
     result
 }
 
-/// The session key: `-k`, else the OS username.
+/// The session key: `-k`, else `MIRRORD_KEY` (read by clap into the same argument), else the OS
+/// username.
 fn session_key(key: Option<String>) -> Result<EnvKey, UpCliError> {
     Ok(match key {
         Some(key) => EnvKey::Provided(key),
