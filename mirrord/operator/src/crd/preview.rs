@@ -306,7 +306,7 @@ pub struct PreviewIdleConfig {
 }
 
 impl PreviewSessionSpec {
-    fn default_replicas() -> i32 {
+    pub fn default_replicas() -> i32 {
         1
     }
 

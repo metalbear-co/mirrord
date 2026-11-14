@@ -42,6 +42,7 @@ use feature::{
         },
         outgoing::OutgoingFilterConfig,
     },
+    preview::PreviewTtl,
     split_queues::QueueKind,
 };
 use k8s_openapi::api::core::v1::PodSpec;
@@ -1643,8 +1644,18 @@ impl LayerConfig {
             context.add_warning(ignored("feature.network.incoming.http_filter.ports"));
         }
 
+        // A branch-only preview (branches the operator provisions, no target) sends no incoming,
+        // so its steal check runs on the config as it is sent, below, and no filter is ever used.
+        // Decided the way `preview start` decides it: a local Redis branch alone makes no preview
+        // without a target. The pod-bound settings themselves are checked in
+        // `verify_for_targetless_preview`, by the commands that start such a preview: a missing
+        // `-t` on `preview stop` or `status` is not a preview without a target.
+        let branch_only =
+            self.target.is_targetless() && self.feature.db_branches.any_provisioned_by_operator();
+
         if matches!(self.feature.network.incoming.mode, IncomingMode::Steal)
             && !self.feature.network.incoming.http_filter.is_filter_set()
+            && !branch_only
         {
             context.add_warning(format!(
                 "using default http header filter: '^baggage: .*mirrord-session={}.*$'.",
@@ -1738,7 +1749,140 @@ impl LayerConfig {
             ));
         }
 
+        // The general checks refuse steal for a targetless agent, but a branch-only preview
+        // sends no incoming at all (the CLI drops it, and `verify_for_targetless_preview`
+        // reports it as ignored), so check the config as it is sent: with the default incoming.
+        // This keeps `target: "targetless"` and no `target` behaving the same.
+        if branch_only {
+            let mut as_sent = self.clone();
+            as_sent.feature.network.incoming = default.feature.network.incoming;
+            return as_sent.verify(context);
+        }
+
         self.verify(context)
+    }
+
+    /// Checks the settings only a preview pod could use, for a preview that `start` or `up`
+    /// decided runs without a target: it provisions its branch databases and nothing else, so
+    /// nothing can receive traffic, consume queues, mount files, scale, or idle. Idle and an
+    /// infinite TTL are refused, the rest is reported as ignored.
+    ///
+    /// Separate from [`Self::verify_for_preview_env`] because that one also runs for `stop`,
+    /// `status`, `logs` and `diff`, which take no target at all: a config that started a
+    /// targeted preview with `idle` must still stop it when `-t` is left out.
+    pub fn verify_for_targetless_preview(
+        &self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
+        let default = Self::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config must be valid");
+
+        if self.feature.preview.idle.is_enabled() {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle` cannot be used in a preview without a target: it \
+                 only provisions branch databases and has no pods to scale."
+                    .to_owned(),
+            ));
+        }
+
+        // The TTL is the only thing that ends a preview without a target: it has no pod to
+        // watch, nothing idles or pauses it, so with no TTL its branch databases would stay
+        // up until someone deletes the session by hand. The operator refuses it as well.
+        if self.feature.preview.resolved_ttl_secs() >= PreviewTtl::INFINITE_TTL_SECS {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.ttl_secs` (or `ttl_mins`) cannot be infinite in a preview without a \
+                 target: the TTL is what ends it and frees its branch databases, as it runs \
+                 no pod that could be stopped instead. Set a finite TTL, or set a `target`."
+                    .to_owned(),
+            ));
+        }
+
+        let ignored_without_target = |field: &str, because: &str| {
+            format!(
+                "`{field}` is ignored in a preview without a target: it only provisions \
+                 branch databases and runs no pod {because}."
+            )
+        };
+
+        if self.feature.env != default.feature.env {
+            context.add_warning(ignored_without_target(
+                "feature.env",
+                "to set the variables in",
+            ));
+        }
+
+        if self.feature.network.incoming != default.feature.network.incoming {
+            context.add_warning(ignored_without_target(
+                "feature.network.incoming",
+                "to receive traffic",
+            ));
+        }
+
+        if self.feature.split_queues.is_set() {
+            context.add_warning(ignored_without_target(
+                "feature.split_queues",
+                "to route messages to",
+            ));
+        }
+
+        if self.feature.kafka_branch {
+            context.add_warning(ignored_without_target(
+                "feature.kafka_branch",
+                "to point at the branch broker",
+            ));
+        }
+
+        if self.feature.preview.replicas != default.feature.preview.replicas {
+            context.add_warning(ignored_without_target(
+                "feature.preview.replicas",
+                "to scale",
+            ));
+        }
+
+        if self.feature.preview.labels != default.feature.preview.labels {
+            context.add_warning(ignored_without_target(
+                "feature.preview.labels",
+                "to copy the target's labels to",
+            ));
+        }
+
+        if self.feature.preview.image.is_some() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.image",
+                "to run the image in",
+            ));
+        }
+
+        if !self.feature.preview.config_mounts.is_empty() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.config_mounts",
+                "to mount them in",
+            ));
+        }
+
+        if !self.feature.preview.secret_mounts.is_empty() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.secret_mounts",
+                "to mount them in",
+            ));
+        }
+
+        // The CLI cannot see the branch profile, so this is the earliest word the user gets: the
+        // operator refuses the branch only after `start` has created it, when a targeted sibling
+        // of a `mirrord up` run may already have replaced its preview.
+        for (position, branch) in self.feature.db_branches.iter().enumerate() {
+            if branch.relies_on_profile_source_config_map() {
+                context.add_warning(format!(
+                    "`feature.db_branches[{position}]` reads a `configmap` param without naming \
+                     the ConfigMap, so it falls back to the branch profile's `sourceConfigMap`; in \
+                     a preview without a target the operator refuses the branch if that one is a \
+                     pod volume, once the session is created. Name the ConfigMap in the param \
+                     (`\"configmap\": \"<name>\"`), or set a `target`."
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -3217,6 +3361,240 @@ mod tests {
         resolved
             .verify_for_preview_env(&mut context)
             .expect("a label target should be accepted for preview environments");
+    }
+
+    /// A preview without a target only provisions its branch databases, so the pod-bound
+    /// settings are reported as ignored and idle, which needs a pod to scale, is refused.
+    #[test]
+    fn targetless_preview_with_branches_warns_about_pod_settings() {
+        // Written both ways: `target` left out and `target: "targetless"`. Steal would be
+        // refused for a targetless agent, but a branch-only preview never sends incoming, which
+        // the general preview check knows; the pod-bound settings are the start check's.
+        for target in ["", r#""target": "targetless","#] {
+            let config = ConfigType::Json.parse(&format!(
+                r#"{{
+                    {target}
+                    "feature": {{
+                        "preview": {{
+                            "replicas": 2,
+                            "config_mounts": [{{ "from_file": "./app.yaml", "mount_at": "/etc/app.yaml" }}]
+                        }},
+                        "network": {{ "incoming": "steal" }},
+                        "kafka_branch": true,
+                        "db_branches": [{{
+                            "type": "pg",
+                            "connection": {{ "url": {{ "type": "secret", "name": "pg", "key": "url" }} }}
+                        }}]
+                    }}
+                }}"#,
+            ));
+
+            let mut context = ConfigContext::default();
+            let mut resolved = config
+                .generate_config(&mut context)
+                .expect("config generation should succeed before verification");
+            resolved
+                .verify_for_preview_env(&mut context)
+                .expect("branches with self-contained sources need no target");
+            resolved
+                .verify_for_targetless_preview(&mut context)
+                .expect("pod-bound settings are only ignored, not refused");
+
+            let warnings = context.into_warnings();
+            for field in [
+                "feature.preview.replicas",
+                "feature.network.incoming",
+                "feature.kafka_branch",
+                "feature.preview.config_mounts",
+            ] {
+                assert!(
+                    warnings
+                        .iter()
+                        .any(|warning| warning.contains(&format!("`{field}` is ignored"))),
+                    "no warning for {field} with target {target:?}: {warnings:?}"
+                );
+            }
+        }
+
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "idle": { "sleep_after_secs": 60 } },
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect_err("idle has no pod to scale without a target");
+        assert!(
+            matches!(&error, ConfigError::Conflict(message) if message.contains("without a target")),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A preview without a target sends no `env`, `replicas` or `labels` to the operator, so the
+    /// start check reports each of them as ignored like every other pod-only setting, and a
+    /// `feature.env.override` never goes unmentioned. A `configmap` param without a locator
+    /// passes the target pod check, but the operator refuses it after the session exists when
+    /// the profile's `sourceConfigMap` is a pod volume, so the check warns that it depends on the
+    /// profile.
+    #[test]
+    fn targetless_preview_warns_about_env_labels_and_profile_configmaps() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "env": { "override": { "DATABASE_URL": "postgres://branch/app" } },
+                    "preview": { "labels": { "include": ["app"] } },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "params": {
+                            "host": { "key": "host" },
+                            "password": { "secret": "pg", "key": "password" }
+                        } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect("env, labels and a profile ConfigMap are only warned about");
+
+        let warnings = context.into_warnings();
+        for field in ["feature.env", "feature.preview.labels"] {
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.contains(&format!("`{field}` is ignored"))),
+                "no warning for {field}: {warnings:?}"
+            );
+        }
+        assert!(
+            warnings.iter().any(|warning| {
+                warning.contains("`feature.db_branches[0]`")
+                    && warning.contains("branch profile's `sourceConfigMap`")
+            }),
+            "no warning for the profile ConfigMap: {warnings:?}"
+        );
+    }
+
+    /// A branch-only preview with `incoming: steal` and no filter sends no incoming at all, so
+    /// the "using default http header filter" warning would contradict the "`feature.network.incoming`
+    /// is ignored" one the start check adds right after it.
+    #[test]
+    fn branch_only_preview_does_not_warn_about_the_default_header_filter() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let mut resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("a branch-only preview never sends incoming, so steal is not refused");
+
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("default http header filter")),
+            "a filter nothing uses was warned about: {warnings:?}"
+        );
+    }
+
+    /// A preview without a target has only its TTL to end it: no pod, no idle, no pause. An
+    /// infinite TTL would keep its branch databases up until someone deletes the session by
+    /// hand, so the config check refuses it before anything is created.
+    #[test]
+    fn targetless_preview_with_branches_refuses_an_infinite_ttl() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "ttl_secs": "infinite" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect_err("an infinite TTL must be refused without a target");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be infinite in a preview without a target"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// `preview stop`, `status`, `logs` and `diff` load the config through the same preview check
+    /// as `start`, and take no target: `preview stop -f cfg.json` with no `-t` deletes every
+    /// session under the key. A config that started a targeted preview with `idle` and an
+    /// infinite TTL is valid, so the same config with `-t` left out must still load for the stop;
+    /// only the start check, run once a preview is known to have no target, refuses it.
+    #[test]
+    fn stop_without_a_target_does_not_run_the_targetless_start_checks() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "ttl_secs": "infinite", "idle": { "sleep_after_secs": 60 } },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let mut resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("the config of a running targeted preview must load for its stop");
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("without a target")),
+            "the stop flow is not a preview without a target: {warnings:?}"
+        );
+
+        resolved
+            .verify_for_targetless_preview(&mut ConfigContext::default())
+            .expect_err("the start check still refuses idle and an infinite TTL");
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /

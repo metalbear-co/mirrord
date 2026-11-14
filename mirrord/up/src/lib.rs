@@ -25,9 +25,7 @@ pub use config::{
     SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig, TargetValidationError,
     UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
-use config::{
-    ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
-};
+use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
 pub use init::{
     InitError, PickedService, PickedWorkload, RenderError, SkeletonError, detect_ports,
@@ -244,15 +242,6 @@ pub enum UpError {
         service: Arc<str>,
         /// Namespace the workload was looked up in.
         namespace: String,
-    },
-
-    /// A service previewed by `mirrord preview up` or `mirrord preview sync` has no target
-    /// (`target: none` or `path: targetless`). A preview runs a copy of its target's pod, so there
-    /// has to be one.
-    #[error("service `{service}` has no target, but a preview environment needs one")]
-    PreviewTargetless {
-        /// Name of the targetless service.
-        service: Arc<str>,
     },
 
     /// The only namespace that the user can pick has no workload that the user can list.
@@ -912,29 +901,14 @@ pub async fn resolve_services(
 /// `mirrord preview sync` session, resolving the targets left to the cluster like
 /// [`resolve_services`] does, but without ever prompting. The caller drops the services that get
 /// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
-/// config's `feature.preview.image` to the one it picked.
+/// config's `feature.preview.image` to the one it picked. A service without a target is
+/// assembled like any other; whether its preview can run is for the CLI's `prepare` to decide.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
-    let targetless = up_config.services.iter().find(|(_, service)| {
-        matches!(
-            &service.target,
-            TargetConfig::Targetless
-                | TargetConfig::Specified(SpecifiedTarget {
-                    path: Some(Target::Targetless),
-                    ..
-                })
-        )
-    });
-    if let Some((service, _)) = targetless {
-        return Err(UpError::PreviewTargetless {
-            service: service.clone(),
-        });
-    }
-
     let up_context = UpKubeContext {
         command_arg: kube_context_arg,
         common_context: up_config.common.context.clone(),

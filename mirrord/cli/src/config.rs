@@ -38,6 +38,7 @@ use url::Url;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
+    preview::split_targetless_service,
     subscribe::EventStreamOptions,
 };
 
@@ -2014,6 +2015,8 @@ pub(super) struct PreviewStopArgs {
     ///
     /// If provided, only the preview session matching both the key and this target will be
     /// deleted. If not provided, all preview sessions with the given key will be deleted.
+    /// `targetless` deletes every session without a target, `targetless/<service>` only the one
+    /// of that `mirrord preview up` service.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
@@ -2039,7 +2042,8 @@ pub(super) struct PreviewLogsArgs {
     /// Only read the environment running against this target.
     ///
     /// Without it, every environment matching the key is read. Can also be set via
-    /// `target.path` in the mirrord config.
+    /// `target.path` in the mirrord config. `targetless` reads every environment without a
+    /// target, `targetless/<service>` only the one of that `mirrord preview up` service.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
@@ -2066,7 +2070,7 @@ impl PreviewLogsArgs {
         if let Some(target) = &self.target {
             envs.insert(
                 "MIRRORD_IMPERSONATED_TARGET".as_ref(),
-                Cow::Borrowed(target.as_ref()),
+                Cow::Borrowed(split_targetless_service(target).0.as_ref()),
             );
         }
 
@@ -2092,7 +2096,7 @@ impl PreviewStopArgs {
         if let Some(target) = &self.target {
             envs.insert(
                 "MIRRORD_IMPERSONATED_TARGET".as_ref(),
-                Cow::Borrowed(target.as_ref()),
+                Cow::Borrowed(split_targetless_service(target).0.as_ref()),
             );
         }
         if let Some(namespace) = &self.namespace {

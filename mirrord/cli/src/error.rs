@@ -932,11 +932,17 @@ pub(crate) enum CliError {
     ))]
     PreviewTargetRequired,
 
-    #[error("Failed to resolve target for preview environment: {0}")]
+    #[error("No target specified for preview environment")]
     #[diagnostic(help(
-        "Targetless mode is not supported for preview environments. \
-         Please check that the target exists and has running pods.{GENERAL_HELP}"
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config \
+         file. A preview may run without a target only to have the operator provision branch \
+         databases: set `feature.db_branches` to do that. A local Redis branch runs on your \
+         machine, so it does not count."
     ))]
+    PreviewTargetOrDbBranchesRequired,
+
+    #[error("Failed to resolve target for preview environment: {0}")]
+    #[diagnostic(help("Please check that the target exists and has running pods.{GENERAL_HELP}"))]
     PreviewTargetResolutionFailed(String),
 
     #[error("Failed to create preview session resource: {0}")]
