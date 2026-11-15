@@ -462,6 +462,12 @@ export default function App({
     !selectedLocal &&
     !selectedOperator &&
     watchStatus?.status === 'unavailable'
+  // Only in place of the operator and Kubernetes guidance it replaces: with an operator to watch,
+  // a Cloud user gets the same overview as anyone else.
+  const showCloudOverview =
+    cloudUser &&
+    (watchStatus?.status === 'unavailable' ||
+      watchStatus?.status === 'kubernetes_unavailable')
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -532,7 +538,7 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : cloudUser ? (
+          ) : showCloudOverview ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                 <CloudCog className="text-muted-foreground/40 h-7 w-7" />

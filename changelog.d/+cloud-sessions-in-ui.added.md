@@ -1,1 +1,1 @@
-`mirrord ui` shows the sessions of your organization on MetalBear Cloud after `mirrord login`, and no longer reports an error when the cluster has no mirrord operator or there is no Kubernetes context.
+`mirrord ui` shows the sessions of your organization on MetalBear Cloud after `mirrord login`, and while you're logged in, no longer reports an error when the cluster has no mirrord operator or there is no Kubernetes context.

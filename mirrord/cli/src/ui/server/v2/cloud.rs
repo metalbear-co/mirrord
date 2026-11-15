@@ -10,10 +10,7 @@
 //! rather than an error. Only a response that read a usable login carries it, so a failure to tell
 //! never hides the operator and Kubernetes guidance.
 
-use std::{
-    sync::Arc,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use mirrord_sessions_manager_client::{
@@ -21,6 +18,7 @@ use mirrord_sessions_manager_client::{
     SessionsManagerClientError, SessionsManagerEndpoint,
 };
 use serde::Serialize;
+use tokio::sync::OnceCell;
 use tracing::warn;
 
 use crate::{
@@ -85,8 +83,11 @@ impl From<SessionOwner> for CloudSessionOwner {
 
 impl From<SessionSummary> for CloudSession {
     fn from(session: SessionSummary) -> Self {
-        let created_at: DateTime<Utc> =
-            (UNIX_EPOCH + Duration::from_secs(session.started_at)).into();
+        // Out of range only for a malformed listing, which shouldn't take the handler down.
+        let created_at = i64::try_from(session.started_at)
+            .ok()
+            .and_then(|secs| DateTime::<Utc>::from_timestamp(secs, 0))
+            .unwrap_or_default();
         Self {
             id: session.id,
             environment: session.scope.environment,
@@ -142,12 +143,20 @@ pub(super) async fn cloud_sessions() -> axum::Json<CloudSessionsResponse> {
     };
     let email = Some(login.email);
 
-    // `mirrord ui` has no mirrord config, so only the environment can point it at another
-    // sessions-manager than MetalBear Cloud's.
-    let explicit_url = std::env::var(SESSIONS_MANAGER_URL_ENV).ok();
+    // Built once and reused across polls, so they share one connection pool instead of a TLS
+    // handshake each. Everything it's built from is fixed for the process; the login token is
+    // read from the store on every request.
+    static TRANSPORT: OnceCell<DirectTransport> = OnceCell::const_new();
     let sessions = async {
-        let endpoint = SessionsManagerEndpoint::resolve(explicit_url.as_deref())?;
-        DirectTransport::intproxy_from_env(endpoint, Some(Arc::new(StoredLogin)))?
+        TRANSPORT
+            .get_or_try_init(|| async {
+                // `mirrord ui` has no mirrord config, so only the environment can point it at
+                // another sessions-manager than MetalBear Cloud's.
+                let explicit_url = std::env::var(SESSIONS_MANAGER_URL_ENV).ok();
+                let endpoint = SessionsManagerEndpoint::resolve(explicit_url.as_deref())?;
+                DirectTransport::intproxy_from_env(endpoint, Some(Arc::new(StoredLogin)))
+            })
+            .await?
             .list_sessions()
             .await
     }
