@@ -129,14 +129,15 @@ pub struct DirectTransport {
 impl DirectTransport {
     /// Reaches the sessions-manager at `base_url` without credentials.
     pub fn new(base_url: Url) -> Result<Self, SessionsManagerClientError> {
+        let tls = tls::rustls_config()?;
         let websocket_connector = HttpsConnectorBuilder::new()
-            .with_tls_config(tls::rustls_config()?)
+            .with_tls_config(tls.clone())
             .https_or_http()
             .enable_http1()
             .build();
 
         Ok(Self {
-            http: tls::http_client_builder()?
+            http: tls::http_client_builder(tls)
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()?,
             websocket: HyperClient::builder(TokioExecutor::new()).build(websocket_connector),

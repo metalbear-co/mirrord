@@ -152,7 +152,7 @@ impl CloudTokenCredentials {
             .extend(TOKEN_EXCHANGE_SEGMENTS);
 
         Ok(Self {
-            client: tls::http_client_builder()?
+            client: tls::http_client_builder(tls::rustls_config()?)
                 .timeout(TOKEN_EXCHANGE_TIMEOUT)
                 // A 307/308 replays the POST body, API key included, to wherever it points, and
                 // reqwest only strips sensitive *headers* across origins. The token endpoint is a

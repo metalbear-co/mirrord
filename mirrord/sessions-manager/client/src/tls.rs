@@ -18,19 +18,9 @@ use webpki_root_certs::TLS_SERVER_ROOT_CERTS;
 
 use crate::error::SessionsManagerClientError;
 
-/// A [`reqwest::ClientBuilder`] that trusts the bundled roots alongside the platform's.
+/// A [`ClientConfig`] that trusts the bundled roots alongside the platform's.
 ///
-/// reqwest's own default fails to build a client on a Linux system without any CA certificates.
-pub(crate) fn http_client_builder() -> Result<reqwest::ClientBuilder, SessionsManagerClientError> {
-    let bundled = TLS_SERVER_ROOT_CERTS
-        .iter()
-        .map(|certificate| reqwest::Certificate::from_der(certificate))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(reqwest::Client::builder().tls_certs_merge(bundled))
-}
-
-/// The rustls equivalent of [`http_client_builder`], for connections reqwest does not make.
+/// reqwest's and rustls' own defaults fail on a Linux system without any CA certificates.
 pub(crate) fn rustls_config() -> Result<ClientConfig, SessionsManagerClientError> {
     let provider = Arc::new(aws_lc_rs::default_provider());
     let verifier =
@@ -41,4 +31,12 @@ pub(crate) fn rustls_config() -> Result<ClientConfig, SessionsManagerClientError
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_no_client_auth())
+}
+
+/// A [`reqwest::ClientBuilder`] that verifies servers with `config`, from [`rustls_config`].
+///
+/// reqwest negotiates HTTP/2 only when the preconfigured `config` advertises it over ALPN.
+pub(crate) fn http_client_builder(mut config: ClientConfig) -> reqwest::ClientBuilder {
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    reqwest::Client::builder().tls_backend_preconfigured(config)
 }
