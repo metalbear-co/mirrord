@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { CloudCog, CloudOff } from 'lucide-react'
 import type {
-  CloudLogin,
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
@@ -33,11 +32,22 @@ import {
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
-import { usesCloud, withPreviewSessions } from './utils'
+import { isCloudSession, withPreviewSessions } from './utils'
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
 const EXTENSION_POLL_INTERVAL = 4000
+const CLOUD_USER_STORAGE_KEY = 'mirrord-monitor-cloud-user'
+
+// Whether this browser has seen a MetalBear Cloud session. Remembered, so the operator guidance
+// doesn't come back each time the developer's last serverless session exits.
+function loadCloudUser(): boolean {
+  try {
+    return localStorage.getItem(CLOUD_USER_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 /**
  * Theme is owned by the `mirrord-ui` shell (so a single top-right toggle controls both tabs). The
@@ -63,7 +73,7 @@ export default function App({
   const [operatorSessions, setOperatorSessions] = useState<
     OperatorSessionSummary[]
   >([])
-  const [cloudLogin, setCloudLogin] = useState<CloudLogin | null>(null)
+  const [cloudUser, setCloudUser] = useState(loadCloudUser)
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
     null,
   )
@@ -182,6 +192,16 @@ export default function App({
     }
   }, [])
 
+  useEffect(() => {
+    if (cloudUser || !sessions.some(isCloudSession)) return
+    setCloudUser(true)
+    try {
+      localStorage.setItem(CLOUD_USER_STORAGE_KEY, 'true')
+    } catch {
+      // Not remembered past this page load, which only brings the operator guidance back later.
+    }
+  }, [cloudUser, sessions])
+
   // Clear a stale local selection when its session disappears from the polled list.
   useEffect(() => {
     if (selectedKind !== 'local' || selectedId === null) return
@@ -232,33 +252,6 @@ export default function App({
       cancelled = true
     }
   }, [effectiveContext])
-
-  // Not tied to the kube context: `mirrord login` is per machine. Polled so logging in or out
-  // while the UI is open takes effect without a reload.
-  useEffect(() => {
-    let cancelled = false
-    let timeout: ReturnType<typeof setTimeout> | undefined
-
-    const poll = async () => {
-      try {
-        const login = await api.getCloudLogin()
-        if (!cancelled) setCloudLogin(login)
-      } catch (err: unknown) {
-        // Keep the last login read: the request failing doesn't change it.
-        if (!cancelled) console.error(err)
-      } finally {
-        if (!cancelled) {
-          timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
-        }
-      }
-    }
-
-    void poll()
-    return () => {
-      cancelled = true
-      if (timeout !== undefined) clearTimeout(timeout)
-    }
-  }, [])
 
   // The operator license identifies the licensed organization; fetch it once per context so ui
   // usage is attributed to that org in analytics, rather than on every session poll.
@@ -446,18 +439,20 @@ export default function App({
     [selectedKind, selectedId, operatorSessions],
   )
 
-  const cloudUser = usesCloud(cloudLogin, sessions)
+  // A MetalBear Cloud user needs neither an operator nor a cluster, so the guidance for them is
+  // hidden unless something says they use one: a local session that goes through an operator, or
+  // a kube context whose access failed. Only having no kube context at all is expected.
+  const noOperatorExpected =
+    cloudUser &&
+    !sessions.some((s) => s.is_operator) &&
+    (watchStatus?.status === 'unavailable' ||
+      (watchStatus?.status === 'kubernetes_unavailable' &&
+        contexts.length === 0))
   const showFunnelHero =
-    !cloudUser &&
+    !noOperatorExpected &&
     !selectedLocal &&
     !selectedOperator &&
     watchStatus?.status === 'unavailable'
-  // Only in place of the operator and Kubernetes guidance it replaces: with an operator to watch,
-  // a Cloud user gets the same overview as anyone else.
-  const showCloudOverview =
-    cloudUser &&
-    (watchStatus?.status === 'unavailable' ||
-      watchStatus?.status === 'kubernetes_unavailable')
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -494,7 +489,7 @@ export default function App({
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
           watchStatus={watchStatus}
-          cloudUser={cloudUser}
+          hideTeam={noOperatorExpected}
           selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
           onSelectOperator={handleSelectOperator}
           onConnectOperator={() => setConnectModalOpen(true)}
@@ -528,7 +523,7 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : showCloudOverview ? (
+          ) : noOperatorExpected ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                 <CloudCog className="text-muted-foreground/40 h-7 w-7" />

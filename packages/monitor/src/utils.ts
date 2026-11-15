@@ -1,5 +1,4 @@
 import type {
-  CloudLogin,
   OperatorPreviewSession,
   OperatorSessionSummary,
   SessionInfo,
@@ -177,16 +176,9 @@ export function formatHostPort(address: string, port: number): string {
   return address.endsWith(suffix) ? address : `${address}${suffix}`
 }
 
-// MetalBear Cloud runs serverless targets without an operator, often without a kube context, so
-// for its users a missing operator or cluster is expected rather than something to fix. A
-// `mirrord login` says they use it, and so does a running session on a serverless target, which
-// also covers a self-hosted sessions-manager reached without a login.
-export function usesCloud(
-  login: CloudLogin | null,
-  sessions: SessionInfo[],
-): boolean {
-  return (
-    login?.email !== undefined ||
-    sessions.some((s) => s.target.startsWith('serverless/'))
-  )
+// A session on a serverless target that reached its sessions-manager directly, without an
+// operator: MetalBear Cloud's, or a self-hosted one. One routed through the operator-hosted
+// sessions-manager reports `is_operator`, and needs the cluster like any other operator session.
+export function isCloudSession(session: SessionInfo): boolean {
+  return session.target.startsWith('serverless/') && !session.is_operator
 }

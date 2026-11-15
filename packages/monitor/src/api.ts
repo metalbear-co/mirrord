@@ -1,7 +1,6 @@
 import type {
   ChaosRule,
   ChaosRuleRequest,
-  CloudLogin,
   ContextsResponse,
   NamespacesResponse,
   OperatorLicense,
@@ -249,18 +248,6 @@ export const api = {
       )
     }
     return (await r.json()) as PreviewDetail
-  },
-
-  getCloudLogin: async (): Promise<CloudLogin> => {
-    const r = await fetch(withToken('/api/v2/cloud/login'), {
-      credentials: 'include',
-    })
-    if (!r.ok) {
-      throw new Error(
-        `Failed to read the mirrord login: ${r.status} ${r.statusText}`,
-      )
-    }
-    return (await r.json()) as CloudLogin
   },
 
   getOperatorLicense: async (

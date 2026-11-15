@@ -73,8 +73,9 @@ interface SessionSidebarProps {
   yoursOperatorSessions: OperatorSessionSummary[]
   allOperatorSessions: OperatorSessionSummary[]
   watchStatus: OperatorWatchStatus | null
-  // Uses MetalBear Cloud, where no operator or kube context is expected.
-  cloudUser: boolean
+  // A MetalBear Cloud user without an operator or kube context, who has nothing to connect or
+  // fix there; their own sessions are under "Yours".
+  hideTeam: boolean
   selectedOperatorId: string | null
   onSelectOperator: (id: string) => void
   onConnectOperator: () => void
@@ -98,7 +99,7 @@ export default function SessionSidebar({
   yoursOperatorSessions,
   allOperatorSessions,
   watchStatus,
-  cloudUser,
+  hideTeam,
   selectedOperatorId,
   onSelectOperator,
   onConnectOperator,
@@ -205,10 +206,6 @@ export default function SessionSidebar({
       watchStatus?.status === 'kubernetes_unavailable') &&
     !teamReconnecting
   const teamConnecting = watchStatus?.status === 'not_started'
-  // Nothing to connect or fix for a MetalBear Cloud user, whose own sessions are under "Yours".
-  const hideTeam =
-    cloudUser &&
-    (teamUnavailable || watchStatus?.status === 'kubernetes_unavailable')
 
   return (
     <>
