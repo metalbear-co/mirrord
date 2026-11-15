@@ -145,6 +145,6 @@ These apply in every deployment mode. For connection and authentication problems
 | Symptom | Likely cause |
 | --- | --- |
 | The application starts without mirrord | The setup container failed or its `dependsOn` condition isn't wired up; check its logs and exit code. |
-| The task registers but the developer is never paired | `MIRRORD_REMOTE_SERVICE`/`MIRRORD_REMOTE_ENVIRONMENT` on the task don't match `target.path`/`target.namespace` in `mirrord.json`. |
+| The task registers, but mirrord fails with `timed out connecting to the serverless target's agent through sessions-manager` | `MIRRORD_REMOTE_SERVICE`/`MIRRORD_REMOTE_ENVIRONMENT` on the task don't match `target.path`/`target.namespace` in `mirrord.json`. |
 | `Read-only file system` or `Permission denied` under `/tmp` | The application container has no writable `/tmp` ([Prerequisites](#prerequisites)). |
 | The application container stops at startup: version `GLIBC_2.30` not found, required by `libmirrord_remote_bootstrap.so` | The application image's glibc is older than 2.30 ([Prerequisites](#prerequisites)). |
