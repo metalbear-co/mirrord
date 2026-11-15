@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { CloudOff } from 'lucide-react'
+import { CloudCog, CloudOff } from 'lucide-react'
 import type {
   CloudSessionsResponse,
   OperatorSessionSummary,
@@ -33,7 +33,7 @@ import {
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
-import { withPreviewSessions } from './utils'
+import { usesCloud, withPreviewSessions } from './utils'
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
@@ -262,7 +262,16 @@ export default function App({
       } catch (err: unknown) {
         if (cancelled) return
         console.error(err)
-        setCloud({ status: 'unavailable', reason: String(err), sessions: [] })
+        // Keep the login the last response read: the request failing doesn't change it.
+        setCloud(
+          (prev) =>
+            prev && {
+              ...prev,
+              status: 'unavailable',
+              reason: String(err),
+              sessions: [],
+            },
+        )
       } finally {
         if (!cancelled) {
           timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
@@ -447,10 +456,9 @@ export default function App({
     [selectedKind, selectedId, operatorSessions],
   )
 
-  // See `usesCloud` in `SessionSidebar`: without an operator, Cloud users aren't missing anything.
-  const usesCloud = cloud !== null && cloud.status !== 'loggedOut'
+  const cloudUser = usesCloud(cloud)
   const showFunnelHero =
-    !usesCloud &&
+    !cloudUser &&
     !selectedLocal &&
     !selectedOperator &&
     watchStatus?.status === 'unavailable'
@@ -524,7 +532,19 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : !usesCloud && watchStatus?.status === 'kubernetes_unavailable' ? (
+          ) : cloudUser ? (
+            <div className="flex h-full items-center justify-center p-8">
+              <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+                <CloudCog className="text-muted-foreground/40 h-7 w-7" />
+                <h2 className="text-foreground text-base font-semibold">
+                  {strings.cloudOverview.title}
+                </h2>
+                <p className="text-muted-foreground text-xs">
+                  {strings.cloudOverview.body}
+                </p>
+              </div>
+            </div>
+          ) : watchStatus?.status === 'kubernetes_unavailable' ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="border-destructive/40 bg-destructive/5 flex max-w-xl gap-4 rounded-lg border p-5">
                 <CloudOff className="text-destructive mt-0.5 h-6 w-6 shrink-0" />

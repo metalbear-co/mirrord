@@ -59,6 +59,7 @@ export default function CloudSessionList({
             target={`${s.environment}/${s.service}`}
             meta={[
               owner,
+              s.replicaId,
               ...(s.connected ? [] : [strings.sidebar.cloudWaiting]),
               relativeTimeFromIso(s.createdAt),
             ]}

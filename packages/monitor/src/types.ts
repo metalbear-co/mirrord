@@ -184,7 +184,8 @@ export interface CloudSession {
   connected: boolean
 }
 
-// `loggedOut` means the developer hasn't run `mirrord login`, so they don't use MetalBear Cloud.
+// `loggedOut` means the developer has no usable `mirrord login`, so they don't use MetalBear
+// Cloud. `email` is set only once a login was read, so its absence includes failing to check.
 export interface CloudSessionsResponse {
   status: 'available' | 'loggedOut' | 'unavailable'
   reason?: string

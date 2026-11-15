@@ -89,6 +89,10 @@ export const strings = {
     cloudError: 'Could not list MetalBear Cloud sessions',
     cloudWaiting: 'waiting for agent',
   },
+  cloudOverview: {
+    title: 'MetalBear Cloud',
+    body: "Your organization's sessions show in the sidebar while they run. Start one with mirrord exec.",
+  },
   kubernetesAccess: {
     title: 'Kubernetes access was lost',
     help: 'Check your Kubernetes credentials. You may need to re-authenticate. mirrord will retry automatically.',

@@ -5,9 +5,10 @@
 //! lists the live sessions of their organization. It's the same sessions-manager, and the same
 //! login, that `mirrord exec` connects a serverless target through.
 //!
-//! The frontend polls this next to `operator/sessions`. While it reports anything but
-//! [`CloudStatus::LoggedOut`], the developer uses MetalBear Cloud, and a missing operator or kube
-//! context is expected rather than an error.
+//! The frontend polls this next to `operator/sessions`. While a response carries the login's
+//! `email`, the developer uses MetalBear Cloud, and a missing operator or kube context is expected
+//! rather than an error. Only a response that read a usable login carries it, so a failure to tell
+//! never hides the operator and Kubernetes guidance.
 
 use std::{
     sync::Arc,
@@ -17,7 +18,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use mirrord_sessions_manager_client::{
     DirectTransport, SESSIONS_MANAGER_URL_ENV, SessionOwner, SessionSummary,
-    SessionsManagerEndpoint,
+    SessionsManagerClientError, SessionsManagerEndpoint,
 };
 use serde::Serialize;
 use tracing::warn;
@@ -31,7 +32,8 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 enum CloudStatus {
     Available,
-    /// No unexpired `mirrord login` token, so the developer doesn't use MetalBear Cloud.
+    /// No usable `mirrord login` token, so the developer doesn't use MetalBear Cloud. Includes a
+    /// token the sessions-manager refused, such as a revoked one, with the refusal as `reason`.
     LoggedOut,
     /// Logged in, but the sessions couldn't be listed.
     Unavailable,
@@ -43,7 +45,8 @@ pub(super) struct CloudSessionsResponse {
     status: CloudStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
-    /// The developer `mirrord login` signed in, so the frontend can tell their sessions apart.
+    /// The developer `mirrord login` signed in. Set only once a login was read and not refused,
+    /// which is how the frontend tells a Cloud user from a failure to check.
     #[serde(skip_serializing_if = "Option::is_none")]
     email: Option<String>,
     sessions: Vec<CloudSession>,
@@ -156,6 +159,12 @@ pub(super) async fn cloud_sessions() -> axum::Json<CloudSessionsResponse> {
             reason: None,
             email,
             sessions: list.sessions.into_iter().map(CloudSession::from).collect(),
+        },
+        Err(error @ SessionsManagerClientError::LoginTokenRejected) => CloudSessionsResponse {
+            status: CloudStatus::LoggedOut,
+            reason: Some(error.to_string()),
+            email: None,
+            sessions: Vec::new(),
         },
         Err(error) => CloudSessionsResponse::unavailable(
             email,

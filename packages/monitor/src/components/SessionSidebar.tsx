@@ -36,6 +36,7 @@ import type {
   SessionInfo,
 } from '../types'
 import { strings } from '../strings'
+import { usesCloud } from '../utils'
 import SessionCard from './SessionCard'
 import OperatorList from './OperatorList'
 import CloudSessionList from './CloudSessionList'
@@ -209,9 +210,9 @@ export default function SessionSidebar({
   const teamConnecting = watchStatus?.status === 'not_started'
   // Logged in to MetalBear Cloud, serverless targets run without an operator or even a kube
   // context, so not finding either is expected rather than something to fix.
-  const usesCloud = cloud !== null && cloud.status !== 'loggedOut'
+  const cloudUser = usesCloud(cloud)
   const hideTeam =
-    usesCloud &&
+    cloudUser &&
     (teamUnavailable || watchStatus?.status === 'kubernetes_unavailable')
 
   return (
@@ -342,7 +343,7 @@ export default function SessionSidebar({
           )}
         </div>
 
-        {usesCloud && (
+        {cloudUser && (
           <>
             <SectionHeader
               icon={<CloudCog className="h-3.5 w-3.5" />}
