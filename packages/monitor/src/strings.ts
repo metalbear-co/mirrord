@@ -85,6 +85,10 @@ export const strings = {
     connectOperator: 'Connect operator →',
     zeroSessions: '0 sessions · operator not connected',
   },
+  cloudOverview: {
+    title: 'MetalBear Cloud',
+    body: 'Your sessions show in the sidebar while they run. Start one with mirrord exec.',
+  },
   kubernetesAccess: {
     title: 'Kubernetes access was lost',
     help: 'Check your Kubernetes credentials. You may need to re-authenticate. mirrord will retry automatically.',

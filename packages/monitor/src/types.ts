@@ -170,6 +170,11 @@ export type OperatorWatchStatus =
       message: string
     }
 
+// `/api/v2/cloud/login`: the developer `mirrord login` signed in to MetalBear Cloud, if any.
+export interface CloudLogin {
+  email?: string
+}
+
 export interface OperatorLicense {
   fingerprint: string | null
   organization: string

@@ -1,4 +1,9 @@
-import type { OperatorPreviewSession, OperatorSessionSummary } from './types'
+import type {
+  CloudLogin,
+  OperatorPreviewSession,
+  OperatorSessionSummary,
+  SessionInfo,
+} from './types'
 
 const MS_PER_SEC = 1000
 const SECS_PER_MIN = 60
@@ -170,4 +175,18 @@ export function extractSessionKey(config: unknown): string | null {
 export function formatHostPort(address: string, port: number): string {
   const suffix = `:${port}`
   return address.endsWith(suffix) ? address : `${address}${suffix}`
+}
+
+// MetalBear Cloud runs serverless targets without an operator, often without a kube context, so
+// for its users a missing operator or cluster is expected rather than something to fix. A
+// `mirrord login` says they use it, and so does a running session on a serverless target, which
+// also covers a self-hosted sessions-manager reached without a login.
+export function usesCloud(
+  login: CloudLogin | null,
+  sessions: SessionInfo[],
+): boolean {
+  return (
+    login?.email !== undefined ||
+    sessions.some((s) => s.target.startsWith('serverless/'))
+  )
 }

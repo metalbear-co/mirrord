@@ -1,0 +1,1 @@
+`mirrord ui` no longer asks MetalBear Cloud users to connect an operator or fix their Kubernetes access. While you're logged in with `mirrord login`, or running a serverless target, it shows your own sessions without the operator and Kubernetes guidance.

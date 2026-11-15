@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { CloudOff } from 'lucide-react'
+import { CloudCog, CloudOff } from 'lucide-react'
 import type {
+  CloudLogin,
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
@@ -32,7 +33,7 @@ import {
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
-import { withPreviewSessions } from './utils'
+import { usesCloud, withPreviewSessions } from './utils'
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
@@ -62,6 +63,7 @@ export default function App({
   const [operatorSessions, setOperatorSessions] = useState<
     OperatorSessionSummary[]
   >([])
+  const [cloudLogin, setCloudLogin] = useState<CloudLogin | null>(null)
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
     null,
   )
@@ -230,6 +232,33 @@ export default function App({
       cancelled = true
     }
   }, [effectiveContext])
+
+  // Not tied to the kube context: `mirrord login` is per machine. Polled so logging in or out
+  // while the UI is open takes effect without a reload.
+  useEffect(() => {
+    let cancelled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
+    const poll = async () => {
+      try {
+        const login = await api.getCloudLogin()
+        if (!cancelled) setCloudLogin(login)
+      } catch (err: unknown) {
+        // Keep the last login read: the request failing doesn't change it.
+        if (!cancelled) console.error(err)
+      } finally {
+        if (!cancelled) {
+          timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
+        }
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timeout !== undefined) clearTimeout(timeout)
+    }
+  }, [])
 
   // The operator license identifies the licensed organization; fetch it once per context so ui
   // usage is attributed to that org in analytics, rather than on every session poll.
@@ -417,8 +446,18 @@ export default function App({
     [selectedKind, selectedId, operatorSessions],
   )
 
+  const cloudUser = usesCloud(cloudLogin, sessions)
   const showFunnelHero =
-    !selectedLocal && !selectedOperator && watchStatus?.status === 'unavailable'
+    !cloudUser &&
+    !selectedLocal &&
+    !selectedOperator &&
+    watchStatus?.status === 'unavailable'
+  // Only in place of the operator and Kubernetes guidance it replaces: with an operator to watch,
+  // a Cloud user gets the same overview as anyone else.
+  const showCloudOverview =
+    cloudUser &&
+    (watchStatus?.status === 'unavailable' ||
+      watchStatus?.status === 'kubernetes_unavailable')
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -455,6 +494,7 @@ export default function App({
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
           watchStatus={watchStatus}
+          cloudUser={cloudUser}
           selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
           onSelectOperator={handleSelectOperator}
           onConnectOperator={() => setConnectModalOpen(true)}
@@ -488,6 +528,18 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
+          ) : showCloudOverview ? (
+            <div className="flex h-full items-center justify-center p-8">
+              <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+                <CloudCog className="text-muted-foreground/40 h-7 w-7" />
+                <h2 className="text-foreground text-base font-semibold">
+                  {strings.cloudOverview.title}
+                </h2>
+                <p className="text-muted-foreground text-xs">
+                  {strings.cloudOverview.body}
+                </p>
+              </div>
+            </div>
           ) : watchStatus?.status === 'kubernetes_unavailable' ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="border-destructive/40 bg-destructive/5 flex max-w-xl gap-4 rounded-lg border p-5">

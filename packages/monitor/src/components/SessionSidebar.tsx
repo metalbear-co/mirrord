@@ -73,6 +73,8 @@ interface SessionSidebarProps {
   yoursOperatorSessions: OperatorSessionSummary[]
   allOperatorSessions: OperatorSessionSummary[]
   watchStatus: OperatorWatchStatus | null
+  // Uses MetalBear Cloud, where no operator or kube context is expected.
+  cloudUser: boolean
   selectedOperatorId: string | null
   onSelectOperator: (id: string) => void
   onConnectOperator: () => void
@@ -96,6 +98,7 @@ export default function SessionSidebar({
   yoursOperatorSessions,
   allOperatorSessions,
   watchStatus,
+  cloudUser,
   selectedOperatorId,
   onSelectOperator,
   onConnectOperator,
@@ -202,6 +205,10 @@ export default function SessionSidebar({
       watchStatus?.status === 'kubernetes_unavailable') &&
     !teamReconnecting
   const teamConnecting = watchStatus?.status === 'not_started'
+  // Nothing to connect or fix for a MetalBear Cloud user, whose own sessions are under "Yours".
+  const hideTeam =
+    cloudUser &&
+    (teamUnavailable || watchStatus?.status === 'kubernetes_unavailable')
 
   return (
     <>
@@ -331,15 +338,19 @@ export default function SessionSidebar({
           )}
         </div>
 
-        <SectionHeader
-          icon={<Cloud className="h-3.5 w-3.5" />}
-          label="Team"
-          count={
-            watchStatus?.status === 'watching' ? operatorSessions.length : null
-          }
-        />
+        {!hideTeam && (
+          <SectionHeader
+            icon={<Cloud className="h-3.5 w-3.5" />}
+            label="Team"
+            count={
+              watchStatus?.status === 'watching'
+                ? operatorSessions.length
+                : null
+            }
+          />
+        )}
 
-        {teamUnavailable ? (
+        {hideTeam ? null : teamUnavailable ? (
           <FunnelInline onConnect={onConnectOperator} />
         ) : teamError ? (
           <div className="bg-destructive/10 border-destructive/40 rounded-lg border px-3 py-2">
