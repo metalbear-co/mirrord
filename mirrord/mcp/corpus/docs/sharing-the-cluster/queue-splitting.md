@@ -46,7 +46,7 @@ That temporary queue is *exclusive* to the target workload.
 Similarly, the local application is reconfigured to consume messages from its own *exclusive* temporary queue.
 
 {% hint style="warning" %}
-Queue splitting requires that the application read the queue name from an environment variable, from a config file mounted from a ConfigMap volume (see [Queue Names in Mounted Config Files](#queue-names-in-mounted-config-files)), or from a file injected into its pods, for example by Vault (see [Queue Names Injected by Vault or CSI Drivers](#queue-names-injected-by-vault-or-csi-drivers)).
+Queue splitting requires that the application read the queue name from an environment variable, from a config file mounted from a ConfigMap or Secret volume (see [Queue Names in Mounted Config Files](#queue-names-in-mounted-config-files)), or from a file injected into its pods, for example by Vault (see [Queue Names Injected by Vault or CSI Drivers](#queue-names-injected-by-vault-or-csi-drivers)).
 This lets the operator override the name to change the queue that the application reads from.
 {% endhint %}
 
@@ -100,7 +100,7 @@ A config has either `targetRef` or `targetSelector`, not both; the `Accepted` co
 Every config that applies to a workload is merged for its sessions, so a shared selector config and a per-workload `targetRef` config can be used together:
 
 * A queue id or a `dbBranches` entry id defined identically by several configs is one queue or one entry.
-* A queue id, a `dbBranches` entry, or one of `ttl`, `drainTimeout` and `tmpNameTemplate` that two configs set differently is a conflict. Both configs get `Accepted: False` with reason `ConflictingConfigs`, naming the other config and the field, and sessions for that workload fail until one of them changes.
+* A queue id, a `dbBranches` entry, or one of `ttl`, `drainTimeout`, `tmpNameTemplate` and [`consumerCluster`](../using-mirrord/multi-cluster.md#splitting-from-one-cluster) (multi-cluster only) that two configs set differently is a conflict. Both configs get `Accepted: False` with reason `ConflictingConfigs`, naming the other config and the field, and sessions for that workload fail until one of them changes.
 * `restart` and `clientConfigs` merge field by field: one config can set `restart.timeout` and another `restart.strategy`, or each can name its own broker's client config. Only the same field set to two values (`restart.timeout`, `clientConfigs.sqs`) is a conflict.
 
 The older `MirrordWorkloadQueueRegistry` and `MirrordKafkaTopicsConsumer` objects of a workload stay in effect under selector configs: their queues are added to the merge, and their settings fill in what the configs leave unset. A config that names the workload with `targetRef` replaces them, as it always has.
@@ -114,10 +114,10 @@ Each config that applies to a workload shows the workload's split phase and sess
 ## Queue Names in Mounted Config Files
 
 {% hint style="info" %}
-Mounted config file sources require mirrord operator `3.198.0` or later.
+Mounted config file sources require mirrord operator `3.198.0` or later; Secret-backed volumes require `3.233.0` or later.
 {% endhint %}
 
-A queue name can also be read from a file mounted from a ConfigMap volume, instead of an environment variable. This is useful when your application keeps its queue names in a config file - for example a Spring-style `application.yaml` in a centrally managed ConfigMap - and duplicating the names into the pod's environment is not an option.
+A queue name can also be read from a file mounted from a ConfigMap or Secret volume, instead of an environment variable. This is useful when your application keeps its queue names in a config file - for example a Spring-style `application.yaml` in a centrally managed ConfigMap, or next to credentials in a Secret - and duplicating the names into the pod's environment is not an option.
 
 To use it, set a `volume` source in the `appConfig` entry instead of `env` or `envLike`. A complete `MirrordSplitConfig` for a Kafka consumer reading both its topic and group from a mounted `application.yaml`:
 
@@ -151,31 +151,40 @@ spec:
 
 The `volume` source fields:
 
-* `volume.name` - name of a `configMap` volume in the target's pod spec. Other volume types are rejected.
-* `volume.file` - path of the file within the volume: the ConfigMap data key, or the item `path` when the volume remaps keys via `items`.
+* `volume.name` - name of a `configMap` or `secret` volume in the target's pod spec. Other volume types are rejected.
+* `volume.file` - path of the file within the volume: the ConfigMap or Secret data key, or the item `path` when the volume remaps keys via `items`.
 * `valueSelector` - a selector run over the parsed file (JSON or YAML). It supports nested keys (`.kafka.consumer.group`) and `.[]` to iterate arrays or object values (`.topics.[]`); pipes, functions, and other jq operators are not supported.
 * `valuePattern` - a regex whose capture group marks the name inside the raw file text. With neither `valueSelector` nor `valuePattern`, the whole file content is the queue name.
 
+A source entry whose `volume` names a `secret` volume has these rules:
+
+* It must set `valueSelector` or `valuePattern`. A session against a target whose split config leaves both out fails to start.
+* Whatever the selector matches, or the capture group of the pattern, becomes a queue name. Keep it narrow: `.[]` over an object that also holds a password makes the password a queue name.
+* A value that spans several lines or is longer than 260 bytes is refused, whatever the broker. The session fails to start with an error that names the file but not the value. Read a longer Redis Pub/Sub, BullMQ or Temporal name from a `configMap` volume, a `podFile` source or an env var.
+* In a multi-cluster setup, the split's `consumerCluster` can only be the default cluster. A session whose split config names another cluster fails to start. Upgrade the primary operator to `3.233.0` before the other clusters, as for `podFile` sources below.
+
 If both a `volume` source and an `env`/`envLike` source are set on the same entry, `env`/`envLike` takes precedence and `volume` is ignored. `fallback` does not apply to `volume`. A `containerNames` list is not needed either - the file is shared by every container that mounts the volume.
 
-The operator never modifies your ConfigMap. When a split starts, it:
+The operator never modifies your ConfigMap or Secret. When a split starts, it:
 
-1. Creates a copy of the ConfigMap with the temporary fallback names substituted. The copy is labeled and managed by the operator.
+1. Creates a copy of the ConfigMap or Secret with the temporary fallback names substituted. The copy is labeled and managed by the operator, and a Secret is copied into another Secret.
 2. Redirects the volume in the target's pods to the copy. This restarts the workload, the same way environment variable injection does.
-3. Serves your local application a version of the file carrying its own session queue names, in-flight over the mirrord session. Nothing containing session names is written to the cluster.
+3. Serves your local application a version of the file carrying its own session queue names, in-flight over the mirrord session. While the session runs, the operator keeps that version in a Secret owned by the split session, in the target's namespace, with the label `operator.metalbear.co/queue-split-session-files`, for a file from a Secret, and in the status of the split session object (`MirrordClusterSplitSession`) for a file from a ConfigMap.
 
-When the last session ends, the pods are restored to the original ConfigMap and the copy is deleted.
+When the last session ends, the pods are restored to the original ConfigMap or Secret and the copy is deleted.
 
 Things to know:
 
 * `valueSelector` rewrites re-serialize the copied file, so YAML comments and formatting are lost in the copy (never in your original). `valuePattern` rewrites keep the file byte-identical outside the swapped name.
 * Your local application must read the mounted path through mirrord's remote file system. If your mirrord config marks that path as local (`feature.fs` local patterns), the local app reads its own file and never sees the session queue names.
 * The session file content is served for reads that open the file by its full path. Reads that go through a directory file descriptor with a relative path (`openat` after opening the directory) bypass the override, and the local application then sees the copy's fallback names instead of its session names. Most applications open config files by full path and are unaffected.
-* Editing the original ConfigMap while a split is running does not update the copy. Content changes are picked up when the next split starts.
+* Editing the original ConfigMap or Secret while a split is running does not update the copy. Content changes are picked up when the next split starts.
+* The copy holds every key of the Secret as it was when the split started, and every target pod moves onto the copy when the split starts. If the Secret also carries values that rotate, such as credentials, the pods keep reading the values from the start of the split, and an application that hot-reloads the Secret misses every rotation until the split ends.
+* The Secret with the session's version of the file holds its full text and is deleted with the session. Limit who can read it the way you limit access to your original Secret.
 
 ### Preview Environments
 
-A [preview environment](../use-cases/preview-environments.md) pod runs in the cluster and reads real mounted files, so the operator delivers session queue names by preparing the files each reader mounts. The queue names are located inside each file with the same `valueSelector` / `valuePattern` from the split config (see [the field reference above](#queue-names-in-mounted-config-files)). With a split running, every reader of the "same" config file sees its own version - and your original ConfigMap is never modified:
+A [preview environment](../use-cases/preview-environments.md) pod runs in the cluster and reads real mounted files, so the operator delivers session queue names by preparing the files each reader mounts. The queue names are located inside each file with the same `valueSelector` / `valuePattern` from the split config (see [the field reference above](#queue-names-in-mounted-config-files)). With a split running, every reader of the "same" config file sees its own version - and your original ConfigMap or Secret is never modified:
 
 ![Preview environments with mounted-config queue splitting](../.gitbook/assets/preview-configmap-split.svg)
 
@@ -207,6 +216,8 @@ Which queues get split, and where their names live, comes from the same two plac
 
 The per-session copies are owned by the `PreviewSession` and deleted with it; the fallback copy goes when the last session ends.
 
+A `secret` volume gets its per-session copy as a Secret, with every key and the `type` of the original. The operator never writes a Secret's content into a ConfigMap: if a preview built with `--resource` declares a volume as `configMap` while the target mounts it from a Secret, the preview fails before the split starts, with an error naming the volume. The check covers every volume the target's split config reads queue names from. Declare such volumes as `secret` volumes in your manifest.
+
 `config_mounts` entries compose with this. When the file content your mirrord config sends (`feature.preview.config_mounts` in `mirrord.json`) carries the same queue config, the operator bakes the session's queue names into it before mounting, and keeps every other value. For a session whose split renamed `orders`:
 
 Content your `mirrord.json` provided:
@@ -232,7 +243,7 @@ The rewrite is content-based, not path-based: a mount can sit anywhere, and a mo
 ## Queue Names Injected by Vault or CSI Drivers
 
 {% hint style="info" %}
-Injected file sources require mirrord operator `3.201.0` or later.
+Injected file sources require mirrord operator `3.201.0` or later. From `3.233.0`, the session's version of the file is kept in a Secret instead of the split session's status.
 {% endhint %}
 
 A queue name can also be read from a file that exists only inside the running pods, with no ConfigMap or Secret behind it. This is useful when vault-agent-injector renders the names into `/vault/secrets/`, or a secrets-store CSI driver projects them at mount time, and moving them into the pod's environment is not an option.
@@ -257,7 +268,7 @@ The operator never touches Vault or the injector. When a split starts, it:
 
 1. Creates a Secret with the file's content and the temporary fallback names substituted. The Secret is labeled and managed by the operator, holds only the referenced file, and also caches the original content so later resolutions never depend on the pods again.
 2. Mounts that Secret over the file's exact path in the target's application containers. This restarts the workload, the same way environment variable injection does. The injector's own sidecar keeps its original view of the file, so it can keep rendering it underneath.
-3. Serves your local application a version of the file carrying its own session queue names, in-flight over the mirrord session, exactly as for `volume` sources.
+3. Serves your local application a version of the file carrying its own session queue names, in-flight over the mirrord session, exactly as for `volume` sources. While the session runs, the operator keeps that version in a Secret owned by the split session, in the target's namespace, with the label `operator.metalbear.co/queue-split-session-files` (before `3.233.0`, in the status of the `MirrordClusterSplitSession` object).
 
 When the last session ends, the pods are restored to the injected file and the Secret is deleted.
 
@@ -267,6 +278,7 @@ Things to know:
 * If both a `podFile` source and an `env`/`envLike` or `volume` source are set on the same entry, the other source takes precedence and `podFile` is ignored. `fallback` does not apply to `podFile`.
 * A `containerNames` list on the entry limits which containers get the overriding mount. Without one, every application container gets it.
 * The remote file system and directory file descriptor notes for `volume` sources apply here as well.
+* In a multi-cluster setup, the split's `consumerCluster` can only be the default cluster. A session whose split config names another cluster fails to start. The primary operator is the one that refuses it, so upgrade the primary to `3.233.0` before the other clusters: with an older primary, a split on another cluster starts and your local application reads the original queue names.
 
 ## Autoscaled Targets with KEDA
 

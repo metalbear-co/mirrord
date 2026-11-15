@@ -84,7 +84,7 @@ Developers define branches in their `mirrord.json`:
         "id": "users-mysql-db",             // Optional
         "location": "remote",               // Optional, default is "remote", Available options [remote | local]
         "type": "mysql",                    // See "Choose Your Database" above for supported values
-        "version": "8.0",
+        "version": "8.4",
         "name": "users-database-name",      // Optional
         "ttl_secs": 60,                     // Optional, mutually exclusive with `ttl_mins`
         "creation_timeout_secs": 20,        // Optional, Defaults to 60 if not specified
@@ -99,6 +99,8 @@ Developers define branches in their `mirrord.json`:
   }
 }
 ```
+
+MySQL `8.4` is the default from operator `3.232.0`. On an older operator, a branch pinned to `8.4` can fail or leave the source user without its login - see the MySQL page's [Limits](db-branching/mysql.md#limits).
 
 ### Key Fields
 
