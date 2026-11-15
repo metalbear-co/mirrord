@@ -9,9 +9,9 @@ use hyper::{
     header::{ACCEPT, AUTHORIZATION, HeaderMap},
     upgrade::Upgraded,
 };
-use hyper_rustls::HttpsConnectorBuilder;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::{
-    client::legacy::Client as HyperClient,
+    client::legacy::{Client as HyperClient, connect::HttpConnector},
     rt::{TokioExecutor, TokioIo},
 };
 use mirrord_operator_websocket::{
@@ -40,6 +40,7 @@ use crate::{
     },
     error::SessionsManagerClientError,
     retry::with_deadline,
+    tls,
 };
 
 /// Complete sessions-manager API base URL, including any deployment-specific path prefix.
@@ -118,6 +119,9 @@ const WEBSOCKET_UPGRADE_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub struct DirectTransport {
     http: reqwest::Client,
+    /// Dials the data-plane WebSocket upgrades, which need the raw [`Upgraded`] connection that
+    /// reqwest does not expose.
+    websocket: HyperClient<HttpsConnector<HttpConnector>, Empty<Bytes>>,
     api: ControlPlaneApi,
     credentials: Arc<dyn CredentialProvider>,
 }
@@ -125,10 +129,17 @@ pub struct DirectTransport {
 impl DirectTransport {
     /// Reaches the sessions-manager at `base_url` without credentials.
     pub fn new(base_url: Url) -> Result<Self, SessionsManagerClientError> {
+        let websocket_connector = HttpsConnectorBuilder::new()
+            .with_tls_config(tls::rustls_config()?)
+            .https_or_http()
+            .enable_http1()
+            .build();
+
         Ok(Self {
-            http: reqwest::Client::builder()
+            http: tls::http_client_builder()?
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()?,
+            websocket: HyperClient::builder(TokioExecutor::new()).build(websocket_connector),
             api: ControlPlaneApi::new(validate_base_url(base_url)?),
             credentials: Arc::new(NoCredentials),
         })
@@ -180,14 +191,6 @@ impl DirectTransport {
 
         let url = assignment.data_plane_endpoint.resolve(base_url, scheme)?;
 
-        let connector = HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_http1()
-            .build();
-        let client: HyperClient<_, Empty<Bytes>> =
-            HyperClient::builder(TokioExecutor::new()).build(connector);
-
         let started_at = Instant::now();
         tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, async {
             // The credentials are gathered inside the timeout: a provider may have to reach the
@@ -201,7 +204,8 @@ impl DirectTransport {
             // The data-plane upgrade request never carries a body, so the (always-empty) `Vec<u8>`
             // built above is simply dropped in favor of the client's own `Empty<Bytes>` body type.
             let stream = connect_ws_direct(request, UpgradeContract::Direct, |request| async {
-                let response = client
+                let response = self
+                    .websocket
                     .request(request.map(|_| Empty::<Bytes>::new()))
                     .await
                     .map_err(|error| Box::new(error) as BoxError)?;

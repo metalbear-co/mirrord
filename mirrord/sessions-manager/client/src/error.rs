@@ -9,6 +9,8 @@ pub enum SessionsManagerClientError {
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
     #[error("HTTP control plane request failed: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("failed to set up TLS for the sessions-manager data plane: {0}")]
+    Tls(#[from] rustls::Error),
     #[error("WebSocket data-plane upgrade failed: {0}")]
     WebSocketUpgrade(#[from] ConnectError),
     #[error("Kubernetes request to the operator-hosted sessions-manager failed: {0}")]

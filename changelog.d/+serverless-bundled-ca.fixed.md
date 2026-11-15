@@ -1,0 +1,1 @@
+The serverless workload companion and the CLI's sessions-manager connection trust the CA certificates bundled into mirrord, alongside the system's when it has any, so application images no longer need `ca-certificates` installed to connect to MetalBear Cloud.
