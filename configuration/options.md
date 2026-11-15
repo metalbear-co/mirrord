@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-11-12T00:00:00.000Z
+lastmod: 2026-11-15T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -1057,7 +1057,7 @@ Example:
   "name": "my-database-name",
   "ttl_secs": 120,
   "type": "mysql",
-  "version": "8.0",
+  "version": "8.4",
   "connection": {
     "url": {
       "type": "env",
