@@ -84,6 +84,10 @@ export const strings = {
     showingYours: 'Showing only your sessions.',
     connectOperator: 'Connect operator →',
     zeroSessions: '0 sessions · operator not connected',
+    cloud: 'MetalBear Cloud',
+    cloudEmpty: 'No sessions in your organization right now.',
+    cloudError: 'Could not list MetalBear Cloud sessions',
+    cloudWaiting: 'waiting for agent',
   },
   kubernetesAccess: {
     title: 'Kubernetes access was lost',

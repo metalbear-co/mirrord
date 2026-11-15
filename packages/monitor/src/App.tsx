@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { CloudOff } from 'lucide-react'
 import type {
+  CloudSessionsResponse,
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
@@ -62,6 +63,7 @@ export default function App({
   const [operatorSessions, setOperatorSessions] = useState<
     OperatorSessionSummary[]
   >([])
+  const [cloud, setCloud] = useState<CloudSessionsResponse | null>(null)
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
     null,
   )
@@ -247,6 +249,34 @@ export default function App({
     }
   }, [effectiveContext])
 
+  // Not tied to the kube context: the sessions-manager lists the sessions of the organization
+  // the developer's `mirrord login` names.
+  useEffect(() => {
+    let cancelled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
+    const poll = async () => {
+      try {
+        const resp = await api.listCloudSessions()
+        if (!cancelled) setCloud(resp)
+      } catch (err: unknown) {
+        if (cancelled) return
+        console.error(err)
+        setCloud({ status: 'unavailable', reason: String(err), sessions: [] })
+      } finally {
+        if (!cancelled) {
+          timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
+        }
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timeout !== undefined) clearTimeout(timeout)
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     let timeout: ReturnType<typeof setTimeout> | undefined
@@ -417,8 +447,13 @@ export default function App({
     [selectedKind, selectedId, operatorSessions],
   )
 
+  // See `usesCloud` in `SessionSidebar`: without an operator, Cloud users aren't missing anything.
+  const usesCloud = cloud !== null && cloud.status !== 'loggedOut'
   const showFunnelHero =
-    !selectedLocal && !selectedOperator && watchStatus?.status === 'unavailable'
+    !usesCloud &&
+    !selectedLocal &&
+    !selectedOperator &&
+    watchStatus?.status === 'unavailable'
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -455,6 +490,7 @@ export default function App({
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
           watchStatus={watchStatus}
+          cloud={cloud}
           selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
           onSelectOperator={handleSelectOperator}
           onConnectOperator={() => setConnectModalOpen(true)}
@@ -488,7 +524,7 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
-          ) : watchStatus?.status === 'kubernetes_unavailable' ? (
+          ) : !usesCloud && watchStatus?.status === 'kubernetes_unavailable' ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="border-destructive/40 bg-destructive/5 flex max-w-xl gap-4 rounded-lg border p-5">
                 <CloudOff className="text-destructive mt-0.5 h-6 w-6 shrink-0" />

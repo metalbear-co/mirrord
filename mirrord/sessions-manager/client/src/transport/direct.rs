@@ -20,7 +20,7 @@ use mirrord_operator_websocket::{
 };
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, ServiceScope,
+    AssignmentSubscription, ConnectionAssignment, ServiceScope, SessionList,
 };
 use reqwest::StatusCode;
 use tokio::time::Instant;
@@ -156,6 +156,29 @@ impl DirectTransport {
     pub fn with_credentials(mut self, credentials: Arc<dyn CredentialProvider>) -> Self {
         self.credentials = credentials;
         self
+    }
+
+    /// The live sessions of the organization the credentials name, for showing them without an
+    /// operator (`mirrord ui`).
+    pub async fn list_sessions(&self) -> Result<SessionList, SessionsManagerClientError> {
+        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
+        let endpoint = self.api.endpoint(ControlPlaneEndpoint::Sessions)?;
+        let credentials =
+            with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
+        let sent_authorization = credentials.contains_key(AUTHORIZATION);
+        let request = self.http.get(endpoint).headers(credentials).send();
+        let response = with_deadline(Some(deadline), request).await??;
+        match response.status() {
+            StatusCode::UNAUTHORIZED
+                if sent_authorization
+                    && let Some(error) = self.credentials.unauthorized_error() =>
+            {
+                Err(error)
+            }
+            StatusCode::FORBIDDEN => Err(SessionsManagerClientError::Forbidden),
+            status if !status.is_success() => Err(SessionsManagerClientError::HttpStatus(status)),
+            _ => Ok(with_deadline(Some(deadline), response.json()).await??),
+        }
     }
 
     /// Dials and authorizes the data-plane WebSocket described by a control-plane assignment.
