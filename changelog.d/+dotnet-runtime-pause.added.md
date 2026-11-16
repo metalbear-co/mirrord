@@ -1,0 +1,1 @@
+Experimental: `mirrord up --debug <service>` also holds each .NET program the service starts, such as the app under `dotnet run`, before any of its .NET code runs, until an IDE attaches its debugger and releases it.
