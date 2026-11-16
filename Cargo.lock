@@ -5954,6 +5954,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rustls",
  "rustls-platform-verifier",
+ "rustls-webpki",
  "secrecy",
  "serde",
  "serde_json",
@@ -5969,6 +5970,7 @@ dependencies = [
  "url",
  "uuid",
  "webpki-root-certs",
+ "webpki-roots",
 ]
 
 [[package]]

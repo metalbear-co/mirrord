@@ -1,7 +1,7 @@
 //! Which certificate authorities the sessions-manager and MetalBear Cloud connections trust.
 //!
-//! The workload companion runs inside the customer's application container, and many images ship
-//! no CA bundle at all (slim and distroless bases, or any image without `ca-certificates`). The
+//! The workload companion runs inside the customer's application container, and some images ship
+//! no CA bundle at all (`scratch`, `debian:*-slim`, or any image without `ca-certificates`). The
 //! Mozilla roots compiled into the binary are therefore always trusted, so reaching MetalBear
 //! Cloud, or any sessions-manager with a publicly trusted certificate, needs nothing from the image.
 //!
@@ -12,11 +12,32 @@
 
 use std::sync::Arc;
 
-use rustls::{ClientConfig, crypto::aws_lc_rs};
+use rustls::{ClientConfig, crypto::aws_lc_rs, pki_types::CertificateDer};
 use rustls_platform_verifier::Verifier;
 use webpki_root_certs::TLS_SERVER_ROOT_CERTS;
+use webpki_roots::TLS_SERVER_ROOTS;
 
 use crate::error::SessionsManagerClientError;
+
+/// The bundled Mozilla roots, without those Mozilla trusts only for some names.
+///
+/// Both reqwest and the platform verifier take roots as bare certificates, which can't carry the
+/// name constraints Mozilla attaches to a root (such as TUBITAK Kamu SM's, limited to `.tr`).
+/// Trusted unconstrained, such a root could issue a certificate for any sessions-manager, so it's
+/// left out. `webpki-roots` lists the same roots with their constraints, which is how they're
+/// found. A root whose subject can't be read is left out too.
+fn bundled_roots() -> impl Iterator<Item = CertificateDer<'static>> {
+    TLS_SERVER_ROOT_CERTS
+        .iter()
+        .filter(|certificate| {
+            webpki::anchor_from_trusted_cert(certificate).is_ok_and(|anchor| {
+                !TLS_SERVER_ROOTS.iter().any(|constrained| {
+                    constrained.name_constraints.is_some() && constrained.subject == anchor.subject
+                })
+            })
+        })
+        .cloned()
+}
 
 /// A [`reqwest::ClientBuilder`] that trusts the bundled roots alongside the platform's.
 ///
@@ -25,9 +46,8 @@ use crate::error::SessionsManagerClientError;
 /// reqwest accepts only when it is the exact `rustls` version reqwest links, and otherwise rejects
 /// at `build()` with an opaque builder error.
 pub(crate) fn http_client_builder() -> Result<reqwest::ClientBuilder, SessionsManagerClientError> {
-    let bundled = TLS_SERVER_ROOT_CERTS
-        .iter()
-        .map(|certificate| reqwest::Certificate::from_der(certificate))
+    let bundled = bundled_roots()
+        .map(|certificate| reqwest::Certificate::from_der(&certificate))
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(reqwest::Client::builder().tls_certs_merge(bundled))
@@ -37,8 +57,7 @@ pub(crate) fn http_client_builder() -> Result<reqwest::ClientBuilder, SessionsMa
 /// does not dial.
 pub(crate) fn rustls_config() -> Result<ClientConfig, SessionsManagerClientError> {
     let provider = Arc::new(aws_lc_rs::default_provider());
-    let verifier =
-        Verifier::new_with_extra_roots(TLS_SERVER_ROOT_CERTS.iter().cloned(), provider.clone())?;
+    let verifier = Verifier::new_with_extra_roots(bundled_roots(), provider.clone())?;
 
     Ok(ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?

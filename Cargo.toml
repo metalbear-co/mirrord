@@ -257,6 +257,7 @@ rust-embed = "8"
 rustls = "0.23"
 rustls-pemfile = "2"
 rustls-platform-verifier = "0.7"
+rustls-webpki = "0.103"
 schemars = { version = "1.0" }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
