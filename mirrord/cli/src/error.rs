@@ -1278,6 +1278,11 @@ impl CliError {
     pub(crate) fn connect_analytics_error(&self) -> AnalyticsError {
         match self {
             Self::SessionsManagerConnectTimeout => AnalyticsError::SessionsManagerConnectTimeout,
+            // The same refusal, found when the connection is made rather than by the check
+            // before it.
+            Self::SessionsManagerConnect(
+                mirrord_sessions_manager_client::SessionsManagerClientError::ServerlessSessionsManagerNotServed(..),
+            ) => AnalyticsError::ServerlessSessionsManagerNotServed,
             Self::SessionsManagerConnect(..) => AnalyticsError::SessionsManagerConnect,
             Self::SessionsManagerUrl(..) => AnalyticsError::SessionsManagerUrl,
             Self::ServerlessSessionsManagerNotServed => {
