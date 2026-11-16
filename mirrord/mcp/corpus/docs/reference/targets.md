@@ -57,7 +57,7 @@ When targeting a Service, mirrord resolves the Service to its backing pods via t
 
 When targeting Labels, mirrord will target all pods that match the label selector. See [Targeting Pods by Label](../using-mirrord/targeting-pods-by-label.md) for how this behaves, version requirements, and current limitations.
 
-mirrord can also target workloads that run outside Kubernetes, such as Amazon ECS tasks, with a `serverless/<SERVICE_NAME>` target. This is experimental; see [Serverless Workloads](../using-mirrord/serverless/README.md).
+mirrord can also target workloads that run outside Kubernetes, such as Amazon ECS tasks, with a `serverless/<SERVICE_NAME>` target. This is in alpha; see [Beyond Kubernetes](../using-mirrord/beyond-kubernetes/README.md).
 
 Both in mirrord OSS and mirrord for Teams, if you don't name any specific container to be targeted, mirrord will pick the first container from the pod spec. Some containers, like service mesh proxies, will be automatically ignored.
 

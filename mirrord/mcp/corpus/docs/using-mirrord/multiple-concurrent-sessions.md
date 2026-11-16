@@ -101,7 +101,7 @@ Your local process takes over the service entirely. mirrord creates a copy of th
 The original workload is restored when the session ends.
 {% endhint %}
 
-`replace` requires the targeted workload to be a deployment, statefulset, or replicaset.
+`replace` requires the targeted workload to be a deployment, statefulset, or replicaset. It can't be used with a [serverless target](#serverless-targets).
 
 Any `http_filter` set on a service in `replace` mode is ignored.
 
@@ -144,6 +144,41 @@ A service in `mirror` mode asks for `mirror` on every one of its Kafka queues. W
 {% hint style="info" %}
 Only messages containing the session key (`checkout-debug` in this case) are routed to your local session. All other messages continue to the deployed target.
 {% endhint %}
+
+### Serverless targets
+
+{% hint style="info" %}
+This feature requires at least mirrord version 3.288.0.
+{% endhint %}
+
+A service can target a [workload outside Kubernetes](beyond-kubernetes/README.md), such as an Amazon ECS service, alongside services that target Kubernetes workloads. Set `target.path` to `serverless/` followed by the service name, and `target.namespace` to the environment it runs in:
+
+```yaml
+services:
+  orders:
+    target:
+      path: serverless/orders
+      namespace: staging
+    run:
+      command: ["node", "app.js"]
+
+  user-auth-service:
+    target:
+      path: deployment/user-auth
+    run:
+      command: ["python", "-m", "http.server"]
+```
+
+For a serverless target, `target.namespace` is the environment the service is registered under in sessions-manager, not a Kubernetes namespace. When it's not set, `default` is used. Set up the workload and your deployment mode first, as described in [Beyond Kubernetes](beyond-kubernetes/README.md#setting-up).
+
+Serverless targets work with these limitations:
+
+* **`split` and `mirror` only.** A serverless target can't be copied, so a service in `replace` mode fails before any session starts, with an `incompatible mode and target` error that names the service.
+* **No queue splitting or DB branching.** In `split` and `mirror` mode the service runs without either, and `mirrord up` prints a warning for it. A mode that asks for queue splitting or DB branching gets the same warning instead of an error, so one mode can still cover both serverless and Kubernetes services.
+* **No `split_queues`, `kafka_branch`, `db_branches` or `copy_target` in `config_patch`.** A service whose `config_patch` sets any of them fails before any session starts, with an error naming the setting, for example `` `feature.db_branches` is not supported with serverless targets.``
+* **Set the target explicitly.** `mirrord up init` and target inference only find Kubernetes workloads, so write the `serverless/` path into `mirrord-up.yaml` yourself.
+
+All the [limitations of workloads outside Kubernetes](beyond-kubernetes/README.md#limitations) also apply.
 
 ### Context
 
@@ -201,6 +236,8 @@ Specifies the target of the session. Has 2 fields: `path` and `namespace`, which
 When `path` is omitted, `mirrord up` infers it from the service id (the key in the `services` map) by searching the cluster for a deployment, statefulset, rollout, or pod with that name. If a match is found, it's used automatically, otherwise `mirrord up` prompts you to pick a namespace and workload, and offers to save the choice back to `mirrord-up.yaml` so future runs skip the prompt.
 
 To run a service without a target (outgoing traffic only), set `target: none`.
+
+For a [serverless target](#serverless-targets), `namespace` is the environment of the service in sessions-manager, `default` when not set. Serverless targets aren't inferred, so set `path` explicitly.
 
 Examples:
 

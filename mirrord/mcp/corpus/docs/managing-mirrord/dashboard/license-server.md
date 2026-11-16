@@ -64,3 +64,5 @@ curl -H "x-license-key: <your-license-key>" \
 ```
 
 For spreadsheet reports (Excel format), see Getting a Utilisation Report (../license-server.md#getting-a-utilisation-report-from-the-license-server)
+
+For an OpenAPI description of the license server API, see [Getting an OpenAPI Description of the License Server API](../license-server.md#getting-an-openapi-description-of-the-license-server-api).

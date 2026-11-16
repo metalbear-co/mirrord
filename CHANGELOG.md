@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.289.0](https://github.com/metalbear-co/mirrord/tree/3.289.0) - 2026-11-16
+
+
+### Security
+
+- The internal proxy no longer writes the values of credential headers, such as
+  `Authorization`, `Cookie` and API key headers, to its log when it receives an
+  HTTP request.
+
+
+### Added
+
+- `mirrord ui` shows the sessions of your organization on MetalBear Cloud after
+  `mirrord login`, and while you're logged in, no longer reports an error when
+  the cluster has no mirrord operator or there is no Kubernetes context.
+
 ## [3.288.0](https://github.com/metalbear-co/mirrord/tree/3.288.0) - 2026-11-15
 
 
