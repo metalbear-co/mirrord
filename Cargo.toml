@@ -132,6 +132,8 @@ derive_more = "2.0.1"
 dirs = "6"
 dns-lookup = "3"
 dotenvy = "0.15"
+# TEMPORARY: a sibling checkout until dotnot is published; then a git rev, as for stork.
+dotnot = { path = "../mirrord-dotnot" }
 drain = "0.1"
 dunce = "1"
 enum_dispatch = "0.3"
