@@ -653,7 +653,7 @@ impl MirrordExecution {
             mirrord_up.as_ref(),
         )
         .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        .inspect_err(|error| analytics.set_error(error.connect_analytics_error()))?;
 
         let mut client = connector.into_client().await?;
 
@@ -813,7 +813,7 @@ impl MirrordExecution {
             mirrord_up.as_ref(),
         )
         .await
-        .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?;
+        .inspect_err(|error| analytics.set_error(error.connect_analytics_error()))?;
 
         let share_link = match &connect_info {
             AgentConnectInfo::Operator(session) if config.share => {
