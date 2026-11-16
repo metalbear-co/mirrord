@@ -18,6 +18,7 @@ use mirrord_config::{
     config::EnvKey,
     target::{Target, TargetFileConfig},
 };
+use mirrord_debug_hold::{LINE_VERSION, Trigger};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -44,6 +45,19 @@ pub struct UpListing {
     key: String,
     /// Sorted by name, so the output is stable between runs.
     services: Vec<ListedService>,
+    /// What `mirrord up --debug` does in this CLI.
+    debug: DebugSupport,
+}
+
+/// What `mirrord up --debug` does in this CLI, for an extension to choose its own part by, rather
+/// than by a version number.
+#[derive(Debug, Serialize)]
+struct DebugSupport {
+    /// The `v` of the `debug-hold`, `debug-hold-ended` and `debug-plan` lines it prints.
+    hold_line: u32,
+    /// What can hold a debugged program: `process`, and `runtime` for the .NET runtime's startup
+    /// pause on a diagnostic port `up` serves, so the extension adds no port of its own.
+    triggers: [Trigger; 2],
 }
 
 #[derive(Debug, Serialize)]
@@ -140,6 +154,10 @@ impl UpListing {
             config_path: dunce::canonicalize(config_path)?,
             key: key.as_str().to_owned(),
             services,
+            debug: DebugSupport {
+                hold_line: LINE_VERSION,
+                triggers: [Trigger::Process, Trigger::Runtime],
+            },
         })
     }
 
@@ -411,7 +429,11 @@ mod tests {
                             "pre_command": []
                         }
                     }
-                ]
+                ],
+                "debug": {
+                    "hold_line": 2,
+                    "triggers": ["process", "runtime"]
+                }
             })
         );
     }

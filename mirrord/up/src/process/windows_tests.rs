@@ -84,6 +84,7 @@ fn service(directory: &Path, name: &str, mode: &str) -> ServiceCommands {
         name: Arc::from(name),
         debugged: false,
         pre: None,
+        dotnet_port: None,
         session: command,
     }
 }
@@ -450,6 +451,7 @@ async fn spawn_failure_is_returned_instead_of_panicking() {
         name: Arc::from("missing"),
         debugged: false,
         pre: None,
+        dotnet_port: None,
         session: resolve_tokio_command(directory.path().join("missing.exe")),
     };
     // Teardown starts before the spawned service can write its PID, so this only checks that

@@ -2,10 +2,12 @@ services:
   api:
     target: none
     run:
+      pre_command: [build, api]
       command: [api]
   web:
     target: none
     run:
+      pre_command: [build, web]
       command: [web]
   worker:
     target: none
