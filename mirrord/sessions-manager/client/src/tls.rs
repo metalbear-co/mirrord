@@ -2,13 +2,15 @@
 //!
 //! The workload companion runs inside the customer's application container, and some images ship
 //! no CA bundle at all (`scratch`, `debian:*-slim`, or any image without `ca-certificates`). The
-//! Mozilla roots compiled into the binary are therefore always trusted, so reaching MetalBear
-//! Cloud, or any sessions-manager with a publicly trusted certificate, needs nothing from the image.
+//! Mozilla roots compiled into the binary are therefore always trusted (all but the few Mozilla
+//! trusts only for some names, see [`bundled_roots`]), so reaching MetalBear Cloud, or any
+//! sessions-manager with a publicly trusted certificate, needs nothing from the image.
 //!
 //! The platform's own roots are trusted as well whenever it has any, so a sessions-manager behind a
 //! private CA or a TLS-inspecting proxy keeps working once that CA is installed in the image (or on
 //! the developer's machine, for the CLI). The control plane and the data plane share this trust, so
-//! a deployment cannot pass registration and then fail every data-plane dial.
+//! a certificate one of them accepts the other accepts too. They don't share a route: reqwest
+//! honors `HTTPS_PROXY` and `ALL_PROXY`, while the data-plane WebSocket always dials directly.
 
 use std::sync::Arc;
 
@@ -24,15 +26,19 @@ use crate::error::SessionsManagerClientError;
 /// Both reqwest and the platform verifier take roots as bare certificates, which can't carry the
 /// name constraints Mozilla attaches to a root (such as TUBITAK Kamu SM's, limited to `.tr`).
 /// Trusted unconstrained, such a root could issue a certificate for any sessions-manager, so it's
-/// left out. `webpki-roots` lists the same roots with their constraints, which is how they're
-/// found. A root whose subject can't be read is left out too.
+/// left out. `webpki-roots` lists the same roots with their constraints, so a certificate is kept
+/// only when `webpki-roots` lists its subject and key without constraints. The two crates are
+/// released separately, and a root only the newer one knows is left out rather than trusted for
+/// every name.
 fn bundled_roots() -> impl Iterator<Item = CertificateDer<'static>> {
     TLS_SERVER_ROOT_CERTS
         .iter()
         .filter(|certificate| {
             webpki::anchor_from_trusted_cert(certificate).is_ok_and(|anchor| {
-                !TLS_SERVER_ROOTS.iter().any(|constrained| {
-                    constrained.name_constraints.is_some() && constrained.subject == anchor.subject
+                TLS_SERVER_ROOTS.iter().any(|listed| {
+                    listed.name_constraints.is_none()
+                        && listed.subject == anchor.subject
+                        && listed.subject_public_key_info == anchor.subject_public_key_info
                 })
             })
         })
