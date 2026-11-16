@@ -1289,6 +1289,13 @@ impl CliError {
                 AnalyticsError::ServerlessSessionsManagerNotServed
             }
             Self::SessionsManagerCloudUrl(..) => AnalyticsError::SessionsManagerCloudUrl,
+            // An operator that could serve the sessions-manager but has it turned off does not
+            // serve it either.
+            Self::FeatureDisabledInOperatorError { feature, .. }
+                if *feature == NewOperatorFeature::ServerlessSessionsManager.to_string() =>
+            {
+                AnalyticsError::ServerlessSessionsManagerNotServed
+            }
             _ => AnalyticsError::AgentConnection,
         }
     }
