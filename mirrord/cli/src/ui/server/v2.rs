@@ -17,6 +17,9 @@
 //! - `operator/*` — cluster sessions from the operator. Fetched per-request for the selected
 //!   context and filtered to the selected namespace; the upstream is itself a poll of the operator
 //!   CRD, so a stateless per-context fetch is the natural fit.
+//! - `cloud/*`    — sessions of the developer's organization from the MetalBear Cloud
+//!   sessions-manager, for serverless targets that run without an operator. Authenticated with
+//!   the `mirrord login` token; see [`cloud`].
 //! - `kube/*`     — kubeconfig/cluster metadata used to populate the context and namespace pickers.
 
 use std::{collections::BTreeMap, time::Duration};
@@ -53,6 +56,7 @@ use super::{
 };
 use crate::{data::GlobalConfig, ui::error::ApiError};
 
+mod cloud;
 mod events;
 mod targets;
 
@@ -72,6 +76,7 @@ pub(super) fn v2_router() -> Router<AppState> {
         .route("/operator/events", get(events::operator_events_sse))
         .route("/operator/previews/{id}", get(operator_preview_detail))
         .route("/operator/license", get(operator_license))
+        .route("/cloud/sessions", get(cloud::cloud_sessions))
         .route("/kube/contexts", get(kube_contexts))
         .route("/kube/namespaces", get(kube_namespaces))
         .route("/kube/user", get(kube_user))
