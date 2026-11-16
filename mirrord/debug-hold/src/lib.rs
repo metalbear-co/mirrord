@@ -23,6 +23,8 @@ pub use line::{
 };
 
 mod line;
+#[cfg(feature = "runtime-pause")]
+pub mod runtime;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -135,6 +137,9 @@ pub enum HoldError {
         #[source]
         source: GateError,
     },
+
+    #[error("the wait for the debug release of process {pid} ended without an answer")]
+    WaitAbandoned { pid: u32 },
 }
 
 #[cfg(test)]
