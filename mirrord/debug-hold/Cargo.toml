@@ -17,6 +17,8 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
@@ -32,6 +34,7 @@ utils-win = { path = "../utils-win" }
 winapi.workspace = true
 
 [dev-dependencies]
+rstest.workspace = true
 tempfile.workspace = true
 
 [lib]

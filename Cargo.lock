@@ -5435,6 +5435,9 @@ version = "3.288.0"
 dependencies = [
  "libc",
  "nix 0.31.3",
+ "rstest",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",

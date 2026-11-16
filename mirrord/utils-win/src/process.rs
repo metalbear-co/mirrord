@@ -139,6 +139,22 @@ pub fn process_status(pid: u32) -> ProcessStatus {
 ///
 /// * `handle` - a process handle with at least `PROCESS_QUERY_LIMITED_INFORMATION` access.
 pub fn process_image_name(handle: BorrowedHandle<'_>) -> Option<String> {
+    let full = process_image_path(handle)?;
+    Some(
+        Path::new(&full)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or(full),
+    )
+}
+
+/// The full path of the image of the process `handle` refers to, e.g.
+/// `C:\Program Files\dotnet\dotnet.exe`. `None` when it can't be read.
+///
+/// # Arguments
+///
+/// * `handle` - a process handle with at least `PROCESS_QUERY_LIMITED_INFORMATION` access.
+pub fn process_image_path(handle: BorrowedHandle<'_>) -> Option<String> {
     // Sized past `MAX_PATH` (260) so a long path is not truncated, matching the buffer
     // `modules.rs` uses.
     let mut buf = [0u16; 1024];
@@ -157,13 +173,7 @@ pub fn process_image_name(handle: BorrowedHandle<'_>) -> Option<String> {
         return None;
     }
     let written = buf.get(..size as usize).unwrap_or(&buf);
-    let full = u16_buffer_to_string(written);
-    Some(
-        Path::new(&full)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or(full),
-    )
+    Some(u16_buffer_to_string(written))
 }
 
 /// A snapshot of the current process's identity.
