@@ -26,6 +26,7 @@ mirrord-intproxy-protocol = { path = "../intproxy/protocol" }
 mirrord-progress = { path = "../progress", features = ["implementations"] }
 mirrord-kube = { path = "../kube", features = ["portforward"] }
 mirrord-config = { path = "../config" }
+mirrord-debug-hold = { path = "../debug-hold" }
 mirrord-up = { path = "../up" }
 mirrord-tui = { path = "../tui" }
 mirrord-mcp = { path = "../mcp" }
@@ -44,6 +45,7 @@ actix-codec.workspace = true
 atomic-write-file.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
+dotnot.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true

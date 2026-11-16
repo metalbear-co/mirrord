@@ -2500,6 +2500,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
+name = "dotnot"
+version = "0.1.0"
+dependencies = [
+ "dataview",
+ "pelite",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "double_listen"
 version = "3.288.0"
 dependencies = [
@@ -5078,6 +5087,7 @@ dependencies = [
  "clap_complete",
  "const-random",
  "dotenvy",
+ "dotnot",
  "drain",
  "dunce",
  "flate2",
@@ -5103,6 +5113,7 @@ dependencies = [
  "mirrord-command",
  "mirrord-config",
  "mirrord-console",
+ "mirrord-debug-hold",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
  "mirrord-kube",

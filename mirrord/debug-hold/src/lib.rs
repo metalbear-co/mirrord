@@ -18,8 +18,8 @@
 use std::io::Write;
 
 pub use line::{
-    ANNOUNCEMENT_PREFIX, Announcement, ENDED_PREFIX, Ended, EndedOutcome, HeldProcess,
-    LINE_VERSION, RuntimeFacts, Trigger,
+    ANNOUNCEMENT_PREFIX, Announcement, DotnetImage, ENDED_PREFIX, Ended, EndedOutcome, HeldProcess,
+    LINE_VERSION, PLAN_PREFIX, Plan, RuntimeFacts, Trigger,
 };
 
 mod line;

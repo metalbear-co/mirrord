@@ -5,6 +5,8 @@
 //! - `debug-hold {…}`: a program is held, and the IDE may attach to it, then release it
 //!   ([`Announcement`]).
 //! - `debug-hold-ended {…}`: a hold is over ([`Ended`]).
+//! - `debug-plan {…}`: once per debugged service, before its program starts, what will hold it
+//!   ([`Plan`]).
 //!
 //! `mirrord up` prefixes every line with the service's name and `: `, like the rest of the
 //! service's output. The objects carry [`LINE_VERSION`] as `v`. Fields are only ever added, so an
@@ -23,6 +25,9 @@ pub const ANNOUNCEMENT_PREFIX: &str = "debug-hold ";
 
 /// How [`Ended`]'s line starts, before its JSON.
 pub const ENDED_PREFIX: &str = "debug-hold-ended ";
+
+/// How [`Plan`]'s line starts, before its JSON.
+pub const PLAN_PREFIX: &str = "debug-plan ";
 
 /// What holds the program, which tells the IDE when its attach can complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -169,6 +174,67 @@ impl Ended {
 impl fmt::Display for Ended {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write_line(f, ENDED_PREFIX, self)
+    }
+}
+
+/// What kind of .NET program a root is, from its image's bytes.
+///
+/// A process hold's engine follows from it: managed (.NET Framework) for
+/// [`Framework`](Self::Framework), native for no kind at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DotnetImage {
+    /// A .NET apphost, which starts CoreCLR.
+    Apphost,
+    /// A single-file .NET bundle, which starts CoreCLR.
+    SingleFile,
+    /// The `dotnet` muxer, which starts CoreCLR for `dotnet App.dll` and `dotnet run`.
+    Muxer,
+    /// A .NET Framework program, which has no diagnostic port to pause on.
+    Framework,
+}
+
+/// `debug-plan {…}`: what `mirrord exec` will hold of a debugged service, before the program
+/// starts.
+///
+/// It tells the IDE what to expect: a process hold for the root, or runtime holds for each .NET
+/// runtime in the program's tree, and for a process hold, the engine to attach with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Plan {
+    /// Always [`LINE_VERSION`].
+    v: u32,
+    /// What holds the root.
+    pub trigger: Trigger,
+    /// What kind of .NET program the root is, `None` for none.
+    pub dotnet: Option<DotnetImage>,
+    /// The root's image, as `exec` resolved it.
+    pub image: Option<String>,
+    /// Why the plan isn't the one the root's kind asks for, such as diagnostics turned off.
+    pub note: Option<String>,
+}
+
+impl Plan {
+    /// The plan for a root whose image is `image`.
+    pub fn new(
+        trigger: Trigger,
+        dotnet: Option<DotnetImage>,
+        image: Option<String>,
+        note: Option<String>,
+    ) -> Self {
+        Self {
+            v: LINE_VERSION,
+            trigger,
+            dotnet,
+            image,
+            note,
+        }
+    }
+}
+
+/// The whole line, without its newline: `debug-plan {…}`.
+impl fmt::Display for Plan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_line(f, PLAN_PREFIX, self)
     }
 }
 
