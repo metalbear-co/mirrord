@@ -11,7 +11,7 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt},
     sync::mpsc,
     task::JoinHandle,
 };
@@ -473,6 +473,221 @@ async fn two_runtimes_are_held_and_released_on_their_own() {
         [PROCESS_INFO3],
         "the first runtime is still held"
     );
+}
+
+/// What [`real_runtime`] built.
+struct RealApp {
+    /// The temporary directory everything was built in, removed with this.
+    _scratch: tempfile::TempDir,
+    /// The fixture's project, built in place, so `dotnet run --no-build` finds its output.
+    project: std::path::PathBuf,
+    /// Its IL `.dll`, which `dotnet` runs.
+    dll: std::path::PathBuf,
+}
+
+/// Builds `testdata/hello` offline with the `dotnet` on PATH, or says why it can't and returns
+/// `None`. Set `MIRRORD_REQUIRE_DOTNET=1` to make a missing SDK a failure instead.
+fn real_runtime() -> Option<RealApp> {
+    let has_sdk = mirrord_command::resolve_command("dotnet")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !has_sdk {
+        assert!(
+            std::env::var_os("MIRRORD_REQUIRE_DOTNET").is_none(),
+            "MIRRORD_REQUIRE_DOTNET is set, but there's no .NET SDK on PATH"
+        );
+        eprintln!("skipped: no .NET SDK on PATH to build a real runtime's app with");
+        return None;
+    }
+
+    let scratch = tempfile::tempdir().expect("a scratch directory");
+    let project = scratch.path().join("project");
+    let feed = scratch.path().join("empty-feed");
+    for directory in [&project, &feed] {
+        std::fs::create_dir_all(directory).expect("the scratch directory is writable");
+    }
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runtime/testdata/hello");
+    for file in [
+        "Hello.csproj",
+        "Program.cs",
+        "Directory.Build.props",
+        "Directory.Build.targets",
+    ] {
+        std::fs::copy(fixture.join(file), project.join(file)).expect("the fixture's files exist");
+    }
+
+    // Offline, and without build servers, so nothing downloads and no compiler outlives the test.
+    let built = mirrord_command::resolve_command("dotnet")
+        .args([
+            "build",
+            "-c",
+            "Release",
+            "--nologo",
+            "--disable-build-servers",
+        ])
+        .arg("-p:UseSharedCompilation=false")
+        .arg("--source")
+        .arg(&feed)
+        .arg(project.join("Hello.csproj"))
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .env("DOTNET_NOLOGO", "1")
+        .env("MSBUILDDISABLENODEREUSE", "1")
+        .output()
+        .expect("dotnet runs");
+    assert!(
+        built.status.success(),
+        "the fixture app must build:\n{}\n{}",
+        String::from_utf8_lossy(&built.stdout),
+        String::from_utf8_lossy(&built.stderr)
+    );
+    // `bin/Release/<the SDK's framework>/`, where `dotnet run --no-build` looks for it too.
+    let dll = std::fs::read_dir(project.join("bin/Release"))
+        .expect("the build made its output directory")
+        .flatten()
+        .map(|framework| framework.path().join("Hello.dll"))
+        .find(|dll| dll.is_file())
+        .expect("the build made the app's dll");
+    Some(RealApp {
+        dll,
+        project,
+        _scratch: scratch,
+    })
+}
+
+/// A real .NET runtime, `dotnet Hello.dll` with the port in its `DOTNET_DiagnosticPorts`, pauses
+/// before its first line, is announced under its own pid with its entry assembly, and runs only
+/// once the IDE releases it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_real_runtime_pauses_on_the_port_until_its_release() {
+    let Some(app) = tokio::task::spawn_blocking(real_runtime)
+        .await
+        .expect("the build ran")
+    else {
+        return;
+    };
+    let port = DiagnosticPort::create().expect("the port is created");
+    let ports = format!("{},connect,suspend", port.address());
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let _serve = tokio::spawn(port.serve(move |report| {
+        let _ = report_tx.send(report);
+    }));
+
+    let mut child = mirrord_command::resolve_tokio_command("dotnet")
+        .arg(&app.dll)
+        .env("DOTNET_DiagnosticPorts", ports)
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("the app starts");
+    let mut stdout = tokio::io::BufReader::new(child.stdout.take().expect("piped")).lines();
+
+    let held = match tokio::time::timeout(STEP, report_rx.recv()).await {
+        Ok(Some(Report::Held(held))) => held,
+        other => panic!("expected the runtime's hold, got {other:?}"),
+    };
+    assert_eq!(Some(held.pid), child.id(), "held under the app's own pid");
+    assert_eq!(held.runtime.entry_assembly.as_deref(), Some("Hello"));
+    assert!(
+        held.process
+            .image
+            .as_deref()
+            .is_some_and(|image| std::path::Path::new(image).is_absolute()),
+        "the IDE gets the image's whole path: {:?}",
+        held.process.image
+    );
+    let early = tokio::time::timeout(QUIET, stdout.next_line()).await;
+    assert!(early.is_err(), "the app ran before its release: {early:?}");
+
+    release_like_an_ide(&held.release);
+
+    match tokio::time::timeout(STEP, report_rx.recv()).await {
+        Ok(Some(Report::Ended(ended))) => assert_eq!(ended.outcome, EndedOutcome::Resumed),
+        other => panic!("expected the hold's end, got {other:?}"),
+    }
+    let line = tokio::time::timeout(STEP, stdout.next_line())
+        .await
+        .expect("the app runs once released")
+        .expect("its output is readable");
+    assert_eq!(line.as_deref(), Some("hello from a paused runtime"));
+    let status = tokio::time::timeout(STEP, child.wait())
+        .await
+        .expect("the app ends")
+        .expect("its status is readable");
+    assert!(status.success(), "the app ran to its end: {status}");
+}
+
+/// `dotnet run --no-build`, the shape of a service that runs its project: the SDK pauses first and
+/// is resumed without a word, and then the app it starts pauses, and is held.
+#[tokio::test(flavor = "multi_thread")]
+async fn under_dotnet_run_the_sdk_is_skipped_and_the_app_is_held() {
+    let Some(app) = tokio::task::spawn_blocking(real_runtime)
+        .await
+        .expect("the build ran")
+    else {
+        return;
+    };
+    let port = DiagnosticPort::create().expect("the port is created");
+    let ports = format!("{},connect,suspend", port.address());
+    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
+    let _serve = tokio::spawn(port.serve(move |report| {
+        let _ = report_tx.send(report);
+    }));
+
+    let mut child = mirrord_command::resolve_tokio_command("dotnet")
+        .args([
+            "run",
+            "--no-build",
+            "-c",
+            "Release",
+            "--no-launch-profile",
+            "--project",
+        ])
+        .arg(&app.project)
+        .env("DOTNET_DiagnosticPorts", ports)
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .env("DOTNET_NOLOGO", "1")
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("the SDK starts");
+    let mut stdout = tokio::io::BufReader::new(child.stdout.take().expect("piped")).lines();
+
+    match tokio::time::timeout(STEP, report_rx.recv()).await {
+        Ok(Some(Report::Skipped {
+            pid,
+            entry_assembly,
+        })) => {
+            assert_eq!(
+                Some(pid),
+                child.id(),
+                "the SDK is the process this test started"
+            );
+            assert_eq!(entry_assembly, "dotnet");
+        }
+        other => panic!("expected the SDK to be skipped, got {other:?}"),
+    }
+    let held = match tokio::time::timeout(STEP, report_rx.recv()).await {
+        Ok(Some(Report::Held(held))) => held,
+        other => panic!("expected the app's hold, got {other:?}"),
+    };
+    assert_ne!(Some(held.pid), child.id(), "the app is the SDK's child");
+    assert_eq!(held.runtime.entry_assembly.as_deref(), Some("Hello"));
+
+    release_like_an_ide(&held.release);
+
+    let line = tokio::time::timeout(STEP, stdout.next_line())
+        .await
+        .expect("the app runs once released")
+        .expect("its output is readable");
+    assert_eq!(line.as_deref(), Some("hello from a paused runtime"));
+    let status = tokio::time::timeout(STEP, child.wait())
+        .await
+        .expect("the SDK ends with its app")
+        .expect("its status is readable");
+    assert!(status.success(), "the app ran to its end: {status}");
 }
 
 /// A program that ends right after its resume never connects again. Its hold still ended in a
