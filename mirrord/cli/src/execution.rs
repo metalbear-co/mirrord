@@ -19,8 +19,11 @@ use mirrord_command::resolve_tokio_command;
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
-    MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
-    external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
+    MIRRORD_TEST_INTPROXY_ADDR,
+    config::ConfigError,
+    debug_hold::{self, dotnet_ports},
+    external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM,
+    feature::env::mapper::EnvVarsRemapper,
     util::GIT_BRANCH,
 };
 #[cfg(windows)]
@@ -1025,6 +1028,12 @@ impl MirrordExecution {
         };
 
         config.sanitize_remote_env(&mut env_vars);
+        // A debugged program's runtimes pause on the port `mirrord up` serves, and a pod's own
+        // ports would keep them paused for good: they name sockets inside the pod.
+        // NOTE: a Run session keeps them, as it always did, though they can hang it the same way.
+        if debug_hold::requested_in_env() {
+            dotnet_ports::drop_remote(&mut env_vars);
+        }
 
         if let Some(file) = &config.feature.env.env_file {
             let envs_from_file = dotenvy::from_path_iter(file)
