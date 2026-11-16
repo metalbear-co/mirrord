@@ -128,6 +128,15 @@ pub const MIRRORD_DEBUG_HOLD: &str = "MIRRORD_DEBUG_HOLD";
 /// Experimental, like `--debug`. [`debug_hold`] has how the hold travels.
 pub const MIRRORD_LAYER_DEBUG_HOLD: &str = "MIRRORD_LAYER_DEBUG_HOLD";
 
+/// Environment variable handing `mirrord exec` the address of the .NET diagnostic port that
+/// `mirrord up --debug` serves for the service: a named pipe's name on Windows, a Unix socket's
+/// path elsewhere. `exec` merges it into the program's `DOTNET_DiagnosticPorts`, so each .NET
+/// runtime in the program's tree pauses at its startup until an IDE releases it. Only `exec`
+/// reads it, and the program never gets it.
+///
+/// Experimental, like `--debug`. [`debug_hold`] has how the hold travels.
+pub const MIRRORD_DEBUG_DOTNET_PORT: &str = "MIRRORD_DEBUG_DOTNET_PORT";
+
 /// Environment variable controlling Windows layer crash reporting.
 ///
 /// Crash reporting defaults to enabled. IDE extensions set this to `false` because stopping an
