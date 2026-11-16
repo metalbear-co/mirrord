@@ -11,6 +11,9 @@
 //! constructor, once it has started. Either way the program's entry point and its own initializers
 //! have not run when the debugger attaches, though the initializers of the libraries it depends on
 //! may have.
+//!
+//! A crate of its own, rather than part of `mirrord-layer-lib`, so `mirrord up` can create gates
+//! too without linking the layer's hooking dependencies.
 
 use std::{fmt, io::Write};
 

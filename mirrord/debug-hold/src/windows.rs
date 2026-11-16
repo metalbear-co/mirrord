@@ -9,7 +9,7 @@ pub use utils_win::event::EventError as GateError;
 use utils_win::event::{EventAccess, NamedEvent, Wake, wait_any};
 use uuid::Uuid;
 
-use crate::process::hold::{HoldError, HoldOutcome, ReleaseGate};
+use crate::{HoldError, HoldOutcome, ReleaseGate};
 
 /// A release event, created unset, that the IDE opens with `EVENT_MODIFY_STATE` and sets.
 pub struct Gate {

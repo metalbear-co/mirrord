@@ -30,6 +30,7 @@ mirrord-progress = { path = "../progress" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec"] }
 mirrord-layer-macro = { path = "../layer/macro" }
 mirrord-console = { path = "../console" }
+mirrord-debug-hold = { path = "../debug-hold" }
 
 base64.workspace = true
 bincode.workspace = true
@@ -44,7 +45,6 @@ http.workspace = true
 itertools.workspace = true
 libc.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }

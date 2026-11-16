@@ -1,0 +1,38 @@
+[package]
+name = "mirrord-debug-hold"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+nix = { workspace = true, features = ["fs", "signal"] }
+
+[target.'cfg(windows)'.dependencies]
+utils-win = { path = "../utils-win" }
+
+[target.'cfg(windows)'.dev-dependencies]
+winapi.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lib]
+doctest = false
