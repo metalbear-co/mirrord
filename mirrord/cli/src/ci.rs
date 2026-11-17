@@ -1009,6 +1009,90 @@ mod tests {
         );
     }
 
+    /// Waits until exactly `count` descriptors of this process are open on the file at
+    /// `lock_path`. A descriptor of a deleted file doesn't count, because `/proc` reads its target
+    /// as `<path> (deleted)`.
+    #[cfg(target_os = "linux")]
+    async fn wait_for_open_lock_files(lock_path: &std::path::Path, count: usize) {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let mut open = 0;
+                let mut descriptors = tokio::fs::read_dir("/proc/self/fd").await.unwrap();
+                while let Some(descriptor) = descriptors.next_entry().await.unwrap() {
+                    // Descriptors close while the directory is read, so a failed read is skipped.
+                    if tokio::fs::read_link(descriptor.path())
+                        .await
+                        .is_ok_and(|target| target == lock_path)
+                    {
+                        open += 1;
+                    }
+                }
+                if open == count {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("expected {count} open descriptors of {lock_path:?}"));
+    }
+
+    /// `mirrord ci stop` deletes the lock file of a session it removes while it holds the lock,
+    /// and a process of the session can have opened that file before the deletion. Once the stop
+    /// releases the lock, that process must wait for the lock file now at the lock path, here a
+    /// replacement that a later process of the session holds, instead of taking the lock of the
+    /// deleted file and writing the state while the replacement's holder writes it too.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn ci_store_update_waits_for_lock_file_replaced_after_removal() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = tokio::fs::canonicalize(temp_dir.path())
+            .await
+            .unwrap()
+            .join("session");
+        let lock_path = MirrordCiStore::lock_path(&session_dir);
+
+        let stop_lock = MirrordCiStore::lock_or_create_session(&session_dir, Duration::ZERO)
+            .await
+            .unwrap();
+        let waiter_dir = session_dir.clone();
+        let waiter = tokio::spawn(async move {
+            MirrordCiStore::update(&waiter_dir, LOCK_TIMEOUT, |store| {
+                store.intproxy_pids.insert(1234);
+            })
+            .await
+        });
+        // The stop's descriptor and the one the waiter opened before the removal.
+        wait_for_open_lock_files(&lock_path, 2).await;
+
+        MirrordCiStore::remove_session(&session_dir, &stop_lock)
+            .await
+            .unwrap();
+        let replacement = MirrordCiStore::lock_or_create_session(&session_dir, Duration::ZERO)
+            .await
+            .unwrap();
+        drop(stop_lock);
+        // The replacement's descriptor and the one the waiter opened at the lock path again.
+        wait_for_open_lock_files(&lock_path, 2).await;
+        assert!(waiter.is_finished().not());
+
+        MirrordCiStore::update_locked(&session_dir, &replacement, |store| {
+            store.intproxy_pids.insert(5678);
+        })
+        .await
+        .unwrap();
+        drop(replacement);
+        waiter.await.unwrap().unwrap();
+
+        assert_eq!(
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(&session_dir))
+                .await
+                .unwrap()
+                .intproxy_pids,
+            HashSet::from([1234, 5678])
+        );
+    }
+
     /// A background user command runs only once the CLI holds its session's lock, so a lock
     /// timeout can't leave it running with no record for `mirrord ci stop`. A foreground command
     /// ends with its session, so it neither waits for the lock nor is recorded.
