@@ -933,11 +933,17 @@ pub(crate) enum CliError {
     ))]
     PreviewTargetRequired,
 
-    #[error("Failed to resolve target for preview environment: {0}")]
+    #[error("No target specified for preview environment")]
     #[diagnostic(help(
-        "Targetless mode is not supported for preview environments. \
-         Please check that the target exists and has running pods.{GENERAL_HELP}"
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config \
+         file. A preview may run without a target only to have the operator provision branch \
+         databases: set `feature.db_branches` to do that. A local Redis branch runs on your \
+         machine, so it does not count."
     ))]
+    PreviewTargetOrDbBranchesRequired,
+
+    #[error("Failed to resolve target for preview environment: {0}")]
+    #[diagnostic(help("Please check that the target exists and has running pods.{GENERAL_HELP}"))]
     PreviewTargetResolutionFailed(String),
 
     #[error("Failed to create preview session resource: {0}")]
@@ -1372,6 +1378,9 @@ impl From<OperatorApiError> for CliError {
         {
             return Self::LocalShare(LocalShareError::Operator(status.message.clone()));
         }
+        if value.is_sessions_manager_not_served() {
+            return Self::ServerlessSessionsManagerNotServed;
+        }
 
         match value {
             OperatorApiError::BranchCreationFailed { operation, message } => {
@@ -1405,9 +1414,6 @@ impl From<OperatorApiError> for CliError {
                 Self::LocalPaidFeatureRequiresPlan { feature, gate }
             }
             OperatorApiError::FeatureNotLicensed { gate } => Self::PaidFeatureRequiresPlan { gate },
-            OperatorApiError::ServerlessSessionsManagerNotServed => {
-                Self::ServerlessSessionsManagerNotServed
-            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }

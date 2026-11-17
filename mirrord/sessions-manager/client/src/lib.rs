@@ -23,6 +23,7 @@ mod control_plane;
 mod credentials;
 mod error;
 mod retry;
+mod tls;
 mod transport;
 
 pub use client::{AgentClient, IntproxyClient, SessionsManagerConnectInfo};

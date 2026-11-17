@@ -416,7 +416,6 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::BuiltinModeName(_))
             | UpCliError::Up(UpError::UnknownMode(_))
             | UpCliError::Up(UpError::NoInferredTarget { .. })
-            | UpCliError::Up(UpError::PreviewTargetless { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
