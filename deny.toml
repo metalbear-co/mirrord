@@ -25,6 +25,16 @@ ignore = [
   "RUSTSEC-2026-0368",
   "RUSTSEC-2026-0369",
   "RUSTSEC-2026-0429",
+  # zip AES entries read without checking their MAC; we don't enable `aes-crypto`.
+  "RUSTSEC-2026-0545",
+  # zip `ZipStreamReader` names can differ from the central directory; apple-codesign only writes zips.
+  "RUSTSEC-2026-0548",
+  # chrono and the crates around it are unmaintained, with no maintained release to move to yet
+  # (https://github.com/chronotope/chrono/issues/1768). chrono-tz comes from tera.
+  "RUSTSEC-2026-0542", # humantime
+  "RUSTSEC-2026-0543", # chrono
+  "RUSTSEC-2026-0555", # chrono-tz
+  "RUSTSEC-2026-0559", # chrono-tz-build
   # crypto-bigint timing side channels, held at 0.5 by apple-codesign's elliptic-curve 0.13. We only use it to
   # re-sign binaries locally, with no secrets an attacker could observe.
   "RUSTSEC-2026-0387",
