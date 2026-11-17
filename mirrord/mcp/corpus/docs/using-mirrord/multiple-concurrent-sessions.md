@@ -32,7 +32,7 @@ The fastest way to get a valid `mirrord-up.yaml` is the interactive wizard:
 mirrord up init
 ```
 
-It prompts for common settings and walks you through one or more services, then writes the file (default: `./mirrord-up.yaml`). The generated file contains only the values you set; everything left at its default is omitted. See [`mirrord up init`](#mirrord-up-init) below for details.
+It walks you through one or more services, picking each one's target from your cluster, then writes the file (default: `./mirrord-up.yaml`). The generated file contains only the values you set; everything left at its default is omitted. To answer the same questions in your browser, run `mirrord wizard`. See [`mirrord up init`](#mirrord-up-init) below for details.
 
 To write the file by hand instead, start with:
 
@@ -455,14 +455,10 @@ Runs every service in the specified context, ignoring the `context` field(s) set
 
 ## `mirrord up init`
 
-Interactive wizard that generates a skeleton `mirrord-up.yaml`. It does not query the cluster; workload inference and prompting happen later, when you run `mirrord up`.
+Interactive wizard that generates a skeleton `mirrord-up.yaml`, picking each service's target from your cluster. `-o` sets the file it offers to write (default: `./mirrord-up.yaml`).
 
 ```sh
 mirrord up init [-o path/to/mirrord-up.yaml]
 ```
 
-Flow:
-
-1. **Common settings** — prompts for `operator`, `accept_invalid_certificates`, and `telemetry`. Only values you change from the default are written.
-2. **Services** — loops one service at a time, prompting for name, mode, target, HTTP filter, ignore ports (with presets for Istio/Linkerd sidecars), env overrides, run type (`exec`/`container`), and the local command. For the target you choose to infer it from the service name (looked up when you run `mirrord up`), specify one explicitly, or run without a target. Choosing `replace` mode skips the HTTP filter prompt and drops the targetless option, since neither applies to it. Repeats until you answer "no" to *Add another service?*.
-3. **Preview and save** — prints the generated YAML, asks whether to save, then for a filename (re-asking if you decline to overwrite an existing file).
+It asks the same questions as `mirrord wizard`, which `mirrord wizard --tui` runs too. See the [Onboarding Wizard](../getting-started/onboarding-wizard.md) for the questions.

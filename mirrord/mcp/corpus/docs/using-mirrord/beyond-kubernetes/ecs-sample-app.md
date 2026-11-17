@@ -36,7 +36,11 @@ This tutorial creates billable AWS resources: a NAT gateway, an Application Load
 
 ## Get an API key
 
-The ECS task signs in to MetalBear Cloud with the serverless agent API key of your organization. Your organization has one active key at a time. If it already has a key, ask the admin who generated it for the key, and go to the next step.
+The ECS task signs in to MetalBear Cloud with the serverless agent API key of your organization. Your organization has one active key at a time, and the dashboard shows it only once. If your organization already has a key and you have it, go to the next step. If nobody saved it, an admin can rotate it in **Settings → Serverless agents**. Pick an overlap in the **Rotate…** menu so that tasks already using the old key keep connecting until you update their secret and redeploy them.
+
+{% hint style="info" %}
+**Signing up now?** In the setup wizard, choose **mirrord for Amazon ECS**, and generate the key in its first step, **Get your agent key**. Skip the wizard's other two steps: Terraform does them in the next section. Leave the wizard open. It shows the task as connected once `terraform apply` finishes.
+{% endhint %}
 
 1. Open the [MetalBear dashboard](https://app.metalbear.com), and go to **Settings → Serverless agents**.
 2. Generate the key.
@@ -58,7 +62,10 @@ In `terraform.tfvars`, set:
 
 ```hcl
 mirrord_api_key = "<API_KEY>"
+name            = "mirrord-<YOUR_NAME>"
 ```
+
+`name` prefixes the name of every resource the sample creates. Give it a value no one else uses in the AWS account, so your resources don't collide with another deployment of the sample. Use at most 32 lowercase letters, digits and hyphens, starting with a letter.
 
 The resources go to `us-east-1`. To use a different region, also set `region`.
 
@@ -177,7 +184,7 @@ services:
 
 | Setting | Value | What it does |
 | --- | --- | --- |
-| `common.operator` | `false` | Connects through MetalBear Cloud. Without it, mirrord looks for an Operator in your current kubeconfig context, and uses it if it finds one. |
+| `common.operator` | `false` | Connects through MetalBear Cloud. Without it, mirrord connects through the Operator if you've used one on this machine before: after a successful Operator session, mirrord sets `"operator": true` in `~/.mirrord/mirrord.json`, which applies whenever your config doesn't set `operator`. |
 | `services.orders.target.path` | `serverless/orders` | Selects the service. It matches `MIRRORD_REMOTE_SERVICE` on the task. |
 | `services.orders.target.namespace` | `staging` | Selects the environment. It matches `MIRRORD_REMOTE_ENVIRONMENT` on the task. |
 | `services.orders.run.command` | `python app/main.py` | The local process that mirrord runs. |
@@ -211,8 +218,8 @@ terraform destroy
 
 | Symptom | Likely cause |
 | --- | --- |
-| `mirrord operator does not serve the operator-hosted sessions-manager` | `mirrord-up.yaml` has no `operator: false` under `common`, and your current kubeconfig context has an Operator. Add `operator: false` under `common`. |
-| `Feature target.path requires a mirrord Enterprise plan` | `mirrord-up.yaml` has no `operator: false` under `common`, and your current kubeconfig context has an Operator with a Free or Team license. Add `operator: false` under `common`. |
+| `mirrord operator does not serve the operator-hosted sessions-manager` | `mirrord-up.yaml` has no `operator: false` under `common`, and you've used an Operator on this machine before. Add `operator: false` under `common`. |
+| ``Feature `target.path` requires a mirrord Enterprise plan.`` | `mirrord-up.yaml` has no `operator: false` under `common`, and you've used an Operator with a Free or Team license on this machine before. Add `operator: false` under `common`. |
 | `mirrord up` cannot find the target | `target.path` or `target.namespace` in `mirrord-up.yaml` does not match the task's `MIRRORD_REMOTE_SERVICE` or `MIRRORD_REMOTE_ENVIRONMENT`, or the task is not running. |
 | A request with the header gets `"version": "v1"` | The header does not match the filter. Send `baggage: mirrord-session=<key>`, with the key that you gave to `--key`. |
 | `mirrord up` asks you to sign in, or refuses the session | Your sign-in expired, or it is to a different organization from the API key's. Run `mirrord login` again. |

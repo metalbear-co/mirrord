@@ -103,6 +103,7 @@ The bootstrap connects to MetalBear's sessions-manager, at `https://sm-aws-use1.
 How to set them depends on the platform:
 
 * [Connecting ECS to MetalBear Cloud](ecs-metalbear-cloud.md)
+* [Cloudflare Containers](cloudflare-containers.md)
 
 ## Developer setup
 

@@ -1,10 +1,10 @@
 ---
 title: Onboarding wizard
 date: 2026-01-05T12:00:00.000Z
-lastmod: 2026-01-05T12:00:00.000Z
+lastmod: 2026-11-16T12:00:00.000Z
 draft: false
 toc: true
-description: "Use the mirrord onboarding wizard to learn the basics and create your first config file."
+description: "Use the mirrord onboarding wizard to learn the basics and generate a mirrord-up.yaml."
 tags:
   - oss
   - team
@@ -13,75 +13,77 @@ tags:
 
 # Onboarding Wizard
 
-The mirrord onboarding wizard is designed to make getting started with mirrord easier and faster. It does this by taking you through the basics of mirrord and some commonly used features, and then lets you create and download your first mirrord configuration file via the UI.
+The onboarding wizard walks you through the basics of mirrord, then generates a `mirrord-up.yaml`: the file [`mirrord up`](../using-mirrord/multiple-concurrent-sessions.md) reads to run your local services against the cluster.
 
 {% hint style="info" %}
-This feature is available in mirrord version 3.178.0 and onwards.
+The wizard generates a `mirrord-up.yaml` from mirrord 3.287.0.
 {% endhint %}
 
 ## Launching the wizard
-
-Starting the wizard will open a locally hosted webapp in your browser. To launch the wizard, [install mirrord](install-mirrord.md) and run the following command:
 
 ```bash
 mirrord wizard
 ```
 
-Make sure that you are connected (and if necessary signed in) to your cluster and that if you are using the operator, it is set up properly. If you do not, the wizard will not be able to list targets or suggest ports for network configuration.
+This opens the wizard in your browser. To answer the same questions in your terminal, run `mirrord wizard --tui`. See [`mirrord up init`](../using-mirrord/multiple-concurrent-sessions.md#mirrord-up-init) for details.
 
-![The Onboarding Wizard Homepage](../.gitbook/assets/wiz-home.png)
+The wizard lists namespaces and workloads from the kube context mirrord uses: `kube_context` in your [global configuration](../installing-mirrord/global-configuration.md) if set, otherwise your kubeconfig's current context. Make sure you're connected to the cluster. Otherwise the wizard can't list targets or detect their ports.
 
-### Learning overview
-
-As a new user, you may want to learn some mirrord basics before jumping into creating a configuration file. You can do this from the wizard landing page, by leafing through the overview before getting to the configuration options.
+From the landing page, you can go through a short overview of mirrord first, or go straight to the questions.
 
 ## Creating a configuration
 
-There are four parts to configuration creation:
+For each service, the wizard asks for its mode, target, traffic, and local command. Then you can add another service or export the file. The file holds only what you set; anything left at its default is omitted.
 
-1. Boilerplate selection
-2. Target configuration
-3. Network configuration
-4. Export
+### Mode
 
-### Boilerplate selection
+How the service shares incoming traffic with the deployed one: Split (the default), Mirror, or Replace. See [Service modes](../using-mirrord/multiple-concurrent-sessions.md#service-modes). Replace requires the operator.
 
-![Wizard Boilerplate Selection](../.gitbook/assets/wiz-boiler.png)
+### Target
 
-There are three options for boilerplate configurations that you can choose between. The differences between them are explained in more detail in the overview steps.
+Pick a namespace, then the workload the service runs against. In Split and Mirror, that's a deployment, statefulset, Argo rollout or pod; in Replace, a deployment or statefulset. In Split, you can instead run without a target, which gives the service outgoing traffic only.
 
-_Note that using "Replace" mode requires the operator (not available in OSS)_.
+Each service is an entry under `services` in `mirrord-up.yaml`, keyed by its name. The wizard names it after the workload, like `api` for `deployment/api`, adding `-2`, `-3`, and so on if that name is taken. A service without a target has no workload to name it after, so the wizard asks you for a name.
 
-### Target configuration
+### Traffic
 
-![Wizard Target Selection](../.gitbook/assets/wiz-target.png)
+By default, Split and Mirror use the `baggage: .*mirrord-session={key}.*` header filter, and Replace takes all traffic, on every port your app listens on. You can change that by setting:
 
-Select a target from a given namespace in your cluster, optionally filtering by specific types (this can be helpful if there are a lot of resources in your cluster). Target selection is required in the wizard (targetless configurations are not yet supported).
+- an HTTP header filter (not in Replace), which applies to every intercepted port;
+- which of the ports detected on the target to intercept;
+- other ports to ignore.
 
-If there are namespaces or resources missing, it could be that there is an issue with your connection to the cluster, or that the resources require the operator and you are using OSS.
+The ports you don't intercept go to `ignore_ports`. Every other port your app listens on is intercepted.
 
-### Network configuration
+### Local command
 
-Optionally configure traffic filters and/or ports.
-
-**Traffic filters**
-
-![Wizard Traffic Filter Configuration](../.gitbook/assets/wiz-filter.png)
-
-Here, you can set header or path filters for traffic. Strings are RegEx by default, but selecting "Exact" matching from the dropdown will enable exact matching instead.
-
-If you set multiple filters, you can choose how to combine them: "Any" will filter traffic that matches one or more of the filters (logical OR), whereas "All" will filter traffic that matches every filter (logical AND).
-
-**Ports**
-
-![Wizard Port Configuration](../.gitbook/assets/wiz-port.png)
-
-Here, you can configure specific ports that you are interested in mirroring or stealing. Ports that are exposed in the resource definition of your target will be added automatically, but you can remove these or add your own.
-
-Additionally, if you wish to map ports that differ on the local and remote, you can do so by editing the remote port for the corresponding entry in the list.
+The command that starts the service, like `go run ./cmd/api`, and optionally its working directory, relative to the `mirrord-up.yaml`.
 
 ### Export
 
-![Wizard Configuration Export](../.gitbook/assets/wiz-export.png)
+The wizard shows the services you added and a preview of the file, which you can copy or download. `mirrord wizard --tui` prints the preview and writes the file. Run it with:
 
-Preview and download (or copy to clipboard) the configuration file according to the options you have set in the previous steps. To use a configuration file in the CLI, use the `-f <CONFIG_PATH>` flag. Or if using VSCode Extension or JetBrains plugin, simply create a `.mirrord/mirrord.json` file or use the UI.
+```bash
+mirrord up -f mirrord-up.yaml
+```
+
+For example, a Split service with a header filter and an ignored port, and a service without a target:
+
+```yaml
+services:
+  server-echo:
+    target:
+      path: deployment/server-echo
+    http_filter:
+      header_filter: "^x-user: me$"
+    ignore_ports: [9090]
+    run:
+      command: ["node", "server.js"]
+  worker:
+    target: none
+    run:
+      directory: jobs
+      command: ["python", "worker.py"]
+```
+
+Settings shared by every service, like `operator` or `telemetry`, go under [`common`](../using-mirrord/multiple-concurrent-sessions.md#common), which the wizard doesn't ask for. See [Multiple concurrent sessions (mirrord up)](../using-mirrord/multiple-concurrent-sessions.md) for the full file format.

@@ -23,7 +23,7 @@ This guide connects an ECS task that runs the [mirrord remote bootstrap](ecs.md)
 ## Prerequisites
 
 1. The ECS task definition set up with the [remote bootstrap](ecs.md), up to [Connect to your deployment mode](ecs.md#connect-to-your-deployment-mode).
-2. An [API key](README.md#api-key), `<API_KEY>`.
+2. An [API key](README.md#api-key), `<API_KEY>`, generated at [app.metalbear.com](https://app.metalbear.com). Sign up there first if you don't have a MetalBear account.
 3. An IAM **execution role** on the ECS service (`executionRoleArn` in the task definition). This is not the task role.
 4. The AWS CLI, with permission to manage Secrets Manager secrets, IAM role policies and the ECS task definition.
 
