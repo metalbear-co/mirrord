@@ -14,7 +14,7 @@ use tokio::{sync::Mutex, time::Instant};
 use url::Url;
 
 use super::{CredentialProvider, ready_headers};
-use crate::error::SessionsManagerClientError;
+use crate::{error::SessionsManagerClientError, tls};
 
 /// Long-lived MetalBear API key, exchanged for the short-lived token sessions-manager verifies.
 /// Setting it is what turns [`CloudTokenCredentials`] on.
@@ -152,7 +152,7 @@ impl CloudTokenCredentials {
             .extend(TOKEN_EXCHANGE_SEGMENTS);
 
         Ok(Self {
-            client: reqwest::Client::builder()
+            client: tls::http_client_builder()?
                 .timeout(TOKEN_EXCHANGE_TIMEOUT)
                 // A 307/308 replays the POST body, API key included, to wherever it points, and
                 // reqwest only strips sensitive *headers* across origins. The token endpoint is a

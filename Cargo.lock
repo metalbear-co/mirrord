@@ -5952,6 +5952,9 @@ dependencies = [
  "mirrord-protocol-io",
  "mirrord-sessions-manager-protocol",
  "reqwest 0.13.4",
+ "rustls",
+ "rustls-platform-verifier",
+ "rustls-webpki",
  "secrecy",
  "serde",
  "serde_json",
@@ -5966,6 +5969,8 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "webpki-root-certs",
+ "webpki-roots",
 ]
 
 [[package]]
