@@ -28,10 +28,12 @@ if [ "$ACTION" != closed ]; then
     echo "$identifier is a draft; the review is requested when it is ready"
     exit 0
   fi
-  requested=$(gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
-    -f "team_reviewers[]=$team" --jq '[.requested_teams[].slug] | join(",")')
-  if [[ ",$requested," != *",$team,"* ]]; then
-    echo "::error::GitHub accepted the request but $team is not among the requested teams ($requested)"
+  # A team with code review assignment passes the request on to one of its members, so the reviewer
+  # can be a person and not the team.
+  reviewers=$(gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
+    -f "team_reviewers[]=$team" --jq '(.requested_reviewers | length) + (.requested_teams | length)')
+  if [ "$reviewers" -eq 0 ]; then
+    echo "::error::GitHub accepted the request for $team but the pull request has no reviewer"
     exit 1
   fi
   echo "requested $team for $identifier"
