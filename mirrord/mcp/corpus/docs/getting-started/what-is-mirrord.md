@@ -58,6 +58,7 @@ On top of everything in the Team plan, the Enterprise plan adds:
 * **Multi-cluster** - Intercept traffic across multiple clusters in a single mirrord session
 * **Air-gapped operation** - Run the [License Server](../managing-mirrord/license-server.md) on-prem to manage seats without sending telemetry to MetalBear
 * **High availability** - Run the Operator in HA mode
+* **Operator-hosted sessions-manager** - Run the sessions-manager for [workloads outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md) inside the Operator on your cluster, with access managed by Kubernetes RBAC (alpha)
 * **Premium support**
 
 See [pricing](https://metalbear.com/mirrord/pricing/) for details.
