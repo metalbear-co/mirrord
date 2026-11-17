@@ -1289,13 +1289,6 @@ impl CliError {
                 AnalyticsError::ServerlessSessionsManagerNotServed
             }
             Self::SessionsManagerCloudUrl(..) => AnalyticsError::SessionsManagerCloudUrl,
-            // An operator that could serve the sessions-manager but has it turned off does not
-            // serve it either.
-            Self::FeatureDisabledInOperatorError { feature, .. }
-                if *feature == NewOperatorFeature::ServerlessSessionsManager.to_string() =>
-            {
-                AnalyticsError::ServerlessSessionsManagerNotServed
-            }
             _ => AnalyticsError::AgentConnection,
         }
     }
@@ -1379,6 +1372,9 @@ impl From<OperatorApiError> for CliError {
         {
             return Self::LocalShare(LocalShareError::Operator(status.message.clone()));
         }
+        if value.is_sessions_manager_not_served() {
+            return Self::ServerlessSessionsManagerNotServed;
+        }
 
         match value {
             OperatorApiError::BranchCreationFailed { operation, message } => {
@@ -1412,9 +1408,6 @@ impl From<OperatorApiError> for CliError {
                 Self::LocalPaidFeatureRequiresPlan { feature, gate }
             }
             OperatorApiError::FeatureNotLicensed { gate } => Self::PaidFeatureRequiresPlan { gate },
-            OperatorApiError::ServerlessSessionsManagerNotServed => {
-                Self::ServerlessSessionsManagerNotServed
-            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }

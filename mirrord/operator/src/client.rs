@@ -787,18 +787,11 @@ where
         &self.client
     }
 
-    /// Fails with [`OperatorApiError::ServerlessSessionsManagerNotServed`] unless this operator
-    /// serves the operator-hosted sessions-manager routes.
+    /// Checks whether this operator serves the sessions-manager routes.
     pub fn check_serverless_sessions_manager_served(&self) -> OperatorApiResult<()> {
         self.operator
             .spec
             .require_feature(NewOperatorFeature::ServerlessSessionsManager)
-            .map_err(|error| match error {
-                OperatorApiError::UnsupportedFeature { .. } => {
-                    OperatorApiError::ServerlessSessionsManagerNotServed
-                }
-                error => error,
-            })
     }
 
     /// Create a new CI api key by generating a random key pair, creating a certificate
@@ -3866,10 +3859,8 @@ mod test {
                         assert_eq!(gate.required_plan, crate::types::RequiredPlan::Team);
                     }
                     (None, Ok(())) => {}
-                    (
-                        None | Some("future_plan"),
-                        Err(OperatorApiError::ServerlessSessionsManagerNotServed),
-                    ) => {}
+                    (None | Some("future_plan"), Err(error))
+                        if error.is_sessions_manager_not_served() => {}
                     (plan, result) => {
                         panic!("unexpected serverless result for {plan:?}: {result:?}")
                     }

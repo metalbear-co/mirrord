@@ -94,8 +94,6 @@ pub enum OperatorApiError {
 
     #[error("{gate}")]
     FeatureNotLicensed { gate: PaidFeatureGate },
-    #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
-    ServerlessSessionsManagerNotServed,
 
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
@@ -209,6 +207,22 @@ pub enum OperatorApiError {
         size: usize,
         limit: usize,
     },
+}
+
+impl OperatorApiError {
+    /// Whether the operator refused the operator-hosted sessions-manager because it either does
+    /// not support it or has it turned off.
+    pub fn is_sessions_manager_not_served(&self) -> bool {
+        matches!(
+            self,
+            Self::FeatureDisabled {
+                feature: NewOperatorFeature::ServerlessSessionsManager,
+            } | Self::UnsupportedFeature {
+                feature: NewOperatorFeature::ServerlessSessionsManager,
+                ..
+            }
+        )
+    }
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;
