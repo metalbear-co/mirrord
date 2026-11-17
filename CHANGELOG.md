@@ -8,6 +8,21 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.288.0](https://github.com/metalbear-co/mirrord/tree/3.288.0) - 2026-11-15
+
+
+### Added
+
+- `mirrord up` runs services with a serverless target. In `split` and `mirror`
+  modes they run without queue splitting or DB branching, and `mirrord up` says
+  so; `replace` mode fails, since a serverless target can't be copied.
+
+
+### Changed
+
+- `mirrord wizard` and `mirrord up init` now say what `mirrord up` does with
+  traffic when you skip customizing the header filter and ports.
+
 ## [3.287.0](https://github.com/metalbear-co/mirrord/tree/3.287.0) - 2026-11-12
 
 

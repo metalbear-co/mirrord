@@ -26,7 +26,7 @@ Spanner branching requires operator `3.182.0`, mirrord CLI `3.230.0`, and operat
       {
         "id": "users-spanner-db",
         "type": "spanner",
-        "version": "1.5.23",
+        "version": "1.5.59",
         "connection": {
           "params": {
             "project": "SPANNER_PROJECT_ID",
@@ -123,7 +123,7 @@ By default mirrord writes the branch emulator's address into `SPANNER_EMULATOR_H
     "db_branches": [
       {
         "type": "spanner",
-        "version": "1.5.23",
+        "version": "1.5.59",
         "emulator_host": "MY_SPANNER_EMULATOR",
         "connection": {
           "params": {
