@@ -1,7 +1,7 @@
 //! Which certificate authorities the sessions-manager and MetalBear Cloud connections trust.
 //!
 //! The workload companion runs inside the customer's application container, and some images ship
-//! no CA bundle at all (`scratch`, `debian:*-slim`, or any image without `ca-certificates`). The
+//! no CA bundle at all (`debian:*-slim`, or any other image without `ca-certificates`). The
 //! Mozilla roots compiled into the binary are therefore always trusted (all but the few Mozilla
 //! trusts only for some names, see [`bundled_roots`]), so reaching MetalBear Cloud, or any
 //! sessions-manager with a publicly trusted certificate, needs nothing from the image.
@@ -70,4 +70,24 @@ pub(crate) fn rustls_config() -> Result<ClientConfig, SessionsManagerClientError
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_no_client_auth())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every dev and CI machine has a CA bundle, so an empty bundled set would go unnoticed until an
+    /// image without one fails to build its clients. A mismatch also flags `webpki-roots` and
+    /// `webpki-root-certs` drifting apart, which leaves out roots only the newer one lists.
+    #[test]
+    fn bundled_roots_leave_out_only_name_constrained() {
+        let constrained = TLS_SERVER_ROOTS
+            .iter()
+            .filter(|root| root.name_constraints.is_some())
+            .count();
+        let bundled = bundled_roots().count();
+
+        assert!(bundled > 0);
+        assert_eq!(bundled, TLS_SERVER_ROOT_CERTS.len() - constrained);
+    }
 }

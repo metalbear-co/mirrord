@@ -102,3 +102,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           cargo nextest run -p mirrord-intproxy
+      - name: mirrord sessions-manager client UT
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo nextest run -p mirrord-sessions-manager-client

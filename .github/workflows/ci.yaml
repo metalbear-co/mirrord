@@ -467,6 +467,8 @@ jobs:
         run: cargo nextest run -p mirrord-agent-env
       - name: mirrord-agent-iptables UT
         run: cargo nextest run -p mirrord-agent-iptables
+      - name: mirrord-sessions-manager-client UT
+        run: cargo nextest run -p mirrord-sessions-manager-client
 
   integration_tests:
     needs: [plan, build-ci-runner]
