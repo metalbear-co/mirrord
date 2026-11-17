@@ -12,7 +12,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: linear-loop-pr-${{ github.event.pull_request.number }}-${{ github.event.action }}
+  group: linear-loop-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -32,12 +32,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEW_TOKEN: ${{ secrets.LINEAR_LOOP_REVIEW_TOKEN }}
-          ACTION: ${{ github.event.action }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           REPO: ${{ github.repository }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          DRAFT: ${{ github.event.pull_request.draft }}
           LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
           LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
         run: .github/scripts/linear-loop-pr.sh
