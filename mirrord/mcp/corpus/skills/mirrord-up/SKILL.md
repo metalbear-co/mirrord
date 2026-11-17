@@ -7,7 +7,7 @@ description: >
   or managing multiple mirrord sessions' lifecycle in one command.
 metadata:
   author: MetalBear
-  version: "1.12"
+  version: "1.13"
 ---
 
 # mirrord up Skill
@@ -186,6 +186,16 @@ target:
 
 ```yaml mirrord-up=services.*
 target: none
+```
+
+##### Serverless targets (mirrord Beyond)
+
+A service can target a workload outside Kubernetes, such as an Amazon ECS service, with `path: serverless/<service>`. Here `namespace` is the mirrord Beyond environment the workload registered under (not a Kubernetes namespace; unset means `default`). Serverless targets run in `split` or `mirror` mode only, without queue splitting or DB branching, and can sit in the same file as Kubernetes targets. With the MetalBear Cloud sessions-manager, set `common.operator: false` and sign in with `mirrord login`. For the ECS setup, sign-in and troubleshooting, use the **mirrord-beyond** skill.
+
+```yaml mirrord-up=services.*
+target:
+  path: serverless/orders
+  namespace: staging
 ```
 
 #### `services.*.env`
