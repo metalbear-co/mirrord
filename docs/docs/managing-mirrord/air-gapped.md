@@ -55,7 +55,7 @@ Push the chart to your internal chart repository, or copy the `.tgz` file. For a
 helm pull metalbear/mirrord-operator-license-server
 ```
 
-Then copy the Operator and agent images, as in [Copying images](operator.md#copying-images). Some features also use third-party images, such as the databases for database branching. For the full list, see [Feature-specific images](operator.md#feature-specific-images).
+Then copy the [Operator and agent images](operator.md#operator-and-agent-images), as in [Copying images](operator.md#copying-images). Some features also use third-party images, such as the databases for database branching. For the full list, see [Feature-specific images](operator.md#feature-specific-images).
 
 ## Set up the Operator with a license certificate
 
