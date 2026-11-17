@@ -23,7 +23,7 @@ The task-definition changes apply to **Linux tasks on both AWS Fargate and Amazo
 
 ## Prerequisites
 
-1. A [deployment mode](README.md#deployment-modes) that's set up: the [Operator-hosted sessions-manager](operator-hosted.md) or [MetalBear Cloud](metalbear-cloud.md).
+1. A [deployment mode](README.md#deployment-modes) that's set up: the [Operator-hosted sessions-manager](operator-hosted.md) or [MetalBear Cloud](metalbear-cloud.md). MetalBear Cloud needs a MetalBear account and an [API key](metalbear-cloud.md#api-keys), both from [app.metalbear.com](https://app.metalbear.com).
 2. Permission to register ECS task definitions and update the ECS service.
 3. A writable `/tmp` in the application container. If the task definition sets `readonlyRootFilesystem`, mount a task volume at `/tmp`.
 4. An application image based on glibc 2.30 or later, and not on musl, such as Alpine. See [Application container requirements](README.md#application-container-requirements).
@@ -148,6 +148,7 @@ These apply in every deployment mode. For connection and authentication problems
 | Symptom | Likely cause |
 | --- | --- |
 | The application starts without mirrord | The setup container failed or its `dependsOn` condition isn't wired up; check its logs and exit code. |
+| The task runs, but mirrord hangs while connecting, then fails | The task couldn't register with sessions-manager, for example because of a wrong API key or URL. Check the application container's logs. |
 | The task registers, but mirrord fails with `timed out connecting to the serverless target's agent through sessions-manager` | `MIRRORD_REMOTE_SERVICE`/`MIRRORD_REMOTE_ENVIRONMENT` on the task don't match `target.path`/`target.namespace` in `mirrord-up.yaml`. |
 | `Read-only file system` or `Permission denied` under `/tmp` | The application container has no writable `/tmp` ([Prerequisites](#prerequisites)). |
 | The application container stops at startup: version `GLIBC_2.30` not found, required by `libmirrord_remote_bootstrap.so` | The application image's glibc is older than 2.30 ([Prerequisites](#prerequisites)). |

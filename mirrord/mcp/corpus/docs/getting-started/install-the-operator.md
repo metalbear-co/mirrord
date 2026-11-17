@@ -195,4 +195,4 @@ If either check fails, see [Common Issues](../troubleshooting/common-issues.md).
 
 - [Policies](../sharing-the-cluster/policies.md): control what developers can do in the cluster.
 - [Sharing the Cluster](../sharing-the-cluster/overview.md): concurrent sessions, queue splitting, and database branching.
-- [Onboarding Wizard](onboarding-wizard.md): guides developers through their first mirrord config.
+- [Onboarding Wizard](onboarding-wizard.md): guides developers through their first `mirrord-up.yaml`.

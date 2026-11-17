@@ -86,6 +86,6 @@ mirrord supports Kubernetes `1.22` or later. This applies to the open-source ver
 
 ## Next steps
 
-- [Onboarding Wizard](onboarding-wizard.md): create your first mirrord config file.
+- [Onboarding Wizard](onboarding-wizard.md): generate a `mirrord-up.yaml` for your services.
 - [Starting your first session](first-session.md): run your local code in the context of the cluster.
 - [Install the Operator](install-the-operator.md): for teams sharing a cluster, the platform team installs it once per cluster.

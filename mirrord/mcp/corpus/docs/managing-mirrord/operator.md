@@ -132,6 +132,15 @@ The Operator pod will wait until the secret exists and start automatically once 
 
 Using an internal registry reduces startup time, ingress costs, and removes dependency on GitHub's registry.
 
+### Operator and agent images
+
+These two images are always required. The Operator pulls its own image on install, and the agent image is pulled whenever a session starts. Copy both to your registry first (see [Copying images](#copying-images)), then add the feature-specific images below for the features you use.
+
+| Image    | Default                          | Tag                                                                                         | Description                                          | Override               |
+| -------- | -------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------- |
+| Operator | `ghcr.io/metalbear-co/operator`  | Chart `appVersion`                                                                          | The Operator itself.                                 | `operator.image`       |
+| Agent    | `ghcr.io/metalbear-co/mirrord`   | Version in the Operator image's `metalbear.mirrord.version` label (changes with the Operator) | Agent the Operator starts for each mirrord session. | `agent.image.registry` |
+
 ### Feature-specific images
 
 These images are only pulled when the corresponding feature is enabled:

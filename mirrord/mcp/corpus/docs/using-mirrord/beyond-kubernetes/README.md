@@ -15,7 +15,7 @@ tags:
 Support for workloads outside Kubernetes is in **alpha**: behavior, configuration and resource names may change without notice. Don't rely on them for anything beyond development environments. The MetalBear Cloud mode is available on every plan, including Free, while it's in alpha; the Operator-hosted mode requires the Enterprise plan. To try them, install a [supported mirrord CLI](#required-versions).
 {% endhint %}
 
-Some services don't run in Kubernetes, but on platforms such as Amazon ECS and Fargate. In this section, they're called **workloads outside Kubernetes**. The CLI and the dashboard call them serverless workloads, and developers target them with a `serverless/` target. You run such a service **locally** while it takes over the network and environment of the deployed one. There's no image to build or push, and nothing to redeploy.
+Some services don't run in Kubernetes, but on platforms such as Amazon ECS, Fargate and Cloudflare Containers. In this section, they're called **workloads outside Kubernetes**. The CLI and the dashboard call them serverless workloads, and developers target them with a `serverless/` target. You run such a service **locally** while it takes over the network and environment of the deployed one. There's no image to build or push, and nothing to redeploy.
 
 **When is this useful?**
 
@@ -57,13 +57,14 @@ Start with MetalBear Cloud. On the Enterprise plan, if you already run the Opera
 | Platform | MetalBear Cloud | Operator-hosted |
 | --- | --- | --- |
 | [Amazon ECS](ecs.md) | [Supported](ecs-metalbear-cloud.md) | [Supported](ecs-operator-hosted.md) |
+| [Cloudflare Containers](cloudflare-containers.md) | [Supported](cloudflare-containers.md) | Not covered |
 
 ## Setting Up
 
 Setup is split by what it touches, so you only redo the parts that change:
 
 1. **Set up your deployment mode, once.** See [Operator-Hosted Sessions-Manager](operator-hosted.md) or [MetalBear Cloud Sessions-Manager](metalbear-cloud.md).
-2. **Add the remote bootstrap to each workload.** For ECS, see [Amazon ECS](ecs.md).
+2. **Add the remote bootstrap to each workload.** For ECS, see [Amazon ECS](ecs.md). For Cloudflare Containers, see [Cloudflare Containers](cloudflare-containers.md), which also covers the next step.
 3. **Connect each workload to your deployment mode.** For ECS, see [Connecting ECS to the Operator](ecs-operator-hosted.md) or [Connecting ECS to MetalBear Cloud](ecs-metalbear-cloud.md).
 
 ### Required versions

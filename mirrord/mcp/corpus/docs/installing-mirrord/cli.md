@@ -39,7 +39,7 @@ Configuration options are documented in the [configuration reference](https://me
 
 ## Interactive Setup
 
-You can use `mirrord wizard` to generate a `mirrord.json` configuration file interactively. This walks you through common use cases and helps you create a configuration tailored to your needs. See the [Onboarding Wizard](../getting-started/onboarding-wizard.md) for more information.
+You can use `mirrord wizard` to generate a `mirrord-up.yaml` interactively, then run it with `mirrord up -f mirrord-up.yaml`. See the [Onboarding Wizard](../getting-started/onboarding-wizard.md) for more information.
 
 ## Listing Targets
 

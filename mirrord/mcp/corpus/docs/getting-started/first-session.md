@@ -41,7 +41,7 @@ To run several services together from one config file, use [`mirrord up`](../usi
 mirrord up init
 ```
 
-This walks you through an interactive wizard and writes a `mirrord-up.yaml` for you, so you don't need to write any config by hand. Once you have a `mirrord-up.yaml`, start the services by running `mirrord up`.
+This walks you through an interactive wizard and writes a `mirrord-up.yaml` for you, so you don't need to write any config by hand. To answer the same questions in your browser, run `mirrord wizard` (see [Onboarding Wizard](onboarding-wizard.md)). Once you have a `mirrord-up.yaml`, start the services by running `mirrord up`.
 
 ## IDE extensions
 
@@ -92,7 +92,7 @@ Install the [mirrord browser extension](https://chromewebstore.google.com/detail
 
 mirrord reads config from `<project-path>/.mirrord/mirrord.json` (also supports `.toml` and `.yaml`). You can also prefix config files, e.g. `my-config.mirrord.json`.
 
-Run `mirrord wizard` to generate a config file interactively (see [Onboarding Wizard](onboarding-wizard.md)), or see the full [configuration options](https://metalbear.com/mirrord/docs/config). To keep an Operator preference across projects, see [Global Configuration](../installing-mirrord/global-configuration.md).
+See the full [configuration options](https://metalbear.com/mirrord/docs/config). To keep an Operator preference across projects, see [Global Configuration](../installing-mirrord/global-configuration.md).
 
 {% hint style="info" %}
 The IDE extensions provide autocomplete for mirrord config files.
