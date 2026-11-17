@@ -1,15 +1,15 @@
 ---
 title: "Operator-Hosted Sessions-Manager"
-description: "Run sessions-manager inside the mirrord Operator, so developers can target serverless workloads such as Amazon ECS tasks through your cluster's API server."
+description: "Run sessions-manager inside the mirrord Operator, so developers can target workloads outside Kubernetes such as Amazon ECS tasks through your cluster's API server."
 tags:
-  - experimental
+  - alpha
   - enterprise
 ---
 
 # Operator-Hosted Sessions-Manager
 
 {% hint style="warning" %}
-The Operator-hosted sessions-manager is **experimental**, and may change without notice. It requires Operator **3.223.0 or later**; see [Required versions](README.md#required-versions).
+The Operator-hosted sessions-manager is in **alpha**, and may change without notice. It requires Operator **3.223.0 or later**; see [Required versions](README.md#required-versions).
 {% endhint %}
 
 In the Operator-hosted [deployment mode](README.md#deployment-modes), sessions-manager runs inside the mirrord Operator. Enabling it is a Helm value: there's no additional deployment, service or load balancer, and the Operator isn't exposed outside the cluster. At a glance, the setup is:
@@ -20,7 +20,7 @@ In the Operator-hosted [deployment mode](README.md#deployment-modes), sessions-m
 
 ## Prerequisites
 
-1. A Kubernetes cluster with mirrord Operator **3.223.0 or later** installed through its Helm chart, and a mirrord Operator license. For initial installation and licensing, follow the [Operator installation guide](../../getting-started/install-the-operator.md#custom-install-with-helm). The step-by-step workload guides cover EKS; other clusters work through a [kubeconfig context](#connection-variables).
+1. A Kubernetes cluster with mirrord Operator **3.223.0 or later** installed through its Helm chart, and an Enterprise license for the mirrord Operator. For initial installation and licensing, follow the [Operator installation guide](../../getting-started/install-the-operator.md#custom-install-with-helm). The step-by-step workload guides cover EKS; other clusters work through a [kubeconfig context](#connection-variables).
 2. `kubectl` and `helm`, with permission to manage the Operator Helm release and cluster RBAC.
 
 ---
@@ -34,7 +34,7 @@ This section is for whoever reviews the setup, such as your security team. To st
 ```
  developer machine                     EKS VPC                                workload network
 ┌───────────────────┐  kubeconfig   ┌───────────────────────────────┐      ┌───────────────────────────┐
-│ mirrord exec      │─────────────► │ EKS API server endpoint       │      │ application container     │
+│ mirrord up        │─────────────► │ EKS API server endpoint       │      │ application container     │
 │ (local process)   │               │   │ aggregated API            │      │ + mirrord remote          │
 └───────────────────┘               │   ▼                           │      │   bootstrap (LD_PRELOAD)  │
                                     │ mirrord Operator              │      └─────────────┬─────────────┘
@@ -105,7 +105,7 @@ Enabling sessions-manager grants `proxy` on `serverlessclientassignments` (the *
 aws eks update-kubeconfig --name <CLUSTER_NAME> --region <REGION>
 ```
 
-If you grant Operator access with your own roles instead, add the two rules above to them. For the developer's `mirrord.json`, see [Using mirrord with a Serverless Workload](README.md#using-mirrord-with-a-serverless-workload).
+If you grant Operator access with your own roles instead, add the two rules above to them. For the developer's `mirrord-up.yaml`, see [Using mirrord with a Workload Outside Kubernetes](README.md#using-mirrord-with-a-workload-outside-kubernetes).
 
 A developer can check their access with their own kubeconfig:
 
@@ -177,7 +177,7 @@ An identity bound to this role can register as service `api` in environment `sta
 
 ## Operating notes
 
-* **Operator restarts and upgrades** end active sessions. Workloads register again on their own; developers rerun `mirrord exec`. If connections are cut during rollouts, raise the chart's `operator.terminationGracePeriodSeconds` (default `25`) to give sessions time to close cleanly.
+* **Operator restarts and upgrades** end active sessions. Workloads register again on their own; developers rerun `mirrord up`. If connections are cut during rollouts, raise the chart's `operator.terminationGracePeriodSeconds` (default `25`) to give sessions time to close cleanly.
 * **Traffic path**: session traffic flows through the API server. It's suited to development traffic, not to load testing through a mirrord session.
 * **Long-lived connections**: a session holds its HTTPS connections open for as long as the developer runs it. The Operator sends a keepalive on each registration stream every 15 seconds, and data-plane connections carry mirrord's own periodic traffic.
 
@@ -194,9 +194,9 @@ Any firewall or proxy between a workload and the API server needs an idle timeou
 | `403 Forbidden` on `serverlessagentassignments` for a workload bound to a custom role | The role's `resourceNames` doesn't list the workload's `<environment>.<service>`, in its lowercased form ([Limiting a workload to specific services](#limiting-a-workload-to-specific-services)). |
 | `MIRRORD_SESSIONS_MANAGER_URL, MIRRORD_OPERATOR_API_URL and MIRRORD_OPERATOR_KUBE_CONTEXT are mutually exclusive` | The workload sets more than one of them ([Connection variables](#connection-variables)). |
 | A workload is refused with `HTTP control plane returned 401 Unauthorized`, and never reaches the Operator | None of the [connection variables](#connection-variables) are set on the workload, so it registers with the MetalBear Cloud sessions-manager instead. |
-| mirrord prints `connecting through the MetalBear Cloud sessions-manager` | `mirrord.json` doesn't set `"operator": true` ([Using mirrord with a Serverless Workload](README.md#using-mirrord-with-a-serverless-workload)). |
+| mirrord prints `connecting through the MetalBear Cloud sessions-manager` | `mirrord-up.yaml` doesn't set `common.operator: true` ([Using mirrord with a Workload Outside Kubernetes](README.md#using-mirrord-with-a-workload-outside-kubernetes)). |
 | `Failed to load kubeconfig context` | `KUBECONFIG` doesn't point at the mounted kubeconfig, or it has no context named `MIRRORD_OPERATOR_KUBE_CONTEXT`. |
-| The workload registers, but mirrord fails with `timed out connecting to the serverless target's agent through sessions-manager` | The workload's service and environment names don't match `target.path` and `target.namespace` in `mirrord.json`. |
+| The workload registers, but mirrord fails with `timed out connecting to the serverless target's agent through sessions-manager` | The workload's service and environment names don't match `target.path` and `target.namespace` in `mirrord-up.yaml`. |
 
 For workload-side problems, see the troubleshooting section of your platform's connection guide, such as [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting). To see which sessions-manager a workload registers with, and why, set `MIRRORD_AGENT_RUST_LOG=info` on it. The bootstrap then logs its choice when it starts, for example `Registering with the sessions-manager hosted by the mirrord operator, selected by MIRRORD_OPERATOR_API_URL`.
 
