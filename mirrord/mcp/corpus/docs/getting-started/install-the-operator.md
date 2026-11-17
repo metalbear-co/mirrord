@@ -108,7 +108,7 @@ Edit the values you need:
 - To install into a namespace other than `mirrord`, set `namespace`. Then use your namespace instead of `mirrord` in the commands on this page.
 - To pull images from your own registry, see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional).
 - On OpenShift or GKE Autopilot, see [OpenShift](../managing-mirrord/operator.md#openshift) or [GKE Autopilot](../managing-mirrord/operator.md#gke-autopilot).
-- To let developers target [serverless workloads](../using-mirrord/serverless/README.md) outside Kubernetes, such as Amazon ECS tasks, set `operator.sessionsManager: true`. This is experimental. See [Operator-Hosted Sessions-Manager](../using-mirrord/serverless/operator-hosted.md).
+- To let developers target [workloads outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md), such as Amazon ECS tasks, set `operator.sessionsManager: true`. This is an alpha feature, available on the Enterprise plan. See [Operator-Hosted Sessions-Manager](../using-mirrord/beyond-kubernetes/operator-hosted.md).
 
 ### Cloud API key
 

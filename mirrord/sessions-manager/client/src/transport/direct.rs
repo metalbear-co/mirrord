@@ -20,7 +20,7 @@ use mirrord_operator_websocket::{
 };
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, ServiceScope,
+    AssignmentSubscription, ConnectionAssignment, ServiceScope, SessionList,
 };
 use reqwest::StatusCode;
 use tokio::time::Instant;
@@ -169,6 +169,43 @@ impl DirectTransport {
         self
     }
 
+    /// The live sessions of the organization the credentials name, for showing them without an
+    /// operator (`mirrord ui`).
+    pub async fn list_sessions(&self) -> Result<SessionList, SessionsManagerClientError> {
+        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
+        let endpoint = self.api.endpoint(ControlPlaneEndpoint::Sessions)?;
+        let credentials =
+            with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
+        let sent_authorization = credentials.contains_key(AUTHORIZATION);
+        let request = self.http.get(endpoint).headers(credentials).send();
+        let response = with_deadline(Some(deadline), request).await??;
+        self.check_refused(response.status(), sent_authorization)?;
+        if !response.status().is_success() {
+            return Err(SessionsManagerClientError::HttpStatus(response.status()));
+        }
+        Ok(with_deadline(Some(deadline), response.json()).await??)
+    }
+
+    /// Explains a control-plane request the sessions-manager refused by who it refused, the
+    /// credentials (`401`) or the caller they name (`403`). `sent_authorization` is whether the
+    /// request carried an `Authorization` header, without which a `401` says nothing about them.
+    fn check_refused(
+        &self,
+        status: StatusCode,
+        sent_authorization: bool,
+    ) -> Result<(), SessionsManagerClientError> {
+        if status == StatusCode::UNAUTHORIZED
+            && sent_authorization
+            && let Some(error) = self.credentials.unauthorized_error()
+        {
+            return Err(error);
+        }
+        if status == StatusCode::FORBIDDEN {
+            return Err(SessionsManagerClientError::Forbidden);
+        }
+        Ok(())
+    }
+
     /// Dials and authorizes the data-plane WebSocket described by a control-plane assignment.
     ///
     /// Assignment endpoints are relative to the configured base URL. The assignment
@@ -258,15 +295,7 @@ impl SessionsManagerTransport for DirectTransport {
             .header(ACCEPT, "text/event-stream")
             .send();
         let response = with_deadline(Some(deadline), request).await??;
-        if response.status() == StatusCode::UNAUTHORIZED
-            && sent_authorization
-            && let Some(error) = self.credentials.unauthorized_error()
-        {
-            return Err(error);
-        }
-        if response.status() == StatusCode::FORBIDDEN {
-            return Err(SessionsManagerClientError::Forbidden);
-        }
+        self.check_refused(response.status(), sent_authorization)?;
         verify_event_stream(response.status(), response.headers())?;
 
         Ok(ControlPlaneEventStream::from_bytes(response.bytes_stream()))

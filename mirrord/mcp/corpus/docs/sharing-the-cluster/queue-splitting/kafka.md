@@ -501,8 +501,21 @@ This lets you route messages by fields inside the message body. For example, to 
 If both `message_filter` and `jq_filter` are specified for the same queue, both must match for a message to reach the local application. Records for which the jq program errors (for example, a non-JSON payload piped to `fromjson`) are treated as not matching and stay on the deployed application's path.
 
 {% hint style="warning" %}
-`jq_filter` for Kafka requires mirrord operator `3.183.0` or later and mirrord CLI `3.232.0` or later, and is only supported with the default `librdkafka` client. Sessions using the Java client (`mirrord.client_implementation: java`, required for Kafka Streams) fail with a clear error when a `jq_filter` is set.
+`jq_filter` for Kafka requires mirrord operator `3.183.0` or later and mirrord CLI `3.232.0` or later. With the Java client (`mirrord.client_implementation: java`, required for Kafka Streams) it requires mirrord operator `3.232.0` or later; earlier operators fail the session with a clear error when a `jq_filter` is set. The same applies to a `keyJqFilter` in a `MirrordSplitConfig` entry a Java-client session takes.
 {% endhint %}
+
+#### jq with the Java client
+
+The two Kafka clients run jq programs on different engines. The default `librdkafka` client runs them in the operator on [jaq](https://github.com/01mf02/jaq), which follows [jq 1.7](https://jqlang.org/manual/v1.7/). The Java client runs them in the operator's Kafka sidecar on [jackson-jq](https://github.com/eiiches/jackson-jq), which implements [jq 1.6](https://jqlang.org/manual/v1.6/). Common filters, like reading a payload field and comparing it, `test`, `startswith`, `select`, `any` or `all`, give the same result on both.
+
+What to know when the target uses the Java client:
+
+- **Missing functions fail the session at start.** From mirrord operator `3.233.0`, a program calling a function or `@` format jq 1.6 does not have fails the session when it starts, with the function named in the error. On `3.232.0` such a session starts and matches nothing. Among others: `abs`, `trim`, `ltrim`, `rtrim`, `isempty`, `pick`, `toarray`, `add(f)`, `todate`, `fromdate`, `strftime`, `strptime`, `mktime`, `env` and `@base32`. Syntax newer than jq 1.6 fails the session at start too.
+- **Large integers.** Integers compare as floating-point numbers, so two 19-digit IDs that differ only in their last digits can compare equal: `.id == 1234567890123456788` also matches `1234567890123456789`. To match a long ID exactly, match it as text in the raw payload, for example `.payload | test("\"id\":1234567890123456789[,}]")`.
+- **Missing fields.** `.a.b` on a record without `a` gives `null` on the Java client and an error, so no match, on the `librdkafka` client. A plain comparison like `.a.b == "x"` gives the same result on both. Anything that turns that `null` into a match differs: on `{}`, `.a.b == null`, `.a.b != "x"`, `.a.b == "x" | not` and `(.a.b // "d") == "d"` all match on the Java client and not on the `librdkafka` client.
+- **Number formatting.** The Java client prints a whole-number float without the `.0`, so `(.v | tostring) == "2.0"` on `{"v": 2.0}` matches on the `librdkafka` client only, and `== "2"` on the Java client only. The same goes for a `keyJqFilter`, which the operator compares to the session key as text: a key of `42.0` matches session key `42` on the Java client and `42.0` on the `librdkafka` client. Return keys as strings or integers to get the same result on both.
+- **Errors.** On the Java client the first error ends the program and the record does not match. On the `librdkafka` client the program keeps going after an error, so a later output can still match: `.items[] | .sku == "A1"` matches `{"items": [1, {"sku": "A1"}]}` there but not on the Java client. Wrap the part that can fail in `try` (`.items[] | try (.sku == "A1")`) to get the same result on both.
+- **Regexes.** jq 1.6 uses [Oniguruma](https://github.com/kkos/oniguruma/blob/master/doc/RE) syntax, the `librdkafka` client the [regex-lite](https://docs.rs/regex-lite/latest/regex_lite/) syntax. Character classes, anchors, alternation, groups, repetition and the `i` and `x` flags work the same. Look-around, backreferences and Unicode classes like `\p{L}` only work on the Java client, and on the `librdkafka` client `\w` and `\d` match ASCII only, so `test("\\w+")` on `"é"` matches on the Java client only. The Java client's engine also backtracks, so a pattern like `.*ERROR` on a large payload can run into the 500 ms per-record time limit there, which fails the session.
 
 ### Filtering on protobuf payloads
 
@@ -533,7 +546,7 @@ Some topics carry raw protobuf bytes instead of JSON - for example CDC events se
 In `payload_decoded`, field names appear exactly as written in the schema, enum values as their names, and 64-bit integers as JSON numbers. Fields at their default value are included. Records whose value fails to decode with the given schema are treated as not matching and stay on the deployed application's path.
 
 {% hint style="warning" %}
-`payload_protobuf` only supports plain protobuf values - schema registry framing (magic byte and schema id prefix) is not supported. Like `jq_filter`, it requires the default `librdkafka` client.
+`payload_protobuf` only supports plain protobuf values - schema registry framing (magic byte and schema id prefix) is not supported. It requires the default `librdkafka` client; sessions using the Java client (`mirrord.client_implementation: java`) fail with a clear error when it is set.
 {% endhint %}
 
 ## FAQ

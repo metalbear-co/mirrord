@@ -1,0 +1,184 @@
+//! `cloud/*`: sessions of the developer's organization, from the MetalBear Cloud sessions-manager.
+//!
+//! Serverless targets run without an operator, so there's no cluster resource that lists their
+//! sessions. Instead, the sessions-manager the developer is logged in to with `mirrord login`
+//! lists the live sessions of their organization. It's the same sessions-manager, and the same
+//! login, that `mirrord exec` connects a serverless target through.
+//!
+//! The frontend polls this next to `operator/sessions`. While a response carries the login's
+//! `email`, the developer uses MetalBear Cloud, and a missing operator or kube context is expected
+//! rather than an error. Only a response that read a usable login carries it, so a failure to tell
+//! never hides the operator and Kubernetes guidance.
+
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
+use mirrord_sessions_manager_client::{
+    DirectTransport, SESSIONS_MANAGER_URL_ENV, SessionOwner, SessionSummary,
+    SessionsManagerClientError, SessionsManagerEndpoint,
+};
+use serde::Serialize;
+use tokio::sync::OnceCell;
+use tracing::warn;
+
+use crate::{
+    data::{AuthStore, StoredLogin},
+    login::issuer,
+};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum CloudStatus {
+    Available,
+    /// No usable `mirrord login` token, so the developer doesn't use MetalBear Cloud. Includes a
+    /// token the sessions-manager refused, such as a revoked one, with the refusal as `reason`.
+    LoggedOut,
+    /// Logged in, but the sessions couldn't be listed.
+    Unavailable,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CloudSessionsResponse {
+    status: CloudStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    /// The developer `mirrord login` signed in. Set only once a login was read and not refused,
+    /// which is how the frontend tells a Cloud user from a failure to check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
+    sessions: Vec<CloudSession>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudSession {
+    id: String,
+    environment: String,
+    service: String,
+    replica_id: String,
+    user_session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner: Option<CloudSessionOwner>,
+    /// RFC 3339, like the operator sessions' `createdAt`.
+    created_at: String,
+    connected: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudSessionOwner {
+    user_id: String,
+    email: String,
+}
+
+impl From<SessionOwner> for CloudSessionOwner {
+    fn from(owner: SessionOwner) -> Self {
+        Self {
+            user_id: owner.user_id,
+            email: owner.email,
+        }
+    }
+}
+
+impl From<SessionSummary> for CloudSession {
+    fn from(session: SessionSummary) -> Self {
+        // Out of range only for a malformed listing, which shouldn't take the handler down.
+        let created_at = i64::try_from(session.started_at)
+            .ok()
+            .and_then(|secs| DateTime::<Utc>::from_timestamp(secs, 0))
+            .unwrap_or_default();
+        Self {
+            id: session.id,
+            environment: session.scope.environment,
+            service: session.scope.service,
+            replica_id: session.agent_replica_id.to_string(),
+            user_session_id: session.user_session_id,
+            owner: session.owner.map(CloudSessionOwner::from),
+            created_at: created_at.to_rfc3339(),
+            connected: session.connected,
+        }
+    }
+}
+
+impl CloudSessionsResponse {
+    fn unavailable(email: Option<String>, reason: String) -> Self {
+        warn!("{reason}");
+        Self {
+            status: CloudStatus::Unavailable,
+            reason: Some(reason),
+            email,
+            sessions: Vec::new(),
+        }
+    }
+}
+
+pub(super) async fn cloud_sessions() -> axum::Json<CloudSessionsResponse> {
+    let cloud_url = match StoredLogin::cloud_url() {
+        Ok(url) => url,
+        Err(error) => {
+            return axum::Json(CloudSessionsResponse::unavailable(
+                None,
+                format!("MetalBear Cloud URL is invalid: {error}"),
+            ));
+        }
+    };
+
+    let login = match AuthStore::login_token(issuer(&cloud_url)).await {
+        Ok(Some(login)) => login,
+        Ok(None) => {
+            return axum::Json(CloudSessionsResponse {
+                status: CloudStatus::LoggedOut,
+                reason: None,
+                email: None,
+                sessions: Vec::new(),
+            });
+        }
+        Err(error) => {
+            return axum::Json(CloudSessionsResponse::unavailable(
+                None,
+                format!("Could not read your mirrord login: {error}"),
+            ));
+        }
+    };
+    let email = Some(login.email);
+
+    // Built once and reused across polls, so they share one connection pool instead of a TLS
+    // handshake each. Everything it's built from is fixed for the process; the login token is
+    // read from the store on every request.
+    static TRANSPORT: OnceCell<DirectTransport> = OnceCell::const_new();
+    let sessions = async {
+        TRANSPORT
+            .get_or_try_init(|| async {
+                // `mirrord ui` has no mirrord config, so only the environment can point it at
+                // another sessions-manager than MetalBear Cloud's.
+                let explicit_url = std::env::var(SESSIONS_MANAGER_URL_ENV).ok();
+                let endpoint = SessionsManagerEndpoint::resolve(explicit_url.as_deref())?;
+                DirectTransport::intproxy_from_env(endpoint, Some(Arc::new(StoredLogin)))
+            })
+            .await?
+            .list_sessions()
+            .await
+    }
+    .await;
+
+    let response = match sessions {
+        Ok(list) => CloudSessionsResponse {
+            status: CloudStatus::Available,
+            reason: None,
+            email,
+            sessions: list.sessions.into_iter().map(CloudSession::from).collect(),
+        },
+        Err(error @ SessionsManagerClientError::LoginTokenRejected) => CloudSessionsResponse {
+            status: CloudStatus::LoggedOut,
+            reason: Some(error.to_string()),
+            email: None,
+            sessions: Vec::new(),
+        },
+        Err(error) => CloudSessionsResponse::unavailable(
+            email,
+            format!("Could not list MetalBear Cloud sessions: {error}"),
+        ),
+    };
+    axum::Json(response)
+}

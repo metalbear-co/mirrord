@@ -2,6 +2,7 @@ use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf, process::ExitSta
 
 use kube::{self, Error, client::AuthError};
 use miette::Diagnostic;
+use mirrord_analytics::AnalyticsError;
 use mirrord_auth::error::{ApiKeyError, CredentialStoreError};
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
@@ -1273,6 +1274,25 @@ pub(crate) enum CliError {
 }
 
 impl CliError {
+    /// The [`AnalyticsError`] to report when this error failed the connection to the agent.
+    pub(crate) fn connect_analytics_error(&self) -> AnalyticsError {
+        match self {
+            Self::SessionsManagerConnectTimeout => AnalyticsError::SessionsManagerConnectTimeout,
+            // The same refusal, found when the connection is made rather than by the check
+            // before it.
+            Self::SessionsManagerConnect(
+                mirrord_sessions_manager_client::SessionsManagerClientError::ServerlessSessionsManagerNotServed(..),
+            ) => AnalyticsError::ServerlessSessionsManagerNotServed,
+            Self::SessionsManagerConnect(..) => AnalyticsError::SessionsManagerConnect,
+            Self::SessionsManagerUrl(..) => AnalyticsError::SessionsManagerUrl,
+            Self::ServerlessSessionsManagerNotServed => {
+                AnalyticsError::ServerlessSessionsManagerNotServed
+            }
+            Self::SessionsManagerCloudUrl(..) => AnalyticsError::SessionsManagerCloudUrl,
+            _ => AnalyticsError::AgentConnection,
+        }
+    }
+
     /// Here we give more meaning to some errors, instead of just letting them pass as
     /// whatever [`KubeApiError`] we're getting.
     ///

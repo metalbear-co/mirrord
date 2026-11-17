@@ -1,4 +1,8 @@
-import type { OperatorPreviewSession, OperatorSessionSummary } from './types'
+import type {
+  CloudSessionsResponse,
+  OperatorPreviewSession,
+  OperatorSessionSummary,
+} from './types'
 
 const MS_PER_SEC = 1000
 const SECS_PER_MIN = 60
@@ -170,4 +174,13 @@ export function extractSessionKey(config: unknown): string | null {
 export function formatHostPort(address: string, port: number): string {
   const suffix = `:${port}`
   return address.endsWith(suffix) ? address : `${address}${suffix}`
+}
+
+// Without an operator or a kube context, a MetalBear Cloud user isn't missing anything, so the
+// operator and Kubernetes guidance is hidden for them. Decided by the login the backend read, never
+// by a failed check, which says nothing about whether the developer uses Cloud.
+export function usesCloud(
+  cloud: CloudSessionsResponse | null,
+): cloud is CloudSessionsResponse & { email: string } {
+  return cloud?.email !== undefined
 }
