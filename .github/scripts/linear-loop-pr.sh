@@ -2,9 +2,10 @@
 # Routes a pull request opened by the Linear coding agent: asks the team that owns the ticket for a
 # review, and settles the Linear issue once the pull request merges or closes unmerged.
 #
-# Requires $ACTION, $PR_NUMBER, $PR_URL, $REPO, $HEAD_REF, $DRAFT and $GH_TOKEN. The Linear step also
-# needs $LINEAR_APP_CLIENT_ID and $LINEAR_APP_CLIENT_SECRET, which `linear-token.sh` turns into a
-# token; without them only the review request happens.
+# Requires $ACTION, $PR_NUMBER, $PR_URL, $REPO, $HEAD_REF, $DRAFT and $GH_TOKEN. The review request
+# needs $REVIEW_TOKEN, a GitHub token that can see the organization's teams, and is skipped without
+# it. The Linear step needs $LINEAR_APP_CLIENT_ID and $LINEAR_APP_CLIENT_SECRET, which
+# `linear-token.sh` turns into a token, and is skipped without them.
 # shellcheck disable=SC2016 # GraphQL variables are not shell expansions
 set -euo pipefail
 
@@ -30,9 +31,15 @@ if [ "$ACTION" != closed ]; then
     echo "$identifier is a draft; the review is requested when it is ready"
     exit 0
   fi
+  # GitHub answers a team request made with the workflow token with 422, because that token
+  # cannot see the organization's teams.
+  if [ -z "${REVIEW_TOKEN:-}" ]; then
+    echo "::warning::no token that can request a team review, so nobody was asked to review $identifier"
+    exit 0
+  fi
   # A team with code review assignment passes the request on to one of its members, so the reviewer
   # can be a person and not the team.
-  reviewers=$(gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
+  reviewers=$(GH_TOKEN=$REVIEW_TOKEN gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
     -f "team_reviewers[]=$team" --jq '(.requested_reviewers | length) + (.requested_teams | length)')
   if [ "$reviewers" -eq 0 ]; then
     echo "::error::GitHub accepted the request for $team but the pull request has no reviewer"
