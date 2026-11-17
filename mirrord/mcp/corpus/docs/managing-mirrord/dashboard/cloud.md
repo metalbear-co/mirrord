@@ -49,7 +49,7 @@ The onboarding in the app does these steps for you and checks each one. To set i
    {% endhint %}
 
 
-4. Install the mirrord CLI and run a session (mirrord wizard generates a config to start from).
+4. Install the mirrord CLI and run a session (`mirrord wizard` generates a `mirrord-up.yaml` to start from).
 
 Once the operator is connected and a session has been recorded, your Home page at `app.metalbear.com` is the usage dashboard - see [Dashboard](../admin-dashboard.md) for what you'll see there.
 

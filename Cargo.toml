@@ -72,7 +72,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.288.0"
+version = "3.290.0"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -256,6 +256,8 @@ rstest = { version = "0.23", default-features = false, features = ["crate-name"]
 rust-embed = "8"
 rustls = "0.23"
 rustls-pemfile = "2"
+rustls-platform-verifier = "0.7"
+rustls-webpki = "0.103"
 schemars = { version = "1.0" }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -305,6 +307,7 @@ url = "2.5.8"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 vt100 = "0.16"
 walkdir = "2"
+webpki-root-certs = "1"
 webpki-roots = "1"
 which = "7"
 wildmatch = "2"

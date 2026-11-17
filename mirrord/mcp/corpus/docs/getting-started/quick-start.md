@@ -24,7 +24,7 @@ Get mirrord running against your cluster in a few minutes.
 ## Developers
 
 1. [Install mirrord](install-mirrord.md): the CLI, or the extension for VS Code or a JetBrains IDE.
-2. [Onboarding Wizard](onboarding-wizard.md) (optional): create your first mirrord config file.
+2. [Onboarding Wizard](onboarding-wizard.md) (optional): generate a `mirrord-up.yaml` for your services.
 3. [Starting your first session](first-session.md): run your local code in the context of the cluster.
 
 ## Platform teams

@@ -508,7 +508,7 @@ The queue filters `mirrord up` generates give way to `keyJqFilter` too. A filter
 
 To stop sessions from setting their own filter on a queue, add `enforceFilter: true` next to `keyJqFilter`. A session that sets a filter on that queue then fails to start, with an error that names the queue and the `MirrordSplitConfig`. An empty `message_filter: {}` and the filters `mirrord up` generates are still accepted.
 
-`keyJqFilter` is a jq filter, so what applies to a session's `jq_filter` applies here too: Kafka with the Java sidecar does not support it, and a queue filter policy rule that covers the queue rejects it.
+`keyJqFilter` is a jq filter, so what applies to a session's `jq_filter` applies here too: a queue filter policy rule that covers the queue rejects it, and with the Kafka Java client it runs on jq 1.6, see [jq with the Java client](queue-splitting/kafka.md#jq-with-the-java-client).
 
 {% hint style="warning" %}
 Filters in the split config require mirrord `3.283.0` or later, and mirrord operator `3.230.0` or later. Against an older operator the CLI refuses to start a session whose entry has no filter and names the missing feature.

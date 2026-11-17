@@ -295,11 +295,13 @@ operator:
   # grants it read access to EndpointSlices.
   topology: false
 
-  # Sharing preview environments via a plain link. Requires `previewEnv: true` and the
-  # `mirrord-share-ingress` chart deployed with a matching `shareDomain`.
+  # Sharing preview environments and local sessions (`mirrord exec --share`) via a plain link.
+  # Requires the `mirrord-share-ingress` chart deployed with a matching `shareDomain`. Previews
+  # also require `previewEnv: true`.
   shareIngress:
-    # Domain that preview share hosts are minted under, as `<slug>.<shareDomain>`, entered without
-    # a leading "*." wildcard. When empty, no share host is minted and previews are not shareable by link.
+    # Domain that preview and local share hosts are minted under, as `<slug>.<shareDomain>`,
+    # entered without a leading "*." wildcard. When empty, no share host is minted and neither
+    # previews nor local sessions are shareable by link.
     shareDomain: ""
     # Mint share hosts without the random suffix, as `<sanitized key>.<shareDomain>` (the key
     # lowercased, other characters turned into "-"), so a link can be built from the session key
@@ -308,7 +310,11 @@ operator:
     # session that holds it. Sessions that already have a host keep it. The links become
     # guessable, so only enable this when the ingress in front of `mirrord-share-ingress`
     # authenticates every request.
+    # Local share hosts always get the random suffix, whatever this is set to.
     stableSlugs: false
+    # Address the operator uses to ask `mirrord-share-ingress` whether it can route local share
+    # links. Empty uses the `mirrord-share-ingress` Service in the release namespace.
+    serviceUrl: ""
 
   preview:
     # Annotations added to the pods created by preview environments.
@@ -716,7 +722,7 @@ operator:
   ##
   ## brokerPod:
   ##   # Any Kafka image configured through `KAFKA_` environment variables, like `apache/kafka`.
-  ##   image: "docker.io/apache/kafka:4.1.0"
+  ##   image: "docker.io/apache/kafka:4.4.0"
   ##   imagePullSecrets:
   ##     - name: "kafka-registry-secret"
   ##   imagePullPolicy: "IfNotPresent"
@@ -839,7 +845,7 @@ operator:
   ##     # with that tool's pinned tag. The per-branch `migrations` config in mirrord.json
   ##     # can override the full image.
   ##     flyway:
-  ##       # Defaults to `flyway/flyway:12`; a registry here is used with the tag `12`.
+  ##       # Defaults to `flyway/flyway:13`; a registry here is used with the tag `13`.
   ##       registry: "custom-flyway-registry"
   ##     liquibase:
   ##       # Defaults to `liquibase/liquibase:4.33`; a registry here is used with the tag `4.33`.
@@ -866,8 +872,20 @@ operator:
   ##   # image's entrypoint hands them to the server, so an image that replaces that entrypoint
   ##   # may not pick them up. Keep the listener on 3306 - the seeding init container, schema
   ##   # migrations, and the operator all connect there.
+  ##   # A sourced branch loads `mysql_native_password` through a settings file under
+  ##   # `/etc/mysql/conf.d`, which images such as Percona's and Oracle's `community-server`
+  ##   # do not read, and a branch with no source gets no file. The `loose-` flag loads the
+  ##   # plugin on MySQL 8.4 for those too; 8.0 and 9 only log a warning for it, so it is
+  ##   # safe here, where every branch that selects no profile gets it. A profile is a
+  ##   # complete `dbPod` and inherits none of these args.
+  ##   # To also make the plugin the default for new accounts on 8.4, as
+  ##   # `--default-authentication-plugin` did before 8.4 removed it, give a profile only
+  ##   # 8.4 branches select both flags in its own `dbServerArgs`: the `loose-` flag, then
+  ##   # `--authentication-policy=*:mysql_native_password`. 8.4 refuses a policy naming a
+  ##   # plugin that is not loaded, MySQL 8.0 rejects the `*:` form, and MySQL 9 has no
+  ##   # such plugin, so a branch on either exits on the policy.
   ##   dbServerArgs:
-  ##     - "--default-authentication-plugin=mysql_native_password"
+  ##     - "--loose-mysql-native-password=ON"
   ##   # How branch pods recreate the source database's accounts.
   ##   # `empty` (default): only the user declared in the branch's connection config, with its
   ##   # real password (as a hash) and every privilege; copied objects lose their definers.
@@ -890,7 +908,7 @@ operator:
   ##     # with that tool's pinned tag. The per-branch `migrations` config in mirrord.json
   ##     # can override the full image.
   ##     flyway:
-  ##       # Defaults to `flyway/flyway:12`; a registry here is used with the tag `12`.
+  ##       # Defaults to `flyway/flyway:13`; a registry here is used with the tag `13`.
   ##       registry: "custom-flyway-registry"
   ##     liquibase:
   ##       # Defaults to `liquibase/liquibase:4.33`; a registry here is used with the tag `4.33`.
@@ -948,7 +966,7 @@ operator:
   ##     # with that tool's pinned tag. The per-branch `migrations` config in mirrord.json
   ##     # can override the full image.
   ##     flyway:
-  ##       # Defaults to `flyway/flyway:12`; a registry here is used with the tag `12`.
+  ##       # Defaults to `flyway/flyway:13`; a registry here is used with the tag `13`.
   ##       registry: "custom-flyway-registry"
   ##     liquibase:
   ##       # Defaults to `liquibase/liquibase:4.33`; a registry here is used with the tag `4.33`.
@@ -1239,7 +1257,7 @@ operator:
   ##   image:
   ##     # Registry for the ClickHouse branch container.
   ##     # Defaults to `docker.io/clickhouse/clickhouse-server`.
-  ##     # Tag can be specified by the user when requesting a new branch, defaulting to `24.8`.
+  ##     # Tag can be specified by the user when requesting a new branch, defaulting to `26.8`.
   ##     registry: "custom-clickhouse-registry"
   ##   initImage:
   ##     # Registry for the ClickHouse branch initContainer image.
