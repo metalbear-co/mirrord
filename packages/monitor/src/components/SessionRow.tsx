@@ -22,6 +22,7 @@ interface SessionRowProps {
   leftStrip?: string | undefined
 }
 
+// Without `onClick` the row is plain content: it has nothing to open, so it shows no affordance.
 export default function SessionRow({
   lead,
   target,
@@ -37,17 +38,14 @@ export default function SessionRow({
     e.preventDefault()
     onClick?.()
   }
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className={cn(
-        'group relative flex min-h-[54px] w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
-        selected
-          ? 'border-primary bg-primary/15'
-          : 'border-border bg-card hover:border-muted-foreground',
-      )}
-    >
+  const className = cn(
+    'group relative flex min-h-[54px] w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
+    selected
+      ? 'border-primary bg-primary/15'
+      : cn('border-border bg-card', onClick && 'hover:border-muted-foreground'),
+  )
+  const content = (
+    <>
       {leftStrip && (
         <span
           className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-sm"
@@ -83,16 +81,24 @@ export default function SessionRow({
         )}
       </div>
       {right && <div className="flex shrink-0 items-center">{right}</div>}
-      <div
-        role="presentation"
-        className="flex shrink-0 items-center gap-1.5"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        {action ?? (
-          <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />
-        )}
-      </div>
+      {(action ?? onClick) && (
+        <div
+          role="presentation"
+          className="flex shrink-0 items-center gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {action ?? (
+            <ChevronRight className="text-muted-foreground h-3.5 w-3.5" />
+          )}
+        </div>
+      )}
+    </>
+  )
+  if (!onClick) return <div className={className}>{content}</div>
+  return (
+    <button type="button" onClick={handleClick} className={className}>
+      {content}
     </button>
   )
 }
