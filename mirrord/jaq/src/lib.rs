@@ -127,7 +127,7 @@ const THREAD_WAIT_LIMIT: std::time::Duration = std::time::Duration::from_secs(10
 /// that hands out no thread within `THREAD_WAIT_LIMIT` fails the same way, so a starved host
 /// shows up as an error rather than as a caller that waits forever.
 #[cfg(feature = "eval")]
-pub async fn evaluate_jq(
+pub async fn evaluate_jq_filter(
     jq_code: &str,
     payload: &serde_json::Value,
     time_limit: std::time::Duration,
@@ -310,7 +310,7 @@ mod tests {
             {"snow": 20, "wind": 10}
         ]);
 
-        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+        let result = evaluate_jq_filter(jq_code, &payload, std::time::Duration::from_millis(500))
             .await
             .expect("JQ evaluation failed");
         assert!(
@@ -330,7 +330,7 @@ mod tests {
             {"snow": 20, "wind": 10}
         ]);
 
-        let result = evaluate_jq(jq_code, &payload, std::time::Duration::from_millis(500))
+        let result = evaluate_jq_filter(jq_code, &payload, std::time::Duration::from_millis(500))
             .await
             .expect("JQ evaluation failed");
         assert!(
@@ -394,7 +394,7 @@ mod tests {
 
         assert!(
             matches!(
-                evaluate_jq(jq_code, &payload, std::time::Duration::from_secs(1)).await,
+                evaluate_jq_filter(jq_code, &payload, std::time::Duration::from_secs(1)).await,
                 Err(JqError::Timeout { .. })
             ),
             "Expected jq evaluation to timeout but it didn't"

@@ -1,0 +1,1 @@
+Compile the operator with the mirrord crates of every pull request that changes Rust code, so a pull request that breaks the operator has an operator branch of the same name that fixes it before it merges.
