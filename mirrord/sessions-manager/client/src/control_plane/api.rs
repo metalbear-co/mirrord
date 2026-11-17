@@ -27,7 +27,11 @@ pub(crate) struct ControlPlaneApi {
 }
 
 pub(crate) enum ControlPlaneEndpoint<'a> {
-    Assignments { scope: &'a ServiceScope },
+    Assignments {
+        scope: &'a ServiceScope,
+    },
+    /// The live sessions of the caller's organization.
+    Sessions,
 }
 
 impl ControlPlaneApi {
@@ -59,6 +63,9 @@ impl ControlPlaneApi {
                     let environment = slug::slugify(&scope.environment);
                     let service = slug::slugify(&scope.service);
                     segments.extend(["env", &environment, "service", &service, "assignments"]);
+                }
+                ControlPlaneEndpoint::Sessions => {
+                    segments.push("sessions");
                 }
             }
         }

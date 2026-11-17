@@ -1,5 +1,5 @@
 use k8s_openapi::api::core::v1::ConfigMap;
-use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
+use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext, util::GIT_BRANCH};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol_api::client::ProtocolConnector;
@@ -58,7 +58,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         None,
     )
     .await
-    .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?
+    .inspect_err(|error| analytics.set_error(error.connect_analytics_error()))?
     .connector;
 
     let connection = Connection::from_channel(

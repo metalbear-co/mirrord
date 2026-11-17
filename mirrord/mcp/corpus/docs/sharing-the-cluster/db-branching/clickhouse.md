@@ -24,7 +24,7 @@ ClickHouse branching requires operator `3.182.0`, mirrord CLI `3.230.0`, and ope
       {
         "id": "users-clickhouse-db",
         "type": "clickhouse",
-        "version": "24.8",
+        "version": "26.8",
         "name": "users-database-name",
         "connection": {
           "url": "DATABASE_URL"

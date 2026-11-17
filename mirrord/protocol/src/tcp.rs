@@ -784,6 +784,59 @@ impl<B: fmt::Debug> fmt::Debug for InternalHttpRequest<B> {
     }
 }
 
+/// Parts of names that often hold secrets, such as API keys, passwords and session cookies.
+///
+/// There is no plain `key` part, because names such as `mirrord-key` and `Idempotency-Key` do not
+/// hold secrets and help to debug a session.
+const SENSITIVE_NAME_PARTS: &[&str] = &[
+    "accesskey",
+    "apikey",
+    "appcheck",
+    "auth",
+    "cookie",
+    "credential",
+    "csrf",
+    "encryptioncustomerkey",
+    "encryptionkey",
+    "functionskey",
+    "hmac",
+    "jwt",
+    "oidcdata",
+    "passphrase",
+    "passw",
+    "privatekey",
+    "pwd",
+    "secret",
+    "session",
+    "signature",
+    "subscriptionkey",
+    "token",
+    "xsrf",
+];
+
+/// Tells whether the value of the HTTP header or queue message property `name` likely holds a
+/// secret, and must be left out of logs.
+///
+/// The intproxy and the operator log the requests and messages that a session handles, and these
+/// logs go to files and log systems that more people can read than can use the session. Neither
+/// can know every name that a customer uses for a secret, so this only catches the usual ones.
+///
+/// A name matches when its ASCII letters and digits, in lowercase and with all other characters
+/// removed, contain one of [`SENSITIVE_NAME_PARTS`]: `X-Api-Key`, `api_key`, `api.key` and
+/// `apikey` all match `apikey`.
+///
+/// The mirrord docs ("Message Processing" in the monitoring page) show this list and the match
+/// rule to users, so change them together.
+pub fn is_sensitive_name(name: &str) -> bool {
+    let name = name
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect::<String>();
+
+    SENSITIVE_NAME_PARTS.iter().any(|part| name.contains(part))
+}
+
 /// Minimal mirrord-protocol version that allows [`DaemonTcp::HttpRequestFramed`] and
 /// [`LayerTcpSteal::HttpResponseFramed`].
 pub static HTTP_FRAMED_VERSION: LazyLock<VersionReq> =

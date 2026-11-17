@@ -7,6 +7,10 @@ use mirrord_config::target::TargetType;
 
 use crate::{INFERRED_TARGET_TYPES, config::ServiceMode};
 
+/// The `mirrord up` docs on the modes, linked from the traffic question.
+pub const MODES_DOCS_URL: &str =
+    "https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions/#service-modes";
+
 impl ServiceMode {
     /// The modes offered, in order. The first is preselected.
     pub const OFFERED: [Self; 3] = [Self::Split, Self::Mirror, Self::Replace];
@@ -70,9 +74,20 @@ impl ServiceMode {
     /// The yes/no question before the traffic questions.
     pub fn traffic_question(self) -> &'static str {
         if self.uses_http_filter() {
-            "Configure traffic filtering and ports?"
+            "Customize the header filter and ports?"
         } else {
-            "Configure ports?"
+            "Customize ports?"
+        }
+    }
+
+    /// What `mirrord up` does when the [`Self::traffic_question`] is answered
+    /// no. The fallback filter is built in `ServiceConfig::unpatched_config`,
+    /// without `ports`, so it applies to every port not in `ignore_ports`.
+    pub fn traffic_default(self) -> &'static str {
+        if self.uses_http_filter() {
+            "Default: `baggage: .*mirrord-session={key}.*` header filter on every port your app listens on."
+        } else {
+            "Default: all traffic on every port your app listens on, unfiltered."
         }
     }
 }

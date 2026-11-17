@@ -31,7 +31,7 @@ use mirrord_protocol::{
         ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestErrorV1, ChunkedRequestErrorV2,
         DaemonTcp, HttpRequest, HttpRequestMetadata, IncomingTrafficTransportType,
         InternalHttpBodyFrame, InternalHttpRequest, LayerTcp, LayerTcpSteal, NewTcpConnectionV1,
-        NewTcpConnectionV2,
+        NewTcpConnectionV2, is_sensitive_name,
     },
 };
 use rand::seq::IndexedRandom;
@@ -129,6 +129,21 @@ struct HttpGatewayHandle {
     ///
     /// [`None`] if all frames were already sent.
     body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+}
+
+/// Copies `headers`, marking the values that [`is_sensitive_name`] matches as sensitive,
+/// so that their [`Debug`](std::fmt::Debug) prints `Sensitive` instead of the value.
+///
+/// The HTTP requests we log at `INFO` come from the user's cluster, and these logs end up in the
+/// intproxy log file and, for preview environments, in the operator's logs.
+fn redact_sensitive_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut headers = headers.clone();
+    for (name, value) in headers.iter_mut() {
+        if is_sensitive_name(name.as_str()) {
+            value.set_sensitive(true);
+        }
+    }
+    headers
 }
 
 /// Handles logic and state of the `incoming` feature.
@@ -279,7 +294,7 @@ impl IncomingProxy {
         message_bus: &MessageBus<Self>,
     ) {
         tracing::info!(
-            full_headers = ?request.internal_request.headers,
+            headers = ?redact_sensitive_headers(&request.internal_request.headers),
             ?request,
             is_steal,
             "Received an HTTP request from the agent",

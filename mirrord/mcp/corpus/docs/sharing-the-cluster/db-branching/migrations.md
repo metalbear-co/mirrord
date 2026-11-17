@@ -92,7 +92,7 @@ Mind the interaction with `copy.mode`: Flyway refuses to migrate a schema that a
 | --- | --- |
 | `path` | Local directory of migration files, resolved relative to your working directory. Mutually exclusive with `locations`. |
 | `locations` | Flyway locations inside `image` holding the migration files, for images with the SQL baked in. Mutually exclusive with `path`, and requires `image`. |
-| `image` | Migration runner image. Optional with `path` (defaults to `flyway/flyway:12`), required with `locations`. |
+| `image` | Migration runner image. Optional with `path` (defaults to `flyway/flyway:13` from operator `3.232.0`, `flyway/flyway:12` on `3.182.0` through `3.231.0`), required with `locations`. |
 
 Exactly one of `path` or `locations` is required.
 
