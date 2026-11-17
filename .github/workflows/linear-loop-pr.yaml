@@ -1,8 +1,8 @@
 name: Linear loop pull requests
 
-# `pull_request_target` runs this file and script from the default branch, so a branch of the agent
-# can never change the code that holds the Linear credentials. Nothing from the pull request is
-# checked out.
+# `pull_request_target` runs this file from the base branch of the pull request, and another base
+# branch could carry its own copy of the script. The job therefore only handles pull requests into
+# the default branch and takes its script from there. Nothing from the pull request is checked out.
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, closed]
@@ -19,11 +19,13 @@ jobs:
   route:
     if: >-
       github.event.pull_request.user.login == 'linear-code[bot]' &&
-      startsWith(github.event.pull_request.head.ref, 'linear/')
+      startsWith(github.event.pull_request.head.ref, 'linear/') &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           persist-credentials: false
       - name: Route the pull request
