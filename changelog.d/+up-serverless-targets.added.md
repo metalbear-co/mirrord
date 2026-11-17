@@ -1,1 +1,0 @@
-`mirrord up` runs services with a serverless target. In `split` and `mirror` modes they run without queue splitting or DB branching, and `mirrord up` says so; `replace` mode fails, since a serverless target can't be copied.

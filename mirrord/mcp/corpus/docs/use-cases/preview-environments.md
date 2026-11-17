@@ -581,7 +581,9 @@ Before creating anything, mirrord checks the files:
   created. A preview that is already running with the same key is left as it is.
 
 The comparison and the dry runs use your own credentials, not the operator's, so the operator
-never reads your Secrets. For the full check you need:
+reads none of your Secrets for them. (A running preview is different: when the target's split
+config reads queue names from a `secret` volume, the operator reads that Secret of the pod and
+copies it for the preview.) For the full check you need:
 
 * `get` on the target and on the ConfigMaps and Secrets its pod uses, to compare them.
 * `create` on the target's kind, ConfigMaps, and Secrets, for the dry runs (they create

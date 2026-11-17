@@ -208,7 +208,7 @@ Each entry in the `spec.queues` list describes one or more Pub/Sub subscriptions
 * `appConfig.subscription` - how the application discovers the subscription name. Each entry can use:
   * `env` - exact environment variable name containing the subscription ID.
   * `envLike` - regex matching environment variable names.
-  * `volume` - read the subscription name from a file mounted from a `configMap` volume (`volume.name` + `volume.file`) instead of an environment variable. See [Queue Names in Mounted Config Files](../queue-splitting.md#queue-names-in-mounted-config-files).
+  * `volume` - read the subscription name from a file mounted from a `configMap` or `secret` volume (`volume.name` + `volume.file`) instead of an environment variable. See [Queue Names in Mounted Config Files](../queue-splitting.md#queue-names-in-mounted-config-files).
   * `fallback` - fallback subscription name if the variable is not found.
   * `valueSelector` - a selector extracting the subscription name from the variable's value: nested keys and `.[]` to iterate arrays or object values. Useful when the env var contains JSON rather than a plain name. Pipes, functions, and other jq operators are not supported.
   * `valuePattern` - a regex used when the subscription name is embedded in a larger string such as a Go CDK URL (`gcppubsub://projects/my-project/subscriptions/my-subscription`) or a resource path. See [Preserving the value format](gcp-pubsub.md#preserving-the-value-format) below.

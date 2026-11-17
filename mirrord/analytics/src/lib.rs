@@ -95,6 +95,11 @@ pub enum AnalyticsError {
     EnvFetch,
     BinaryExecuteFailed,
     IntProxyFirstConnection,
+    SessionsManagerConnectTimeout,
+    SessionsManagerConnect,
+    SessionsManagerUrl,
+    ServerlessSessionsManagerNotServed,
+    SessionsManagerCloudUrl,
 
     #[default]
     Unknown,
