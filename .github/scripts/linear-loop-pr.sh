@@ -20,11 +20,10 @@ prefix=${BASH_REMATCH[1]}
 key="$prefix-${BASH_REMATCH[2]}"
 identifier=$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')
 
-# `owner` is the Linear id of the product manager who prioritizes the team's issues.
 case $prefix in
-  cor) team=core owner=6bbcaf3a-71da-406a-81cc-00a2c79adab3 ;;
-  int) team=cloud-integrations owner=c9fbc8c6-7cbd-4959-a288-153adf7d937e ;;
-  *) team=rnd owner=c9fbc8c6-7cbd-4959-a288-153adf7d937e ;;
+  cor) team=core ;;
+  int) team=cloud-integrations ;;
+  *) team=rnd ;;
 esac
 
 live_state() { gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '"\(.state) \(.merged) \(.draft)"'; }
@@ -81,13 +80,6 @@ fi
 token=$(timeout 30s "$(dirname "$0")/linear-token.sh")
 echo "::add-mask::$token"
 
-owner_url=$(linear 'query($id: String!) { user(id: $id) { url } }' "$(jq -n --arg id "$owner" '{id: $id}')" \
-  | jq -r '.data.user.url // empty') || owner_url=
-if [ -z "$owner_url" ]; then
-  echo "::error::could not look up who prioritizes $identifier"
-  exit 1
-fi
-
 # Linear has no conditional update, so the pull requests are checked as late as possible. Another
 # open pull request for the issue from a branch of this repository, such as a replacement or this
 # one reopened, means the work goes on.
@@ -106,12 +98,13 @@ fi
 # The comment on an unmerged close starts with this, which is also how a rerun finds it.
 notice="The pull request ${PR_URL} was closed without merging"
 
-issue=$(linear 'query($id: String!, $notice: String!) { issue(id: $id) { id state { id type } team { states { nodes { id name } } } comments(filter: {body: {contains: $notice}}, first: 1) { nodes { id } } } }' \
+issue=$(linear 'query($id: String!, $notice: String!) { issue(id: $id) { id state { id type } team { states { nodes { id name } } triageResponsibility { currentUser { url } } } comments(filter: {body: {contains: $notice}}, first: 1) { nodes { id } } } }' \
   "$(jq -n --arg id "$identifier" --arg notice "$notice" '{id: $id, notice: $notice}')") || issue=null
 issue_id=$(jq -r '.data.issue.id // empty' <<< "$issue")
 state_id=$(jq -r '.data.issue.state.id // empty' <<< "$issue")
 state_type=$(jq -r '.data.issue.state.type // empty' <<< "$issue")
 noticed=$(jq -r '.data.issue.comments.nodes[0].id // empty' <<< "$issue")
+triager_url=$(jq -r '.data.issue.team.triageResponsibility.currentUser.url // empty' <<< "$issue")
 if [ -z "$issue_id" ] || [ -z "$state_id" ] || [ -z "$state_type" ]; then
   echo "::error::Linear returned no issue for $identifier"
   exit 1
@@ -141,7 +134,7 @@ if [ -n "$noticed" ]; then
   exit 0
 fi
 posted=$(linear 'mutation($id: String!, $body: String!) { commentCreate(input: {issueId: $id, body: $body}) { success } }' \
-  "$(jq -n --arg id "$issue_id" --arg body "$notice, so this issue is back in Todo. ${owner_url} please reprioritize it." '{id: $id, body: $body}')") || posted=null
+  "$(jq -n --arg id "$issue_id" --arg body "$notice, so this issue is back in Todo. ${triager_url:-Someone} please reprioritize it." '{id: $id, body: $body}')") || posted=null
 if [ "$(jq -r '.data.commentCreate.success' <<< "$posted")" != true ]; then
   echo "::error::$identifier is in Todo, but Linear refused the comment that asks for it to be reprioritized; rerun this job to send it"
   exit 1
