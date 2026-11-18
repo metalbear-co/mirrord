@@ -28,10 +28,22 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           persist-credentials: false
+      # The workflow token cannot see the organization's teams, so the cubby-mb app requests the review.
+      # This step fails while the app cannot read the organization's members, and the script then skips
+      # the review request.
+      - name: Get a token that can request a team review
+        id: review-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          permission-members: read
+          permission-pull-requests: write
       - name: Route the pull request
         env:
           GH_TOKEN: ${{ github.token }}
-          REVIEW_TOKEN: ${{ secrets.LINEAR_LOOP_REVIEW_TOKEN }}
+          REVIEW_TOKEN: ${{ steps.review-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           REPO: ${{ github.repository }}
