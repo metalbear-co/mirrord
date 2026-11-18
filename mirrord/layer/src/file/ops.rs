@@ -219,7 +219,6 @@ impl RemoteFile {
         Ok(response)
     }
 
-
     /// Sends a [`CloseFileRequest`] message, closing the file in the agent.
     #[mirrord_layer_macro::instrument(level = "trace")]
     pub(crate) fn close(mut self) -> Result<()> {
@@ -250,7 +249,13 @@ impl Drop for RemoteFile {
         // - This can run from `close_layer_fd`, after the caller closed stdout or stderr.
         // - A log can need a `write`, and the hooked `write` locks `OPEN_FILES`. If a caller drops
         //   a `RemoteFile` under that guard, the thread deadlocks with itself.
-        let _ = remote_close(self.fd);
+        match remote_close(self.fd) {
+            err @ Err(HookError::CannotGetProxyConnection)
+            | err @ Err(HookError::ProxyError(_)) => {
+                panic!("failed to close fd: {err:?}")
+            }
+            _ => {}
+        };
     }
 }
 
