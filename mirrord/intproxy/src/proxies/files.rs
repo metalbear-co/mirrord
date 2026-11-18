@@ -532,6 +532,7 @@ impl FilesProxy {
 
     #[tracing::instrument(level = Level::TRACE, skip(message_bus))]
     async fn layer_closed(&mut self, closed: LayerClosed, message_bus: &mut MessageBus<Self>) {
+        let close_responses = self.close_responses();
         for fd in self.remote_files.remove_all(closed.id) {
             self.buffered_files.remove(&fd);
             message_bus
@@ -539,6 +540,14 @@ impl FilesProxy {
                     CloseFileRequest { fd },
                 )))
                 .await;
+
+            if close_responses {
+                // This works because once the layer is removed,
+                // messages sent to it will be silently dropped. So
+                // when the response from agent arrives, we'll forward
+                // it to a nonexistent layer => drop => all good.
+                self.request_queue.push_back(0, closed.id);
+            }
         }
 
         for remote_fd in self.remote_dirs.remove_all(closed.id) {
@@ -548,6 +557,14 @@ impl FilesProxy {
                     CloseDirRequest { remote_fd },
                 )))
                 .await;
+
+            if close_responses {
+                // This works because once the layer is removed,
+                // messages sent to it will be silently dropped. So
+                // when the response from agent arrives, we'll forward
+                // it to a nonexistent layer => drop => all good.
+                self.request_queue.push_back(0, closed.id);
+            }
         }
     }
 
@@ -633,30 +650,35 @@ impl FilesProxy {
         match request {
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::Close(close) => {
-                if self.remote_files.remove(layer_id, close.fd) {
+                let removed = self.remote_files.remove(layer_id, close.fd);
+
+                if removed {
                     self.buffered_files.remove(&close.fd);
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::Close(close)))
                         .await;
 
-                    // Handle old protocol versions
                     if self.close_responses() {
                         self.request_queue.push_back(message_id, layer_id);
-                    } else {
-                        message_bus
-                            .send(ToLayer {
-                                message_id,
-                                layer_id,
-                                message: ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
-                            })
-                            .await;
                     }
+                }
+
+                if removed.not() || self.close_responses().not() {
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            layer_id,
+                            message: ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
+                        })
+                        .await;
                 }
             }
 
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::CloseDir(close) => {
-                if self.remote_dirs.remove(layer_id, close.remote_fd) {
+                let removed = self.remote_dirs.remove(layer_id, close.remote_fd);
+
+                if removed {
                     self.buffered_dirs.remove(&close.remote_fd);
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::CloseDir(close)))
@@ -665,15 +687,17 @@ impl FilesProxy {
                     // Handle old protocol versions
                     if self.close_responses() {
                         self.request_queue.push_back(message_id, layer_id);
-                    } else {
-                        message_bus
-                            .send(ToLayer {
-                                message_id,
-                                layer_id,
-                                message: ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
-                            })
-                            .await;
                     }
+                }
+
+                if removed.not() || self.close_responses().not() {
+                    message_bus
+                        .send(ToLayer {
+                            message_id,
+                            layer_id,
+                            message: ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
+                        })
+                        .await;
                 }
             }
 
