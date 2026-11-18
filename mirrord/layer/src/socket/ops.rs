@@ -775,10 +775,18 @@ pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), 
 
                     open_files.insert(dup_fd as RawFd, file)
                 }
+                // The kernel replaced `dup_fd` with a copy of an fd the layer doesn't manage, so
+                // whatever the layer tracked under `dup_fd` is gone.
+                None if SWITCH_MAP => {
+                    sockets.remove(&dup_fd);
+                    open_files.remove(&dup_fd)
+                }
                 None => None,
             }
         }
     };
+    // Dropped, not closed with `RemoteFile::close`: like the kernel's, the close of the replaced
+    // fd is silent, and `dup2`/`dup3` don't report its errors.
     drop(replaced_file);
 
     Ok(())
