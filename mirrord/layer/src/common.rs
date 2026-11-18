@@ -6,7 +6,7 @@ use libc::c_char;
 use mirrord_layer_lib::detour::DetourError;
 pub use mirrord_layer_lib::{
     detour::{Bypass, Detour, OptionExt},
-    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    proxy_connection::make_proxy_request_with_response,
 };
 use mirrord_protocol::file::OpenOptionsInternal;
 use null_terminated::Nul;

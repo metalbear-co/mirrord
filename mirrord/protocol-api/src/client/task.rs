@@ -8,7 +8,10 @@ use std::{
 
 use futures::{SinkExt, StreamExt, stream::SelectAll};
 use mirrord_nightly_polyfill::error::Report;
-use mirrord_protocol::{CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, LogMessage};
+use mirrord_protocol::{
+    CLIENT_READY_FOR_LOGS, ClientMessage, DaemonMessage, FileRequest, FileResponse, LogMessage,
+    file::CLOSE_RESPONSE_VERSION,
+};
 use tokio::{
     sync::mpsc,
     time::{self, Instant},
@@ -252,21 +255,21 @@ impl<C: ProtocolConnector> ClientTask<C> {
                     };
                     *fd = new_fd;
                 };
-                self.queues[queue_kind].push_back(handler);
-                message.into()
-            }
 
-            ClientRequest::SimpleNoResponse(mut message) => {
-                let remote_fd = match &mut message {
-                    ClientMessage::FileRequest(req) => req.remote_fd_mut(),
-                    _ => None,
-                };
-                if let Some(fd) = remote_fd {
-                    let Some(new_fd) = self.fd_tracker.map_id_from_client(*fd) else {
-                        return Default::default();
-                    };
-                    *fd = new_fd;
-                };
+                // For protocol versions older than [`CLOSE_RESPONSE_VERSION`], we simulate
+                // the response from the agent (because the real one will never arrive).
+                match &message {
+                    ClientMessage::FileRequest(FileRequest::Close(_))
+                    | ClientMessage::FileRequest(FileRequest::CloseDir(_))
+                        if CLOSE_RESPONSE_VERSION.matches(&self.protocol_version).not() =>
+                    {
+                        handler(Ok(DaemonMessage::File(FileResponse::Close(Ok(())))));
+                    }
+                    _ => {
+                        self.queues[queue_kind].push_back(handler);
+                    }
+                }
+
                 message.into()
             }
 

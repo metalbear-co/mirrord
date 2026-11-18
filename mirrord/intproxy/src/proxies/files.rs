@@ -62,6 +62,7 @@ impl From<AgentLostFileResponse> for ToLayer {
             FileResponse::Futimens(..) => FileResponse::Futimens(Err(error)),
             FileResponse::Fchown(..) => FileResponse::Fchown(Err(error)),
             FileResponse::Fchmod(..) => FileResponse::Fchmod(Err(error)),
+            FileResponse::Close(..) => FileResponse::Close(Err(error)),
         };
 
         debug_assert_eq!(
@@ -382,6 +383,7 @@ impl RouterFileOps {
             | FileResponse::Futimens(..)
             | FileResponse::Fchown(..)
             | FileResponse::Fchmod(..) => {}
+            FileResponse::Close(..) => {}
 
             FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd: remote_fd, .. }))
             | FileResponse::Open(Ok(OpenFileResponse { fd: remote_fd }))
@@ -509,6 +511,14 @@ impl FilesProxy {
             .is_some_and(|version| READDIR_BATCH_VERSION.matches(version))
     }
 
+    /// Returns whether [`mirrord_protocol`] version does returns responses to
+    /// [`FileRequest::Close`] and [`FileRequest::CloseDir`]
+    fn close_responses(&self) -> bool {
+        self.protocol_version
+            .as_ref()
+            .is_some_and(|version| CLOSE_RESPONSE_VERSION.matches(version))
+    }
+
     /// Returns whether this proxy is configured to buffer readonly files.
     fn buffer_reads(&self) -> bool {
         self.file_buffer_size > 0
@@ -628,6 +638,19 @@ impl FilesProxy {
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::Close(close)))
                         .await;
+
+                    // Handle old protocol versions
+                    if self.close_responses() {
+                        self.request_queue.push_back(message_id, layer_id);
+                    } else {
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                layer_id,
+                                message: ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
+                            })
+                            .await;
+                    }
                 }
             }
 

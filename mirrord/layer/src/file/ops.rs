@@ -220,8 +220,9 @@ impl RemoteFile {
     /// Sends a [`CloseFileRequest`] message, closing the file in the agent.
     #[mirrord_layer_macro::instrument(level = "trace")]
     pub(crate) fn remote_close(fd: u64) -> Result<()> {
-        common::make_proxy_request_no_response(CloseFileRequest { fd })?;
-        Ok(())
+        Ok(common::make_proxy_request_with_response(
+            CloseFileRequest { fd },
+        )??)
     }
 }
 

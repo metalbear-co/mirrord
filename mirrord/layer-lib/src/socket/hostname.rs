@@ -7,7 +7,7 @@ use tracing::trace;
 
 use crate::{
     error::{HookResult, HostnameResolveError},
-    proxy_connection::{make_proxy_request_no_response, make_proxy_request_with_response},
+    proxy_connection::make_proxy_request_with_response,
     setup::setup,
 };
 
@@ -72,10 +72,20 @@ impl ManagedRemoteFile {
 
 impl Drop for ManagedRemoteFile {
     fn drop(&mut self) {
-        // Ignore any errors during cleanup - we don't want to panic in Drop
-        let _ = make_proxy_request_no_response(mirrord_protocol::file::CloseFileRequest {
+        let res = make_proxy_request_with_response(mirrord_protocol::file::CloseFileRequest {
             fd: self.fd,
         });
+
+        // Ignore any errors during cleanup - we don't want to panic in Drop
+        match res {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                tracing::error!(?err, "failed closing managed remote file");
+            }
+            Err(err) => {
+                tracing::error!(?err, "failed closing managed remote file");
+            }
+        };
     }
 }
 
