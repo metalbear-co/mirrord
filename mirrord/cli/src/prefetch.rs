@@ -361,9 +361,7 @@ impl Downloader<'_> {
 
         let fd = self.open_remote(remote).await?;
         let result = self.copy_contents(fd, &partial).await;
-        self.client
-            .make_request_no_response(CloseFileRequest { fd })
-            .await;
+        self.client.make_request(CloseFileRequest { fd }).await?;
 
         if let Err(error) = result {
             let _ = fs::remove_file(&partial);
@@ -413,9 +411,7 @@ impl Downloader<'_> {
         {
             Ok(response) => response.fd,
             Err(error) => {
-                self.client
-                    .make_request_no_response(CloseFileRequest { fd })
-                    .await;
+                self.client.make_request(CloseFileRequest { fd }).await?;
 
                 return Err(error.into());
             }
@@ -424,11 +420,9 @@ impl Downloader<'_> {
         let entries = self.drain_dir(dir_fd).await;
 
         self.client
-            .make_request_no_response(CloseDirRequest { remote_fd: dir_fd })
-            .await;
-        self.client
-            .make_request_no_response(CloseFileRequest { fd })
-            .await;
+            .make_request(CloseDirRequest { remote_fd: dir_fd })
+            .await?;
+        self.client.make_request(CloseFileRequest { fd }).await?;
 
         entries
     }

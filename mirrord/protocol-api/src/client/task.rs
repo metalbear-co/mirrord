@@ -263,7 +263,7 @@ impl<C: ProtocolConnector> ClientTask<C> {
                     | ClientMessage::FileRequest(FileRequest::CloseDir(_))
                         if CLOSE_RESPONSE_VERSION.matches(&self.protocol_version).not() =>
                     {
-                        handler(Ok(DaemonMessage::File(FileResponse::Close(Ok(())))));
+                        handler(Ok(DaemonMessage::File(FileResponse::Close(Ok(()))))).ok();
                     }
                     _ => {
                         self.queues[queue_kind].push_back(handler);
