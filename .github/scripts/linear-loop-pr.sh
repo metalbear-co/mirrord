@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Routes a pull request opened by the Linear coding agent: asks the team that owns the ticket for a
-# review, and sends the Linear issue back to Todo when the pull request closes unmerged. Linear's own
-# pull request automations move the issue when the pull request opens or merges.
+# review, and sends the Linear issue back to triage (Todo in a team without triage) when the pull
+# request closes unmerged. Linear's own pull request automations move the issue when the pull request
+# opens or merges.
 #
 # Requires $PR_NUMBER, $PR_URL, $REPO, $HEAD_REF and $GH_TOKEN. The review request
 # needs $REVIEW_TOKEN, a GitHub token that can see the organization's teams, and is skipped without
@@ -98,7 +99,7 @@ fi
 # The comment on an unmerged close starts with this, which is also how a rerun finds it.
 notice="The pull request ${PR_URL} was closed without merging"
 
-issue=$(linear 'query($id: String!, $notice: String!) { issue(id: $id) { id state { id type } team { states { nodes { id name } } triageResponsibility { currentUser { url } } } comments(filter: {body: {contains: $notice}}, first: 1) { nodes { id } } } }' \
+issue=$(linear 'query($id: String!, $notice: String!) { issue(id: $id) { id state { id type } team { triageEnabled triageIssueState { id name } states { nodes { id name } } triageResponsibility { currentUser { url } } } comments(filter: {body: {contains: $notice}}, first: 1) { nodes { id } } } }' \
   "$(jq -n --arg id "$identifier" --arg notice "$notice" '{id: $id, notice: $notice}')") || issue=null
 issue_id=$(jq -r '.data.issue.id // empty' <<< "$issue")
 state_id=$(jq -r '.data.issue.state.id // empty' <<< "$issue")
@@ -109,23 +110,25 @@ if [ -z "$issue_id" ] || [ -z "$state_id" ] || [ -z "$state_type" ]; then
   echo "::error::Linear returned no issue for $identifier"
   exit 1
 fi
-todo=$(jq -r '[.data.issue.team.states.nodes[] | select(.name == "Todo")][0].id // empty' <<< "$issue")
-if [ -z "$todo" ]; then
-  echo "::warning::the team of $identifier has no Todo state"
+target=$(jq -c '.data.issue.team | if .triageEnabled and .triageIssueState then .triageIssueState else ([.states.nodes[] | select(.name == "Todo")][0] // {}) end' <<< "$issue")
+target_id=$(jq -r '.id // empty' <<< "$target")
+target_name=$(jq -r '.name // empty' <<< "$target")
+if [ -z "$target_id" ]; then
+  echo "::warning::the team of $identifier has neither triage nor a Todo state"
   exit 0
 fi
 
-# A rerun after a failure finds the issue in Todo already, or the comment posted already, and only
-# does what is missing.
+# A rerun after a failure finds the issue moved already, or the comment posted already, and only does
+# what is missing.
 if [ "$state_type" = started ]; then
   moved=$(linear 'mutation($id: String!, $state: String!) { issueUpdate(id: $id, input: {stateId: $state}) { success } }' \
-    "$(jq -n --arg id "$issue_id" --arg state "$todo" '{id: $id, state: $state}')") || moved=null
+    "$(jq -n --arg id "$issue_id" --arg state "$target_id" '{id: $id, state: $state}')") || moved=null
   if [ "$(jq -r '.data.issueUpdate.success' <<< "$moved")" != true ]; then
     echo "::error::Linear did not move $identifier"
     exit 1
   fi
-  echo "moved $identifier to Todo"
-elif [ "$state_id" != "$todo" ]; then
+  echo "moved $identifier to $target_name"
+elif [ "$state_id" != "$target_id" ]; then
   echo "$identifier is not in progress, leaving it"
   exit 0
 fi
@@ -134,9 +137,9 @@ if [ -n "$noticed" ]; then
   exit 0
 fi
 posted=$(linear 'mutation($id: String!, $body: String!) { commentCreate(input: {issueId: $id, body: $body}) { success } }' \
-  "$(jq -n --arg id "$issue_id" --arg body "$notice, so this issue is back in Todo. ${triager_url:-Someone} please reprioritize it." '{id: $id, body: $body}')") || posted=null
+  "$(jq -n --arg id "$issue_id" --arg body "$notice, so this issue is back in $target_name. ${triager_url:-Someone} please reprioritize it." '{id: $id, body: $body}')") || posted=null
 if [ "$(jq -r '.data.commentCreate.success' <<< "$posted")" != true ]; then
-  echo "::error::$identifier is in Todo, but Linear refused the comment that asks for it to be reprioritized; rerun this job to send it"
+  echo "::error::$identifier is in $target_name, but Linear refused the comment that asks for it to be reprioritized; rerun this job to send it"
   exit 1
 fi
 echo "asked for $identifier to be reprioritized"
