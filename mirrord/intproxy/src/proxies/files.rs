@@ -661,6 +661,19 @@ impl FilesProxy {
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::CloseDir(close)))
                         .await;
+
+                    // Handle old protocol versions
+                    if self.close_responses() {
+                        self.request_queue.push_back(message_id, layer_id);
+                    } else {
+                        message_bus
+                            .send(ToLayer {
+                                message_id,
+                                layer_id,
+                                message: ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
+                            })
+                            .await;
+                    }
                 }
             }
 
