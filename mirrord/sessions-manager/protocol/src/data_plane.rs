@@ -14,6 +14,14 @@ use crate::error::SessionsManagerProtocolError;
 /// on that path. A standalone sessions-manager receives it in `Authorization`.
 pub const OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER: &str = "x-mirrord-data-plane-authorization";
 
+/// WebSocket close code sessions-manager ends a data-plane connection with when the other side of
+/// its room disconnected (reason `peer-left`).
+///
+/// This is how every session ends for the side that stays: an agent sees it each time a developer
+/// stops `mirrord exec`. The other application codes sessions-manager closes with (4001
+/// `peer-attach-timeout`, 4003 `revoked`) mean the session failed, so only this one is a clean end.
+pub const PEER_LEFT_CLOSE_CODE: u16 = 4002;
+
 /// A credential whose value is exposed only at an explicit transport boundary.
 ///
 /// Serialization deliberately exposes the credential because [`crate::ConnectionAssignment`] is the

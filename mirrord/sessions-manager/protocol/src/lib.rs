@@ -19,6 +19,7 @@ pub use control_plane::{
 };
 pub use data_plane::{
     DataPlaneAuthorization, DataPlaneEndpoint, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
+    PEER_LEFT_CLOSE_CODE,
 };
 pub use error::SessionsManagerProtocolError;
 use serde::{Deserialize, Serialize};

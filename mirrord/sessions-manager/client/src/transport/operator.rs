@@ -8,7 +8,7 @@ use mirrord_operator_websocket::{connection::OperatorConnection, upgrade::connec
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
     AssignmentSubscription, ConnectionAssignment, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
-    ServiceScope,
+    PEER_LEFT_CLOSE_CODE, ServiceScope,
 };
 use tokio::time::Instant;
 
@@ -87,7 +87,7 @@ impl SessionsManagerTransport for OperatorTransport {
                 .await
                 .map_err(|_| SessionsManagerClientError::WebSocketUpgradeTimeout)??;
 
-        Ok(OperatorConnection::new(socket))
+        Ok(OperatorConnection::new(socket).with_clean_close_codes(&[PEER_LEFT_CLOSE_CODE]))
     }
 }
 

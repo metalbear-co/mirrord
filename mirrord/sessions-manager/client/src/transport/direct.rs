@@ -20,7 +20,7 @@ use mirrord_operator_websocket::{
 };
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, ServiceScope, SessionList,
+    AssignmentSubscription, ConnectionAssignment, PEER_LEFT_CLOSE_CODE, ServiceScope, SessionList,
 };
 use reqwest::StatusCode;
 use tokio::time::Instant;
@@ -308,9 +308,10 @@ impl SessionsManagerTransport for DirectTransport {
         &self,
         assignment: ConnectionAssignment,
     ) -> Result<OperatorConnection<E>, SessionsManagerClientError> {
-        Ok(OperatorConnection::new(
-            self.connect_websocket(&assignment).await?,
-        ))
+        Ok(
+            OperatorConnection::new(self.connect_websocket(&assignment).await?)
+                .with_clean_close_codes(&[PEER_LEFT_CLOSE_CODE]),
+        )
     }
 }
 
