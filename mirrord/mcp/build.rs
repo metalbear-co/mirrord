@@ -85,18 +85,21 @@ fn main() -> io::Result<()> {
     );
     let mut archive = tar::Builder::new(encoder);
     for (path, source) in files {
-        let contents = fs::read(&source)?;
-        if std::str::from_utf8(&contents).is_err() {
-            return Err(io::Error::other(format!(
+        let contents = String::from_utf8(fs::read(&source)?).map_err(|_| {
+            io::Error::other(format!(
                 "{} isn't UTF-8 text, which `mirrord mcp` can't serve",
                 source.display()
-            )));
-        }
+            ))
+        })?;
+        // A Windows checkout can have CRLF line endings (`core.autocrlf`), but `src/corpus.rs`
+        // parses front matter with LF only, so CRLF becomes LF here and the archive is the same on
+        // every OS.
+        let contents = contents.replace("\r\n", "\n");
         let mut header = tar::Header::new_gnu();
         header.set_size(contents.len() as u64);
         header.set_mode(0o644);
         header.set_mtime(0);
-        archive.append_data(&mut header, &path, contents.as_slice())?;
+        archive.append_data(&mut header, &path, contents.as_bytes())?;
     }
     archive.into_inner()?.finish()?;
 
