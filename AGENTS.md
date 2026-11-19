@@ -105,7 +105,8 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
 
 - `ci` (the `ci-success` job) is the only required check. It and `lint-success` only collect the jobs they need, so
   when either fails, read the job under it that failed.
-- `main` merges through the merge queue, with merge commits, after one approval and with every review thread resolved.
+- `main` merges through the merge queue after one approval and with every review thread resolved, and the queue
+  squashes each pull request into one commit.
 - nextest retries a failing test twice, so `FLAKY` marks a pass on a retry and `TRY 3 FAIL` a test that never passed.
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
 - `typos` checks the tracked Markdown outside `mirrord/mcp/corpus`, and Vale the Markdown at the root and every fragment
