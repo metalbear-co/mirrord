@@ -93,6 +93,12 @@ async fn app_reuses_low_fds() {
         ),
         "expected the close of the remote file, got {close:?}"
     );
+    layer
+        .send(
+            close.message_id,
+            ProxyToLayerMessage::File(FileResponse::Close(Ok(()))),
+        )
+        .await;
 
     process.wait_assert_success().await;
     process.assert_stdout_contains("remote open done").await;

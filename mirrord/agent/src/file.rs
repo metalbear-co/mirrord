@@ -1110,13 +1110,19 @@ mod tests {
 
         let (manager, dir) = match mode {
             Mode::Targeted => (
-                FileManager::with_resolver(Some(InTargetPathResolver::with_root_path(
-                    root.path().to_path_buf(),
-                ))),
+                FileManager::with_resolver(
+                    Some(InTargetPathResolver::with_root_path(
+                        root.path().to_path_buf(),
+                    )),
+                    Default::default(),
+                ),
                 PathBuf::from("/a/b/c"),
             ),
-            Mode::Targetless => (FileManager::new(None), host_dir.clone()),
-            Mode::WorkloadCompanion => (FileManager::new_workload_companion(), host_dir.clone()),
+            Mode::Targetless => (FileManager::new(None, Default::default()), host_dir.clone()),
+            Mode::WorkloadCompanion => (
+                FileManager::new_workload_companion(Default::default()),
+                host_dir.clone(),
+            ),
         };
 
         fs::write(host_dir.join("file"), "hello").unwrap();

@@ -65,6 +65,7 @@ async fn double_listen() {
             OpenFileResponse { fd: 1 },
         ))))
         .await;
+    intproxy.expect_file_close(1).await;
 
     test_process.wait_assert_success().await;
 }
