@@ -300,7 +300,12 @@ jobs:
       build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
     secrets: inherit
 
+  # `check-towncrier.yaml` reads the pull request's labels, which needs `pull-requests: read` from
+  # this caller.
   towncrier_check:
+    permissions:
+      contents: read
+      pull-requests: read
     uses: ./.github/workflows/check-towncrier.yaml
 
   lint:
