@@ -21,8 +21,8 @@ use reqwest::{StatusCode, redirect::Policy};
 use url::Url;
 
 use super::{
-    EXCHANGE_TIMEOUT, LoginError, MAX_REJECTION_BODY_CHARS, Verifier, approve_in_browser, issuer,
-    local_time,
+    EXCHANGE_TIMEOUT, LoginError, MAX_REJECTION_BODY_CHARS, Verifier, approve_in_browser, host_of,
+    issuer, local_time,
 };
 use crate::{
     data::{AuthStore, StoredOperatorLogin},
@@ -113,6 +113,12 @@ pub(super) async fn login(
 
     let mut subtask = progress.subtask("Exchanging grant for the login token");
     let response = exchange_grant(&url, &grant, &verifier, &callback_uri).await?;
+    if response.expires_at <= Utc::now() {
+        return Err(LoginError::BadToken(format!(
+            "expired at {}",
+            local_time(response.expires_at)
+        )));
+    }
     subtask.success(Some("Login token received"));
 
     let mut subtask = progress.subtask("Saving the login");
@@ -189,13 +195,6 @@ fn sso_route(url: &Url, path: &str) -> Result<Url, LoginError> {
 }
 
 /// How messages name the operator: its host, with the port when it is not the default.
-fn host_of(url: &Url) -> String {
-    issuer(url)
-        .split_once("://")
-        .map(|(_, host)| host.to_owned())
-        .unwrap_or_else(|| url.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use axum::{

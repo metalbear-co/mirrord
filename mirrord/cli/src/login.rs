@@ -195,6 +195,14 @@ async fn approve_in_browser(
     Ok(grant)
 }
 
+/// The host (and port, when not the default) of a login URL, how messages name an operator.
+fn host_of(url: &Url) -> String {
+    issuer(url)
+        .split_once("://")
+        .map(|(_, host)| host.to_owned())
+        .unwrap_or_else(|| url.to_string())
+}
+
 /// A point in time in the developer's time zone, how login messages show when a login ends.
 fn local_time(time: DateTime<Utc>) -> impl fmt::Display {
     time.with_timezone(&Local).format("%Y-%m-%d %H:%M %Z")
@@ -345,13 +353,15 @@ pub(crate) enum LoginError {
     /// Loopback callback handler failed.
     #[error("failed to listen on a loopback port: {0}")]
     LoopbackListen(#[source] io::Error),
-    /// Loopback callback handler was not called within the time limit.
+    /// The browser delivered a refusal from the operator or the identity provider instead of a
+    /// grant.
     #[error("the login was refused in the browser: {0}")]
     #[diagnostic(help(
         "Your identity provider or the operator did not complete the login. Fix what the message \
          names, then run `mirrord login` again."
     ))]
     Refused(String),
+    /// Loopback callback handler was not called within the time limit.
     #[error("the login was not approved in the browser within {} minutes", APPROVAL_TIMEOUT.as_secs() / 60)]
     #[diagnostic(help("Run `mirrord login` again to start a new login."))]
     ApprovalTimeout,

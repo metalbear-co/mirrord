@@ -272,29 +272,38 @@ impl AuthStore {
     }
 
     /// Makes the saved login to the operator at `url` the one mirrord uses, when it has not
-    /// expired. `None` when there is no such login, so the caller logs in through the browser.
+    /// expired, and returns it. `None` when there is no valid login to `url`, whatever other login
+    /// is active, so the caller logs in to `url` through the browser.
     pub(crate) async fn activate_operator_login(url: String) -> io::Result<Option<OperatorLogin>> {
         let now = Utc::now();
-        let store = update_owner_only_at_path(Self::path()?, move |store: &mut Self| {
-            store.activate_operator(&url, now);
+        let (activated_tx, activated_rx) = tokio::sync::oneshot::channel();
+        update_owner_only_at_path(Self::path()?, move |store: &mut Self| {
+            let activated = store
+                .activate_operator(&url, now)
+                .then(|| store.operators.get(&url).cloned())
+                .flatten()
+                .map(|login| login.into_login(&url));
+            let _ = activated_tx.send(activated);
             Ok::<_, io::Error>(())
         })
         .await?;
 
-        Ok(store.active_login(now).ok().flatten())
+        activated_rx
+            .await
+            .map_err(|_| io::Error::other("the login store update did not report its outcome"))
     }
 
     /// Removes the login to the operator at `url`, handing the active role over when it had it.
     pub(crate) async fn remove_operator_login(url: String) -> io::Result<LogoutOutcome> {
         let now = Utc::now();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
         update_owner_only_at_path(Self::path()?, move |store: &mut Self| {
-            let _ = sender.send(store.remove_operator(&url, now));
+            let _ = outcome_tx.send(store.remove_operator(&url, now));
             Ok::<_, io::Error>(())
         })
         .await?;
 
-        receiver
+        outcome_rx
             .await
             .map_err(|_| io::Error::other("the login store update did not report its outcome"))
     }
@@ -302,14 +311,14 @@ impl AuthStore {
     /// Removes every mirrord Cloud token issued by `issuer`. `false` when there was none.
     pub(crate) async fn remove_cloud_login(issuer: &str) -> io::Result<bool> {
         let issuer = issuer.to_owned();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
         update_owner_only_at_path(Self::path()?, move |store: &mut Self| {
-            let _ = sender.send(store.issuers.remove(&issuer).is_some());
+            let _ = outcome_tx.send(store.issuers.remove(&issuer).is_some());
             Ok::<_, io::Error>(())
         })
         .await?;
 
-        receiver
+        outcome_rx
             .await
             .map_err(|_| io::Error::other("the login store update did not report its outcome"))
     }
@@ -684,6 +693,43 @@ mod tests {
     }
 
     /// Switching to a saved login needs no browser, but only while the login is valid.
+    /// Logging in to an operator without a valid saved login must start a browser login to that
+    /// operator, even while another operator's login is active. The activation reports nothing
+    /// then, so the caller never mistakes the other login for the requested one.
+    #[test]
+    fn failed_activation_leaves_another_active_login_out_of_the_answer() {
+        let now = Utc::now();
+        let mut store = AuthStore::default();
+        store.insert_operator(
+            OPERATOR.to_owned(),
+            operator_login("a", now + TimeDelta::hours(1), now),
+        );
+        store.insert_operator(
+            STAGING.to_owned(),
+            operator_login("b", now - TimeDelta::hours(1), now),
+        );
+        store.active_operator = Some(OPERATOR.to_owned());
+
+        // Mirrors `activate_operator_login`: the answer is the requested login, or nothing.
+        let mut activate = |url: &str| {
+            store
+                .activate_operator(url, now)
+                .then(|| store.operators.get(url).cloned())
+                .flatten()
+                .map(|login| login.into_login(url))
+        };
+        assert!(
+            activate(STAGING).is_none(),
+            "an expired login is not activated"
+        );
+        assert!(activate("https://unknown").is_none());
+        assert_eq!(
+            activate(OPERATOR).map(|login| login.url),
+            Some(OPERATOR.to_owned())
+        );
+        assert_eq!(store.active_operator.as_deref(), Some(OPERATOR));
+    }
+
     #[test]
     fn activating_a_saved_login_requires_it_to_be_valid() {
         let now = Utc::now();

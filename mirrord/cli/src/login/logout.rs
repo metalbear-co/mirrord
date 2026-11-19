@@ -5,7 +5,7 @@ use mirrord_operator::sso::OperatorLogin;
 use mirrord_sessions_manager_client::cloud_url_from_env;
 use url::Url;
 
-use super::{LoginError, backend_base_url, issuer};
+use super::{LoginError, backend_base_url, host_of, issuer};
 use crate::{
     config::LogoutArgs,
     data::{AuthStore, LogoutOutcome},
@@ -67,19 +67,9 @@ fn logout_message(
         (true, Some(login), _) => format!("mirrord uses your login to {} now.", login.host()),
         (false, Some(login), _) => format!("mirrord still uses your login to {}.", login.host()),
         (_, None, Some(context)) => format!("mirrord uses your kubeconfig context {context}."),
-        (_, None, None) => {
-            "No kubeconfig was found, so mirrord has nothing to connect with until you log in again."
-                .to_owned()
-        }
+        (_, None, None) => "No kubeconfig was found.".to_owned(),
     };
     format!("Logged out of {host}. {uses}")
-}
-
-fn host_of(url: &Url) -> String {
-    issuer(url)
-        .split_once("://")
-        .map(|(_, host)| host.to_owned())
-        .unwrap_or_else(|| url.to_string())
 }
 
 #[cfg(test)]
@@ -128,8 +118,7 @@ mod tests {
         );
         assert_eq!(
             logout_message("mirrord.corp.example.com", true, None, None),
-            "Logged out of mirrord.corp.example.com. No kubeconfig was found, so mirrord has \
-             nothing to connect with until you log in again."
+            "Logged out of mirrord.corp.example.com. No kubeconfig was found."
         );
     }
 }
