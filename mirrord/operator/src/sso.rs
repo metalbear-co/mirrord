@@ -226,11 +226,24 @@ impl OperatorLoginStore {
     /// represent read as empty, the way the CLI's store recovers them before its next write.
     #[cfg(feature = "client")]
     pub async fn read(path: &std::path::Path) -> std::io::Result<Self> {
-        match tokio::fs::read(path).await {
-            Ok(contents) => Ok(serde_json::from_slice(&contents).unwrap_or_default()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(error) => Err(error),
-        }
+        let contents = match tokio::fs::read(path).await {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => return Err(error),
+        };
+        // A file that exists but does not parse is not "no login": it may hold the login this
+        // run should use, and going to the kubeconfig instead would switch identity silently.
+        serde_json::from_slice(&contents).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "the file is not a mirrord login store ({error}). Fix or delete it, then run \
+                     mirrord login again."
+                ),
+            )
+        })
     }
 
     /// The login mirrord uses, `None` when it uses the kubeconfig. An active login that expired
@@ -353,14 +366,11 @@ mod tests {
         let login = store.active_login(Utc::now()).unwrap().unwrap();
         assert_eq!(login.host(), "mirrord.corp.example.com");
 
+        // A broken file is an error, never a silent switch to the kubeconfig.
         std::fs::write(&path, "not json").unwrap();
-        assert_eq!(
-            OperatorLoginStore::read(&path)
-                .await
-                .unwrap()
-                .active_login(Utc::now()),
-            Ok(None)
-        );
+        let error = OperatorLoginStore::read(&path).await.unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("mirrord login"), "{error}");
     }
 
     #[cfg(feature = "client")]

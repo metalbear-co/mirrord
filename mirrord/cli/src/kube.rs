@@ -11,7 +11,7 @@ use mirrord_kube::{
     retry::retry_policy_from_config,
 };
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi},
+    client::{NoClientCert, OperatorAccess, OperatorApi},
     sso::OperatorLogin,
 };
 use mirrord_progress::Progress;
@@ -28,9 +28,20 @@ use crate::error::CliError;
 pub(crate) async fn kube_client_from_layer_config(
     layer_config: &LayerConfig,
 ) -> Result<kube::Client, CliError> {
-    let (config, _) = OperatorApi::<NoClientCert>::base_client_config(layer_config).await?;
+    kube_client_and_access_from_layer_config(layer_config)
+        .await
+        .map(|(client, _)| client)
+}
 
-    ClientBuilder::try_from(config)
+/// [`kube_client_from_layer_config`] together with how the client reaches the operator, for
+/// commands that read ordinary cluster resources: under a login only the operator's own API
+/// answers, so they ask the operator instead.
+pub(crate) async fn kube_client_and_access_from_layer_config(
+    layer_config: &LayerConfig,
+) -> Result<(kube::Client, OperatorAccess), CliError> {
+    let (config, access) = OperatorApi::<NoClientCert>::base_client_config(layer_config).await?;
+
+    let client = ClientBuilder::try_from(config)
         .map_err(KubeApiError::from)
         .and_then(|builder| {
             Ok(builder
@@ -40,7 +51,10 @@ pub(crate) async fn kube_client_from_layer_config(
                 )?))
                 .build())
         })
-        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))
+        .map_err(|error| {
+            CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
+        })?;
+    Ok((client, access))
 }
 
 /// Get a vector of `T`s if T is defined on the cluster. If the list request returns a 404, assume

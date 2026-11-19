@@ -21,7 +21,7 @@ use crate::{
     data::GlobalConfig,
     error::CliResult,
     kube::{ConfigSource, record_run_kube_environment},
-    login::apply_active_operator_login,
+    login::apply_login_and_global_defaults,
 };
 
 /// Address for mirrord-console is listening on.
@@ -98,15 +98,13 @@ fn resolve_project_config(
     Ok((config_path, config, source))
 }
 
-/// The operator login is checked against the settings the developer wrote for this run, before
-/// the global defaults fill in a `kube_context` that the login makes meaningless anyway.
 async fn apply_global_defaults_and_record(
     config: &mut LayerConfig,
     source: ConfigSource,
     cfg_context: &mut ConfigContext,
 ) -> CliResult<()> {
-    let login = apply_active_operator_login(config, cfg_context).await?;
-    GlobalConfig::load().await.apply_to(config);
+    let global = GlobalConfig::load().await;
+    let login = apply_login_and_global_defaults(config, cfg_context, global).await?;
     record_run_kube_environment(source, config, login.as_ref());
     Ok(())
 }

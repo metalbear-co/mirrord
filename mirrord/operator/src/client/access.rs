@@ -90,6 +90,22 @@ pub async fn active_operator_login() -> Result<Option<OperatorLogin>, OperatorAc
     Ok(store.active_login(Utc::now())?)
 }
 
+/// Refuses `operator: false` under a login: without the operator there is nothing the login can
+/// reach. Runs on its own as well, on the config after the global defaults are merged in, since a
+/// global `operator: false` only shows up there.
+pub fn check_operator_enabled_under_login(
+    config: &LayerConfig,
+    login: &OperatorLogin,
+) -> Result<(), OperatorAccessError> {
+    if config.operator == Some(false) {
+        return Err(OperatorAccessError::OperatorDisabled {
+            host: login.host().to_owned(),
+            url: login.url.clone(),
+        });
+    }
+    Ok(())
+}
+
 /// Checks the config of a run against the operator login it runs under, and returns the warnings
 /// to show for settings the login makes meaningless, each naming the setting and the operator.
 ///
@@ -99,12 +115,7 @@ pub fn check_config_under_login(
     config: &LayerConfig,
     login: &OperatorLogin,
 ) -> Result<Vec<String>, OperatorAccessError> {
-    if config.operator == Some(false) {
-        return Err(OperatorAccessError::OperatorDisabled {
-            host: login.host().to_owned(),
-            url: login.url.clone(),
-        });
-    }
+    check_operator_enabled_under_login(config, login)?;
 
     let ignored = [
         ("kubeconfig", config.kubeconfig.is_some()),

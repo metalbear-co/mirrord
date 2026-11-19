@@ -36,6 +36,9 @@ impl StatusCommandHandler {
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
         let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
+        for warning in cfg_context.into_warnings() {
+            progress.warning(&warning);
+        }
 
         if !layer_config.use_proxy {
             remove_proxy_env();

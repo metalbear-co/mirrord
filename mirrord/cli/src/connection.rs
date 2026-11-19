@@ -364,13 +364,18 @@ where
         session,
         conn,
         target_container_ports,
-    } = if is_multi_cluster {
+    } = if is_multi_cluster || api.through_login() {
         // Multi-cluster: CLI connects to the Primary, which routes to the workload cluster where
-        // the target is resolved and the session is created.
+        // the target is resolved and the session is created. An operator login reaches only the
+        // operator's own API group, so the workload cannot be read here either and the operator
+        // resolves it the same way.
         if layer_config.feature.magic.auto_mount {
-            progress.warning(
-                "auto_mount: skipped in multi-cluster mode (target is resolved server-side)",
-            );
+            progress.warning(if is_multi_cluster {
+                "auto_mount: skipped in multi-cluster mode (target is resolved server-side)"
+            } else {
+                "auto_mount: skipped while logged in to the operator (target is resolved \
+                 server-side)"
+            });
         }
 
         api.connect_in_multi_cluster_session(
@@ -413,9 +418,15 @@ where
     session_subtask.success(Some("session started"));
     operator_subtask.success(Some("using operator"));
 
-    let api_version = apiserver_version(api.client())
-        .await
-        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed))?;
+    // The version only feeds analytics. A login reaches no `/version` route, so it reports the
+    // unknown version the sessions-manager runs report as well.
+    let api_version = if api.through_login() {
+        (0, 0)
+    } else {
+        apiserver_version(api.client()).await.map_err(|error| {
+            CliError::friendlier_error_or_else(error, CliError::CreateAgentFailed)
+        })?
+    };
 
     if let Err(error) = GlobalConfig::remember_operator().await {
         progress.warning(&format!(

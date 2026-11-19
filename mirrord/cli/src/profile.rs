@@ -20,6 +20,7 @@ use mirrord_operator::{
             cluster_profile_api_path, namespaced_profile_api_path,
         },
     },
+    types::PaidFeatureGate,
 };
 use mirrord_progress::Progress;
 use thiserror::Error;
@@ -295,6 +296,11 @@ async fn fetch_profile(
     };
 
     fetched.map_err(|error| match error {
+        // The operator refuses the route below Enterprise with the paid-feature status every
+        // other gated feature gives, which names the plan instead of a bare 403.
+        kube::Error::Api(status) if let Some(gate) = PaidFeatureGate::from_status(&status) => {
+            CliError::PaidFeatureRequiresPlan { gate }
+        }
         kube::Error::Api(status) if status.code == 404 => {
             CliError::ProfileError(ProfileError::ProfileNotFound)
         }

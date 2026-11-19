@@ -56,7 +56,7 @@ mod logout;
 mod operator;
 mod whoami_command;
 
-pub(crate) use active::apply_active_operator_login;
+pub(crate) use active::apply_login_and_global_defaults;
 pub(crate) use logout::logout_command;
 pub(crate) use whoami_command::whoami_command;
 

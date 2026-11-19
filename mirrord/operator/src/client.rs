@@ -117,6 +117,7 @@ pub mod split_config_branches;
 
 pub use access::{
     OperatorAccess, OperatorAccessError, active_operator_login, check_config_under_login,
+    check_operator_enabled_under_login,
 };
 pub use discovery::operator_installed;
 pub use queue_split_progress::temporal_mirror_warning;
@@ -426,6 +427,9 @@ pub struct OperatorApi<C> {
     /// URL of the API server [`Self::client`] talks to. Unlike [`Self::kube_context`], it tells
     /// clusters apart: two contexts can name one cluster.
     cluster_url: String,
+    /// Whether [`Self::client`] reaches the operator over its public URL with a saved login. Only
+    /// the operator's own API group answers there, so the workload is never read from here.
+    through_login: bool,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -471,6 +475,7 @@ impl OperatorApi<NoClientCert> {
     {
         let (base_config, access) = Self::base_client_config(config).await?;
         let kube_context = access.kube_context().map(ToOwned::to_owned);
+        let through_login = access.login().is_some();
         let cluster_url = base_config.cluster_url.to_string();
 
         let client = progress
@@ -504,6 +509,7 @@ impl OperatorApi<NoClientCert> {
                     kube_context,
                     machine_id: reporter.machine_id(),
                     cluster_url,
+                    through_login,
                 }));
             }
 
@@ -608,6 +614,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context: self.kube_context,
                 machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
+                through_login: self.through_login,
             },
 
             Err(error) => OperatorApi {
@@ -619,6 +626,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context: self.kube_context,
                 machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
+                through_login: self.through_login,
             },
         }
     }
@@ -670,6 +678,7 @@ impl OperatorApi<NoClientCert> {
         let kube_context = self.kube_context.clone();
         let machine_id = self.machine_id;
         let cluster_url = self.cluster_url.clone();
+        let through_login = self.through_login;
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -702,6 +711,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context,
                 machine_id,
                 cluster_url,
+                through_login,
             },
         }
     }
@@ -724,6 +734,7 @@ impl OperatorApi<MaybeClientCert> {
             kube_context: self.kube_context,
             machine_id: self.machine_id,
             cluster_url: self.cluster_url,
+            through_login: self.through_login,
         })
     }
 }
@@ -737,6 +748,12 @@ where
     /// In-cluster clients do not have a named kubeconfig context.
     pub fn kube_context(&self) -> Option<&str> {
         self.kube_context.as_deref()
+    }
+
+    /// Whether this API reaches the operator over its public URL with a saved login, where only
+    /// the operator's own API group answers and the operator resolves the target itself.
+    pub fn through_login(&self) -> bool {
+        self.through_login
     }
 
     /// Returns the URL of the API server this API's client talks to, which identifies the
@@ -2724,6 +2741,10 @@ impl OperatorApi<PreparedClientCert> {
     /// where the primary cluster is management-only and targets exist only on
     /// workload clusters. The operator handles target resolution on the appropriate cluster.
     ///
+    /// Sessions under an operator login take this path too, whatever the cluster layout: the
+    /// login reaches only the operator's own API group, so the workload cannot be read from the
+    /// CLI and the operator resolves it.
+    ///
     /// This method skips:
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
@@ -2746,11 +2767,14 @@ impl OperatorApi<PreparedClientCert> {
         // where the target is resolved and the session is created
 
         if layer_config.feature.kafka_branch {
-            return Err(OperatorApiError::UnsupportedTargetConfig(
+            let reason = if self.through_login {
+                "Kafka branching is not available while logged in to the operator; run `mirrord \
+                 logout` and use a kubeconfig for this session"
+            } else {
                 "Kafka branching is not available in multi-cluster sessions; set `multi_cluster` \
                  to false to run the session on the primary cluster"
-                    .to_owned(),
-            ));
+            };
+            return Err(OperatorApiError::UnsupportedTargetConfig(reason.to_owned()));
         }
 
         // Owned: branch preparation below edits the config while the target is still needed.
@@ -4017,6 +4041,7 @@ mod test {
                 })).unwrap(),
                 kube_context: None,
                 machine_id: None,
+                through_login: false,
             };
                 let result = api.check_serverless_sessions_manager_served();
                 assert_eq!(result.is_ok(), enabled);
@@ -4808,6 +4833,7 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
             machine_id: None,
+            through_login: false,
         };
         tokio::time::timeout(
             std::time::Duration::from_secs(60),
@@ -4861,6 +4887,7 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
             machine_id: None,
+            through_login: false,
             cluster_url: "https://127.0.0.1:9669/".to_owned(),
         };
 
