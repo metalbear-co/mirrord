@@ -899,6 +899,7 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Publishes the Docker images to GHCR.
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
    - Publishes to Homebrew, Chocolatey, and WinGet.
+   - Publishes `docs/` and `guides/` to the `docs-published` and `guides-published` branches, which GitBook builds the docs site from.
    - Updates the `latest` git tag and notifies the infra repository.
 
 ## Triggering a release PR manually
