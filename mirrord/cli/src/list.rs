@@ -2,7 +2,10 @@ use std::{ops::Not, sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
-use kube::{Api, api::ListParams};
+use kube::{
+    Api,
+    api::{ListParams, ObjectList},
+};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{
     LayerConfig,
@@ -109,12 +112,14 @@ impl FoundTargets {
         };
 
         let operator_spec = operator_api.as_ref().map(|api| &api.operator().spec);
-        let current_namespace = current_namespace(
-            layer_config.target.namespace.as_deref(),
-            &access,
-            operator_spec,
-            client.default_namespace(),
-        );
+        // The same namespace a session with this config runs in: the client's default under a
+        // login too, since that is what the connect request carries.
+        let current_namespace = layer_config
+            .target
+            .namespace
+            .as_deref()
+            .unwrap_or(client.default_namespace())
+            .to_owned();
         let namespace_source = NamespaceSource::select(rich_output, &access, operator_spec);
 
         let seeker = KubeResourceSeeker {
@@ -226,26 +231,6 @@ impl FoundTargets {
     }
 }
 
-/// The namespace `mirrord ls` lists in and reports as the current one.
-///
-/// The config's namespace when it names one. Otherwise, under a login, the namespace the operator
-/// runs a session in when the CLI names none, which is the operator's default namespace, not the
-/// kubeconfig's: the login path reads no kubeconfig. With a kubeconfig, its context's namespace.
-fn current_namespace(
-    configured: Option<&str>,
-    access: &OperatorAccess,
-    operator: Option<&MirrordOperatorSpec>,
-    client_default: &str,
-) -> String {
-    if let Some(namespace) = configured {
-        return namespace.to_owned();
-    }
-    match (access, operator) {
-        (OperatorAccess::Login(_), Some(spec)) => spec.default_namespace.clone(),
-        _ => client_default.to_owned(),
-    }
-}
-
 /// Where the rich `mirrord ls` output, the IDE's picker, takes the namespaces it offers from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NamespaceSource {
@@ -303,9 +288,10 @@ async fn targets_through_operator(
         CliError::friendlier_error_or_else(KubeApiError::from(error), CliError::ListTargetsFailed)
     };
 
-    let targets = Api::<TargetCrd>::namespaced(client.clone(), namespace)
+    let listed = Api::<TargetCrd>::namespaced(client.clone(), namespace)
         .list(&ListParams::default())
-        .await
+        .await;
+    let targets = tolerate_forbidden_namespace(listed, rich_output, namespace)
         .map_err(list_failed)?
         .into_iter()
         .filter_map(|crd| crd.spec.target.as_known().ok().cloned())
@@ -342,6 +328,29 @@ async fn targets_through_operator(
     Ok((targets, namespaces))
 }
 
+/// In the rich listing, a `403` on the current namespace yields no targets instead of failing the
+/// command: the IDE's picker still needs the namespaces the user may switch to, and a user bound in
+/// some namespaces only often may not list the one the listing starts in. The plain listing keeps
+/// the error, since its only output is the targets.
+fn tolerate_forbidden_namespace(
+    listed: kube::Result<ObjectList<TargetCrd>>,
+    rich_output: bool,
+    namespace: &str,
+) -> kube::Result<Vec<TargetCrd>> {
+    match listed {
+        Ok(list) => Ok(list.items),
+        Err(kube::Error::Api(status)) if rich_output && status.code == 403 => {
+            tracing::warn!(
+                namespace,
+                message = %status.message,
+                "Listing targets in the current namespace is forbidden, offering the other namespaces"
+            );
+            Ok(Vec::new())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// The namespaces the operator says this user may list targets in. On failure, the current
 /// namespace alone: a `403` means the user's role lacks `list` on `namespaces` in the operator's
 /// API group, which the chart's user roles grant from the version that serves the route.
@@ -373,7 +382,8 @@ async fn namespaces_through_operator_route(client: &kube::Client, namespace: &st
 }
 
 /// The namespaces of every target the operator lists cluster-wide, for an operator without the
-/// namespace route. On failure, the current namespace alone.
+/// namespace route, with the current namespace always among them so the picker is never left
+/// without a choice. On failure, the current namespace alone.
 async fn namespaces_of_targets_across_cluster(
     client: &kube::Client,
     namespace: &str,
@@ -386,6 +396,7 @@ async fn namespaces_of_targets_across_cluster(
             let mut namespaces = all_targets
                 .into_iter()
                 .filter_map(|crd| crd.metadata.namespace)
+                .chain(std::iter::once(namespace.to_owned()))
                 .collect::<Vec<_>>();
             namespaces.sort();
             namespaces.dedup();
@@ -567,28 +578,25 @@ mod tests {
         );
     }
 
-    /// Without a namespace in the config, a logged-in CLI lists where the operator would run the
-    /// session: its default namespace, as no kubeconfig is read. The config's namespace wins
-    /// everywhere, and a kubeconfig keeps its context's namespace.
-    #[test]
-    fn current_namespace_follows_the_operator_under_a_login() {
-        let operator = operator(&[]);
+    fn forbidden(code: u16) -> kube::Result<ObjectList<TargetCrd>> {
+        Err(kube::Error::Api(Box::new(kube::core::Status {
+            status: Some(kube::core::response::StatusSummary::Failure),
+            message: "targets.operator.metalbear.co is forbidden".to_owned(),
+            reason: "Forbidden".to_owned(),
+            code,
+            ..Default::default()
+        })))
+    }
 
-        assert_eq!(
-            current_namespace(None, &login(), Some(&operator), "default"),
-            "payments"
-        );
-        assert_eq!(
-            current_namespace(None, &login(), None, "default"),
-            "default"
-        );
-        assert_eq!(
-            current_namespace(None, &kubeconfig(), Some(&operator), "team-a"),
-            "team-a"
-        );
-        assert_eq!(
-            current_namespace(Some("orders"), &login(), Some(&operator), "default"),
-            "orders"
-        );
+    /// A user bound in `team-a` only starts the IDE picker in the client's default namespace,
+    /// which refuses the target list with `403`. The rich listing goes on with no targets, so the
+    /// namespaces still reach the picker; the plain listing, and any other error, still fail.
+    #[test]
+    fn a_forbidden_current_namespace_empties_the_rich_listing_only() {
+        let rich = tolerate_forbidden_namespace(forbidden(403), true, "default").unwrap();
+        assert!(rich.is_empty());
+
+        assert!(tolerate_forbidden_namespace(forbidden(403), false, "default").is_err());
+        assert!(tolerate_forbidden_namespace(forbidden(500), true, "default").is_err());
     }
 }
