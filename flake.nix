@@ -86,8 +86,7 @@
                 miscPackages = [
                   cargo-deny
                   python3Packages.towncrier
-                  # `cargo xtask corpus check` runs the skills repo's config check through uv, on
-                  # the Python version that the skills repo's CI uses
+                  # CI's `content_check` runs the skills' fence-tag check through uv, on Python 3.12
                   uv
                   python312
                 ];
