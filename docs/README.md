@@ -1,8 +1,8 @@
 # mirrord docs
 
-This repo contains the source for the [mirrord docs site](https://metalbear.com/mirrord/docs) Documentation tab. It uses [GitBook](https://gitbook.com/) to generate documentation from markdown.
+This directory of the mirrord repository contains the source for the [mirrord docs site](https://metalbear.com/mirrord/docs) Documentation tab. It uses [GitBook](https://gitbook.com/) to generate documentation from markdown.
 
-> **NOTE** that the mirrord docs' Configuration tab is not governed by this repo, but by [the mirrord repo docs branch](https://github.com/metalbear-co/mirrord/tree/docs) and is updated automatically by mirrord's release workflow.
+> **NOTE** that the mirrord docs' Configuration tab is not built from this directory, but from [the mirrord repository's `docs` branch](https://github.com/metalbear-co/mirrord/tree/docs), which mirrord's release workflow updates.
 
 > The Changelog tab also has [a separate repo](https://github.com/metalbear-co/docs-changelog), and is also updated automatically by CI.
 
@@ -12,13 +12,13 @@ The root of the GitBook docs is `./docs`, as defined in `.gitbook.yaml`. See [th
 
 ### Development
 
-**When you open a PR with changes**, GitBook will publish a preview and display the link under the `Checks` section at the bottom of the page that will show your changes - it does so via the [GitBook bot](https://github.com/gitbook-bot) installed in this repo. Use the preview labeled "*GitBook - metalbear.com*".
+GitBook still publishes the site from [metalbear-co/docs](https://github.com/metalbear-co/docs) until it's switched to the mirrord repository, so merging here doesn't publish yet, and pull requests get no GitBook preview.
 
-Changes to **content and basic structure** are possible in the repo, and other changes must be made via the [GitBook platform](https://app.gitbook.com). To do so, you will need access to the MetalBear organisation.
+Changes to **content and basic structure** can be made in this directory, and other changes must be made via the [GitBook platform](https://app.gitbook.com). To do so, you will need access to the MetalBear organisation.
 
 When **changing the structure** of the docs, like creating a new page, you must update `./docs/SUMMARY.md` to reflect this. New folders should have a `README.md` as their overview page.
 
-**Every feature page needs a plan tag.** Pages under `docs/using-mirrord`, `docs/sharing-the-cluster` and `docs/use-cases` must list at least one of `oss`, `team` or `enterprise` in their `tags` frontmatter, alongside `alpha` or `beta` where relevant. `mirrord mcp` reads these tags to tell users which plan a feature needs. The `Plan tags` workflow runs `.github/scripts/check_plan_tags.py` on every PR and fails on any page in those directories without one, so a new page cannot ship untagged.
+**Every feature page needs a plan tag.** Pages under `docs/using-mirrord`, `docs/sharing-the-cluster` and `docs/use-cases` must list at least one of `oss`, `team` or `enterprise` in their `tags` frontmatter, alongside `alpha` or `beta` where relevant. `mirrord mcp` reads these tags to tell users which plan a feature needs. The `content_check` job of the mirrord repository's CI runs `.github/scripts/check_plan_tags.py` on every PR that changes the docs and fails on any page in those directories without one, so a new page cannot ship untagged.
 
 ### GitBook
 

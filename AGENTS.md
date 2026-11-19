@@ -129,6 +129,14 @@ such as tests and CI, and any type besides `fixed`, `security`, and `internal` m
 The fragment becomes the release notes, so write it for users: what changed for them, not in the code. Never edit
 `CHANGELOG.md`; the release pull request builds it.
 
+A pull request that only changes `docs/`, `guides/` or `skills/` should get the `docs` label, added by hand, instead of
+a fragment, since the release notes describe changes to mirrord, not to its documentation or skills (`CONTRIBUTING.md`
+gives contributors the same rule). The label skips the check whatever the pull request changes, so a pull request that
+changes any other file needs a fragment and must not get the label. The check reads the label when it runs, and adding
+or removing a label starts no run: after adding it to a pull request whose check failed, re-run the failed jobs, and
+after removing it, re-run `towncrier_check`. The merge queue doesn't run the check, so it doesn't catch a label removed
+after the pull request's last run.
+
 ## Compatibility
 
 The CLI ships the layer and the intproxy inside its own binary, but not the agent or the operator. An agent can be
@@ -147,8 +155,15 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 
 ## Related Repositories
 
-- `metalbear-co/docs` documents user-visible behavior, so a change users notice usually needs a pull request there
-  too. The configuration reference is the exception: it's generated here (`mirrord/config/AGENTS.md`).
+- `docs/` and `guides/` came from `metalbear-co/docs`, which keeps their earlier history. They document user-visible
+  behavior, so a change users notice usually updates them in the same pull request. GitBook still publishes the site
+  from `metalbear-co/docs` until it's switched to this repository, so an edit here doesn't reach the site yet, but
+  `mirrord mcp` embeds `docs/docs` when it's built, so an edit reaches it with the next mirrord release. The
+  configuration reference is the exception: it isn't in `docs/`, but is generated from `mirrord-config`'s doc comments
+  (`mirrord/config/AGENTS.md`), so a config change updates those instead.
+- `skills/` came from `metalbear-co/skills`, which keeps its earlier history. `mirrord mcp` embeds `skills/skills` when
+  it's built (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release. Nothing copies `skills/` to
+  `metalbear-co/skills` yet, so an edit doesn't reach that repository.
 - `metalbear-co/mirrord-vscode` and `metalbear-co/mirrord-intellij` drive the CLI; `ci.yaml` runs their end-to-end
   tests on release branches.
 - `metalbear-co/test-images` builds the app images the end-to-end tests deploy.

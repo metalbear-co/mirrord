@@ -2,9 +2,13 @@
 
 ## Overview
 
-This repository holds the Documentation tab of the [mirrord docs](https://metalbear.com/mirrord/docs): GitBook builds it from the Markdown under `docs/`, and the site follows `main`, so merging publishes. A page for an unreleased change names the versions expected to ship it, and its PR merges once they are out.
+Paths in this file are relative to this directory of the mirrord repository, which holds the Documentation tab of the [mirrord docs](https://metalbear.com/mirrord/docs), built by GitBook from the Markdown under `docs/`. GitBook still publishes the site from `metalbear-co/docs` until it's switched to the mirrord repository, so merging here doesn't publish yet. `mirrord mcp` embeds the pages, so a merged page reaches it with the next mirrord release.
 
-The Configuration tab is generated from the doc comments in the mirrord repository's `mirrord/config/src`, and the Changelog tab from each product's `CHANGELOG.md`. Fix them there.
+A page for an unreleased change names the versions expected to ship it. Every mirrord release ships the merged pages, through `mirrord mcp`, so a page for a CLI feature can merge with the feature. The operator ships on its own schedule, so a page for an unreleased operator feature merges only once the operator version that ships it is out. Otherwise a mirrord release would document a feature that users can't get yet.
+
+The Configuration tab is generated from the doc comments in `mirrord/config/src` at the repository root, and the Changelog tab from each product's `CHANGELOG.md`. Fix them there.
+
+A pull request that only changes `docs/`, `guides/` or `skills/` at the repository root should get the `docs` label instead of a changelog fragment, as the root `AGENTS.md` says.
 
 ## Command Reference
 
@@ -15,7 +19,7 @@ The Configuration tab is generated from the doc comments in the mirrord reposito
 python3 .github/scripts/check_plan_tags.py
 ```
 
-There is no local build. GitBook renders each PR against `main`, and its `GitBook - metalbear.com/mirrord/docs/` check links a preview of the whole site.
+CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. There is no local build, and GitBook doesn't build pull requests to the mirrord repository, so they get no preview.
 
 ## Pages
 
