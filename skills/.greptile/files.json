@@ -1,0 +1,8 @@
+{
+  "files": [
+    {
+      "path": "CONTRIBUTING.md",
+      "description": "Fence tag convention for json and yaml blocks in skills: the tag set, the schema path rule for fragments, and the files exempt from the check."
+    }
+  ]
+}

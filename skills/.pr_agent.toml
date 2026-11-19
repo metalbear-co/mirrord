@@ -1,0 +1,39 @@
+# Qodo code review (qodo-code-review GitHub app) configuration, read from the
+# default branch. Reviews are metered, so automatic review is skipped for PRs
+# that are not worth reviewing. Any skipped PR can still be reviewed on demand
+# by commenting `/agentic_review` on it.
+# https://docs.qodo.ai/code-review/ignore-content-from-analysis
+
+[config]
+# Exact, case-sensitive label name. With automatic draft reviews disabled
+# (Qodo's default), create a draft with `gh pr create --draft --label no-qodo`,
+# then run `gh pr ready` after creation succeeds and the label is attached.
+# `gh pr create --label no-qodo` alone is not safe: gh creates the PR before
+# adding labels, so an automatic review can start before the label is applied.
+ignore_pr_labels = ["no-qodo"]
+# Regular expressions matched against the PR author's username. These bots open
+# dependency and workflow-generated PRs, which are not worth a metered review.
+# They are listed by name so that PRs opened by coding agents (the Linear agent,
+# Copilot) still get reviewed. Each pattern is anchored at both ends, with the
+# `[bot]` suffix optional, so that it cannot match another account sharing the
+# prefix.
+ignore_pr_authors = [
+  '^dependabot(\[bot\])?$',
+  '^github-actions(\[bot\])?$',
+]
+# Regular expressions matched against the PR title. The Cubby app (`cubby-mb`)
+# opens every automated PR in this repository, and the docs-sync ones carry
+# skill edits written by a coding agent, so it is not skipped by author. These
+# titles are its mechanical PRs: reference files copied from upstream by the
+# update-references workflow, and docs-sync runs that only advance the sync
+# marker.
+ignore_pr_title = [
+  '^Update mirrord-\S+ references',
+  '^Docs sync \S+: no skill changes needed$',
+]
+
+[github_app]
+# Qodo's default is to skip every PR opened by a bot account, coding agents
+# included. `ignore_pr_authors` above names the bots to skip instead. For GitHub
+# this key is only read from `[github_app]`.
+ignore_bot_pr = false

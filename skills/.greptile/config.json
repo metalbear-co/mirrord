@@ -1,0 +1,12 @@
+{
+  "excludeAuthors": ["cubby-mb[bot]", "github-actions[bot]"],
+  "disabledLabels": ["no-greptile"],
+  "rules": [
+    {
+      "id": "fence-tags",
+      "rule": "Every fenced json or yaml code block in a markdown file must carry a tag in the fence info string from the set documented in CONTRIBUTING.md. Flag any block with no tag or a tag outside the set. For blocks tagged mirrord, mirrord=<path>, mirrord-up or mirrord-up=<path>: flag the block if it is not valid JSON or YAML (placeholders like ..., inline comments, trailing commas), for a mirrord=<path> fragment flag it if <path> does not exist in skills/mirrord-config/references/schema.json or the block's top-level keys are not properties of the object at that path, and for a mirrord-up=<path> fragment flag it if <path> does not exist in skills/mirrord-up/references/schema.json or the block's top-level keys are not properties of the object at that path. Skip skills/mirrord-config/references/configuration.md, skills/mirrord-config/references/schema.json, skills/mirrord-operator/references/values.yaml and skills/mirrord-up/references/schema.json, they are synced verbatim from upstream.",
+      "scope": ["**/*.md"],
+      "severity": "high"
+    }
+  ]
+}

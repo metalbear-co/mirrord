@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 520" width="1160" height="520" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">The ECS sample app with MetalBear Cloud</title>
+  <desc id="d">A client sends HTTP requests to a public load balancer in an AWS VPC, which sends them to the ECS task. The task runs the orders app and the mirrord agent, which the mirrord remote bootstrap starts in the app container. The orders app in the task serves requests without the session header. The agent sends requests with your session header to the MetalBear sessions-manager, which forwards them to the orders app that runs on your machine under mirrord up. The task and your machine both connect out to the sessions-manager over HTTPS. The task connects to the private RDS database, for its own app and for your local process.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#756DF3"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1160" height="520" fill="#ffffff"/>
+
+  <!-- Client -->
+  <rect x="20" y="190" width="140" height="90" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="90" y="231" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">client</text>
+  <text x="90" y="253" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">curl</text>
+
+  <!-- AWS VPC boundary -->
+  <rect x="200" y="40" width="560" height="460" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="220" y="68" font-size="15" font-weight="700" fill="#4a44b8">AWS VPC</text>
+
+  <!-- Load balancer -->
+  <rect x="230" y="190" width="140" height="90" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <text x="300" y="231" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Load balancer</text>
+  <text x="300" y="253" font-size="12.5" fill="#333344" text-anchor="middle">public</text>
+  <line x1="370" y1="235" x2="406" y2="235" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- ECS task with the app and the mirrord agent -->
+  <rect x="410" y="110" width="320" height="250" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="140" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">ECS task (Fargate)</text>
+  <rect x="430" y="160" width="280" height="70" rx="8" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="189" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">orders app (v1)</text>
+  <text x="570" y="211" font-size="12.5" fill="#333344" text-anchor="middle">serves requests without the header</text>
+  <rect x="430" y="250" width="280" height="80" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="283" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+  <text x="570" y="305" font-size="12.5" fill="#ffffff" text-anchor="middle">started by the remote bootstrap</text>
+
+  <!-- Private database -->
+  <line x1="570" y1="360" x2="570" y2="410" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="556" y="382" font-size="12.5" fill="#333344" text-anchor="end">database connections, also</text>
+  <text x="556" y="398" font-size="12.5" fill="#333344" text-anchor="end">for your local process</text>
+  <path d="M470 426 L470 474 A100 12 0 0 0 670 474 L670 426" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <ellipse cx="570" cy="426" rx="100" ry="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="458" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">RDS (Postgres)</text>
+  <text x="570" y="478" font-size="12.5" fill="#333344" text-anchor="middle">no public endpoint</text>
+
+  <!-- Agent to sessions-manager -->
+  <polyline points="710,290 820,290 820,115 876,115" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="830" y="226" font-size="12.5" fill="#4a44b8">requests with</text>
+  <text x="830" y="242" font-size="12.5" fill="#4a44b8">your header</text>
+
+  <!-- MetalBear sessions-manager -->
+  <rect x="880" y="60" width="260" height="110" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="1010" y="97" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">sessions-manager</text>
+  <text x="1010" y="119" font-size="12.5" fill="#ffffff" text-anchor="middle">MetalBear Cloud</text>
+  <text x="1010" y="141" font-size="12.5" fill="#ffffff" text-anchor="middle">both sides connect out over HTTPS</text>
+
+  <!-- Sessions-manager to your machine -->
+  <text x="1020" y="250" font-size="12.5" fill="#4a44b8">forwarded</text>
+  <text x="1020" y="266" font-size="12.5" fill="#4a44b8">to you</text>
+
+  <!-- Your machine boundary -->
+  <rect x="860" y="320" width="280" height="180" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="876" y="346" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
+  <rect x="885" y="370" width="250" height="110" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="1010" y="408" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">orders app (v2)</text>
+  <text x="1010" y="431" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">mirrord up</text>
+  <text x="1010" y="454" font-size="12.5" fill="#ffffff" text-anchor="middle">your changed code</text>
+
+  <!-- Arrows that cross a boundary, drawn last so the boundary fill does not cover them -->
+  <line x1="160" y1="235" x2="226" y2="235" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="1010" y1="170" x2="1010" y2="366" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+</svg>

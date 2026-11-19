@@ -1,0 +1,132 @@
+name: Sync skills with docs changes
+
+on:
+  schedule:
+    - cron: '0 9 * * 2' # Every Tuesday at 9:00 UTC (update-references runs Mondays)
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  docs-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if a docs-sync PR is already open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OPEN=$(gh pr list --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("auto/docs-sync-"))] | length')
+          if [ "$OPEN" -gt 0 ]; then
+            echo "An auto/docs-sync-* PR is already open; skipping this run." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Checkout docs repo
+        if: env.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: metalbear-co/docs
+          path: docs-src
+          fetch-depth: 0
+
+      - name: Compute docs diff since last sync
+        if: env.skip != 'true'
+        run: |
+          LAST_SHA=$(cat .github/docs-sync-sha)
+          cd docs-src
+          if ! git cat-file -e "$LAST_SHA" 2>/dev/null; then
+            echo "Marker SHA $LAST_SHA not found in docs repo (force-push?). Fix .github/docs-sync-sha manually."
+            exit 1
+          fi
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
+          git diff "$LAST_SHA"..HEAD -- docs > /tmp/docs-changes.diff
+          git log --oneline "$LAST_SHA"..HEAD -- docs > /tmp/docs-commits.log
+          if [ ! -s /tmp/docs-changes.diff ]; then
+            echo "No docs content changes since last sync." >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_ENV"
+          else
+            echo "$(wc -l < /tmp/docs-commits.log) docs commits to process." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Run Claude to update skills
+        if: env.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Without this the action falls back to an OIDC exchange with the
+          # Claude GitHub App. This step only edits local files, so the default
+          # token is enough.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # The action hides the SDK stream by default, which swallows the error
+          # message when a run fails before Claude does any work. This job only
+          # reads public docs and skill files, so there is nothing to redact.
+          show_full_output: true
+          prompt: "Read .github/docs-sync-prompt.md and follow its instructions exactly."
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 250
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git diff:*),Bash(git log:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(wc:*)"
+
+      # The enterprise blocks GITHUB_TOKEN from creating pull requests, so
+      # gh pr create authenticates as the Cubby app instead (same pattern as
+      # auto-release-pr in mirrord/operator).
+      - name: Create app token for PR creation
+        if: env.skip != 'true'
+        id: app_token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Commit and open PR
+        if: env.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          echo "$HEAD_SHA" > .github/docs-sync-sha
+          rm -rf docs-src
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add skills .github/docs-sync-sha
+
+          CHANGED_SKILLS=$(git diff --cached --name-only -- skills/ \
+            | cut -d/ -f2 | sort -u | paste -sd ', ' -)
+
+          DATE=$(date -u +%F)
+          BRANCH="auto/docs-sync-${DATE}-${GITHUB_RUN_NUMBER}"
+          git checkout -b "$BRANCH"
+
+          if [ -z "$CHANGED_SKILLS" ]; then
+            TITLE="Docs sync ${DATE}: no skill changes needed"
+            SUMMARY="Claude reviewed the docs changes below and found no skill updates needed. Merging just advances the sync marker so these commits are not re-processed."
+          else
+            TITLE="Docs sync ${DATE}: update ${CHANGED_SKILLS}"
+            SUMMARY="Claude updated the following skills to match recent docs changes: **${CHANGED_SKILLS}**. Review the edits for accuracy before merging."
+          fi
+
+          git commit -m "$TITLE"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "$TITLE" \
+            --body "$(cat <<EOF
+          ## Summary
+          ${SUMMARY}
+
+          ### Docs commits covered
+          \`\`\`
+          $(cat /tmp/docs-commits.log)
+          \`\`\`
+
+          > Auto-generated by the weekly docs-sync workflow. Sources: metalbear-co/docs \`docs/\`.
+          EOF
+          )"
