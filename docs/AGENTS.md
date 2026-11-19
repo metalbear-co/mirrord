@@ -8,8 +8,6 @@ A page for an unreleased change names the versions expected to ship it. Every mi
 
 The Configuration tab is generated from the doc comments in `mirrord/config/src` at the repository root, and the Changelog tab from each product's `CHANGELOG.md`. Fix them there.
 
-A pull request that only changes `docs/`, `guides/` or `skills/` at the repository root should get the `docs` label instead of a changelog fragment, as the root `AGENTS.md` says.
-
 ## Command Reference
 
 ### Linting

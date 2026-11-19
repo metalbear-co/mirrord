@@ -129,14 +129,6 @@ such as tests and CI, and any type besides `fixed`, `security`, and `internal` m
 The fragment becomes the release notes, so write it for users: what changed for them, not in the code. Never edit
 `CHANGELOG.md`; the release pull request builds it.
 
-A pull request that only changes `docs/`, `guides/` or `skills/` should get the `docs` label, added by hand, instead of
-a fragment, since the release notes describe changes to mirrord, not to its documentation or skills (`CONTRIBUTING.md`
-gives contributors the same rule). The label skips the check whatever the pull request changes, so a pull request that
-changes any other file needs a fragment and must not get the label. The check reads the label when it runs, and adding
-or removing a label starts no run: after adding it to a pull request whose check failed, re-run the failed jobs, and
-after removing it, re-run `towncrier_check`. The merge queue doesn't run the check, so it doesn't catch a label removed
-after the pull request's last run.
-
 ## Compatibility
 
 The CLI ships the layer and the intproxy inside its own binary, but not the agent or the operator. An agent can be
