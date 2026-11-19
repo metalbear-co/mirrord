@@ -11,9 +11,20 @@
 //! constructor, once it has started. Either way the program's entry point and its own initializers
 //! have not run when the debugger attaches, though the initializers of the libraries it depends on
 //! may have.
+//!
+//! A crate of its own, rather than part of `mirrord-layer-lib`, so `mirrord up` can create gates
+//! too without linking the layer's hooking dependencies.
 
-use std::{fmt, io::Write};
+use std::io::Write;
 
+pub use line::{
+    ANNOUNCEMENT_PREFIX, Announcement, DotnetImage, ENDED_PREFIX, Ended, EndedOutcome, HeldProcess,
+    LINE_VERSION, PLAN_PREFIX, Plan, RuntimeFacts, Trigger,
+};
+
+mod line;
+#[cfg(feature = "runtime-pause")]
+pub mod runtime;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -28,24 +39,6 @@ mod platform {
 }
 
 pub use platform::{Gate, GateError};
-
-/// The line an IDE matches to find a held program and release it:
-/// `debug-hold pid=<pid> release=<release>`.
-///
-/// `mirrord up` prefixes it with the service's name, like the rest of the service's output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Announcement<'a> {
-    /// The held program, which the debugger attaches to.
-    pub pid: u32,
-    /// What the IDE opens to release it. See [`ReleaseGate::release_name`].
-    pub release: &'a str,
-}
-
-impl fmt::Display for Announcement<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "debug-hold pid={} release={}", self.pid, self.release)
-    }
-}
 
 /// How a hold ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,8 +59,7 @@ pub trait ReleaseGate: Sized {
     /// never release a later program that reused the pid.
     fn create(pid: u32) -> Result<Self, HoldError>;
 
-    /// What the IDE opens to release: an event name, or a FIFO path. Never has whitespace, since
-    /// the IDE matches `release=\S+`.
+    /// What the IDE opens to release: an event name, or a FIFO path. Never has whitespace.
     fn release_name(&self) -> &str;
 
     /// Waits for the release, or for `holder` to end the wait. Never times out: a person is
@@ -75,38 +67,51 @@ pub trait ReleaseGate: Sized {
     fn wait(&self, holder: Self::Holder<'_>) -> Result<HoldOutcome, HoldError>;
 }
 
-/// The one hold every platform runs: create the gate, announce it, wait for the release.
+/// The one process hold every platform runs: create the gate, announce it, wait for the release,
+/// and say how it ended.
 ///
 /// The announcement goes out in one `write_all`, then a flush, before the wait begins: a writer
 /// that writes straight through keeps the line whole, and the IDE never waits on a line still in a
 /// buffer. One that cannot be written means no IDE will ever release the program, so it is an
 /// error, and nothing waits.
 ///
+/// The [`Ended`] line after the wait is only news for the IDE: one that can't be written is logged,
+/// and the outcome stands.
+///
 /// # Arguments
 ///
 /// * `pid` - the held program.
+/// * `process` - what the announcement says about it.
 /// * `holder` - what else ends the wait. See [`ReleaseGate::Holder`].
 /// * `out` - where the IDE reads the announcement: the program's stdout, which `mirrord up`
 ///   forwards.
 pub fn hold<G: ReleaseGate>(
     pid: u32,
+    process: HeldProcess,
     holder: G::Holder<'_>,
     out: &mut impl Write,
 ) -> Result<HoldOutcome, HoldError> {
     let gate = G::create(pid)?;
-    let announcement = Announcement {
-        pid,
-        release: gate.release_name(),
-    };
+    let release = gate.release_name().to_owned();
+    let announcement = Announcement::process(pid, release.clone(), process);
     out.write_all(format!("{announcement}\n").as_bytes())
         .and_then(|()| out.flush())
         .map_err(|source| HoldError::Announce { pid, source })?;
-    tracing::debug!(
-        pid,
-        release = gate.release_name(),
-        "debug hold: waiting for the release"
-    );
-    gate.wait(holder)
+    tracing::debug!(pid, release, "debug hold: waiting for the release");
+
+    let waited = gate.wait(holder);
+    let ended = match &waited {
+        Ok(HoldOutcome::Released) => Ended::new(pid, release, EndedOutcome::Resumed, None),
+        Ok(HoldOutcome::ProcessExited) => Ended::new(pid, release, EndedOutcome::Exited, None),
+        Err(error) => Ended::new(pid, release, EndedOutcome::Failed, Some(error.to_string())),
+    };
+    if let Err(error) = out
+        .write_all(format!("{ended}\n").as_bytes())
+        .and_then(|()| out.flush())
+    {
+        tracing::warn!(%error, pid, "failed to say the debug hold ended");
+    }
+    waited
 }
 
 /// Why a program could not be held for a debugger.
@@ -132,6 +137,9 @@ pub enum HoldError {
         #[source]
         source: GateError,
     },
+
+    #[error("the wait for the debug release of process {pid} ended without an answer")]
+    WaitAbandoned { pid: u32 },
 }
 
 #[cfg(test)]
@@ -228,20 +236,25 @@ mod tests {
             journal: &journal,
             outcome: HoldOutcome::Released,
         };
+        let process = HeldProcess {
+            image: Some("/bin/app".to_owned()),
+            ..HeldProcess::default()
+        };
 
-        hold::<FakeGate>(42, holder, &mut Output::new(&journal)).expect("hold");
+        hold::<FakeGate>(42, process.clone(), holder, &mut Output::new(&journal)).expect("hold");
 
+        let expected = Announcement::process(42, "fake-release-42".to_owned(), process);
         assert_eq!(
-            journal.borrow().flushed_at_wait.as_deref(),
-            Some("debug-hold pid=42 release=fake-release-42\n"),
-            "the IDE matches this exact line, and it must be flushed when the wait begins"
+            journal.borrow().flushed_at_wait,
+            Some(format!("{expected}\n")),
+            "the whole announcement, and nothing else, must be flushed when the wait begins"
         );
     }
 
     /// A writer straight to the program's stdout sends each write as it comes, so a line split
     /// across writes could interleave with the program's own output.
     #[test]
-    fn the_announcement_leaves_in_one_write() {
+    fn each_line_leaves_in_one_write() {
         let journal = RefCell::new(Journal::default());
         let holder = FakeHolder {
             journal: &journal,
@@ -249,11 +262,11 @@ mod tests {
         };
         let mut output = Output::new(&journal);
 
-        hold::<FakeGate>(42, holder, &mut output).expect("hold");
+        hold::<FakeGate>(42, HeldProcess::default(), holder, &mut output).expect("hold");
 
         assert_eq!(
-            output.writes, 1,
-            "the whole line goes out at once, with no buffer to keep it together"
+            output.writes, 2,
+            "one write for the announcement and one for its end, with no buffer to keep either whole"
         );
     }
 
@@ -270,7 +283,7 @@ mod tests {
             ..Output::new(&journal)
         };
 
-        let result = hold::<FakeGate>(42, holder, &mut output);
+        let result = hold::<FakeGate>(42, HeldProcess::default(), holder, &mut output);
 
         assert!(
             matches!(result, Err(HoldError::Announce { pid: 42, .. })),
@@ -284,19 +297,34 @@ mod tests {
     }
 
     /// The caller resumes a released program and hands back an exited one as it is, so the gate's
-    /// answer must reach it unchanged.
-    #[test]
-    fn the_gates_outcome_is_the_holds_outcome() {
-        for outcome in [HoldOutcome::Released, HoldOutcome::ProcessExited] {
-            let journal = RefCell::new(Journal::default());
-            let holder = FakeHolder {
-                journal: &journal,
-                outcome,
-            };
+    /// answer must reach it unchanged, and the IDE reads the same answer in the ended line.
+    #[rstest::rstest]
+    #[case::released(HoldOutcome::Released, EndedOutcome::Resumed)]
+    #[case::exited(HoldOutcome::ProcessExited, EndedOutcome::Exited)]
+    fn the_gates_outcome_is_the_holds_outcome(
+        #[case] outcome: HoldOutcome,
+        #[case] said: EndedOutcome,
+    ) {
+        let journal = RefCell::new(Journal::default());
+        let holder = FakeHolder {
+            journal: &journal,
+            outcome,
+        };
 
-            let held = hold::<FakeGate>(42, holder, &mut Output::new(&journal)).expect("hold");
+        let held = hold::<FakeGate>(
+            42,
+            HeldProcess::default(),
+            holder,
+            &mut Output::new(&journal),
+        )
+        .expect("hold");
 
-            assert_eq!(held, outcome, "the gate said {outcome:?}");
-        }
+        assert_eq!(held, outcome, "the gate said {outcome:?}");
+        let ended = Ended::new(42, "fake-release-42".to_owned(), said, None);
+        assert!(
+            journal.borrow().flushed.ends_with(&format!("{ended}\n")),
+            "the last line says how the hold ended: {}",
+            journal.borrow().flushed
+        );
     }
 }

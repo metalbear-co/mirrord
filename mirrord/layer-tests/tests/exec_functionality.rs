@@ -138,17 +138,25 @@ const HELD_PROGRAM_RAN: &str = "the held program runs";
 #[cfg(unix)]
 const CHILD_RAN: &str = "its child runs";
 
+/// The diagnostic port `mirrord up` would hand the held program's `mirrord exec`.
+#[cfg(unix)]
+const DOTNET_PORT: &str = "/tmp/mirrord-debug-0/dotnet-1-layertest.sock";
+
 /// Starts `tests/apps/exec_debug_hold.py` under `mirrord exec`, held for a debugger the way
 /// `mirrord up --debug` asks for it, and waits for the hold's announcement.
 ///
 /// Returns the process, its intproxy, and the release path the announcement names.
 #[cfg(unix)]
+#[allow(clippy::indexing_slicing)]
 async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let process = exec_python(
         listener.local_addr().unwrap(),
         "exec_debug_hold.py",
-        vec![("MIRRORD_DEBUG_HOLD", "1")],
+        vec![
+            ("MIRRORD_DEBUG_HOLD", "1"),
+            ("MIRRORD_DEBUG_DOTNET_PORT", DOTNET_PORT),
+        ],
     )
     .await;
     let intproxy = TestIntProxy::new(listener, None).await;
@@ -156,17 +164,8 @@ async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     let release = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             // Only a whole line: the path may still be arriving.
-            let release = process
-                .get_stdout()
-                .await
-                .split_inclusive('\n')
-                .filter_map(|line| line.strip_suffix('\n')?.strip_prefix("debug-hold "))
-                .find_map(|fields| {
-                    fields
-                        .split_whitespace()
-                        .find_map(|field| field.strip_prefix("release="))
-                        .map(str::to_owned)
-                });
+            let release = held_announcement(&process.get_stdout().await)
+                .and_then(|hold| hold["release"].as_str().map(str::to_owned));
             match release {
                 Some(release) => break release,
                 None => tokio::time::sleep(Duration::from_millis(20)).await,
@@ -177,6 +176,15 @@ async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     .expect("the held program never announced its hold");
 
     (process, intproxy, release)
+}
+
+/// The JSON of the first whole `debug-hold {json}` line in `stdout`, as an IDE reads it.
+#[cfg(unix)]
+fn held_announcement(stdout: &str) -> Option<serde_json::Value> {
+    stdout
+        .split_inclusive('\n')
+        .filter_map(|line| line.strip_suffix('\n')?.strip_prefix("debug-hold "))
+        .find_map(|json| serde_json::from_str(json).ok())
 }
 
 /// What an IDE does once its debugger is attached: write one byte to the announced release.
@@ -194,6 +202,7 @@ fn release(path: &str) {
 /// runs only once a byte is written to the release.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::indexing_slicing)]
 async fn exec_holds_the_program_until_its_release_gets_a_byte() {
     let (mut process, _intproxy, release_path) = start_held_program().await;
 
@@ -206,10 +215,12 @@ async fn exec_holds_the_program_until_its_release_gets_a_byte() {
     );
     // `execve` keeps `mirrord exec`'s pid, so the program holds under it.
     let pid = process.child.id().unwrap();
-    assert!(
-        stdout.contains(&format!("debug-hold pid={pid} ")),
+    let hold = held_announcement(&stdout).expect("announced");
+    assert_eq!(
+        hold["pid"], pid,
         "the program is held under its own pid, {pid}:\n{stdout}"
     );
+    assert_eq!(hold["trigger"], "process", "{stdout}");
 
     let ran_while_held = tokio::time::timeout(Duration::from_secs(1), async {
         while process.get_stdout().await.contains(HELD_PROGRAM_RAN).not() {
@@ -230,6 +241,9 @@ async fn exec_holds_the_program_until_its_release_gets_a_byte() {
 
 /// Only the program is held: a child it starts runs at once, even one handed the program's hold
 /// binding, and prints no `Ready!` of its own, even one handed the program's `Ready!` binding.
+///
+/// The child still inherits the diagnostic port through the `execve` hook, so a .NET program a
+/// held program starts pauses at its runtime's startup.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_child_of_a_held_program_is_never_held() {
@@ -243,6 +257,12 @@ async fn a_child_of_a_held_program_is_never_held() {
         .expect("the program's child was held too");
     let stdout = process.get_stdout().await;
     assert!(stdout.contains(CHILD_RAN), "the child ran:\n{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "its child's DOTNET_DiagnosticPorts: {DOTNET_PORT},connect,suspend\n"
+        )),
+        "the child inherits the port exec merged in:\n{stdout}"
+    );
     assert_eq!(
         stdout.matches("debug-hold ").count(),
         1,

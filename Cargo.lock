@@ -2500,6 +2500,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
+name = "dotnot"
+version = "0.1.0"
+dependencies = [
+ "dataview",
+ "pelite",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "double_listen"
 version = "3.290.0"
 dependencies = [
@@ -5078,6 +5087,7 @@ dependencies = [
  "clap_complete",
  "const-random",
  "dotenvy",
+ "dotnot",
  "drain",
  "dunce",
  "flate2",
@@ -5103,6 +5113,7 @@ dependencies = [
  "mirrord-command",
  "mirrord-config",
  "mirrord-console",
+ "mirrord-debug-hold",
  "mirrord-intproxy",
  "mirrord-intproxy-protocol",
  "mirrord-kube",
@@ -5430,6 +5441,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-debug-hold"
+version = "3.288.0"
+dependencies = [
+ "libc",
+ "mirrord-command",
+ "nix 0.31.3",
+ "rstest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "utils-win",
+ "uuid",
+ "winapi",
+]
+
+[[package]]
 name = "mirrord-intproxy"
 version = "3.290.0"
 dependencies = [
@@ -5619,6 +5649,7 @@ dependencies = [
  "libc",
  "mirrord-config",
  "mirrord-console",
+ "mirrord-debug-hold",
  "mirrord-intproxy-protocol",
  "mirrord-layer-macro",
  "mirrord-progress",
@@ -5639,7 +5670,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "utils-win",
- "uuid",
  "winapi",
  "windows-strings 0.4.2",
 ]
@@ -6130,6 +6160,7 @@ dependencies = [
  "mirrord-analytics",
  "mirrord-command",
  "mirrord-config",
+ "mirrord-debug-hold",
  "mirrord-kube",
  "mirrord-progress",
  "nix 0.31.3",
@@ -6148,6 +6179,7 @@ dependencies = [
  "textwrap",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
  "uuid",
  "winapi",
  "yamlpatch",

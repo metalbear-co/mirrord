@@ -20,7 +20,7 @@ use mirrord_config::{MIRRORD_LAYER_DEBUG_HOLD, MIRRORD_LAYER_READY, debug_hold};
 use mirrord_layer_lib::{
     detour::DetourGuard,
     error::LayerError,
-    process::hold::{Gate, HoldError, hold},
+    process::hold::{Gate, HeldProcess, HoldError, hold},
 };
 use mirrord_progress::{
     LineMode, finished_task_line,
@@ -89,8 +89,20 @@ fn debug_hold() -> Result<(), HoldError> {
     #[cfg(target_os = "linux")]
     allow_any_tracer();
 
+    let process = HeldProcess {
+        image: std::env::current_exe()
+            .ok()
+            .map(|image| image.to_string_lossy().into_owned()),
+        parent_pid: Some(std::os::unix::process::parent_id()),
+        command_line: Some(
+            std::env::args_os()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    };
     // The process that waits is the held one, so the wait can only end in a release.
-    hold::<Gate>(pid, (), &mut ProgramStdout)?;
+    hold::<Gate>(pid, process, (), &mut ProgramStdout)?;
     Ok(())
 }
 
