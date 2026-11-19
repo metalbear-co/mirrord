@@ -6,7 +6,7 @@
 //! without decoding them.
 //!
 //! An operator login (`mirrord login --url <operator url>`) is kept per operator URL, with the one
-//! mirrord uses named by [`OperatorLoginStore::active_operator`]. Logging in to an operator makes it the
+//! mirrord uses named by [`OperatorLoginStore::active_operator`](mirrord_operator::sso::OperatorLoginStore::active_operator). Logging in to an operator makes it the
 //! active one; logging out of the active one hands over to the most recent login that has not
 //! expired. Expired operator logins stay in the store so `mirrord whoami` can show them as expired
 //! and so using one fails with a message naming the operator to log in to again, instead of
