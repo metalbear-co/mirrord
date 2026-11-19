@@ -2,10 +2,10 @@
 //!
 //! A developer logs in with `mirrord login --url <operator url>`. The CLI and the operator run an
 //! authorization code flow with PKCE where the operator hosts the OIDC redirect, since it holds the
-//! client secret: the CLI opens the browser at [`AUTHORIZE_PATH`], the provider sends the browser
-//! back to the operator's [`CALLBACK_PATH`], the operator hands the browser a short-lived grant for
+//! client secret: the CLI opens the browser at [`AUTHORIZE_PATH`](crate::sso::AUTHORIZE_PATH), the provider sends the browser
+//! back to the operator's [`CALLBACK_PATH`](crate::sso::CALLBACK_PATH), the operator hands the browser a short-lived grant for
 //! the CLI's loopback callback, and the CLI exchanges the grant and its PKCE verifier at
-//! [`TOKEN_PATH`] for a login token it then sends as a bearer token on every request.
+//! [`TOKEN_PATH`](crate::sso::TOKEN_PATH) for a login token it then sends as a bearer token on every request.
 
 use std::fmt;
 
