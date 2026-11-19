@@ -41,13 +41,12 @@ jobs:
           tool: typos-cli
       - name: print typos version
         run: echo $(typos --version)
-      # `mirrord/mcp/corpus` holds upstream's docs and skills, vendored byte-identical for `mirrord mcp`.
       # typos never ran on the top-level `docs/`, `guides/` and `skills/` in their own repositories,
       # and it reports both real typos and identifiers such as `aks` there, so they stay out until
       # those are fixed or added to `typos.toml`.
       - name: spell check markdown files
         run: |
-          files=$(git ls-files '*.md' ':!mirrord/mcp/corpus' ':!docs' ':!guides' ':!skills')
+          files=$(git ls-files '*.md' ':!docs' ':!guides' ':!skills')
           echo $files
           typos --format brief $files
       - name: spell check mirrord/config crate

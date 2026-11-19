@@ -109,8 +109,9 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
   squashes each pull request into one commit.
 - nextest retries a failing test twice, so `FLAKY` marks a pass on a retry and `TRY 3 FAIL` a test that never passed.
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
-- `typos` checks the tracked Markdown outside `mirrord/mcp/corpus`, and Vale the Markdown at the root and every fragment
-  in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
+- `typos` checks the tracked Markdown outside `docs/`, `guides/` and `skills/`, which keep their findings until a
+  cleanup. Vale checks the Markdown at the root and every fragment in `changelog.d`. `CONTRIBUTING.md` says how to clear
+  a false positive from either.
 - The CI runner image (`tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
   A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
   when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
@@ -155,8 +156,8 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 ## Generated Files
 
 `mirrord-schema.json` and `mirrord-up-schema.json` are generated, as `mirrord/config/AGENTS.md` and
-`mirrord/up/AGENTS.md` say. A change to either runs `corpus_check`, which validates the config examples in the skills
-`mirrord-mcp` vendors against them, so renaming or removing an option they use fails it.
+`mirrord/up/AGENTS.md` say. A change to either runs `content_check`, which validates the config examples in `skills/`
+against them, so renaming or removing an option they use fails it.
 
 ## Simplicity and Reuse
 

@@ -90,7 +90,7 @@ To check the connection, ask the agent to validate your `.mirrord/mirrord.json` 
 
 ## Resources and prompts
 
-- `mirrord://info`: the installed mirrord version and the docs and skills it ships with.
+- `mirrord://info`: the installed mirrord version. The docs and skills the server answers from are those of that version.
 - `mirrord://docs/<path>`: each docs page.
 - `mirrord://skills/<name>`: each skill. Each skill is also an MCP prompt.
 

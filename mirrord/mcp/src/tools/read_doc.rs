@@ -1,4 +1,4 @@
-//! The `read_doc` tool: serves one page of the vendored docs and skills in full, by the path
+//! The `read_doc` tool: serves one page of the embedded docs and skills in full, by the path
 //! `search_docs` returns, or lists every page.
 
 use schemars::JsonSchema;
