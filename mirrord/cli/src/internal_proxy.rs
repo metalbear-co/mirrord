@@ -8,7 +8,7 @@
 //! (previously was solved using envguard which wasn't good enough)
 //!
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
-//! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
+//! or let the [`OperatorApi`] handle the connection.
 
 pub(crate) mod db_portforwards;
 
