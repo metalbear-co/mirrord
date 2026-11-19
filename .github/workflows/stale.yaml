@@ -25,9 +25,20 @@ jobs:
                     echo "skip=false" >> $GITHUB_OUTPUT
                   fi
 
+            # Events made with the default token start no workflow runs, so `linear-loop-pr` would miss stale closes.
+            - id: app-token
+              if: steps.holiday.outputs.skip != 'true'
+              uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+              with:
+                  app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+                  private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+                  permission-issues: write
+                  permission-pull-requests: write
+
             - uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
               if: steps.holiday.outputs.skip != 'true'
               with:
+                  repo-token: ${{ steps.app-token.outputs.token }}
                   days-before-issue-stale: 365
                   days-before-issue-close: 14
                   stale-issue-message: "This issue hasn't seen activity in a year! If you want to keep it open, post a comment or remove the `stale` label – otherwise this will be closed in two weeks."
