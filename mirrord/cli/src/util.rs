@@ -21,6 +21,7 @@ use crate::{
     data::GlobalConfig,
     error::CliResult,
     kube::{ConfigSource, record_run_kube_environment},
+    login::apply_active_operator_login,
 };
 
 /// Address for mirrord-console is listening on.
@@ -97,9 +98,17 @@ fn resolve_project_config(
     Ok((config_path, config, source))
 }
 
-async fn apply_global_defaults_and_record(config: &mut LayerConfig, source: ConfigSource) {
+/// The operator login is checked against the settings the developer wrote for this run, before
+/// the global defaults fill in a `kube_context` that the login makes meaningless anyway.
+async fn apply_global_defaults_and_record(
+    config: &mut LayerConfig,
+    source: ConfigSource,
+    cfg_context: &mut ConfigContext,
+) -> CliResult<()> {
+    let login = apply_active_operator_login(config, cfg_context).await?;
     GlobalConfig::load().await.apply_to(config);
-    record_run_kube_environment(source, config);
+    record_run_kube_environment(source, config, login.as_ref());
+    Ok(())
 }
 
 /// Resolves an exec config and fills unset fields from the global mirrord configuration.
@@ -107,7 +116,7 @@ pub(crate) async fn resolve_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<(Option<String>, LayerConfig)> {
     let (path, mut config, source) = resolve_project_or_up_config(cfg_context)?;
-    apply_global_defaults_and_record(&mut config, source).await;
+    apply_global_defaults_and_record(&mut config, source, cfg_context).await?;
     Ok((path, config))
 }
 
@@ -116,7 +125,7 @@ pub(crate) async fn resolve_layer_config(
     cfg_context: &mut ConfigContext,
 ) -> CliResult<LayerConfig> {
     let (_, mut config, source) = resolve_project_config(cfg_context)?;
-    apply_global_defaults_and_record(&mut config, source).await;
+    apply_global_defaults_and_record(&mut config, source, cfg_context).await?;
     Ok(config)
 }
 

@@ -98,12 +98,14 @@ use crate::{
         session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
     },
     share::LocalShareRequest,
+    sso::OperatorLogin,
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
         FeatureGateHitRequest, MIRRORD_CLI_VERSION_HEADER, PaidFeatureGate, SESSION_ID_HEADER,
     },
 };
 
+pub mod access;
 pub mod connect_params;
 mod credentials;
 pub mod database_branches;
@@ -113,6 +115,9 @@ pub mod preview_sync;
 mod queue_split_progress;
 pub mod split_config_branches;
 
+pub use access::{
+    OperatorAccess, OperatorAccessError, active_operator_login, check_config_under_login,
+};
 pub use discovery::operator_installed;
 pub use queue_split_progress::temporal_mirror_warning;
 
@@ -464,7 +469,8 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let (base_config, kube_context) = Self::base_client_config(config).await?;
+        let (base_config, access) = Self::base_client_config(config).await?;
+        let kube_context = access.kube_context().map(ToOwned::to_owned);
         let cluster_url = base_config.cluster_url.to_string();
 
         let client = progress
@@ -1920,7 +1926,11 @@ where
         }
     }
 
-    /// Creates a base [`Config`] for creating kube [`Client`]s.
+    /// Creates a base [`Config`] for creating kube [`Client`]s, and says which credentials it
+    /// carries. This is the one place that decides how the operator is reached: through the
+    /// operator login `mirrord login --url` selected, as a bearer token on the operator's URL, or
+    /// else through the kubeconfig. The kubeconfig is not read while a login is selected.
+    ///
     /// Adds extra headers that we send to the operator with each request:
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
@@ -1930,16 +1940,25 @@ where
     /// Every client built from it adds its own [`LayerConfig::startup_retry`] layer, so kube's
     /// default retry is turned off: nested under ours, its 15 retries turn a 503 from an
     /// unavailable operator into minutes of silent waiting.
-    async fn base_client_config(
+    pub async fn base_client_config(
         layer_config: &LayerConfig,
-    ) -> OperatorApiResult<(Config, Option<String>)> {
-        let (mut client_config, kube_context) = create_kube_config_with_context(
-            layer_config.accept_invalid_certificates,
-            layer_config.kubeconfig.clone(),
-            layer_config.kube_context.clone(),
-        )
-        .await
-        .map_err(OperatorApiError::CreateKubeClient)?;
+    ) -> OperatorApiResult<(Config, OperatorAccess)> {
+        let (mut client_config, access) = match active_operator_login().await? {
+            Some(login) => (
+                Self::login_client_config(layer_config, &login)?,
+                OperatorAccess::Login(login),
+            ),
+            None => {
+                let (config, context) = create_kube_config_with_context(
+                    layer_config.accept_invalid_certificates,
+                    layer_config.kubeconfig.clone(),
+                    layer_config.kube_context.clone(),
+                )
+                .await
+                .map_err(OperatorApiError::CreateKubeClient)?;
+                (config, OperatorAccess::Kubeconfig { context })
+            }
+        };
         client_config.default_retry = false;
 
         add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
@@ -1972,7 +1991,26 @@ where
             }
         }
 
-        Ok((client_config, kube_context))
+        Ok((client_config, access))
+    }
+
+    /// The client configuration of a run under `login`: the operator's URL with the login token,
+    /// honoring `accept_invalid_certificates` the way the kubeconfig path does. Pure, so the test
+    /// below proves the kubeconfig named by `layer_config` is never opened.
+    fn login_client_config(
+        layer_config: &LayerConfig,
+        login: &OperatorLogin,
+    ) -> Result<Config, OperatorAccessError> {
+        let mut config = login
+            .kube_config()
+            .map_err(|error| OperatorAccessError::InvalidUrl {
+                url: login.url.clone(),
+                error,
+            })?;
+        if let Some(accept_invalid_certificates) = layer_config.accept_invalid_certificates {
+            config.accept_invalid_certs = accept_invalid_certificates;
+        }
+        Ok(config)
     }
 
     /// Refuses a `split_queues` entry with no filter of its own when the operator cannot take the
@@ -3836,6 +3874,7 @@ mod test {
         time::Duration,
     };
 
+    use chrono::Utc;
     use http::{HeaderName, HeaderValue, Request, Response, StatusCode};
     use k8s_openapi::api::apps::v1::Deployment;
     use kube::{Client, Config, api::ObjectMeta, client::Body};
@@ -3869,6 +3908,7 @@ mod test {
             error::OperatorApiError,
         },
         crd::{MirrordOperatorCrd, session::SessionCiInfo},
+        sso::OperatorLogin,
     };
 
     /// `mirrord preview up` prepares every service and only then starts them all, so a check
@@ -4529,6 +4569,43 @@ mod test {
 
         // The invariant `try_reuse_copy_target` relies on: same config, same spec.
         assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
+    }
+
+    /// Under a login the client goes to the operator's URL with the login token, and the
+    /// kubeconfig the config names is never opened: here it does not even exist.
+    #[test]
+    fn login_client_config_uses_the_operator_url_and_leaves_the_kubeconfig_alone() {
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut layer_config = LayerFileConfig::default()
+            .generate_config(&mut ctx)
+            .expect("default config generates");
+        layer_config.kubeconfig = Some("/nonexistent/kubeconfig".to_owned());
+        layer_config.kube_context = Some("nowhere".to_owned());
+        layer_config.accept_invalid_certificates = Some(true);
+        let login = OperatorLogin {
+            url: "https://mirrord.corp.example.com".to_owned(),
+            token: "secret-token".to_owned().into(),
+            username: "dev@corp.example.com".to_owned(),
+            account: "dev@corp.example.com".to_owned(),
+            expires_at: Utc::now() + chrono::TimeDelta::hours(1),
+        };
+
+        let config = OperatorApi::<NoClientCert>::login_client_config(&layer_config, &login)
+            .expect("a valid login URL builds a client config");
+
+        assert_eq!(
+            config.cluster_url.to_string(),
+            "https://mirrord.corp.example.com/"
+        );
+        assert!(
+            config.auth_info.token.is_some(),
+            "the login token is the bearer token"
+        );
+        assert!(config.accept_invalid_certs);
+        assert!(
+            !config.default_retry,
+            "startup_retry stays the only retry under a login too"
+        );
     }
 
     /// Answers like a cluster whose operator `APIService` has no endpoints: 503 for the operator

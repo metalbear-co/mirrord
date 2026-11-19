@@ -6,7 +6,7 @@
 //! without decoding them.
 //!
 //! An operator login (`mirrord login --url <operator url>`) is kept per operator URL, with the one
-//! mirrord uses named by [`AuthStore::active_operator`]. Logging in to an operator makes it the
+//! mirrord uses named by [`OperatorLoginStore::active_operator`]. Logging in to an operator makes it the
 //! active one; logging out of the active one hands over to the most recent login that has not
 //! expired. Expired operator logins stay in the store so `mirrord whoami` can show them as expired
 //! and so using one fails with a message naming the operator to log in to again, instead of
@@ -24,7 +24,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use futures::future::{BoxFuture, FutureExt};
-use mirrord_operator::sso::{OperatorLogin, OperatorLoginToken};
+use mirrord_operator::sso::{LoginExpired, OperatorLogin, OperatorLoginStore, StoredOperatorLogin};
 use mirrord_sessions_manager_client::{
     LoginToken, LoginTokenSource, SessionsManagerClientError, cloud_url_from_env,
 };
@@ -33,14 +33,11 @@ use thiserror::Error;
 use url::Url;
 
 use super::update_owner_only_at_path;
-use crate::{login::issuer, util::mirrord_dir};
+use crate::login::issuer;
 
-/// `~/.mirrord/auth.json`, or [`None`] when the home directory is unknown.
-///
-/// Unlike other mirrord documents, the store does not fall back to a relative `~` directory, which
-/// would put credentials under whatever directory `mirrord login` happens to run in.
-static AUTH_STORE_PATH: LazyLock<Option<PathBuf>> =
-    LazyLock::new(|| mirrord_dir::get_path().map(|dir| dir.join("auth.json")));
+/// `~/.mirrord/auth.json`, or [`None`] when the home directory is unknown. The operator client
+/// reads the operator logins from the same path, see [`OperatorLoginStore::default_path`].
+static AUTH_STORE_PATH: LazyLock<Option<PathBuf>> = LazyLock::new(OperatorLoginStore::default_path);
 
 /// Contents of `~/.mirrord/auth.json`.
 #[derive(Default, Serialize, Deserialize)]
@@ -51,45 +48,10 @@ pub(crate) struct AuthStore {
     /// Issuer of the app -> key of the last trial that `mirrord operator signup` started there.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     signups: BTreeMap<String, StoredSignupKey>,
-    /// Operator URL (see [`crate::login::issuer`]) -> login to that operator.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    operators: BTreeMap<String, StoredOperatorLogin>,
-    /// Key in [`Self::operators`] of the login mirrord uses. `None` means mirrord uses the
-    /// kubeconfig.
-    #[serde(
-        default,
-        rename = "activeOperator",
-        skip_serializing_if = "Option::is_none"
-    )]
-    active_operator: Option<String>,
-}
-
-/// A login to one operator as stored in [`AuthStore`], keyed by the operator URL.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct StoredOperatorLogin {
-    pub(crate) token: OperatorLoginToken,
-    /// Kubernetes username the operator derived from the identity provider's claims.
-    pub(crate) username: String,
-    /// The account as the developer knows it, shown by `mirrord whoami`.
-    pub(crate) account: String,
-    /// When the operator stops accepting the token.
-    pub(crate) expires_at: DateTime<Utc>,
-    /// When `mirrord login` saved this entry; the latest one takes over when the active login is
-    /// removed.
-    pub(crate) logged_in_at: DateTime<Utc>,
-}
-
-impl StoredOperatorLogin {
-    fn into_login(self, url: &str) -> OperatorLogin {
-        OperatorLogin {
-            url: url.to_owned(),
-            token: self.token,
-            username: self.username,
-            account: self.account,
-            expires_at: self.expires_at,
-        }
-    }
+    /// The operator logins (`operators`, keyed by [`crate::login::issuer`], and `activeOperator`),
+    /// in the shape the operator client reads them back with [`OperatorLoginStore::read`].
+    #[serde(flatten)]
+    operator_logins: OperatorLoginStore,
 }
 
 /// Every operator login in the store, for `mirrord whoami`.
@@ -117,15 +79,9 @@ pub(crate) enum LogoutOutcome {
 /// Why the active operator login cannot be used.
 #[derive(Debug, Error)]
 pub(crate) enum ActiveLoginError {
-    /// The login mirrord uses expired. Logging in again is the only way forward: mirrord does not
-    /// fall back to a kubeconfig while an operator login is selected.
-    #[error("Your login to {host} expired. Run mirrord login --url {url}.")]
-    Expired { host: String, url: String },
+    #[error(transparent)]
+    Expired(#[from] LoginExpired),
     #[error("failed to read the login store: {0}")]
-    #[expect(
-        dead_code,
-        reason = "constructed by `active_operator_login`, which the commands that connect through a login call"
-    )]
     Store(#[source] io::Error),
 }
 
@@ -280,7 +236,7 @@ impl AuthStore {
         update_owner_only_at_path(Self::path()?, move |store: &mut Self| {
             let activated = store
                 .activate_operator(&url, now)
-                .then(|| store.operators.get(&url).cloned())
+                .then(|| store.operator_logins.operators.get(&url).cloned())
                 .flatten()
                 .map(|login| login.into_login(&url));
             let _ = activated_tx.send(activated);
@@ -334,12 +290,9 @@ impl AuthStore {
     /// The operator login mirrord uses, `None` when it uses the kubeconfig. An expired active
     /// login is an error naming the operator, never a silent fallback.
     ///
-    /// Nothing calls it yet: the commands that connect to the operator through a login instead of a
-    /// kubeconfig start here (INT-1040).
-    #[expect(
-        dead_code,
-        reason = "entry point for the commands that connect through a login (INT-1040)"
-    )]
+    /// Where every command that reaches the operator starts: the config it resolved is checked
+    /// against this login (`crate::login::active`), and the operator client reads the same store
+    /// again when it builds its client.
     pub(crate) async fn active_operator_login() -> Result<Option<OperatorLogin>, ActiveLoginError> {
         let Some(store) = Self::load().await.map_err(ActiveLoginError::Store)? else {
             return Ok(None);
@@ -348,18 +301,19 @@ impl AuthStore {
     }
 
     fn insert_operator(&mut self, url: String, login: StoredOperatorLogin) {
-        self.operators.insert(url.clone(), login);
-        self.active_operator = Some(url);
+        self.operator_logins.operators.insert(url.clone(), login);
+        self.operator_logins.active_operator = Some(url);
     }
 
     /// Selects the login to `url` when it exists and is valid at `now`.
     fn activate_operator(&mut self, url: &str, now: DateTime<Utc>) -> bool {
         let valid = self
+            .operator_logins
             .operators
             .get(url)
             .is_some_and(|login| login.expires_at > now);
         if valid {
-            self.active_operator = Some(url.to_owned());
+            self.operator_logins.active_operator = Some(url.to_owned());
         }
         valid
     }
@@ -367,22 +321,24 @@ impl AuthStore {
     /// Removes the login to `url`. When it was the active one, the most recent login that is
     /// valid at `now` takes over, or none does and mirrord goes back to the kubeconfig.
     fn remove_operator(&mut self, url: &str, now: DateTime<Utc>) -> LogoutOutcome {
-        if self.operators.remove(url).is_none() {
+        let OperatorLoginStore {
+            operators,
+            active_operator,
+        } = &mut self.operator_logins;
+        if operators.remove(url).is_none() {
             return LogoutOutcome::NotLoggedIn;
         }
-        let was_active = self.active_operator.as_deref() == Some(url);
+        let was_active = active_operator.as_deref() == Some(url);
         if was_active {
-            self.active_operator = self
-                .operators
+            *active_operator = operators
                 .iter()
                 .filter(|(_, login)| login.expires_at > now)
                 .max_by_key(|(_, login)| login.logged_in_at)
                 .map(|(url, _)| url.clone());
         }
-        let now_active = self
-            .active_operator
+        let now_active = active_operator
             .as_ref()
-            .and_then(|active| self.operators.get(active).map(|login| (active, login)))
+            .and_then(|active| operators.get(active).map(|login| (active, login)))
             .map(|(url, login)| login.clone().into_login(url));
         LogoutOutcome::Removed {
             was_active,
@@ -391,25 +347,15 @@ impl AuthStore {
     }
 
     fn active_login(&self, now: DateTime<Utc>) -> Result<Option<OperatorLogin>, ActiveLoginError> {
-        let Some(url) = &self.active_operator else {
-            return Ok(None);
-        };
-        let Some(login) = self.operators.get(url) else {
-            return Ok(None);
-        };
-        let login = login.clone().into_login(url);
-        if !login.is_valid_at(now) {
-            return Err(ActiveLoginError::Expired {
-                host: login.host().to_owned(),
-                url: login.url,
-            });
-        }
-        Ok(Some(login))
+        Ok(self.operator_logins.active_login(now)?)
     }
 
     fn into_operator_logins(self) -> OperatorLogins {
-        let active = self.active_operator;
-        let mut entries = self.operators.into_iter().collect::<Vec<_>>();
+        let OperatorLoginStore {
+            operators,
+            active_operator: active,
+        } = self.operator_logins;
+        let mut entries = operators.into_iter().collect::<Vec<_>>();
         entries.sort_by(|(url_a, a), (url_b, b)| {
             let is_active = |url: &String| active.as_ref() == Some(url);
             is_active(url_b)
@@ -496,6 +442,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use chrono::TimeDelta;
+    use mirrord_operator::sso::OperatorLoginToken;
     #[cfg(unix)]
     use tempfile::tempdir;
 
@@ -673,14 +620,20 @@ mod tests {
             OPERATOR.to_owned(),
             operator_login("a", now + TimeDelta::hours(24), now),
         );
-        assert_eq!(store.active_operator.as_deref(), Some(OPERATOR));
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(OPERATOR)
+        );
 
         store.insert_operator(
             STAGING.to_owned(),
             operator_login("b", now + TimeDelta::hours(24), now + TimeDelta::minutes(1)),
         );
-        assert_eq!(store.active_operator.as_deref(), Some(STAGING));
-        assert_eq!(store.operators.len(), 2);
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(STAGING)
+        );
+        assert_eq!(store.operator_logins.operators.len(), 2);
 
         // A Cloud login lives in its own map and leaves the operator in use alone.
         store.insert(
@@ -689,7 +642,10 @@ mod tests {
             token("c", now + TimeDelta::hours(24)),
             now,
         );
-        assert_eq!(store.active_operator.as_deref(), Some(STAGING));
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(STAGING)
+        );
     }
 
     /// Switching to a saved login needs no browser, but only while the login is valid.
@@ -708,13 +664,13 @@ mod tests {
             STAGING.to_owned(),
             operator_login("b", now - TimeDelta::hours(1), now),
         );
-        store.active_operator = Some(OPERATOR.to_owned());
+        store.operator_logins.active_operator = Some(OPERATOR.to_owned());
 
         // Mirrors `activate_operator_login`: the answer is the requested login, or nothing.
         let mut activate = |url: &str| {
             store
                 .activate_operator(url, now)
-                .then(|| store.operators.get(url).cloned())
+                .then(|| store.operator_logins.operators.get(url).cloned())
                 .flatten()
                 .map(|login| login.into_login(url))
         };
@@ -727,7 +683,10 @@ mod tests {
             activate(OPERATOR).map(|login| login.url),
             Some(OPERATOR.to_owned())
         );
-        assert_eq!(store.active_operator.as_deref(), Some(OPERATOR));
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(OPERATOR)
+        );
     }
 
     #[test]
@@ -742,13 +701,19 @@ mod tests {
             STAGING.to_owned(),
             operator_login("b", now - TimeDelta::seconds(1), now - TimeDelta::hours(24)),
         );
-        store.active_operator = None;
+        store.operator_logins.active_operator = None;
 
         assert!(store.activate_operator(OPERATOR, now));
-        assert_eq!(store.active_operator.as_deref(), Some(OPERATOR));
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(OPERATOR)
+        );
         assert!(!store.activate_operator(STAGING, now));
         assert!(!store.activate_operator("https://unknown", now));
-        assert_eq!(store.active_operator.as_deref(), Some(OPERATOR));
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(OPERATOR)
+        );
     }
 
     /// Logging out of the active login hands over to the most recent login that has not
@@ -803,7 +768,10 @@ mod tests {
             panic!("{outcome:?}");
         };
         assert_eq!(now_active.url, STAGING);
-        assert_eq!(store.active_operator.as_deref(), Some(STAGING));
+        assert_eq!(
+            store.operator_logins.active_operator.as_deref(),
+            Some(STAGING)
+        );
 
         assert_eq!(
             store.remove_operator(STAGING, now),
@@ -812,7 +780,7 @@ mod tests {
                 now_active: None,
             }
         );
-        assert_eq!(store.active_operator, None);
+        assert_eq!(store.operator_logins.active_operator, None);
         assert_eq!(
             store.remove_operator(STAGING, now),
             LogoutOutcome::NotLoggedIn
@@ -862,7 +830,7 @@ mod tests {
             OPERATOR.to_owned(),
             operator_login("active", now + TimeDelta::hours(1), now),
         );
-        store.active_operator = Some(STAGING.to_owned());
+        store.operator_logins.active_operator = Some(STAGING.to_owned());
 
         let logins = store.into_operator_logins();
         assert_eq!(logins.active.as_deref(), Some(STAGING));
@@ -884,8 +852,8 @@ mod tests {
             "issuers": { ISSUER: { "org-a": { "token": "t", "email": "a@b", "expiresAt": "2030-01-01T00:00:00Z" } } }
         });
         let store: AuthStore = serde_json::from_value(legacy).unwrap();
-        assert!(store.operators.is_empty());
-        assert_eq!(store.active_operator, None);
+        assert!(store.operator_logins.operators.is_empty());
+        assert_eq!(store.operator_logins.active_operator, None);
 
         let now = Utc::now();
         let mut store = store;

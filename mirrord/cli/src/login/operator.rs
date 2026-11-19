@@ -12,7 +12,7 @@ use chrono::Utc;
 use mirrord_operator::{
     sso::{
         AUTHORIZE_PATH, DONE_PATH, INFO_PATH, SSO_PATH, SsoLoginInfo, SsoTokenRequest,
-        SsoTokenResponse, TOKEN_PATH,
+        SsoTokenResponse, StoredOperatorLogin, TOKEN_PATH,
     },
     types::PaidFeatureGate,
 };
@@ -24,10 +24,7 @@ use super::{
     EXCHANGE_TIMEOUT, LoginError, MAX_REJECTION_BODY_CHARS, Verifier, approve_in_browser, host_of,
     issuer, local_time,
 };
-use crate::{
-    data::{AuthStore, StoredOperatorLogin},
-    login::callback::LoginCallbackServer,
-};
+use crate::{data::AuthStore, login::callback::LoginCallbackServer};
 
 /// First operator version that serves the login routes. An operator with SSO on but without them
 /// answers the login info route with the identity middleware's 401.

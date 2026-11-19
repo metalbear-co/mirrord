@@ -7,7 +7,7 @@
 //! the CLI's loopback callback, and the CLI exchanges the grant and its PKCE verifier at
 //! [`TOKEN_PATH`](crate::sso::TOKEN_PATH) for a login token it then sends as a bearer token on every request.
 
-use std::fmt;
+use std::{collections::BTreeMap, fmt, ops::Not};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -141,6 +141,118 @@ impl OperatorLogin {
     }
 }
 
+/// A login to one operator as `~/.mirrord/auth.json` stores it, keyed there by the operator URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredOperatorLogin {
+    pub token: OperatorLoginToken,
+    /// Kubernetes username the operator derived from the identity provider's claims.
+    pub username: String,
+    /// The account as the developer knows it, shown by `mirrord whoami`.
+    pub account: String,
+    /// When the operator stops accepting the token.
+    pub expires_at: DateTime<Utc>,
+    /// When `mirrord login` saved this entry; the latest one takes over when the active login is
+    /// removed.
+    pub logged_in_at: DateTime<Utc>,
+}
+
+impl StoredOperatorLogin {
+    pub fn into_login(self, url: &str) -> OperatorLogin {
+        OperatorLogin {
+            url: url.to_owned(),
+            token: self.token,
+            username: self.username,
+            account: self.account,
+            expires_at: self.expires_at,
+        }
+    }
+}
+
+/// The operator logins in `~/.mirrord/auth.json`: the part of the login store that every process
+/// reaching the operator reads, next to the mirrord Cloud logins the CLI keeps in the same file.
+///
+/// `mirrord login` and `mirrord logout` write it through the CLI's store; the operator client
+/// only reads it, every time it builds a client, the way it reads the kubeconfig. Expired logins
+/// stay in the store so that using one fails with a message naming the operator to log in to
+/// again, instead of silently falling back to a kubeconfig.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct OperatorLoginStore {
+    /// Operator URL (scheme, host and port, no trailing slash) -> login to that operator.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub operators: BTreeMap<String, StoredOperatorLogin>,
+    /// Key in [`Self::operators`] of the login mirrord uses. `None` means mirrord uses the
+    /// kubeconfig.
+    #[serde(
+        default,
+        rename = "activeOperator",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub active_operator: Option<String>,
+}
+
+/// The login mirrord uses expired. Logging in again is the only way forward: mirrord does not
+/// fall back to a kubeconfig while an operator login is selected.
+///
+/// Implemented by hand because this module builds without the `thiserror` dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginExpired {
+    pub host: String,
+    pub url: String,
+}
+
+impl fmt::Display for LoginExpired {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Your login to {} expired. Run mirrord login --url {}.",
+            self.host, self.url
+        )
+    }
+}
+
+impl std::error::Error for LoginExpired {}
+
+impl OperatorLoginStore {
+    /// `~/.mirrord/auth.json`, or [`None`] when the home directory is unknown.
+    ///
+    /// Unlike other mirrord documents, the store does not fall back to a relative `~` directory,
+    /// which would put credentials under whatever directory `mirrord login` happens to run in.
+    pub fn default_path() -> Option<std::path::PathBuf> {
+        std::env::home_dir().map(|home| home.join(".mirrord").join("auth.json"))
+    }
+
+    /// The stored logins at `path`, empty when the file does not exist. Contents the store cannot
+    /// represent read as empty, the way the CLI's store recovers them before its next write.
+    #[cfg(feature = "client")]
+    pub async fn read(path: &std::path::Path) -> std::io::Result<Self> {
+        match tokio::fs::read(path).await {
+            Ok(contents) => Ok(serde_json::from_slice(&contents).unwrap_or_default()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The login mirrord uses, `None` when it uses the kubeconfig. An active login that expired
+    /// at `now` is an error naming the operator, never a silent fallback.
+    pub fn active_login(&self, now: DateTime<Utc>) -> Result<Option<OperatorLogin>, LoginExpired> {
+        let Some(url) = &self.active_operator else {
+            return Ok(None);
+        };
+        let Some(login) = self.operators.get(url) else {
+            return Ok(None);
+        };
+        let login = login.clone().into_login(url);
+        if login.is_valid_at(now).not() {
+            return Err(LoginExpired {
+                host: login.host().to_owned(),
+                url: login.url,
+            });
+        }
+        Ok(Some(login))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeDelta;
@@ -171,6 +283,84 @@ mod tests {
         let login = login("https://mirrord.corp.example.com");
         assert!(!format!("{login:?}").contains("secret-token"));
         assert!(!format!("{:?}", login.token).contains("secret-token"));
+    }
+
+    fn stored(expires_at: DateTime<Utc>) -> StoredOperatorLogin {
+        StoredOperatorLogin {
+            token: OperatorLoginToken::from("secret-token".to_owned()),
+            username: "dev@corp.example.com".to_owned(),
+            account: "dev@corp.example.com".to_owned(),
+            expires_at,
+            logged_in_at: Utc::now(),
+        }
+    }
+
+    /// No active operator means the kubeconfig; an active login that expired is an error naming
+    /// the operator to log in to again, in the words the developer should run, never a fallback.
+    #[test]
+    fn active_login_is_the_selected_unexpired_entry_or_an_error() {
+        let now = Utc::now();
+        let url = "https://mirrord.corp.example.com";
+        let mut store = OperatorLoginStore::default();
+        assert_eq!(store.active_login(now), Ok(None));
+
+        store
+            .operators
+            .insert(url.to_owned(), stored(now + TimeDelta::hours(1)));
+        assert_eq!(store.active_login(now), Ok(None), "saved but not selected");
+
+        store.active_operator = Some(url.to_owned());
+        let login = store.active_login(now).unwrap().unwrap();
+        assert_eq!(login.url, url);
+        assert_eq!(login.token.expose_secret(), "secret-token");
+
+        let error = store.active_login(now + TimeDelta::hours(2)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Your login to mirrord.corp.example.com expired. \
+             Run mirrord login --url https://mirrord.corp.example.com."
+        );
+
+        store.active_operator = Some("https://gone".to_owned());
+        assert_eq!(store.active_login(now), Ok(None), "a dangling selection");
+    }
+
+    /// The reader shares its shape with the CLI's `~/.mirrord/auth.json`, whose Cloud logins it
+    /// skips, and treats a missing or unreadable file as no login.
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn store_reads_the_cli_file_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+        assert!(
+            OperatorLoginStore::read(&path)
+                .await
+                .unwrap()
+                .active_operator
+                .is_none()
+        );
+
+        std::fs::write(
+            &path,
+            r#"{
+              "issuers": { "https://app.metalbear.com": { "org": { "token": "t", "email": "a@b", "expiresAt": "2030-01-01T00:00:00Z" } } },
+              "operators": { "https://mirrord.corp.example.com": { "token": "secret-token", "username": "dev", "account": "dev@corp.example.com", "expiresAt": "2030-01-01T00:00:00Z", "loggedInAt": "2029-12-31T00:00:00Z" } },
+              "activeOperator": "https://mirrord.corp.example.com"
+            }"#,
+        )
+        .unwrap();
+        let store = OperatorLoginStore::read(&path).await.unwrap();
+        let login = store.active_login(Utc::now()).unwrap().unwrap();
+        assert_eq!(login.host(), "mirrord.corp.example.com");
+
+        std::fs::write(&path, "not json").unwrap();
+        assert_eq!(
+            OperatorLoginStore::read(&path)
+                .await
+                .unwrap()
+                .active_login(Utc::now()),
+            Ok(None)
+        );
     }
 
     #[cfg(feature = "client")]

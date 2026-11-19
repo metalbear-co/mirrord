@@ -299,6 +299,7 @@ Operator License
             "Target",
             "Namespace",
             "User",
+            "Auth",
             "Ports",
             "Session Duration"
         ]);
@@ -336,6 +337,10 @@ Operator License
                 &session.target,
                 session.namespace.as_deref().unwrap_or("N/A"),
                 &session.user,
+                session
+                    .auth_method
+                    .map(|method| method.to_string())
+                    .unwrap_or_default(),
                 locked_ports,
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);

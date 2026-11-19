@@ -49,12 +49,14 @@ use crate::{
     login::callback::LoginCallbackServer,
 };
 
+mod active;
 mod callback;
 mod expiry;
 mod logout;
 mod operator;
 mod whoami_command;
 
+pub(crate) use active::apply_active_operator_login;
 pub(crate) use logout::logout_command;
 pub(crate) use whoami_command::whoami_command;
 
