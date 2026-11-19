@@ -71,6 +71,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       corpus_changed: ${{ steps.changed-corpus.outputs.any_changed }}
+      content_changed: ${{ steps.changed-content.outputs.any_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
@@ -243,6 +244,14 @@ jobs:
           files: |
             mirrord/mcp/corpus/**
             xtask/src/tasks/corpus.rs
+      - name: get docs, guides and skills changes
+        id: changed-content
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            docs/**
+            guides/**
+            skills/**
       - name: get config changes
         id: changed-config-schema
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -279,6 +288,7 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
           echo ${{ steps.changed-corpus.outputs.any_changed }};
+          echo ${{ steps.changed-content.outputs.any_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           echo ${{ steps.changed-frontend-only.outputs.only_changed }};
           echo ${{ steps.changed-install-script.outputs.any_changed }};
@@ -407,6 +417,33 @@ jobs:
           shared-key: mirrord
       - if: ${{ steps.skip.outputs.skip != 'true' }}
         run: cargo xtask corpus check-upstream
+
+  # The checks that `docs/` and `skills/` ran in their own repositories. Every docs feature page must
+  # have a plan tag, since `mirrord mcp` reads the tag to tell users which plan a feature needs. Every
+  # config block in the skills must validate against the schemas of this commit, so a schema change
+  # that breaks a skill fails on its own PR. The fence-tag check runs through uv, as `corpus_check`
+  # runs it. `guides/` has no check yet, but is in `content_changed` so that a check added for it
+  # later runs without a change to the filter.
+  content_check:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.content_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
+    runs-on: ${{ needs.plan.outputs.runner_4 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Check the plan tags of the docs pages
+        run: python3 docs/.github/scripts/check_plan_tags.py
+      - name: Test the fence-tag check
+        run: >-
+          uv run --no-project --python 3.12 --with-requirements skills/.github/scripts/requirements.txt
+          python -m unittest discover -s skills/.github/scripts -p 'test_*.py'
+      - name: Check the fence tags and config blocks of the skills
+        run: >-
+          uv run --no-project --python 3.12 --with-requirements skills/.github/scripts/requirements.txt
+          python skills/.github/scripts/check_fence_tags.py
+          --mirrord-schema mirrord-schema.json --mirrord-up-schema mirrord-up-schema.json
 
   install_script:
     needs: [plan]
@@ -565,6 +602,7 @@ jobs:
         install_script,
         corpus_check,
         corpus_upstream_check,
+        content_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
