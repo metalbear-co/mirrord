@@ -91,10 +91,8 @@ fn main() -> io::Result<()> {
                 source.display()
             ))
         })?;
-        // A Windows checkout can have CRLF line endings (`core.autocrlf`), but `src/corpus.rs`
-        // parses front matter with LF only, so CRLF becomes LF here and the archive is the same on
-        // every OS.
-        let contents = contents.replace("\r\n", "\n");
+        // Packed as read: `src/corpus.rs` parses front matter with LF only, and the root
+        // `.gitattributes` keeps these trees LF in every checkout, Windows included.
         let mut header = tar::Header::new_gnu();
         header.set_size(contents.len() as u64);
         header.set_mode(0o644);

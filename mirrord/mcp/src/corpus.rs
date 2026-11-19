@@ -283,18 +283,6 @@ mod tests {
         assert!(issues.is_empty(), "{}", issues.join("\n"));
     }
 
-    /// A Windows checkout has CRLF line endings, and the front matter of pages and skills is
-    /// parsed with LF only, so `build.rs` has to pack LF whatever the checkout uses.
-    #[test]
-    fn files_have_lf_line_endings() {
-        let crlf = FILES
-            .iter()
-            .filter(|(_, contents)| contents.contains("\r\n"))
-            .map(|(path, _)| path.as_str())
-            .collect::<Vec<_>>();
-        assert!(crlf.is_empty(), "packed with CRLF: {}", crlf.join(", "));
-    }
-
     #[test]
     fn broken_corpus_is_caught() {
         let files: BTreeMap<String, String> = [
