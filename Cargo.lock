@@ -11401,15 +11401,12 @@ name = "xtask"
 version = "3.290.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
  "dirs 6.0.0",
  "dunce",
  "mirrord-command",
  "reqwest 0.13.4",
- "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]

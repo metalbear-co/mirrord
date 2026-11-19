@@ -105,11 +105,13 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
 
 - `ci` (the `ci-success` job) is the only required check. It and `lint-success` only collect the jobs they need, so
   when either fails, read the job under it that failed.
-- `main` merges through the merge queue, with merge commits, after one approval and with every review thread resolved.
+- `main` merges through the merge queue after one approval and with every review thread resolved, and the queue
+  squashes each pull request into one commit.
 - nextest retries a failing test twice, so `FLAKY` marks a pass on a retry and `TRY 3 FAIL` a test that never passed.
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
-- `typos` checks the tracked Markdown outside `mirrord/mcp/corpus`, and Vale the Markdown at the root and every fragment
-  in `changelog.d`. `CONTRIBUTING.md` says how to clear a false positive from either.
+- `typos` checks the tracked Markdown outside `docs/`, `guides/` and `skills/`, which keep their findings until a
+  cleanup. Vale checks the Markdown at the root and every fragment in `changelog.d`. `CONTRIBUTING.md` says how to clear
+  a false positive from either.
 - The CI runner image (`tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
   A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
   when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
@@ -119,10 +121,11 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
 
 ## Changelog Fragments
 
-Every pull request adds a fragment to `changelog.d/`, or `towncrier check` fails it. Name it `<issue>.<type>.md` after
-an issue in this repository, or `+<name>.<type>.md` when there's none; never use the ID of a private tracker. The
-types are the `[[tool.towncrier.type]]` directories in `towncrier.toml`: `internal` is for what users never see,
-such as tests and CI, and any type besides `fixed`, `security`, and `internal` makes the next release a minor one.
+Every pull request adds a fragment to `changelog.d/`, or `towncrier check` fails it; `CONTRIBUTING.md`'s Changelog Entry
+says which pull requests need none. Name it `<issue>.<type>.md` after an issue in this repository, or
+`+<name>.<type>.md` when there's none; never use the ID of a private tracker. The types are the
+`[[tool.towncrier.type]]` directories in `towncrier.toml`: `internal` is for what users never see, such as tests and CI,
+and any type besides `fixed`, `security`, and `internal` makes the next release a minor one.
 
 The fragment becomes the release notes, so write it for users: what changed for them, not in the code. Never edit
 `CHANGELOG.md`; the release pull request builds it.
@@ -145,8 +148,15 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 
 ## Related Repositories
 
-- `metalbear-co/docs` documents user-visible behavior, so a change users notice usually needs a pull request there
-  too. The configuration reference is the exception: it's generated here (`mirrord/config/AGENTS.md`).
+- `docs/` and `guides/` came from `metalbear-co/docs`, which keeps their earlier history. They document user-visible
+  behavior, so a change users notice usually updates them in the same pull request. GitBook still publishes the site
+  from `metalbear-co/docs` until it's switched to this repository, so an edit here doesn't reach the site yet, but
+  `mirrord mcp` embeds `docs/docs` when it's built, so an edit reaches it with the next mirrord release. The
+  configuration reference is the exception: it isn't in `docs/`, but is generated from `mirrord-config`'s doc comments
+  (`mirrord/config/AGENTS.md`), so a config change updates those instead.
+- `skills/` came from `metalbear-co/skills`, which keeps its earlier history. `mirrord mcp` embeds `skills/skills` when
+  it's built (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release. Nothing copies `skills/` to
+  `metalbear-co/skills` yet, so an edit doesn't reach that repository.
 - `metalbear-co/mirrord-vscode` and `metalbear-co/mirrord-intellij` drive the CLI; `ci.yaml` runs their end-to-end
   tests on release branches.
 - `metalbear-co/test-images` builds the app images the end-to-end tests deploy.
@@ -154,8 +164,8 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 ## Generated Files
 
 `mirrord-schema.json` and `mirrord-up-schema.json` are generated, as `mirrord/config/AGENTS.md` and
-`mirrord/up/AGENTS.md` say. A change to either runs `corpus_check`, which validates the config examples in the skills
-`mirrord-mcp` vendors against them, so renaming or removing an option they use fails it.
+`mirrord/up/AGENTS.md` say. A change to either runs `content_check`, which validates the config examples in `skills/`
+against them, so renaming or removing an option they use fails it.
 
 ## Simplicity and Reuse
 

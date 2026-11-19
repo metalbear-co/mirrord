@@ -194,15 +194,7 @@ async fn serves_info_resource() {
         panic!("unexpected contents: {:?}", result.contents);
     };
     let info: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(info["version"], json!(env!("CARGO_PKG_VERSION")));
-    for (corpus, repo) in [
-        ("docs", "metalbear-co/docs"),
-        ("skills", "metalbear-co/skills"),
-    ] {
-        assert_eq!(info[corpus]["repo"], json!(repo));
-        assert_eq!(info[corpus]["commit"].as_str().unwrap().len(), 40);
-        assert!(info[corpus]["synced_at"].is_string());
-    }
+    assert_eq!(info, json!({ "version": env!("CARGO_PKG_VERSION") }));
 }
 
 /// Every skill `get_skill` lists is also served as a prompt and a resource, all from the same
@@ -265,10 +257,26 @@ async fn serves_docs() {
     let (client, _signal) = connect(ProtocolVersion::V_2025_11_25).await;
     let resources = client.list_all_resources().await.unwrap();
 
-    for (query, corpus) in [
-        ("running without a target", "docs/"),
-        ("kafka splitting known issues", "skills/"),
-        ("agent ttl", "config/mirrord.json/"),
+    let skills_source = format!(
+        "https://github.com/metalbear-co/mirrord/blob/{}/skills/skills/",
+        env!("CARGO_PKG_VERSION")
+    );
+    for (query, corpus, source) in [
+        (
+            "running without a target",
+            "docs/",
+            "https://metalbear.com/mirrord/docs/",
+        ),
+        (
+            "kafka splitting known issues",
+            "skills/",
+            skills_source.as_str(),
+        ),
+        (
+            "agent ttl",
+            "config/mirrord.json/",
+            "https://metalbear.com/mirrord/docs/config/",
+        ),
     ] {
         let hits = client
             .call_tool(tool_call(
@@ -293,7 +301,7 @@ async fn serves_docs() {
         let page = &result.content[0].as_text().unwrap().text;
         let title = hit["title"].as_str().unwrap();
         assert!(
-            page.starts_with(&format!("Title: {title}\nSource: https://")),
+            page.starts_with(&format!("Title: {title}\nSource: {source}")),
             "{page}"
         );
 
