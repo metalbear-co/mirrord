@@ -31,7 +31,7 @@ Config blocks must parse: no `...` placeholders, no `//` comments, no trailing c
 
 ### Fragment paths
 
-`<path>` is the dotted schema path of the object the block's top-level keys belong to. Use `[]` for array items and `*` for map values. By default, `mirrord=<path>` resolves against [`skills/mirrord-config/references/schema.json`](skills/mirrord-config/references/schema.json). `mirrord-up=<path>` resolves against [`skills/mirrord-up/references/schema.json`](skills/mirrord-up/references/schema.json).
+`<path>` is the dotted schema path of the object the block's top-level keys belong to. Use `[]` for array items and `*` for map values. `mirrord=<path>` resolves against the schema given with `--mirrord-schema`, and `mirrord-up=<path>` against the schema given with `--mirrord-up-schema`. CI gives both flags the schemas at the repository root, as the start of this file says. Without the flags, both resolve against the copies in [`skills/mirrord-config/references/schema.json`](skills/mirrord-config/references/schema.json) and [`skills/mirrord-up/references/schema.json`](skills/mirrord-up/references/schema.json).
 
 A block whose root keys are `copy` and `connection` sits inside one entry of `feature.db_branches`:
 
