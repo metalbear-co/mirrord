@@ -121,10 +121,11 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
 
 ## Changelog Fragments
 
-Every pull request adds a fragment to `changelog.d/`, or `towncrier check` fails it. Name it `<issue>.<type>.md` after
-an issue in this repository, or `+<name>.<type>.md` when there's none; never use the ID of a private tracker. The
-types are the `[[tool.towncrier.type]]` directories in `towncrier.toml`: `internal` is for what users never see,
-such as tests and CI, and any type besides `fixed`, `security`, and `internal` makes the next release a minor one.
+Every pull request adds a fragment to `changelog.d/`, or `towncrier check` fails it; `CONTRIBUTING.md`'s Changelog Entry
+says which pull requests need none. Name it `<issue>.<type>.md` after an issue in this repository, or
+`+<name>.<type>.md` when there's none; never use the ID of a private tracker. The types are the
+`[[tool.towncrier.type]]` directories in `towncrier.toml`: `internal` is for what users never see, such as tests and CI,
+and any type besides `fixed`, `security`, and `internal` makes the next release a minor one.
 
 The fragment becomes the release notes, so write it for users: what changed for them, not in the code. Never edit
 `CHANGELOG.md`; the release pull request builds it.

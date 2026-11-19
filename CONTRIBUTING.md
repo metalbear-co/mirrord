@@ -779,11 +779,9 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - `internal` for anything users don't care about, e.g. changes in tests or CI
 - `changed` for anything else
 
-A pull request that only changes `docs/`, `guides/` or `skills/` gets the `docs` label instead of a changelog file,
-since the release notes describe changes to mirrord, not to its documentation or skills. Add the label by hand. If the
-check already failed, re-run the failed jobs after adding it, since adding a label doesn't start a run. If the label
-is removed later, re-run `towncrier_check`, because the merge queue doesn't run the check. Keep the label off a pull
-request that changes any other file, which still needs a changelog file.
+A pull request that only changes `docs/`, `guides/` or `skills/` needs no changelog file, since the release notes
+describe changes to mirrord, not to its documentation or skills, and CI skips the check for it. A pull request that
+changes any other file needs one.
 
 # Architecture
 
