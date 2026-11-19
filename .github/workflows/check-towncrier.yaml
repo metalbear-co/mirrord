@@ -8,48 +8,18 @@ permissions:
 
 jobs:
   towncrier:
-    # Runs only for `pull_request` events: a merge-queue or push run has no pull request for the label
-    # step to read, so the step would fail it, and the pull request's own run already checked the
-    # fragment.
-    if: ${{ github.event_name == 'pull_request' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    permissions:
-      contents: read
-      pull-requests: read
     steps:
-      # The `docs` label skips the check, because a pull request that only changes `docs/`, `guides/`
-      # or `skills/` needs no fragment: the release notes describe changes to mirrord, not to its
-      # documentation or skills. The labels come from the API rather than from the event, because a
-      # re-run reuses the original event and its labels. Adding or removing a label starts no run, so
-      # after adding the label to a pull request whose check failed, re-run the failed jobs, and after
-      # removing it, re-run this job.
-      - name: Check for the docs label
-        id: skip
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
-          if grep -qx docs <<< "$labels"; then
-            echo "Skipped by the docs label."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: Install uv
-        if: ${{ steps.skip.outputs.skip != 'true' }}
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
           enable-cache: "false"
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        run: uv python install
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        run: uv venv
+      - run: uv python install
+      - run: uv venv
       - name: install towncrier
-        if: ${{ steps.skip.outputs.skip != 'true' }}
         run: uv pip install towncrier==25.08.0
       - name: verify newsfragment exist
-        if: ${{ steps.skip.outputs.skip != 'true' }}
         run: uv run towncrier check

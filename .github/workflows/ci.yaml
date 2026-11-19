@@ -71,6 +71,7 @@ jobs:
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
       content_changed: ${{ steps.changed-content.outputs.any_changed }}
+      content_only: ${{ steps.changed-content-only.outputs.only_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
@@ -244,6 +245,16 @@ jobs:
             docs/**
             guides/**
             skills/**
+      # `towncrier_check` uses this to skip the changelog check when only the docs, guides or
+      # skills change.
+      - name: get docs, guides and skills-only changes
+        id: changed-content-only
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            docs/**
+            guides/**
+            skills/**
       - name: get config changes
         id: changed-config-schema
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -280,6 +291,7 @@ jobs:
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
           echo ${{ steps.changed-content.outputs.any_changed }};
+          echo ${{ steps.changed-content-only.outputs.only_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           echo ${{ steps.changed-frontend-only.outputs.only_changed }};
           echo ${{ steps.changed-install-script.outputs.any_changed }};
@@ -301,12 +313,11 @@ jobs:
       build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
     secrets: inherit
 
-  # `check-towncrier.yaml` reads the pull request's labels, which needs `pull-requests: read` from
-  # this caller.
+  # A change to only `docs/`, `guides/` or `skills/` needs no changelog fragment, since the release
+  # notes describe changes to mirrord, not to its documentation or skills.
   towncrier_check:
-    permissions:
-      contents: read
-      pull-requests: read
+    needs: [plan]
+    if: ${{ needs.plan.outputs.content_only != 'true' }}
     uses: ./.github/workflows/check-towncrier.yaml
 
   lint:
