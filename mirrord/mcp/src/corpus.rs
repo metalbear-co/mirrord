@@ -1,21 +1,20 @@
 //! The mirrord docs and skills compiled into this binary, which `mirrord mcp` answers from without
 //! network access.
 //!
-//! They are vendored into `corpus/` from pinned commits of `metalbear-co/docs` and
-//! `metalbear-co/skills` by `cargo xtask corpus`, which the release PR runs to bump the pins. The
-//! tests below are the checks the content has to pass to ship, so a bad bump fails the release PR.
+//! `build.rs` packs them from `docs/docs` and `skills/skills` at the repository root, so a binary
+//! serves the docs and skills of the checkout it is built from. The tests below are the checks the
+//! content has to pass to ship, so a pull request that breaks a page or a skill fails them.
 
 use std::{collections::BTreeMap, io::Read, ops::Not, sync::LazyLock};
 
 use flate2::read::GzDecoder;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-/// The `corpus/` files, packed by `build.rs`.
+/// The docs and skills, packed by `build.rs`.
 static ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/corpus.tar.gz"));
 
-/// Every vendored file, keyed by its path in `corpus/`, e.g. `skills/mirrord-up/SKILL.md`.
+/// Every packed file, keyed by its path in the archive, e.g. `skills/mirrord-up/SKILL.md`.
 pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     let mut archive = tar::Archive::new(GzDecoder::new(ARCHIVE));
     let entries = archive.entries().expect("build.rs packs a valid archive");
@@ -34,31 +33,14 @@ pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
                 .read_to_end(&mut contents)
                 .expect("build.rs packs a valid archive");
             let contents = String::from_utf8(contents).unwrap_or_else(|_| {
-                panic!("`cargo xtask corpus` vendors only UTF-8 files, but `{path}` isn't")
+                panic!("`build.rs` packs only UTF-8 files, but `{path}` isn't")
             });
             (path, contents)
         })
         .collect()
 });
 
-/// The upstream commit a corpus is vendored from.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Pin {
-    pub(crate) repo: String,
-    pub(crate) commit: String,
-    /// When the pin was last bumped, in RFC 3339.
-    pub(crate) synced_at: String,
-}
-
-pub(crate) static DOCS_PIN: LazyLock<Pin> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../corpus/docs.pin.json")).expect("valid docs pin")
-});
-
-pub(crate) static SKILLS_PIN: LazyLock<Pin> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../corpus/skills.pin.json")).expect("valid skills pin")
-});
-
-/// A skill from the skills repo, served by `get_skill` and as an MCP prompt and resource.
+/// A skill from `skills/skills`, served by `get_skill` and as an MCP prompt and resource.
 pub(crate) struct Skill<'a> {
     /// From the `SKILL.md` front matter; tells the agent when to use the skill.
     pub(crate) description: String,
@@ -186,7 +168,7 @@ pub(crate) struct Page {
     pub(crate) body: &'static str,
 }
 
-/// Every vendored file, keyed by its path in `corpus/`, e.g. `docs/using-mirrord/targetless.md`.
+/// Every packed file, keyed by its path in the archive, e.g. `docs/using-mirrord/targetless.md`.
 pub(crate) static PAGES: LazyLock<BTreeMap<&'static str, Page>> = LazyLock::new(|| {
     FILES
         .iter()
@@ -227,7 +209,12 @@ fn title(path: &str, body: &str) -> String {
 }
 
 /// Docs are published on `metalbear.com`, a directory's `README.md` at the directory's URL. Skills
-/// link to their file in the skills repo, at the pinned commit.
+/// link to their file in `skills/skills` of the mirrord repository, at the release tag of this
+/// version, which holds the files a release binary embeds. A build between releases links to the
+/// last release, whose file may be older, or missing if that release predates `skills/` in the
+/// repository. The build can't name its own commit, since a Docker build from a Git context has no
+/// `.git`, and a link to `main` would drift from what the binary serves and break when a file
+/// moves.
 fn source_url(path: &str) -> String {
     match path.strip_prefix("docs/") {
         Some(page) => {
@@ -238,9 +225,10 @@ fn source_url(path: &str) -> String {
             };
             format!("https://metalbear.com/mirrord/docs/{page}")
         }
+        // Skills are packed under `skills/` from the repository's `skills/skills` (`build.rs`).
         None => format!(
-            "https://github.com/{}/blob/{}/{path}",
-            SKILLS_PIN.repo, SKILLS_PIN.commit
+            "https://github.com/metalbear-co/mirrord/blob/{}/skills/{path}",
+            env!("CARGO_PKG_VERSION")
         ),
     }
 }

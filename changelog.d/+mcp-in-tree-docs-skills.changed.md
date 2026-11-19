@@ -1,0 +1,1 @@
+`mirrord mcp` links each skill file to `skills/skills` in the mirrord repository, at the tag of the installed version, instead of to `metalbear-co/skills`. The `mirrord://info` resource no longer has the `docs` and `skills` fields, and gives only the mirrord version.

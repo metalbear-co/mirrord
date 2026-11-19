@@ -779,6 +779,10 @@ Add a changelog file in `changelog.d/` named `<identifier>.<category>.md`
 - `internal` for anything users don't care about, e.g. changes in tests or CI
 - `changed` for anything else
 
+A pull request that only changes `docs/`, `guides/` or `skills/` needs no changelog file, since the release notes
+describe changes to mirrord, not to its documentation or skills, and CI skips the check for it. A pull request that
+changes any other file needs one.
+
 # Architecture
 
 A high level view of mirrord.

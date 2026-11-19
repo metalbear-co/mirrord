@@ -4,10 +4,10 @@
 //! The server speaks MCP over stdio: the agent's harness spawns `mirrord mcp` and exchanges
 //! JSON-RPC messages over its stdin/stdout, so nothing else may ever be written to stdout (logs go
 //! to stderr). It exposes:
-//! - the tools in [`tools`], answered offline from what is compiled into this binary;
-//! - the `mirrord://info` resource, describing this mirrord installation and the [`corpus`] it
-//!   ships;
-//! - every vendored skill, as a prompt and as a `mirrord://skills/<name>` resource;
+//! - the tools in [`tools`], answered offline from what is compiled into this binary: the
+//!   [`corpus`] of docs and skills of the checkout it was built from, and the config schemas;
+//! - the `mirrord://info` resource, which gives the version of this mirrord installation;
+//! - every skill, as a prompt and as a `mirrord://skills/<name>` resource;
 //! - every docs page, as a `mirrord://docs/<path>` resource;
 //! - [`INSTRUCTIONS`], which clients hand to the model.
 //!
@@ -187,7 +187,7 @@ impl ServerHandler for McpServer {
     ) -> Result<ListResourcesResult, ErrorData> {
         let info = Resource::new(INFO_RESOURCE_URI, "info")
             .with_description(
-                "The installed mirrord version, and the docs and skills commits it ships.",
+                "The installed mirrord version. The docs and skills this server answers from come with it.",
             )
             .with_mime_type("application/json");
         let skills = SKILLS.iter().map(|(name, skill)| {
@@ -242,11 +242,7 @@ impl ServerHandler for McpServer {
             ));
         }
 
-        let info = json!({
-            "version": env!("CARGO_PKG_VERSION"),
-            "docs": &*corpus::DOCS_PIN,
-            "skills": &*corpus::SKILLS_PIN,
-        });
+        let info = json!({ "version": env!("CARGO_PKG_VERSION") });
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(info.to_string(), INFO_RESOURCE_URI)
                 .with_mime_type("application/json"),
