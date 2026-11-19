@@ -66,7 +66,7 @@ run:
 
 ### Exempt files
 
-These files are verbatim copies of files generated elsewhere, which `.github/workflows/update-references.yml` overwrote in metalbear-co/skills, so they are not tagged and the check skips them. That workflow doesn't run from the mirrord repository, so nothing updates them here. Keep this list in sync with `EXEMPT` in `.github/scripts/check_fence_tags.py`.
+These files are verbatim copies of files generated elsewhere (the operator chart's `values.yaml`, the mirrord config schemas and the configuration reference), so they are not tagged and the check skips them. Nothing in the mirrord repository updates them. Keep this list in sync with `EXEMPT` in `.github/scripts/check_fence_tags.py`.
 
 - `skills/mirrord-config/references/configuration.md`
 - `skills/mirrord-config/references/schema.json`

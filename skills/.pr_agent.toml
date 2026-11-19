@@ -21,16 +21,6 @@ ignore_pr_authors = [
   '^dependabot(\[bot\])?$',
   '^github-actions(\[bot\])?$',
 ]
-# Regular expressions matched against the PR title. The Cubby app (`cubby-mb`)
-# opens every automated PR in this repository, and the docs-sync ones carry
-# skill edits written by a coding agent, so it is not skipped by author. These
-# titles are its mechanical PRs: reference files copied from upstream by the
-# update-references workflow, and docs-sync runs that only advance the sync
-# marker.
-ignore_pr_title = [
-  '^Update mirrord-\S+ references',
-  '^Docs sync \S+: no skill changes needed$',
-]
 
 [github_app]
 # Qodo's default is to skip every PR opened by a bot account, coding agents
