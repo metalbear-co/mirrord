@@ -1,8 +1,4 @@
-use std::{
-    fs::File,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use const_random::const_random;
 use mirrord_progress::Progress;
@@ -76,13 +72,7 @@ where
         Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
         None => default_layer_dir(&temp_dir(), &progress)?.join(file_name),
     };
-    if !file_path.exists() {
-        let mut file = File::create(&file_path)
-            .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
-        let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE"));
-        file.write_all(bytes).unwrap();
-        debug!("Extracted library file to {:?}", &file_path);
-    }
+    write_layer(&file_path, include_bytes!(env!("MIRRORD_LAYER_FILE")))?;
 
     progress.success(Some("layer extracted"));
     Ok(file_path)
@@ -111,20 +101,50 @@ where
     };
 
     let file_path = temp_dir().as_path().join(file_name);
-    if !file_path.exists() {
-        let mut file = File::create(&file_path)
-            .map_err(|e| CliError::LayerExtractError(file_path.clone(), e))?;
-        let bytes = include_bytes!(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"));
-        file.write_all(bytes).unwrap();
-        debug!("Extracted arm64 layer library to {:?}", &file_path);
-    }
+    write_layer(
+        &file_path,
+        include_bytes!(env!("MIRRORD_LAYER_FILE_MACOS_ARM64")),
+    )?;
 
     progress.success(Some("arm64 layer library extracted"));
     Ok(file_path)
 }
 
+/// Writes `bytes` to `path` atomically, so that no program loads a layer that another CLI is still
+/// writing.
+fn write_layer(path: &Path, bytes: &[u8]) -> CliResult<()> {
+    // A program may already have loaded the existing file, so it stays.
+    if path.exists() {
+        return Ok(());
+    }
+
+    let error = |error| CliError::LayerExtractError(path.to_owned(), error);
+    let directory = path.parent().unwrap_or(Path::new("."));
+    let file = tempfile::NamedTempFile::new_in(directory).map_err(error)?;
+    std::fs::write(file.path(), bytes).map_err(error)?;
+
+    // `NamedTempFile` creates the file readable only by its owner, but a program that mirrord runs
+    // may start a child as another user, and that child loads the layer too.
+    #[cfg(unix)]
+    file.as_file()
+        .set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644))
+        .map_err(error)?;
+
+    match file.persist_noclobber(path) {
+        Err(persist) if persist.error.kind() != std::io::ErrorKind::AlreadyExists => {
+            return Err(error(persist.error));
+        }
+        _ => {}
+    }
+
+    debug!("Extracted layer to {path:?}");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::{fs, sync::Mutex};
 
     use super::*;
@@ -193,5 +213,26 @@ mod tests {
         );
         assert_eq!(fs::read(directory.join("layer")).unwrap(), b"cached layer");
         assert!(progress.0.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extracted_layer_is_readable_by_every_user() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("layer");
+        write_layer(&path, b"layer contents").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644, "the layer's mode is {mode:o}");
+    }
+
+    #[test]
+    fn writing_the_layer_again_keeps_the_file() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("layer");
+        write_layer(&path, b"layer contents").unwrap();
+        write_layer(&path, b"other contents").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"layer contents");
     }
 }
