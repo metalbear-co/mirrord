@@ -203,7 +203,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "mirrord-tui-suggest-{}-{:p}",
             std::process::id(),
-            files
+            files.as_ptr()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         for (name, content) in files {
