@@ -1,0 +1,10 @@
+exports_files([
+    # A module that depends on mirrord must repeat these files' settings and versions in its own root
+    # files, so its lint or its diff tests read mirrord's files to check that the two match.
+    ".bazelversion",
+    ".config/nextest.toml",
+    "Cargo.toml",
+    "clippy.toml",
+    "rust-toolchain.toml",
+])
+

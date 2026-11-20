@@ -17,6 +17,25 @@
         system:
         let
           pkgs = inputs.nixpkgs.legacyPackages.${system};
+
+          # Bazel's prebuilt toolchains expect the dynamic loader at `/lib64/ld-linux-x86-64.so.2`
+          # and libraries in `/usr/lib`, which NixOS doesn't have, so on Linux `bazel` runs in an
+          # FHS namespace that has both.
+          #
+          # Bazel's actions and the programs that `bazel run` starts inherit the namespace.
+          bazel =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              pkgs.buildFHSEnv {
+                name = "bazel";
+                runScript = lib.getExe pkgs.bazelisk;
+                # Ctrl-C reaches both bubblewrap and the Bazel client, which asks the Bazel server to
+                # cancel the command. If bubblewrap exited on it, the client would die with it, and
+                # the server would run the command to its end. So bubblewrap ignores the signal, and
+                # waits for the client.
+                extraPreBwrapCmds = "trap '' INT";
+              }
+            else
+              pkgs.writeShellScriptBin "bazel" ''exec ${lib.getExe pkgs.bazelisk} "$@"'';
         in
         {
           default = pkgs.mkShell {
@@ -89,9 +108,10 @@
                   # CI's `content_check` runs the skills' fence-tag check through uv, on Python 3.12
                   uv
                   python312
+                bazelPackages = [
+                  bazel
                 ];
               in
-              rustPackages ++ uiPackages ++ testsPackages ++ miscPackages;
 
             env =
               with pkgs;

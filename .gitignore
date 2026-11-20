@@ -14,7 +14,6 @@ build/
 .zed/
 .porchlight/
 .claude/settings.local.json
-
 ### go tests ###
 *.go_test_app
 *.go_test_app.exe
@@ -50,3 +49,6 @@ wizard-frontend.tar.gz
 
 ### pnpm store ###
 .pnpm-store/
+
+/bazel-*
+/user.bazelrc
