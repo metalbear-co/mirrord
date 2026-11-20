@@ -32,6 +32,44 @@ common --macos_minimum_os=10.13
 # compiler, which would make the build depend on the machine.
 common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
 
+# Windows ------------------------------------------------------------------------------------------
+
+# Both the builds and the tools that run during them target MSVC through the llvm toolchain, as on
+# other machines that build for Windows.
+common:windows --host_platform=@mirrord//bazel/platforms:windows-host
+
+# The llvm toolchain only downloads the MSVC runtime and the Windows SDK once their license terms
+# (https://visualstudio.microsoft.com/license-terms) are accepted, and builds for Windows need both.
+# They apply on every machine, because other machines cross-build for Windows too.
+common --repo_env=BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1
+common --repo_env=BAZEL_WINDOWS_SDK_EULA=1
+
+# Hides the machine's Visual Studio from cc-rs in the build scripts. cc-rs would pass Visual
+# Studio's library directory to rustc, and rules_rust rejects the directory because it's outside the
+# build. `none` hides it because cc-rs only looks for the MSVC version that `VCToolsVersion` names.
+build:windows --action_env=VCToolsVersion=none
+build:windows --host_action_env=VCToolsVersion=none
+
+# Makes `__FILE__` relative in the C code that the build scripts compile on Windows. cc-rs passes
+# absolute source paths, which `__FILE__` puts in the objects, and rules_rust fails a compile whose
+# output contains its working directory.
+#
+# rules_rust already passes this flag to every compiler but MSVC's.
+build:windows --copt=/clang:-ffile-prefix-map=${pwd}=.
+build:windows --host_copt=/clang:-ffile-prefix-map=${pwd}=.
+
+# On Windows, Bazel only creates runfiles directories when it's asked to, and the nextest runner,
+# the Rust tests and the CLI look for their files in them.
+build:windows --enable_runfiles
+
+# Bazel's test environment leaves out these Windows variables, so the tests take them from the
+# machine.
+#
+# The tests that find commands the way Windows does need `PATHEXT`.
+test:windows --test_env=PATHEXT
+# The layer warns without `USERPROFILE`.
+test:windows --test_env=USERPROFILE
+
 # C and C++ ----------------------------------------------------------------------------------------
 
 # Silences the thousands of warnings in third-party C and C++ code, which only upstream can fix.

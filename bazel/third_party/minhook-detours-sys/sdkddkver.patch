@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vinicius Deolindo <viniciusd@metalbear.com>
+Date: Tue, 10 Nov 2026 22:31:43 -0300
+Subject: [PATCH] SlimDetours: include sdkddkver.h with the Windows SDK's casing
+
+SlimDetours.inl included `SdkDdkVer.h`, but the Windows SDK names the
+file `sdkddkver.h`. Windows file systems ignore case, so builds on
+Windows found it. Builds for MSVC on Linux and macOS read the SDK from
+a case-sensitive file system, so the build script failed with:
+
+    fatal error: 'SdkDdkVer.h' file not found
+
+The include now uses the SDK's own name, which every file system finds.
+---
+ vendor/minhook-detours/SlimDetours/SlimDetours.inl |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/vendor/minhook-detours/SlimDetours/SlimDetours.inl b/vendor/minhook-detours/SlimDetours/SlimDetours.inl
+--- a/vendor/minhook-detours/SlimDetours/SlimDetours.inl
++++ b/vendor/minhook-detours/SlimDetours/SlimDetours.inl
+@@ -1,6 +1,6 @@
+ ﻿#pragma once
+ 
+-#include <SdkDdkVer.h>
++#include <sdkddkver.h>
+ 
+ #include "SlimDetours.NDK.inl"
+ #include "SlimDetours.h"
