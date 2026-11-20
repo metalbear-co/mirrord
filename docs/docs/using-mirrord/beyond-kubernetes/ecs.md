@@ -147,7 +147,7 @@ and reference it from each application container instead of listing those variab
 
 ## Troubleshooting
 
-These apply in every deployment mode. For connection and authentication problems, see your deployment mode's guide, such as [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting). The bootstrap's messages appear in the application container's logs.
+These apply in every deployment mode. For connection and authentication problems, see your deployment mode's guide, such as [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting). The bootstrap's messages appear in the application container's logs when its `environment` sets `MIRRORD_LOG`, for example to `info`.
 
 | Symptom | Likely cause |
 | --- | --- |
@@ -156,3 +156,6 @@ These apply in every deployment mode. For connection and authentication problems
 | The task registers, but mirrord fails with `timed out connecting to the serverless target's agent through sessions-manager` | `MIRRORD_REMOTE_SERVICE`/`MIRRORD_REMOTE_ENVIRONMENT` on the task don't match `target.path`/`target.namespace` in `mirrord-up.yaml`. |
 | `Read-only file system` or `Permission denied` under `/tmp` | The application container has no writable `/tmp` ([Prerequisites](#prerequisites)). |
 | The application container stops at startup: version `GLIBC_2.30` not found, required by `libmirrord_remote_bootstrap.so` | The application image's glibc is older than 2.30 ([Prerequisites](#prerequisites)). |
+| Requests with your session key reach the task instead of your local process, and the application accepts them in workers that run as another user, such as the `www-data` workers of nginx and php-fpm | Bootstraps earlier than 3.236.0 can't hand those workers' connections to mirrord. Upgrade the bootstrap image ([Required versions](README.md#required-versions)). |
+| With a bash script as the container's entrypoint or command, the application starts only after 30 seconds, or hangs where the script runs `$(...)` | Bootstraps earlier than 3.236.0 don't support bash as the container's first process. Upgrade the bootstrap image ([Required versions](README.md#required-versions)). |
+| Your local process reaches the task's server on `localhost` instead of your own, for example your local nginx reaching the task's php-fpm | Set [`feature.network.outgoing.ignore_localhost`](https://metalbear.com/mirrord/docs/config/options#feature-network-outgoing-ignore_localhost) to `true` ([Using mirrord with a workload outside Kubernetes](README.md#using-mirrord-with-a-workload-outside-kubernetes)). |
