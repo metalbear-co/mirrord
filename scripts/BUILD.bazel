@@ -80,6 +80,12 @@ py_binary(
 )
 
 py_binary(
+    name = "update_tools",
+    srcs = ["update_tools.py"],
+    deps = [requirement("certifi")],
+)
+
+py_binary(
     name = "update_images",
     srcs = ["mirrord_update_images.py"],
     main = "mirrord_update_images.py",
