@@ -40,7 +40,7 @@ impl<'a> CiStartCommandHandler<'a> {
     ) -> CiResult<Self> {
         let progress = ProgressTracker::from_env("mirrord ci start");
 
-        let mirrord_for_ci = MirrordCi::new(args.ci_common_args).await?;
+        let mirrord_for_ci = MirrordCi::new(args.ci_common_args)?;
 
         Ok(Self {
             mirrord_for_ci,

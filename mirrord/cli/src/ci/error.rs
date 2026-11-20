@@ -1,6 +1,11 @@
+use std::time::Duration;
+
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
 use thiserror::Error;
+
+#[cfg(not(target_os = "windows"))]
+use crate::ci::stop::StopTarget;
 
 #[derive(Error, Debug, Diagnostic)]
 pub(crate) enum CiError {
@@ -28,6 +33,33 @@ pub(crate) enum CiError {
 
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
+
+    #[error("another mirrord process held the mirrord ci session's lock for more than {timeout:?}")]
+    #[diagnostic(help(
+        "`mirrord ci stop` stops every mirrord ci session on this machine, including sessions \
+         that are still starting, so `mirrord ci stop` in another CI job on the same runner can \
+         reach this session. That stop holds the session's lock while it stops the session, and \
+         stopping a `mirrord ci container` session can take up to 10 seconds, which is longer \
+         than this process waits for the lock. Run this CI job again once that stop is done."
+    ))]
+    SessionLocked { timeout: Duration },
+
+    /// Lists each process, process group, and container that `mirrord ci stop` could not stop,
+    /// and each session whose lock or state it could not open, read, write, or remove, with the
+    /// reason. The stop prints no other report of these failures, so the user needs the pids and
+    /// container ids here to find what is still running.
+    #[cfg(not(target_os = "windows"))]
+    #[error(
+        "`mirrord ci stop` failed on these:{}",
+        .failures
+            .iter()
+            .map(|(target, error)| format!("\n- {target}: {error}"))
+            .collect::<String>()
+    )]
+    #[diagnostic(help("Fix the reasons above, then run `mirrord ci stop` again to retry them."))]
+    TargetsNotStopped {
+        failures: Vec<(StopTarget, CiError)>,
+    },
 
     #[error(
         "`MIRRORD_CI_API_KEY` is required for operator-backed `mirrord ci start` and `mirrord ci container` when the operator does not advertise keyless CI."
