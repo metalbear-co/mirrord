@@ -110,10 +110,13 @@ impl ConfigField {
             |plan| quote! { #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::#plan))] },
         );
 
+        let skip_schema = flags.skip_schema.then(|| quote! { #[schemars(skip)] });
+
         quote! {
             #(#docs)*
             #deprecated
             #plan
+            #skip_schema
             #rename
             #[serde(default, skip_serializing_if = "Option::is_none")]
             #vis #ident: Option<#target>

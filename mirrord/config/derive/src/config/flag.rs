@@ -15,7 +15,7 @@ pub enum ConfigFlagsType {
 /// Contains flags parsed from `#[config(...)]` and `#[doc]` attributes
 ///
 /// ConfigFlagsType::Container -> ["derive", "generator", "map_to"]
-/// ConfigFlagsType::Field -> ["default", "env", "nested", "plan", "rename", "toggleable"]
+/// ConfigFlagsType::Field -> ["default", "env", "nested", "plan", "rename", "skip_schema", "toggleable"]
 #[derive(Debug, Default)]
 pub struct ConfigFlags {
     pub doc: Vec<Attribute>,
@@ -44,6 +44,10 @@ pub struct ConfigFlags {
     /// `#[config(plan = Team)]`. Recorded in the schema as `x-mirrord-plan`, where `mirrord mcp`
     /// reads it.
     pub plan: Option<Ident>,
+
+    /// Leaves the option out of the schema, e.g. `#[config(skip_schema)]`, for an option that
+    /// users shouldn't see, such as one that only debug builds have.
+    pub skip_schema: bool,
 }
 
 /// Retrieves the [`enum@Lit`] that is inside a [`MetaNameValue`].
@@ -112,6 +116,11 @@ impl ConfigFlags {
                         if mode == ConfigFlagsType::Field && path.is_ident("unstable") =>
                     {
                         flags.unstable = true;
+                    }
+                    Meta::Path(path)
+                        if mode == ConfigFlagsType::Field && path.is_ident("skip_schema") =>
+                    {
+                        flags.skip_schema = true;
                     }
                     Meta::NameValue(meta)
                         if mode == ConfigFlagsType::Field && meta.path.is_ident("env") =>
