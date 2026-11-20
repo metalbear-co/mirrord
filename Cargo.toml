@@ -273,8 +273,10 @@ rmcp = { version = "3.5", default-features = false, features = [
     "server",
     "transport-io",
 ] }
-rstest = { version = "0.23", default-features = false, features = ["crate-name"] }
 rust-embed = "8"
+# Without the `crate-name` feature, because it makes rstest's macros read `Cargo.toml`, and Bazel's
+# compile actions don't have the manifests.
+rstest = { version = "0.23", default-features = false }
 rustls = "0.23"
 rustls-pemfile = "2"
 rustls-platform-verifier = "0.7"
