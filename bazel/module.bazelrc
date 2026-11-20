@@ -110,6 +110,7 @@ common --@rules_img//img/settings:compression_jobs=nproc
 
 # Rustfmt and clippy -------------------------------------------------------------------------------
 
+common --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
 
 build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
 build:clippy --output_groups=clippy_checks

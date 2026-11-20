@@ -1,0 +1,9 @@
+line-length = 120
+
+# `docs/`, `guides/` and `skills/` came from repositories that didn't use Ruff, so their scripts stay
+# out of it until a cleanup, as those trees stay out of typos.
+extend-exclude = ["docs", "guides", "skills"]
+
+# The apps leave files open on purpose, because the tests check how the layer handles that.
+[lint.per-file-ignores]
+"tests/apps/python-e2e/**" = ["SIM115"]
