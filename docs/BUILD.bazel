@@ -1,0 +1,14 @@
+# The docs pages that `mirrord mcp` embeds (`//mirrord/mcp:corpus`): the Markdown pages without
+# GitBook's navigation and without the hidden directories, such as GitBook's `.gitbook/`.
+filegroup(
+    name = "pages",
+    srcs = glob(
+        ["docs/**/*.md"],
+        exclude = [
+            "docs/SUMMARY.md",
+            "docs/**/.*",
+            "docs/**/.*/**",
+        ],
+    ),
+    visibility = ["//mirrord/mcp:__pkg__"],
+)

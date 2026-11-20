@@ -1,5 +1,6 @@
 //! Packs the docs and skills that `mirrord mcp` answers from into a gzipped tar that
-//! `src/corpus.rs` embeds, so the files take less space in the binary.
+//! `src/corpus.rs` embeds, so the files take less space in the binary, and passes the tar's path to
+//! rustc in `MIRRORD_BUNDLED_MCP_CORPUS`, as Bazel does (see `BUILD.bazel`).
 //!
 //! They are read from `docs/docs` and `skills/skills` at the repository root, so the binary serves
 //! the docs and skills of the checkout it is built from. The files are read from disk, untracked
@@ -19,11 +20,8 @@ use flate2::{Compression, write::GzEncoder};
 
 /// A directory of the repository whose files are packed.
 struct Corpus {
-    /// The directory the files are packed under, which `src/corpus.rs` keys them by, e.g.
-    /// `skills/mirrord-up/SKILL.md`.
-    name: &'static str,
-    /// The directory, relative to the repository root, whose files are packed under `name` at their
-    /// paths relative to this directory.
+    /// The directory, relative to the repository root, whose files are packed at their paths in
+    /// the repository, as Bazel packs them.
     root: &'static str,
     /// The extensions of the files that are packed. `mirrord mcp` serves text only, so images and
     /// other binary files are left out.
@@ -34,14 +32,12 @@ struct Corpus {
 
 const CORPORA: [Corpus; 2] = [
     Corpus {
-        name: "docs",
         root: "docs/docs",
         extensions: &["md"],
         // GitBook's navigation, not a page.
         exclude: &["SUMMARY.md"],
     },
     Corpus {
-        name: "skills",
         root: "skills/skills",
         // Skills point the agent at the files bundled with them, such as Helm values, so those are
         // served too.
@@ -100,6 +96,10 @@ fn main() -> io::Result<()> {
         archive.append_data(&mut header, &path, contents.as_bytes())?;
     }
     archive.into_inner()?.finish()?;
+    println!(
+        "cargo::rustc-env=MIRRORD_BUNDLED_MCP_CORPUS={}",
+        out.join("corpus.tar.gz").display()
+    );
 
     Ok(())
 }
@@ -142,7 +142,7 @@ fn collect(
             .iter()
             .any(|excluded| relative == Path::new(excluded));
         if packed && excluded.not() {
-            files.push((Path::new(corpus.name).join(relative), path));
+            files.push((Path::new(corpus.root).join(relative), path));
         }
     }
     Ok(())
