@@ -62,6 +62,7 @@ async fn serve_remote_file(intproxy: &mut TestIntProxy, contents: &str, remote_f
             }
             ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd })) => {
                 assert_eq!(fd, remote_fd);
+                intproxy.answer_file_close().await;
                 break;
             }
             other => panic!("Invalid message while serving remote file: {other:?}"),

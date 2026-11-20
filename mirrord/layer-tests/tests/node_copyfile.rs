@@ -148,6 +148,7 @@ async fn node_copyfile(config_dir: &Path) {
             ..
         }))
     );
+    intproxy.answer_file_close().await;
     assert_matches!(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest {
@@ -155,6 +156,7 @@ async fn node_copyfile(config_dir: &Path) {
             ..
         }))
     );
+    intproxy.answer_file_close().await;
 
     test_process.wait_assert_success().await;
     test_process.assert_no_error_in_stdout().await;

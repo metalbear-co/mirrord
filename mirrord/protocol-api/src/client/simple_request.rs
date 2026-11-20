@@ -356,6 +356,8 @@ impl_file_request_with_response!(FtruncateRequest, (), Ftruncate, COPYFILE_VERSI
 impl_file_request_with_response!(FutimensRequest, (), Futimens, COPYFILE_VERSION);
 impl_file_request_with_response!(FchownRequest, (), Fchown, COPYFILE_VERSION);
 impl_file_request_with_response!(FchmodRequest, (), Fchmod, COPYFILE_VERSION);
+impl_file_request_with_response!(CloseFileRequest, (), Close);
+impl_file_request_with_response!(CloseDirRequest, (), Close);
 
 impl FileRequestWithResponse for XstatFsRequestV2 {
     type Response = XstatFsResponseV2;
@@ -400,25 +402,5 @@ impl FileRequestWithResponse for StatFsRequestV2 {
             FileResponse::XstatFs(result) => Ok(result.map(From::from)),
             other => Err(other),
         }
-    }
-}
-
-/// Trait for simple [`mirrord_protocol`] requests that do not trigger any response from server.
-///
-/// Currently only [`CloseFileRequest`] and [`CloseDirRequest`].
-pub trait SimpleRequestNoResponse {
-    /// Wraps this request into a [`ClientMessage`] to be sent to the server.
-    fn prepare(self) -> ClientMessage;
-}
-
-impl SimpleRequestNoResponse for CloseFileRequest {
-    fn prepare(self) -> ClientMessage {
-        ClientMessage::FileRequest(FileRequest::Close(self))
-    }
-}
-
-impl SimpleRequestNoResponse for CloseDirRequest {
-    fn prepare(self) -> ClientMessage {
-        ClientMessage::FileRequest(FileRequest::CloseDir(self))
     }
 }

@@ -232,6 +232,7 @@ pub enum FileResponse {
     Futimens(RemoteResult<()>),
     Fchown(RemoteResult<()>),
     Fchmod(RemoteResult<()>),
+    Close(RemoteResult<()>),
 }
 
 /// `-agent` --> `-layer` messages.

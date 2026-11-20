@@ -23,7 +23,7 @@
 //! All instances of a failed network operation are marked by the return
 //! value of [`STATUS_UNEXPECTED_NETWORK_ERROR`].
 
-use mirrord_layer_lib::proxy_connection::make_proxy_request_no_response;
+use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::CloseFileRequest;
 use winapi::shared::{
     ntdef::{HANDLE, NTSTATUS},
@@ -44,7 +44,7 @@ pub(in crate::hooks::files) unsafe fn handle(handle: HANDLE) -> NTSTATUS {
         if let Some(managed_handle) = managed_file(handle)
             && let Ok(handle_context) = managed_handle.try_read()
         {
-            let req = make_proxy_request_no_response(CloseFileRequest {
+            let req = make_proxy_request_with_response(CloseFileRequest {
                 fd: handle_context.fd,
             });
 
@@ -52,9 +52,22 @@ pub(in crate::hooks::files) unsafe fn handle(handle: HANDLE) -> NTSTATUS {
             // agent response, so we don't leak.
             remove_handle(handle);
 
-            if req.is_err() {
-                tracing::error!("nt_close_hook: Failed closing fd when closing file handle!");
-                return STATUS_UNEXPECTED_NETWORK_ERROR;
+            match req {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::error!(
+                        ?error,
+                        "nt_close_hook: The remote close of the file handle failed!"
+                    );
+                    return STATUS_UNEXPECTED_NETWORK_ERROR;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        "nt_close_hook: Failed closing fd when closing file handle!"
+                    );
+                    return STATUS_UNEXPECTED_NETWORK_ERROR;
+                }
             }
 
             tracing::debug!(

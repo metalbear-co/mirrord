@@ -7,7 +7,7 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::RangeInclusive,
     os::{
-        fd::{AsFd, AsRawFd},
+        fd::{AsFd, AsRawFd, IntoRawFd},
         unix::{ffi::OsStrExt, fs::MetadataExt, prelude::FileExt},
     },
     path::{Path, PathBuf, StripPrefixError},
@@ -22,7 +22,9 @@ use nix::{fcntl::AT_FDCWD, unistd::UnlinkatFlags};
 use tracing::{Level, error, trace};
 
 use crate::{
-    error::AgentResult, metrics::OPEN_FD_COUNT, util::path_resolver::InTargetPathResolver,
+    error::AgentResult,
+    metrics::OPEN_FD_COUNT,
+    util::{path_resolver::InTargetPathResolver, protocol_version::ClientProtocolVersion},
 };
 
 trait PathExt {
@@ -109,6 +111,7 @@ pub(crate) struct FileManager {
     dir_streams: HashMap<u64, Enumerate<ReadDir>>,
     getdents_streams: HashMap<u64, Peekable<GetDEnts64Stream>>,
     fds_iter: RangeInclusive<u64>,
+    protocol_version: ClientProtocolVersion,
 }
 
 impl Drop for FileManager {
@@ -274,22 +277,26 @@ impl FileManager {
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    pub fn new(pid: Option<u64>) -> Self {
-        Self::with_resolver(pid.map(InTargetPathResolver::from_pid))
+    pub fn new(pid: Option<u64>, protocol_version: ClientProtocolVersion) -> Self {
+        Self::with_resolver(pid.map(InTargetPathResolver::from_pid), protocol_version)
     }
 
     #[tracing::instrument(level = Level::TRACE, ret)]
-    pub fn new_workload_companion() -> Self {
-        Self::with_resolver(InTargetPathResolver::from_root().into())
+    pub fn new_workload_companion(protocol_version: ClientProtocolVersion) -> Self {
+        Self::with_resolver(InTargetPathResolver::from_root().into(), protocol_version)
     }
 
-    fn with_resolver(path_resolver: Option<InTargetPathResolver>) -> Self {
+    fn with_resolver(
+        path_resolver: Option<InTargetPathResolver>,
+        protocol_version: ClientProtocolVersion,
+    ) -> Self {
         Self {
             path_resolver,
             open_files: Default::default(),
             dir_streams: Default::default(),
             getdents_streams: Default::default(),
             fds_iter: (0..=u64::MAX),
+            protocol_version,
         }
     }
 
@@ -706,36 +713,60 @@ impl FileManager {
             })
     }
 
-    /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
-    /// on `close` of an fd.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn close(&mut self, fd: u64) -> Option<FileResponse> {
-        if self.open_files.remove(&fd).is_none() {
-            error!(fd, "fd not found!");
-        } else {
-            OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        }
+        let response = match self.open_files.remove(&fd) {
+            Some(entry) => {
+                let file = match entry {
+                    RemoteFile::File(file) => file,
+                    RemoteFile::Directory { file, .. } => file,
+                };
+                let fd = file.into_raw_fd();
+                let result = nix::unistd::close(fd).map_err(|errno| {
+                    ResponseError::from(io::Error::from_raw_os_error(errno as i32))
+                });
 
-        None
+                OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+
+                result
+            }
+            None => {
+                error!(fd, "fd not found!");
+                Err(io::Error::from_raw_os_error(libc::EBADF).into())
+            }
+        };
+
+        self.protocol_version
+            .matches(&CLOSE_RESPONSE_VERSION)
+            .then_some(FileResponse::Close(response))
     }
 
-    /// Always returns `None`, since we don't return any [`FileResponse`] back to mirrord
-    /// on `close_dir` of an fd.
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     pub(crate) fn close_dir(&mut self, fd: u64) -> Option<FileResponse> {
         let closed_dir_stream = self.dir_streams.remove(&fd);
         let closed_getdents_stream = self.getdents_streams.remove(&fd);
 
-        if closed_dir_stream.is_some() && closed_getdents_stream.is_some() {
+        // Unlike [`Self::close`], we do not call `libc::close` here
+        // and return the real error from the OS, because:
+        //
+        // 1. It would be a pain as std does not expose a way to get the raw fd
+        // 2. In practice the only real error is EBADF which we can handle anyway
+
+        let response = if closed_dir_stream.is_some() && closed_getdents_stream.is_some() {
             // Closed `dirstream` and `dentsstream`
             OPEN_FD_COUNT.fetch_sub(2, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
         } else if closed_dir_stream.is_some() || closed_getdents_stream.is_some() {
             OPEN_FD_COUNT.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
         } else {
             error!("FileManager::close_dir -> fd {:#?} not found", fd);
-        }
+            Err(io::Error::from_raw_os_error(libc::EBADF).into())
+        };
 
-        None
+        self.protocol_version
+            .matches(&CLOSE_RESPONSE_VERSION)
+            .then_some(FileResponse::Close(response))
     }
 
     pub(crate) fn access(
@@ -1079,13 +1110,19 @@ mod tests {
 
         let (manager, dir) = match mode {
             Mode::Targeted => (
-                FileManager::with_resolver(Some(InTargetPathResolver::with_root_path(
-                    root.path().to_path_buf(),
-                ))),
+                FileManager::with_resolver(
+                    Some(InTargetPathResolver::with_root_path(
+                        root.path().to_path_buf(),
+                    )),
+                    Default::default(),
+                ),
                 PathBuf::from("/a/b/c"),
             ),
-            Mode::Targetless => (FileManager::new(None), host_dir.clone()),
-            Mode::WorkloadCompanion => (FileManager::new_workload_companion(), host_dir.clone()),
+            Mode::Targetless => (FileManager::new(None, Default::default()), host_dir.clone()),
+            Mode::WorkloadCompanion => (
+                FileManager::new_workload_companion(Default::default()),
+                host_dir.clone(),
+            ),
         };
 
         fs::write(host_dir.join("file"), "hello").unwrap();

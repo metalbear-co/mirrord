@@ -27,6 +27,7 @@ async fn tmp_dir_read_locally() {
             mirrord_protocol::file::CloseFileRequest { fd },
         )) => {
             assert_eq!(fd, 1);
+            intproxy.answer_file_close().await;
         }
         other => {
             panic!("unexpected message: {other:?}")

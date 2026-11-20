@@ -337,6 +337,7 @@ impl TestIntProxy {
                 mirrord_protocol::file::CloseFileRequest { fd: 0xb16 }
             ))
         );
+        self.answer_file_close().await;
 
         let port = app_port?;
         let port_subscribe = self
@@ -787,7 +788,7 @@ impl TestIntProxy {
             .unwrap();
     }
 
-    /// Read next layer message and verify it's a close request.
+    /// Read next layer message, verify it's a close request, and answer it.
     pub async fn expect_file_close(&mut self, fd: u64) {
         assert_eq!(
             self.codec.next().await.unwrap().unwrap(),
@@ -795,6 +796,17 @@ impl TestIntProxy {
                 mirrord_protocol::file::CloseFileRequest { fd }
             ))
         );
+        self.answer_file_close().await;
+    }
+
+    /// Answers a `Close` or `CloseDir` request with success.
+    ///
+    /// The fake agent settles on the client's protocol version, which is at least
+    /// `CLOSE_RESPONSE_VERSION`, so the intproxy waits for this reply before the layer's close
+    /// returns.
+    pub async fn answer_file_close(&mut self) {
+        self.send(DaemonMessage::File(FileResponse::Close(Ok(()))))
+            .await;
     }
 
     /// Verify the next message from the layer is an access to the given path with the given mode.
