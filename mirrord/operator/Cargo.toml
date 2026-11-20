@@ -108,6 +108,7 @@ sha2 = { workspace = true, optional = true, features = ["asm"] }
 [dev-dependencies]
 rstest.workspace = true
 serde-saphyr.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 tower-test.workspace = true
 

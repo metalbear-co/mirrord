@@ -410,7 +410,7 @@ impl Commands {
             Self::Preview(args) => match &args.command {
                 PreviewCommand::Status(args) => args.all_namespaces,
                 PreviewCommand::Stop(args) => args.all_namespaces,
-                PreviewCommand::Down => true,
+                PreviewCommand::Down | PreviewCommand::Wake(_) => true,
                 PreviewCommand::Logs(args) => args.all_namespaces,
                 PreviewCommand::Start(_)
                 | PreviewCommand::Up(_)
@@ -1668,6 +1668,18 @@ pub(super) enum PreviewCommand {
     /// `mirrord-up.yaml` when it exists), as `mirrord preview up` picks them. Without a file, in
     /// the context of `--context`, the global config or the kubeconfig.
     Down,
+    /// Wake every preview environment under a key, in all namespaces, and wait until each one's
+    /// pods are ready.
+    ///
+    /// Finds the key and the kube contexts the way `mirrord preview down` does. A preview that is
+    /// idle boots its pods, and one that already runs counts as ready. While the command runs, no
+    /// preview under the key idles, and the idle countdown of each one starts over when it ends.
+    /// A multi-cluster preview also wakes its replica copies on the other workload clusters.
+    ///
+    /// A preview that a `mirrord exec` session pauses is skipped with a warning. The command fails
+    /// when a preview fails or isn't ready within `--timeout`, and succeeds when there is nothing
+    /// to wake.
+    Wake(PreviewWakeArgs),
     /// Print the output of preview environments' pods.
     Logs(PreviewLogsArgs),
     /// Show how the manifests passed with `--resource` differ from the live cluster.
@@ -1684,17 +1696,17 @@ pub(super) struct PreviewCommonArgs {
     /// Environment key for the preview environment.
     ///
     /// Can also be set with the `MIRRORD_KEY` environment variable or via the `key` field in the
-    /// mirrord config file. `mirrord preview up`, `mirrord preview sync` and `mirrord preview
-    /// down` read no mirrord config: without either, their key is the git branch
-    /// (`GITHUB_HEAD_REF` when set).
+    /// mirrord config file. `mirrord preview up`, `mirrord preview sync`, `mirrord preview down`
+    /// and `mirrord preview wake` read no mirrord config: without either, their key is the git
+    /// branch (`GITHUB_HEAD_REF` when set).
     #[arg(short = 'k', long, global = true)]
     pub key: Option<String>,
 
     /// Load config from config file.
     ///
     /// When using -f flag without a value, defaults to "./.mirrord/mirrord.json". For
-    /// `mirrord preview up`, `mirrord preview sync` and `mirrord preview down`, the
-    /// mirrord-up.yaml to read instead, `mirrord-up.yaml` by default.
+    /// `mirrord preview up`, `mirrord preview sync`, `mirrord preview down` and `mirrord preview
+    /// wake`, the mirrord-up.yaml to read instead, `mirrord-up.yaml` by default.
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = DEFAULT_PREVIEW_CONFIG_FILE, num_args = 0..=1, global = true)]
     pub config_file: Option<PathBuf>,
 
@@ -2030,6 +2042,21 @@ pub(super) struct PreviewStopArgs {
     /// Operate on all namespaces.
     #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
     pub all_namespaces: bool,
+}
+
+/// Arguments for `mirrord preview wake`.
+#[derive(Args, Debug)]
+pub(super) struct PreviewWakeArgs {
+    /// How long (in seconds) to wait for every preview to be ready.
+    ///
+    /// Defaults to the longest wake timeout of the previews under the key: each one's
+    /// `feature.preview.idle.wake_timeout_secs`, or the operator's default without one.
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
+    /// Ask every preview to wake and return without waiting for its pods.
+    #[arg(long)]
+    pub no_wait: bool,
 }
 
 /// Arguments for `mirrord preview logs`.
@@ -2791,6 +2818,34 @@ mod tests {
     #[case(&["mirrord", "operator", "session", "stop", "--all", "-f", "config.json"])]
     fn global_management_flags_parse_before_and_after_subcommands(#[case] args: &[&str]) {
         Cli::try_parse_from(args).unwrap();
+    }
+
+    /// `--timeout` and `--no-wait` reach the wake, the key goes before or after the subcommand,
+    /// and like `mirrord preview down` the wake covers every namespace.
+    #[rstest]
+    #[case(&["mirrord", "preview", "wake", "-k", "dev"], None, false)]
+    #[case(
+        &["mirrord", "preview", "-k", "dev", "wake", "--timeout", "30", "--no-wait"],
+        Some(30),
+        true
+    )]
+    fn preview_wake_parses(
+        #[case] args: &[&str],
+        #[case] timeout: Option<u64>,
+        #[case] no_wait: bool,
+    ) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(cli.commands.all_namespaces());
+
+        let Commands::Preview(args) = cli.commands else {
+            panic!("expected `preview` command");
+        };
+        assert_eq!(args.common.key.as_deref(), Some("dev"));
+        let PreviewCommand::Wake(wake) = args.command else {
+            panic!("expected `wake` command");
+        };
+        assert_eq!(wake.timeout, timeout);
+        assert_eq!(wake.no_wait, no_wait);
     }
 
     #[rstest]
