@@ -102,8 +102,7 @@ mod main {
     /// [`MIRRORD_BINARIES_VERSION_PATH_BUF`] on extraction so we can detect when an upgraded CLI
     /// ships a newer bundle and needs to re-extract.
     ///
-    /// Must be kept in sync with the version downloaded by `xtask` (see
-    /// `xtask/src/tasks/sip_binaries.rs`).
+    /// Must match the version of `apple_utils` that Bazel downloads.
     pub const APPLE_UTILS_VERSION: &str = "v10";
 
     /// Set on the first patched process when SIP patching had to use an x86_64 system binary.
