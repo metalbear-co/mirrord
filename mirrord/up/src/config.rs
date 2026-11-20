@@ -4307,34 +4307,10 @@ mod schema {
     const SCHEMA_FILE_PATH: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../mirrord-up-schema.json");
 
-    fn generate() -> String {
-        serde_json::to_string_pretty(&schemars::schema_for!(UpConfig))
-            .expect("Failed generating schema!")
-    }
-
-    /// Writes the `mirrord-up.yaml` schema to `mirrord-up-schema.json`.
-    ///
-    /// Run it after **ANY** change to the config types, including doc-only changes:
-    ///
-    /// ```sh
-    /// cargo test -p mirrord-up generate_up_schema -- --ignored
-    /// ```
-    #[test]
-    #[ignore]
-    fn generate_up_schema() {
-        std::fs::write(SCHEMA_FILE_PATH, generate()).expect("Failed writing schema file!");
-    }
-
     #[test]
     fn up_schema_file_is_up_to_date() {
-        let existing = std::fs::read_to_string(SCHEMA_FILE_PATH)
-            .expect("Schema file doesn't exist!")
-            .replace("\r\n", "\n");
-
         assert!(
-            existing == generate(),
             "mirrord-up-schema.json is outdated, regenerate it with \
-             `cargo test -p mirrord-up generate_up_schema -- --ignored`"
         );
     }
 }

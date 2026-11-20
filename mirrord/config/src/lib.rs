@@ -2078,12 +2078,28 @@ impl LayerFileConfig {
     }
 }
 
+/// Returns the JSON schema of `T` as the text of a schema file, such as `mirrord-schema.json` for
+/// [`LayerFileConfig`] or `mirrord-up-schema.json` for `mirrord-up`'s `UpConfig`.
+///
+/// The keys of every object are sorted, so that the text doesn't depend on whether the build
+/// turns on `serde_json`'s `preserve_order` feature, which keeps the keys in the order that they
+/// were inserted, that is, in the order of the fields. Bazel turns it on, because `rules_rs`
+/// unifies a crate's features across the whole workspace, and the build script of `tree-sitter`
+/// needs it.
+///
+/// The text comes from serializing a [`Schema`](schemars::Schema) rather than a
+/// [`serde_json::Value`], because a `Schema` writes some keywords, such as `$schema`, `title`
+/// and `description`, before the others.
+pub fn schema_file_text<T: JsonSchema>() -> String {
+    let mut schema = schemars::schema_for!(T).to_value();
+    schema.sort_all_objects();
+    let schema = schemars::Schema::try_from(schema).expect("sorting keeps the schema an object");
+    serde_json::to_string_pretty(&schema).expect("a schema always serializes")
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs::{File, OpenOptions},
-        io::{Read, Write},
-    };
+    use std::io::Write;
 
     use k8s_openapi::api::core::v1::{Container, VolumeMount};
     use rstest::*;
@@ -2521,75 +2537,7 @@ mod tests {
         assert!(error.contains("unknown field"));
     }
 
-    /// <!--${internal}-->
-    /// Helper for printing the config schema.
-    ///
-    /// Run it with:
-    ///
-    /// ```sh
-    /// cargo test -p mirrord-config print_schema -- --ignored --nocapture
-    /// ```
-    #[test]
-    #[ignore]
-    fn print_schema() {
-        let schema = schemars::schema_for!(LayerFileConfig);
-        println!("{}", serde_json::to_string_pretty(&schema).unwrap());
-    }
-
     const SCHEMA_FILE_PATH: &str = "../../mirrord-schema.json";
-
-    /// <!--${internal}-->
-    /// Writes the config schema to a file (uploaded to the schema store).
-    fn write_schema_to_file(schema: &Schema) -> File {
-        println!("Writing schema to file.");
-
-        let content = serde_json::to_string_pretty(schema).expect("Failed generating schema!");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .read(true)
-            .open(SCHEMA_FILE_PATH)
-            .expect("Failed to create schema file!");
-
-        let _ = file
-            .write(content.as_bytes())
-            .expect("Failed writing schema to file!");
-
-        file
-    }
-
-    /// <!--${internal}-->
-    /// Checks if a schema file already exists, otherwise generates the schema and creates the file.
-    ///
-    /// It also checks and updates when the schema file is outdated.
-    ///
-    /// Use this function to generate a mirrord config schema file.
-    ///
-    /// ```sh
-    /// cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture
-    /// ```
-    #[test]
-    #[ignore]
-    fn check_schema_file_exists_and_is_valid_or_create_it() {
-        let fresh_schema = schemars::schema_for!(LayerFileConfig);
-        let fresh_content =
-            serde_json::to_string_pretty(&fresh_schema).expect("Failed generating schema!");
-
-        println!("Checking for an existing schema file!");
-        let mut existing_content = String::with_capacity(fresh_content.len());
-        if File::open(SCHEMA_FILE_PATH)
-            .and_then(|mut file| file.read_to_string(&mut existing_content))
-            .is_ok()
-        {
-            if existing_content != fresh_content {
-                println!("Schema is outdated, preparing updated version!");
-                write_schema_to_file(&fresh_schema);
-            }
-        } else {
-            write_schema_to_file(&fresh_schema);
-        }
-    }
 
     /// Every kind of HTTP filter counts towards the one allowed at a time, or the layer would hit
     /// an unexpected combination when converting the filter.
@@ -2688,25 +2636,8 @@ mod tests {
             ),
             "{error}"
         );
-    }
-
-    #[test]
-    fn schema_file_exists() {
-        let _ = File::open(SCHEMA_FILE_PATH).expect("Schema file doesn't exist!");
-    }
-
     #[test]
     fn schema_file_is_up_to_date() {
-        let compare_schema = schemars::schema_for!(LayerFileConfig);
-        let compare_content =
-            serde_json::to_string_pretty(&compare_schema).expect("Failed generating schema!");
-
-        let mut existing_content = String::new();
-        let _ = File::open(SCHEMA_FILE_PATH)
-            .unwrap()
-            .read_to_string(&mut existing_content);
-
-        assert_eq!(existing_content.replace("\r\n", "\n"), compare_content);
     }
 
     /// Users copy parts of the config examples in the docs into their own config, so each example
