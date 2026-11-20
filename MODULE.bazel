@@ -7,11 +7,14 @@ bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "llvm", version = "0.8.27")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_distroless", version = "0.9.4")
 bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "rules_img", version = "0.3.25")
 bazel_dep(name = "rules_nodejs", version = "6.7.7")
 bazel_dep(name = "rules_python", version = "2.4.6")
 bazel_dep(name = "rules_rs", version = "0.2.4")
 bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "tar.bzl", version = "0.10.9")
 bazel_dep(name = "toml.bzl", version = "0.5.0")
 
 # The C libraries that the `-sys` crates link, and the assembler that builds AWS-LC for x86-64
@@ -217,6 +220,69 @@ use_repo(npm, "npm")
 pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
 pnpm.pnpm(pnpm_version_from = "//:package.json")
 use_repo(pnpm, "pnpm")
+
+# Images -------------------------------------------------------------------------------------------
+
+pull = use_repo_rule("@rules_img//img:pull.bzl", "pull")
+
+# `debian:trixie`, the base of the CLI's image and of the images of the end-to-end tests' apps.
+#
+# Bazel only downloads the image's manifests and configs. A push or a load that needs one of the
+# image's layers downloads it from Docker Hub when it runs.
+pull(
+    name = "debian",
+    registry = "index.docker.io",
+    repository = "library/debian",
+    digest = "sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+    tag = "trixie",
+)
+
+# The Debian packages that the images take files from. Each `apt.install` resolves its packages from
+# the snapshot of Debian's archive in `apt.sources_list`.
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+
+# `//mirrord/agent:image_runtime` copies the agent image's programs out of these packages.
+apt.install(
+    dependency_set = "agent_runtime",
+    packages = [
+        # The programs look for the dynamic linker in `/lib` or `/lib64`, but trixie installs it
+        # under `/usr`, and `base-files` has the links from `/lib` and `/lib64` into `/usr`.
+        "base-files",
+        "conntrack",
+        "coreutils",
+        "iproute2",
+        "iptables",
+    ],
+    suites = ["trixie"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["trixie"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261110T000000Z"],
+)
+
+# The `debian` base image has no trust store, and the CLI's HTTP clients need one, so
+# `//bazel:cacerts_layer` builds one from Debian's `ca-certificates` package.
+apt.install(
+    dependency_set = "trixie",
+    include_transitive = False,
+    packages = ["ca-certificates"],
+    suites = ["trixie"],
+)
+use_repo(
+    apt,
+    "agent_runtime",
+    "trixie",
+)
 
 # Test apps ----------------------------------------------------------------------------------------
 
