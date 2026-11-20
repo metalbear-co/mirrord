@@ -3857,6 +3857,7 @@ mod test {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
+        sync::{mpsc, oneshot},
     };
 
     use super::{
@@ -3870,6 +3871,26 @@ mod test {
         },
         crd::{MirrordOperatorCrd, session::SessionCiInfo},
     };
+
+    /// The requests of a [`mock_client`], each with the sender of its response.
+    pub(super) type MockRequests =
+        mpsc::UnboundedReceiver<(Request<Body>, oneshot::Sender<Response<Body>>)>;
+
+    /// A client whose requests come out of [`MockRequests`], for the test to check and answer.
+    pub(super) fn mock_client() -> (Client, MockRequests) {
+        let (requests_tx, requests_rx) = mpsc::unbounded_channel();
+        let service = tower::service_fn(move |request| {
+            let (response_tx, response_rx) = oneshot::channel();
+            let sent = requests_tx.send((request, response_tx));
+            async move {
+                sent.map_err(|_| "the test stopped answering requests")?;
+                response_rx
+                    .await
+                    .map_err(|_| "the test didn't answer the request")
+            }
+        });
+        (Client::new(service, "default"), requests_rx)
+    }
 
     /// `mirrord preview up` prepares every service and only then starts them all, so a check
     /// that only ran while starting would land after a targeted service already replaced its
@@ -4769,7 +4790,7 @@ mod test {
         #[case] succeeds: bool,
         #[values(false, true)] typed_response: bool,
     ) {
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let (client, mut requests) = mock_client();
         let spec = serde_json::from_value(serde_json::json!({
             "operator_version": "3.218.0",
             "default_namespace": "default",
@@ -4777,7 +4798,7 @@ mod test {
         }))
         .unwrap();
         let api = OperatorApi {
-            client: Client::new(service, "default"),
+            client,
             client_cert: NoClientCert {
                 base_config: Config::new("https://127.0.0.1:9669".parse().unwrap()),
             },
@@ -4793,7 +4814,7 @@ mod test {
         let result = tokio::select! {
             result = api.create_credential_secret("team", "branch", values) => result,
             () = async {
-                while let Some((request, send)) = handle.next_request().await {
+                while let Some((request, send)) = requests.recv().await {
                     let path = request.uri().path().to_owned();
                     let status = if path == NAMESPACED_CREDENTIALS {
                         namespaced_status
@@ -4814,12 +4835,12 @@ mod test {
                     } else {
                         serde_json::json!({"secret_name": "creds"})
                     };
-                    send.send_response(
+                    send.send(
                         Response::builder()
                             .status(status)
                             .body(Body::from(serde_json::to_vec(&response).unwrap()))
                             .unwrap(),
-                    );
+                    ).unwrap();
                 }
             } => unreachable!("the mock service lives as long as the client"),
         };

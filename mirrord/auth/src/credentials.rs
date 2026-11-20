@@ -516,6 +516,7 @@ mod test {
     use k8s_openapi::api::core::v1::Pod;
     use kube::{Client, Resource, api::ObjectMeta, client::Body, core::ClusterResourceScope};
     use serde::{Deserialize, Serialize};
+    use tokio::sync::mpsc;
     use x509_certificate::{
         KeyAlgorithm, X509Certificate, X509CertificateBuilder, rfc2986::CertificationRequest,
         rfc5280,
@@ -529,6 +530,19 @@ mod test {
         error::CredentialStoreError,
         key_pair::KeyPair,
     };
+
+    /// A client that hands each of its requests to the test, and then fails it.
+    fn failing_client() -> (Client, mpsc::UnboundedReceiver<Request<Body>>) {
+        let (requests_tx, requests_rx) = mpsc::unbounded_channel();
+        let service = tower::service_fn(move |request| {
+            let sent = requests_tx.send(request);
+            async move {
+                sent.map_err(|_| "the test stopped reading requests")?;
+                Err::<Response<Body>, _>("the test only reads the requests")
+            }
+        });
+        (Client::new(service, "default"), requests_rx)
+    }
 
     /// Stand-in for the `MirrordClusterOperatorUserCredential` CRD.
     ///
@@ -672,8 +686,7 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
     /// encoding.
     #[tokio::test]
     async fn legacy_crt_request_valid_pem() {
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
-        let client = Client::new(service, "default");
+        let (client, mut requests) = failing_client();
 
         tokio::join!(
             async {
@@ -682,10 +695,10 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
                 // The exact resource type does not matter in this test.
                 Credentials::init::<Pod>(client, "whatever", None)
                     .await
-                    .expect_err("mock service should drop the response sender");
+                    .expect_err("the mock service fails every request");
             },
             async {
-                let (request, _) = handle.next_request().await.unwrap();
+                let request = requests.recv().await.unwrap();
                 assert_eq!(request.method(), Method::POST,);
                 assert_eq!(request.uri().path(), "/api/v1/pods/operator/certificate",);
                 let body = request.into_body().collect_bytes().await.unwrap();
@@ -701,8 +714,7 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
     /// the renewal for every user of an operator with any other license.
     #[tokio::test]
     async fn refresh_requests_regular_credential() {
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
-        let client = Client::new(service, "default");
+        let (client, mut requests) = failing_client();
 
         let (certificate, _) = X509CertificateBuilder::default()
             .create_with_random_keypair(KeyAlgorithm::Ed25519)
@@ -717,10 +729,10 @@ fFTb4xOq+a1HyC3T7ScFiQGBy+oUcwFiCVCUI6AAMAcGAytlcAUAA0EAPBRvsUHo
                 credentials
                     .refresh::<Pod, UserCredential>(client, "whatever", true)
                     .await
-                    .expect_err("mock service should drop the response sender");
+                    .expect_err("the mock service fails every request");
             },
             async {
-                let (request, _) = handle.next_request().await.unwrap();
+                let request = requests.recv().await.unwrap();
                 assert_eq!(request.method(), Method::POST);
                 let body = request.into_body().collect_bytes().await.unwrap();
                 let sent = serde_json::from_slice::<UserCredential>(body.as_ref()).unwrap();

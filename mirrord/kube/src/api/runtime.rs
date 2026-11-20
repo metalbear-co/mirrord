@@ -614,9 +614,29 @@ mod tests {
         service::ServiceTarget,
     };
     use rstest::rstest;
+    use tokio::sync::{mpsc, oneshot};
 
     use super::*;
     use crate::{api::kubernetes::rollout::Rollout, resolved::ResolvedResource};
+
+    /// The requests of a [`mock_client`], each with the sender of its response.
+    type MockRequests = mpsc::UnboundedReceiver<(Request<Body>, oneshot::Sender<Response<Body>>)>;
+
+    /// A client whose requests come out of [`MockRequests`], for the test to check and answer.
+    fn mock_client() -> (Client, MockRequests) {
+        let (requests_tx, requests_rx) = mpsc::unbounded_channel();
+        let service = tower::service_fn(move |request| {
+            let (response_tx, response_rx) = oneshot::channel();
+            let sent = requests_tx.send((request, response_tx));
+            async move {
+                sent.map_err(|_| "the test stopped answering requests")?;
+                response_rx
+                    .await
+                    .map_err(|_| "the test didn't answer the request")
+            }
+        });
+        (Client::new(service, "default"), requests_rx)
+    }
 
     fn assert_pod_list_selector(request: &Request<Body>, expected_selector: &str) {
         assert_eq!(request.method(), Method::GET);
@@ -667,8 +687,7 @@ mod tests {
             "spec": {"selector": selector, "template": {}},
         }))
         .unwrap();
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
-        let client = Client::new(service, "default");
+        let (client, mut requests) = mock_client();
 
         tokio::time::timeout(Duration::from_secs(5), async {
             let (result, ()) = tokio::join!(
@@ -680,20 +699,21 @@ mod tests {
                     }
                 },
                 async {
-                    let (request, send) = handle.next_request().await.unwrap();
+                    let (request, send) = requests.recv().await.unwrap();
                     assert_eq!(request.method(), Method::GET);
                     assert_eq!(
                         request.uri().path(),
                         "/apis/apps/v1/namespaces/workloads/deployments/api"
                     );
-                    send.send_response(Response::new(Body::from(
+                    send.send(Response::new(Body::from(
                         serde_json::to_vec(&deployment).unwrap(),
-                    )));
+                    )))
+                    .unwrap();
 
                     if let Some(expected_selector) = expected_selector {
-                        let (request, send) = handle.next_request().await.unwrap();
+                        let (request, send) = requests.recv().await.unwrap();
                         assert_pod_list_selector(&request, expected_selector);
-                        send.send_response(pod_list_response());
+                        send.send(pod_list_response()).unwrap();
                     }
                 },
             );
@@ -738,30 +758,30 @@ mod tests {
                 serde_json::json!({"selector": selector})
             },
         })).unwrap();
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
-        let client = Client::new(service, "default");
+        let (client, mut requests) = mock_client();
 
         tokio::time::timeout(Duration::from_secs(5), async {
             let (_pods, ()) = tokio::try_join!(RolloutTarget::get_pods(&rollout, &client), async {
                 if referenced {
-                    let (request, send) = handle.next_request().await.unwrap();
+                    let (request, send) = requests.recv().await.unwrap();
                     assert_eq!(request.method(), Method::GET);
                     assert_eq!(
                         request.uri().path(),
                         "/apis/apps/v1/namespaces/workloads/deployments/api"
                     );
-                    send.send_response(Response::new(Body::from(
+                    send.send(Response::new(Body::from(
                         serde_json::to_vec(&serde_json::json!({
                             "apiVersion": "apps/v1", "kind": "Deployment",
                             "metadata": {"name": "api", "namespace": "workloads"},
                             "spec": {"selector": selector, "template": {}},
                         }))
                         .unwrap(),
-                    )));
+                    )))
+                    .unwrap();
                 }
-                let (request, send) = handle.next_request().await.unwrap();
+                let (request, send) = requests.recv().await.unwrap();
                 assert_pod_list_selector(&request, expected_selector);
-                send.send_response(pod_list_response());
+                send.send(pod_list_response()).unwrap();
                 Ok(())
             })
             .unwrap();

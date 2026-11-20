@@ -131,7 +131,6 @@ http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
-tower-test.workspace = true
 
 # Only the tests of `preview sync`, which runs on Unix alone, use these.
 [target.'cfg(unix)'.dev-dependencies]

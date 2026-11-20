@@ -51,7 +51,6 @@ itertools.workspace = true
 http.workspace = true
 rstest.workspace = true
 tempfile.workspace = true
-tower-test.workspace = true
 
 [lib]
 doctest = false
