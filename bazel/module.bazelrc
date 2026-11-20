@@ -58,6 +58,9 @@ build:macos --host_linkopt=-Wno-unused-command-line-argument
 # only in `-c opt` builds.
 build --strip=never
 
+# Makes the `js_binary` launchers native programs, so that they run on Windows without bash.
+common --@aspect_rules_js//js:use_hermetic_launcher
+
 # Uses rules_python's interpreter rather than the `python3` on `PATH`, which NixOS may not have.
 common --@rules_python//python/config_settings:bootstrap_impl=script
 

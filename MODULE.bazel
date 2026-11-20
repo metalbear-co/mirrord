@@ -1,5 +1,6 @@
 module(name = "mirrord")
 
+bazel_dep(name = "aspect_rules_js", version = "3.6.0")
 bazel_dep(name = "bazel_lib", version = "3.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "gazelle", version = "0.54.0")
@@ -200,6 +201,22 @@ crate.annotation(
     gen_build_script = "off",
     deps = ["@xz//:lzma"],
 )
+
+# Frontends ----------------------------------------------------------------------------------------
+
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    pnpm_lock = "//:pnpm-lock.yaml",
+)
+use_repo(npm, "npm")
+
+# The pnpm that `bazel run //:lint` and `bazel run //:format` install the frontends' packages with,
+# and run their checks and formatters with. It's the version in `packageManager`, which Corepack
+# would pick too.
+pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
+pnpm.pnpm(pnpm_version_from = "//:package.json")
+use_repo(pnpm, "pnpm")
 
 # Test apps ----------------------------------------------------------------------------------------
 
