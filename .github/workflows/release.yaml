@@ -1328,75 +1328,118 @@ jobs:
 
   release_winget:
     needs: [validate_release_request, release_gh]
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
+    environment: winget
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-
-      - name: Install .NET runtime for wingetcreate
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Get release version
-        id: version
-        run: |
-          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-
       - name: Update WinGet manifest
         env:
-          # Classic PAT from a bot account. A GitHub App installation token
-          # can't be used here: wingetcreate opens the PR against
+          # Classic PAT of the metalbear-ci bot account. A GitHub App installation
+          # token can't be used here: Komac opens the PR against
           # microsoft/winget-pkgs, where our app isn't (and can't be) installed.
-          # A classic PAT can open a cross-fork PR to a public repo without
-          # write access, which is exactly what WinGet needs.
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          # A fine-grained PAT can't open pull requests on public repositories
+          # outside its resource owner either. A classic PAT can open a
+          # cross-fork PR to a public repo without write access, which is
+          # exactly what WinGet needs.
+          #
+          # The PR is opened from the org fork metalbear-co/winget-pkgs rather
+          # than a personal fork, so the release doesn't depend on one person's
+          # account. CONTRIBUTING.md ("WinGet") says who has access and how the
+          # token is managed. The token needs `public_repo`, and `workflow`
+          # because syncing fast-forwards the fork over upstream changes to
+          # .github/workflows, and GitHub doesn't let a token without
+          # `workflow` change workflow files. Whether creating the PR branch in
+          # the fork also needs `workflow` hasn't been tried.
+          #
+          # The secret lives only in the `winget` environment, whose deployment
+          # branch rule allows only `main`. The token can push to the fork and
+          # open pull requests as metalbear-ci, so a run on any other branch,
+          # whose workflow anyone with write access to this repository can
+          # change, must not be able to read it.
+          GITHUB_TOKEN: ${{ secrets.WINGET_BOT_TOKEN }}
+          # Komac uses the token's login as the fork owner unless this is set.
+          KOMAC_FORK_OWNER: metalbear-co
+          # Komac is pinned by version and SHA-256, so a replaced release asset
+          # fails the job. To upgrade, change the version and take the hash from
+          # the komac-<version>-x86_64-unknown-linux-gnu.tar.gz line of the
+          # release's SHA256SUMS.
+          KOMAC_VERSION: "2.17.2"
+          KOMAC_SHA256: b03b020eec98acfb0b53e284a6e21815b884be33de6785b97e7a120f0e748966
+          MIRRORD_VERSION: ${{ needs.validate_release_request.outputs.version }}
+          # Komac drops colors from most of its output with this set. The
+          # script removes the rest before it matches the output.
+          NO_COLOR: "1"
         run: |
-          $ErrorActionPreference = "Stop"
+          set -euo pipefail
 
-          # Get version from step output
-          $version = "${{ steps.version.outputs.version }}"
+          package_id="MetalBear.mirrord"
+          fork="${KOMAC_FORK_OWNER}/winget-pkgs"
+          installer_url="https://github.com/metalbear-co/mirrord/releases/download/${MIRRORD_VERSION}/mirrord.msi"
 
-          # Construct MSI download URL from GitHub release
-          $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
-          $packageId = "MetalBear.mirrord"
+          echo "Updating WinGet manifest for package '${package_id}' version '${MIRRORD_VERSION}'"
+          echo "Installer URL: ${installer_url}"
 
-          Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
-          Write-Host "Installer URL: $installerUrl"
+          if [[ -z "${GITHUB_TOKEN}" ]]; then
+            echo "::error::WINGET_BOT_TOKEN is not set. Cannot publish to WinGet."
+            exit 1
+          fi
 
-          # Validate the WinGet PAT is set
-          if (-not $env:WINGET_TOKEN) {
-            throw "WINGET_GITHUB_PAT is not set. Cannot publish to WinGet."
-          }
+          # The archive holds the `komac` executable at its root, with its
+          # executable mode, which tar keeps.
+          archive="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl --fail --silent --show-error --location --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/${archive}"
+          echo "${KOMAC_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${RUNNER_TEMP}/${archive}" --directory "${RUNNER_TEMP}" komac
+          komac="${RUNNER_TEMP}/komac"
 
-          # Download wingetcreate
-          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          # `komac update` creates its branch at the latest commit of
+          # microsoft/winget-pkgs, not at the fork's, so the submission doesn't
+          # need the fork to be synced. The sync keeps the org fork current for
+          # anyone who works in it by hand, and shows a broken token as a
+          # warning before `komac update` fails on it.
+          if ! "${komac}" sync-fork; then
+            echo "::warning::Komac couldn't sync ${fork} with microsoft/winget-pkgs; its error is above. The submission goes on, since Komac doesn't branch from the fork's commit. The token may lack the workflow scope, may have expired or been revoked, or GitHub returned an error."
+          fi
 
-          # Update manifest and submit a PR to microsoft/winget-pkgs
-          $output = & .\wingetcreate.exe update $packageId `
-            --version $version `
-            --urls "$installerUrl|x64|machine" `
-            --submit `
-            --token $env:WINGET_TOKEN 2>&1
+          # `|x64` overrides the architecture Komac reads from the MSI, which
+          # reports x86. Komac has no scope suffix; it takes the scope (machine)
+          # from the MSI's ALLUSERS property.
+          update_log="${RUNNER_TEMP}/komac-update.log"
+          update_exit=0
+          "${komac}" update "${package_id}" \
+            --version "${MIRRORD_VERSION}" \
+            --urls "${installer_url}|x64" \
+            --submit 2>&1 | tee "${update_log}" || update_exit=$?
+          # Komac's error reports are colored even with NO_COLOR, and the PR
+          # number can be wrapped in an OSC 8 hyperlink, so color and hyperlink
+          # escape sequences are removed before matching.
+          update_output=$(sed --regexp-extended \
+            's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\x1b\]8;[^\x1b\x07]*(\x1b\\|\x07)//g' "${update_log}")
 
-          $exitCode = $LASTEXITCODE
+          if (( update_exit != 0 )); then
+            # Komac reports a package as missing whenever it can't read the
+            # package's manifests, which includes GitHub API errors.
+            if grep --quiet "does not exist in microsoft/winget-pkgs" <<<"${update_output}"; then
+              echo "::error::Komac couldn't read ${package_id} from microsoft/winget-pkgs. Re-run the job; if it fails again, check that the package exists there."
+            else
+              echo "::error::komac update failed with exit code ${update_exit}; its error is above. Check that WINGET_BOT_TOKEN is valid and that its account can write to ${fork}, then re-run the job. If GitHub refused to create the branch, syncing https://github.com/${fork} by hand ('Sync fork') may help."
+            fi
+            exit 1
+          fi
 
-          # Display output
-          $output | ForEach-Object { Write-Host $_ }
+          # In CI Komac exits 0 without a PR when a PR titled with this package
+          # and version already exists in any state, as on a re-run.
+          if grep --quiet --extended-regexp 'Successfully created microsoft/winget-pkgs#[0-9]+' <<<"${update_output}"; then
+            echo "Successfully updated WinGet manifest"
+          else
+            echo "::warning::Komac created no pull request, most likely because one for ${package_id} ${MIRRORD_VERSION} already exists (open, merged or closed). Check https://github.com/microsoft/winget-pkgs/pulls?q=is%3Apr+${package_id}+${MIRRORD_VERSION}; if it was closed without merging, submit the version by hand as CONTRIBUTING.md (WinGet) describes."
+          fi
 
-          # Check for errors
-          if ($exitCode -ne 0) {
-            if ($output -match "was not found") {
-              throw "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Create the initial package manually first."
-            } else {
-              throw "wingetcreate update failed with exit code $exitCode"
-            }
-          }
-
-          Write-Host "Successfully updated WinGet manifest"
+          # Removes the fork's branches whose PRs were merged, so the fork
+          # doesn't keep one branch per release. Best effort, since the
+          # submission is already done.
+          "${komac}" cleanup --only-merged --all || echo "::warning::komac cleanup failed; the fork keeps its merged branches until a later release removes them."
 
   update_latest:
     needs: [validate_release_request, release_homebrew, check_for_new_docs]
