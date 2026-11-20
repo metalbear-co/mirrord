@@ -516,6 +516,26 @@ pub struct BranchDatabaseStatus {
     pub source_names: Vec<String>,
 }
 
+/// Reason the operator gives on the `Ready` condition of a branch that waits for the
+/// copy-on-write snapshot of its configuration to be built.
+pub const SNAPSHOT_BUILDING_REASON: &str = "SnapshotBuilding";
+
+/// Reason on the `Ready` condition of a branch whose pod starts on a copy-on-write clone, while
+/// its node pulls the snapshot.
+pub const SNAPSHOT_CLONING_REASON: &str = "SnapshotCloning";
+
+impl BranchDatabaseStatus {
+    /// Whether the branch waits for a copy-on-write snapshot to be built or pulled, which takes
+    /// as long as copying the source does.
+    pub fn waits_for_snapshot(&self) -> bool {
+        self.conditions.iter().any(|condition| {
+            condition.type_ == "Ready"
+                && (condition.reason == SNAPSHOT_BUILDING_REASON
+                    || condition.reason == SNAPSHOT_CLONING_REASON)
+        })
+    }
+}
+
 /// Where a branch's data came from: the host, port, and database name of the source the
 /// operator resolved from the branch's connection source. Credentials are never recorded.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
