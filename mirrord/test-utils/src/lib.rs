@@ -192,18 +192,26 @@ impl TestProcess {
         self.stderr_data.read().await.clone()
     }
 
+    /// Asserts that the app logged no record of `level`, like uvicorn's `ERROR:    ...` lines, on
+    /// its stderr or its stdout.
+    ///
+    /// It only looks for the level at the start of a line, because the output has other text with
+    /// the level in it, like the CLI's log of its environment, which has the body of the bash
+    /// function `rlocation` that Bazel's test setup exports, with an `echo "ERROR: ..."`.
     pub async fn assert_log_level(&self, stderr: bool, level: &str) {
-        if stderr {
-            assert!(
-                self.stderr_data.read().await.contains(level).not(),
-                "application stderr should not contain `{level}`"
-            );
+        let (stream, output) = if stderr {
+            ("stderr", self.stderr_data.read().await)
         } else {
-            assert!(
-                self.stdout_data.read().await.contains(level).not(),
-                "application stdout should not contain `{level}`"
-            );
-        }
+            ("stdout", self.stdout_data.read().await)
+        };
+        let record = format!("{level}:");
+        assert!(
+            output
+                .lines()
+                .any(|line| line.trim_start().starts_with(&record))
+                .not(),
+            "application {stream} should not have a `{level}` record"
+        );
     }
 
     pub async fn assert_python_fileops_stderr(&self) {
