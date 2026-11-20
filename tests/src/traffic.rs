@@ -4,13 +4,13 @@ mod steal;
 
 #[cfg(test)]
 mod traffic_tests {
-    use std::{ops::Not, path::PathBuf, time::Duration};
+    use std::{ops::Not, time::Duration};
 
     use futures::{StreamExt, stream};
     use futures_util::{AsyncBufReadExt, stream::TryStreamExt};
     use k8s_openapi::api::core::v1::Pod;
-    use mirrord_test_utils::run_command::run_exec_with_target;
     use kube::{Api, api::LogParams};
+    use mirrord_test_utils::{node, python, run_command::run_exec_with_target};
     use rstest::*;
 
     #[cfg(target_os = "windows")]
@@ -29,8 +29,8 @@ mod traffic_tests {
     pub async fn remote_dns_enabled_works(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/remote_dns/test_remote_dns_enabled_works.mjs",
+            node().as_str(),
+            "apps/node-e2e/remote-dns/test-remote-dns-enabled-works/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -52,8 +52,8 @@ mod traffic_tests {
     pub async fn remote_dns_lookup_google(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/remote_dns/test_remote_dns_lookup_google.mjs",
+            node().as_str(),
+            "apps/node-e2e/remote-dns/test-remote-dns-lookup-google/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -78,8 +78,8 @@ mod traffic_tests {
     pub async fn outgoing_traffic_single_request_enabled(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-single-request/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -106,8 +106,8 @@ mod traffic_tests {
     ) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-single-request-ipv6/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -132,8 +132,8 @@ mod traffic_tests {
     pub async fn outgoing_traffic_ipv6_fallback_to_ipv4(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_ipv6_fallback_to_ipv4.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-ipv6-fallback-to-ipv4/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -155,8 +155,8 @@ mod traffic_tests {
     pub async fn outgoing_traffic_single_request_disabled(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_single_request.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-single-request/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -179,8 +179,8 @@ mod traffic_tests {
     pub async fn outgoing_traffic_make_request_after_listen(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_make_request_after_listen.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-make-request-after-listen/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -224,8 +224,8 @@ mod traffic_tests {
         };
 
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-udp-client-with-connect/main.mjs",
             "31415",
             // Reaching service by only service name is only possible from within the cluster.
             &internal_service.name,
@@ -309,8 +309,8 @@ mod traffic_tests {
         };
 
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-udp-client-with-connect/main.mjs",
             "31415",
             // Reaching service by only service name is only possible from within the cluster.
             &internal_service.name,
@@ -422,8 +422,8 @@ mod traffic_tests {
         let port = socket.local_addr().unwrap().port().to_string();
 
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_udp_client_with_connect.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-udp-client-with-connect/main.mjs",
             &port,
         ]
         .map(String::from)
@@ -474,7 +474,7 @@ mod traffic_tests {
         #[values(GoVersion::GO_1_25, GoVersion::GO_1_26, GoVersion::GO_1_27)] go_version: GoVersion,
         #[future] basic_service: KubeService,
     ) {
-        let command = vec![format!("go-e2e-outgoing/{go_version}.go_test_app")];
+        let command = vec![format!("apps/go-e2e-outgoing/go-e2e-outgoing.{go_version}")];
         let service = basic_service.await;
         let mut process =
             run_exec_with_target(command, &service.pod_container_target(), None, None, None).await;
@@ -488,7 +488,7 @@ mod traffic_tests {
         #[values(GoVersion::GO_1_25, GoVersion::GO_1_26, GoVersion::GO_1_27)] go_version: GoVersion,
         #[future] basic_service: KubeService,
     ) {
-        let command = vec![format!("go-e2e-dns/{go_version}.go_test_app")];
+        let command = vec![format!("apps/go-e2e-dns/go-e2e-dns.{go_version}")];
         let service = basic_service.await;
         let mut process =
             run_exec_with_target(command, &service.pod_container_target(), None, None, None).await;
@@ -500,9 +500,12 @@ mod traffic_tests {
     #[tokio::test]
     pub async fn listen_localhost(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let node_command = ["node", "node-e2e/listen/test_listen_localhost.mjs"]
-            .map(String::from)
-            .to_vec();
+        let node_command = [
+            node().as_str(),
+            "apps/node-e2e/listen/test-listen-localhost/main.mjs",
+        ]
+        .map(String::from)
+        .to_vec();
         let mut process = run_exec_with_target(
             node_command,
             &service.pod_container_target(),
@@ -519,7 +522,7 @@ mod traffic_tests {
     #[tokio::test]
     pub async fn gethostname_remote_result(#[future] hostname_service: KubeService) {
         let service = hostname_service.await;
-        let command = ["python3", "-u", "python-e2e/hostname.py"]
+        let command = [python().as_str(), "-u", "apps/python-e2e/hostname/main.py"]
             .map(String::from)
             .to_vec();
         let mut process =
@@ -545,10 +548,7 @@ mod traffic_tests {
         basic_service: KubeService,
     ) {
         let service = basic_service.await;
-        let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .to_string_lossy()
-            .to_string();
-        let executable = vec![app_path];
+        let executable = vec!["apps/rust-unix-socket-client/rust-unix-socket-client".to_owned()];
 
         // Tell mirrord to connect remotely to the pathname the deployed app is listening on.
         let env = Some(vec![(
@@ -573,10 +573,8 @@ mod traffic_tests {
     #[tokio::test]
     pub async fn outgoing_bypassed_unix_stream_pathname(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .to_string_lossy()
-            .to_string();
-        let executable = vec![app_path];
+        let executable =
+            vec!["apps/rust-bypassed-unix-socket/rust-bypassed-unix-socket".to_owned()];
 
         let mut process = run_exec_with_target(
             executable,
@@ -678,8 +676,8 @@ mod traffic_tests {
 
         let service = basic_service.await;
         let node_command = [
-            "node",
-            "node-e2e/outgoing/test_outgoing_traffic_many_requests.mjs",
+            node().as_str(),
+            "apps/node-e2e/outgoing/test-outgoing-traffic-many-requests/main.mjs",
         ]
         .map(String::from)
         .to_vec();
@@ -739,7 +737,7 @@ mod traffic_tests {
                 // mode (ForceV2=0) adjusts the console host to the legacy implementation.
                 args.extend(["cmd.exe", "/c"]);
             }
-            args.extend(["npm", "--prefix", "node-e2e", "run", "test-outgoing"]);
+            args.extend(["npm", "--prefix", "apps/node-e2e", "run", "test-outgoing"]);
             args.into_iter().map(String::from).collect::<Vec<String>>()
         };
 
@@ -767,7 +765,7 @@ mod traffic_tests {
 
         // Verify that npm executed the script (not direct node execution)
         assert!(
-            stdout.contains("> node test_outgoing_traffic_npm.mjs"),
+            stdout.contains("> node test-outgoing-traffic-npm/main.mjs"),
             "Expected npm to execute the script, showing npm's command output"
         );
 

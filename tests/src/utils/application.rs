@@ -48,75 +48,70 @@ pub enum Application {
     /// Tries to open files in the remote target, but these operations should succeed or fail based
     /// on mirrord `FsPolicy`.
     ///
-    /// - `node-e2e/fspolicy/test_operator_fs_policy.mjs`
+    /// - `node-e2e/fspolicy/test-operator-fs-policy/main.mjs`
     NodeFsPolicy,
     /// Waits for any child process to finish, and verifies that the `wait` call fails with
     /// `ECHILD`.
     IntproxyChild,
 }
 
-///
-/// unchanged.
-pub(crate) fn app_path(relative: &str) -> String {
-    match std::env::var("MIRRORD_TESTS_APP_ROOT") {
-        Ok(root) if !root.is_empty() => {
-            format!(
-                "{}/{}",
-                root.trim_end_matches('/'),
-                relative.trim_start_matches("./")
-            )
-        }
-        _ => relative.to_owned(),
-    }
-}
-
 impl Application {
+    /// Returns the command that runs the app.
+    ///
+    /// The paths of the apps are relative to the `tests` directory, because nextest runs
+    /// each test in this package's directory in the test's runfiles, where Bazel puts the apps.
+    /// They stay relative, rather than start from the runfiles, because the layer leaves a relative
+    /// path local, and the apps' interpreters open the scripts by these paths.
     pub fn get_cmd(&self) -> Vec<String> {
         match self {
             Application::PythonFlaskHTTP => {
                 vec![
-                    "python3".into(),
+                    python(),
                     "-u".into(),
-                    app_path("python-e2e/app_flask.py"),
+                    "apps/python-e2e/app-flask/main.py".to_owned(),
                 ]
             }
             Application::PythonFastApiHTTP => vec![
+                python(),
+                "-m".into(),
                 "uvicorn".into(),
                 "--port=80".into(),
                 "--host=0.0.0.0".into(),
-                format!("--app-dir={}", app_path("./python-e2e/")),
-                "app_fastapi:app".into(),
+                "--app-dir=./apps/python-e2e/app-fastapi/".to_owned(),
+                "main:app".into(),
             ],
             Application::PythonFastApiHTTPIPv6 => vec![
+                python(),
+                "-m".into(),
                 "uvicorn".into(),
                 "--port=80".into(),
                 "--host=::".into(),
-                format!("--app-dir={}", app_path("./python-e2e/")),
-                "app_fastapi:app".into(),
+                "--app-dir=./apps/python-e2e/app-fastapi/".to_owned(),
+                "main:app".into(),
             ],
             Application::PythonCloseSocket => {
                 vec![
-                    "python3".into(),
+                    python(),
                     "-u".into(),
-                    app_path("python-e2e/close_socket.py"),
+                    "apps/python-e2e/close-socket/main.py".to_owned(),
                 ]
             }
             Application::PythonCloseSocketKeepConnection => vec![
-                "python3".into(),
+                python(),
                 "-u".into(),
-                app_path("python-e2e/close_socket_keep_connection.py"),
+                "apps/python-e2e/close-socket-keep-connection/main.py".to_owned(),
             ],
-            Application::NodeHTTP => vec!["node".into(), app_path("node-e2e/app.mjs")],
+            Application::NodeHTTP => vec![node(), "apps/node-e2e/app/main.mjs".to_owned()],
             Application::NodeHTTP2 => {
                 vec![
-                    "node".into(),
-                    app_path("node-e2e/http2/test_http2_traffic_steal.mjs"),
+                    node(),
+                    "apps/node-e2e/http2/test-http2-traffic-steal/main.mjs".to_owned(),
                 ]
             }
             Application::NodeFsPolicy => {
                 vec![
-                    "node".into(),
-                    app_path("node-e2e/fspolicy/test_operator_fs_policy.mjs"),
+                    node(),
+                    "apps/node-e2e/fspolicy/test-operator-fs-policy/main.mjs".to_owned(),
                 ]
             }
             Application::CurlToKubeApi => ["curl", "https://kubernetes/api", "--insecure"]
@@ -127,7 +122,8 @@ impl Application {
                     .map(String::from)
                     .to_vec()
             }
-            Application::IntproxyChild => vec![app_path("intproxy_child/out.c_test_app")],
+            Application::RustWebsockets => vec!["apps/rust-websockets/rust-websockets".to_owned()],
+            Application::IntproxyChild => vec!["apps/intproxy-child/intproxy-child".to_owned()],
         }
     }
 

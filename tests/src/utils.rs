@@ -232,12 +232,12 @@ pub async fn send_requests(url: &str, expect_response: bool, headers: reqwest::h
     .await;
 }
 
+/// The directory of the mirrord configs that the tests use, relative to this package's directory
+/// in the test's runfiles, where nextest runs the tests.
 #[fixture]
 #[once]
 pub fn config_dir() -> PathBuf {
-    let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    config_path.push("configs");
-    config_path
+    PathBuf::from("configs")
 }
 
 /// Detect if Operator is installed

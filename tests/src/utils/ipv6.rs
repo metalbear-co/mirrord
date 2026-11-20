@@ -2,6 +2,7 @@
 
 use http_body_util::{BodyExt, Empty};
 use hyper::{
+    Request,
     client::{conn, conn::http1::SendRequest},
 };
 use k8s_openapi::api::core::v1::Pod;

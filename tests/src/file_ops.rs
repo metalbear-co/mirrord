@@ -10,8 +10,8 @@ mod file_ops_tests {
     };
 
     use k8s_openapi::api::core::v1::Pod;
-    use mirrord_test_utils::run_command::run_exec_with_target;
     use kube::{Api, api::LogParams};
+    use mirrord_test_utils::{python, run_command::run_exec_with_target};
     use rstest::*;
     use serde::Deserialize;
     use tempfile::NamedTempFile;
@@ -65,12 +65,12 @@ mod file_ops_tests {
     ) {
         let service = basic_service.await;
         let python_command = [
-            "python3",
+            python().as_str(),
             "-B",
             "-m",
             "unittest",
             "-f",
-            "python-e2e/files_ro.py",
+            "apps/python-e2e/files-ro/main.py",
         ]
         .map(String::from)
         .to_vec();
@@ -99,12 +99,12 @@ mod file_ops_tests {
     ) {
         let service = basic_service.await;
         let python_command = [
-            "python3",
+            python().as_str(),
             "-B",
             "-m",
             "unittest",
             "-f",
-            "python-e2e/files_unlink.py",
+            "apps/python-e2e/files-unlink/main.py",
         ]
         .map(String::from)
         .to_vec();
@@ -149,7 +149,7 @@ mod file_ops_tests {
     #[tokio::test]
     pub async fn bash_file_exists(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let bash_command = ["bash", "bash-e2e/file.sh", "exists"]
+        let bash_command = ["bash", "apps/bash-e2e/file/main.sh", "exists"]
             .map(String::from)
             .to_vec();
         let mut process = run_exec_with_target(
@@ -174,7 +174,7 @@ mod file_ops_tests {
     #[tokio::test]
     pub async fn bash_file_read(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let bash_command = ["bash", "bash-e2e/file.sh", "read"]
+        let bash_command = ["bash", "apps/bash-e2e/file/main.sh", "read"]
             .map(String::from)
             .to_vec();
         let mut process = run_exec_with_target(
@@ -196,7 +196,7 @@ mod file_ops_tests {
     #[tokio::test]
     pub async fn bash_file_write(#[future] basic_service: KubeService) {
         let service = basic_service.await;
-        let bash_command = ["bash", "bash-e2e/file.sh", "write"]
+        let bash_command = ["bash", "apps/bash-e2e/file/main.sh", "write"]
             .map(String::from)
             .to_vec();
         let args = vec!["--rw"];

@@ -4,7 +4,7 @@ use std::{collections::HashMap, process::Stdio};
 use mirrord_command::resolve_tokio_command;
 use tempfile::tempdir;
 
-use crate::{TestProcess, output_label};
+use crate::{TestProcess, output_label, python_path};
 
 /// See [`run_exec`].
 pub async fn run_exec_with_target(
@@ -53,17 +53,10 @@ pub async fn run_exec(
         .into_iter()
         .chain(process_cmd.iter().map(String::as_str))
         .collect();
-    let agent_image_env = "MIRRORD_AGENT_IMAGE";
-    let agent_image_from_devs_env = std::env::var(agent_image_env);
-    // used by the CI, to load the image locally:
-    // docker build -t test . -f mirrord/agent/Dockerfile
-    // minikube load image test:latest
     let mut base_env = HashMap::new();
-    base_env.insert(
-        agent_image_env,
-        // Let devs running the test specify an agent image per env var.
-        agent_image_from_devs_env.as_deref().unwrap_or("test"),
-    );
+    if let Some(python_path) = python_path() {
+        base_env.insert("PYTHONPATH", python_path);
+    }
     base_env.insert("MIRRORD_CHECK_VERSION", "false");
     base_env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     base_env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
@@ -96,12 +89,7 @@ pub async fn run_port_forward(namespace: &str, port_mapping: &str) -> TestProces
         port_mapping,
     ];
 
-    let agent_image_from_devs_env = std::env::var("MIRRORD_AGENT_IMAGE");
     let mut env = HashMap::new();
-    env.insert(
-        "MIRRORD_AGENT_IMAGE",
-        agent_image_from_devs_env.as_deref().unwrap_or("test"),
-    );
     env.insert("MIRRORD_CHECK_VERSION", "false");
     env.insert("MIRRORD_AGENT_RUST_LOG", "warn,mirrord=debug");
     env.insert("MIRRORD_AGENT_COMMUNICATION_TIMEOUT", "180");
@@ -143,12 +131,11 @@ pub async fn run_mirrord(
     env: HashMap<&str, &str>,
     env_remove: Option<&[&str]>,
 ) -> TestProcess {
-    let path = std::env::var("MIRRORD_TESTS_USE_BINARY")
-        .expect("MIRRORD_TESTS_USE_BINARY must point to an external mirrord binary");
+    // The test target has `//mirrord/cli` in its `data`.
+    let path = mirrord_runfiles::runfile_program("cli/mirrord");
     let temp_dir = tempdir().unwrap();
 
-    // Print the mirrord path used to ease MIRRORD_TESTS_USE_BINARY possible misuse investigation
-    // efforts
+    // Shows which CLI the test ran, in case the test target names the wrong one.
     println!("CWD: {:?}", std::env::current_dir().unwrap());
     println!("Using mirrord path: {path:?}");
 
@@ -175,6 +162,6 @@ pub async fn run_mirrord(
         server.id().unwrap()
     );
     // We need to hold temp dir until the process is finished
-    let label = output_label(&path, &args);
+    let label = output_label(&path.to_string_lossy(), &args);
     TestProcess::from_child_labeled(server, Some(temp_dir), &label)
 }

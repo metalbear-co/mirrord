@@ -1,0 +1,8 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+
+js_binary(
+    name = "test-http2-traffic-steal",
+    data = ["//mirrord/test-utils:node"],
+    entry_point = "main.mjs",
+    visibility = ["//tests:__pkg__"],
+)
