@@ -86,6 +86,14 @@ platform(
     ]
 ]
 
+# Whether the build targets the OS and CPU of the machine that runs Bazel, so that the build's
+# programs can run in its actions (see `program_stdout`).
+config_setting(
+    name = "is_host",
+    constraint_values = HOST_CONSTRAINTS,
+    visibility = ["//visibility:public"],
+)
+
 # Lets `bazel test` run the tests for any target platform on the host, the only execution platform.
 # Without it, Bazel only runs a test on an execution platform with all of the target platform's
 # constraints, which the host lacks even for `linux-host`, because of glibc 2.17.

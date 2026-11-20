@@ -5,6 +5,12 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The programs of the `write_source_file` targets and of the `vite_site` tests, which the macros add
+# to the packages that call them.
+exports_files([
+    "write_source_file.py",
+])
+
 # Public, because the modules that depend on mirrord keep a copy of it (see the file).
 exports_files(
     ["module.bazelrc"],
