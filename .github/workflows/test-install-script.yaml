@@ -25,10 +25,10 @@ jobs:
           sparse-checkout-cone-mode: false
 
       # `-s sh` uses the POSIX dialect regardless of the shebang.
-      - name: shellcheck, POSIX sh dialect
+      - name: ShellCheck, POSIX sh dialect
         run: shellcheck -s sh scripts/install.sh
 
-      - name: parse under dash
+      - name: Parse under dash
         run: dash -n scripts/install.sh
 
   install:
@@ -41,16 +41,46 @@ jobs:
       # the indirection specifically.
       matrix:
         include:
-          - { name: "linux x86_64 / sh", os: blacksmith-4vcpu-ubuntu-2404, sh: "sh" }
-          - { name: "linux x86_64 / bash", os: blacksmith-4vcpu-ubuntu-2404, sh: "bash" }
-          - { name: "linux x86_64 / dash", os: blacksmith-4vcpu-ubuntu-2404, sh: "dash" }
-          - { name: "linux x86_64 / zsh", os: blacksmith-4vcpu-ubuntu-2404, sh: "zsh" }
-          - { name: "linux x86_64 / busybox ash", os: blacksmith-4vcpu-ubuntu-2404, sh: "busybox sh" }
-          - { name: "linux aarch64 / sh", os: blacksmith-8vcpu-ubuntu-2404-arm, sh: "sh" }
-          - { name: "mac aarch64 / sh", os: blacksmith-6vcpu-macos-latest, sh: "sh" }
-          - { name: "mac aarch64 / bash", os: blacksmith-6vcpu-macos-latest, sh: "bash" }
-          - { name: "mac aarch64 / zsh", os: blacksmith-6vcpu-macos-latest, sh: "zsh" }
-          - { name: "mac x86_64 / sh", os: macos-15-intel, sh: "sh" }
+          - name: "linux x86_64 / sh"
+            os: blacksmith-4vcpu-ubuntu-2404
+            sh: "sh"
+
+          - name: "linux x86_64 / bash"
+            os: blacksmith-4vcpu-ubuntu-2404
+            sh: "bash"
+
+          - name: "linux x86_64 / dash"
+            os: blacksmith-4vcpu-ubuntu-2404
+            sh: "dash"
+
+          - name: "linux x86_64 / zsh"
+            os: blacksmith-4vcpu-ubuntu-2404
+            sh: "zsh"
+
+          - name: "linux x86_64 / busybox ash"
+            os: blacksmith-4vcpu-ubuntu-2404
+            sh: "busybox sh"
+
+          - name: "linux aarch64 / sh"
+            os: blacksmith-8vcpu-ubuntu-2404-arm
+            sh: "sh"
+
+          - name: "mac aarch64 / sh"
+            os: blacksmith-6vcpu-macos-latest
+            sh: "sh"
+
+          - name: "mac aarch64 / bash"
+            os: blacksmith-6vcpu-macos-latest
+            sh: "bash"
+
+          - name: "mac aarch64 / zsh"
+            os: blacksmith-6vcpu-macos-latest
+            sh: "zsh"
+
+          - name: "mac x86_64 / sh"
+            os: macos-15-intel
+            sh: "sh"
+
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -111,10 +141,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: "linux x86_64", os: blacksmith-4vcpu-ubuntu-2404, asset: mirrord_linux_x86_64 }
+          - name: "linux x86_64"
+            os: blacksmith-4vcpu-ubuntu-2404
+            asset: mirrord_linux_x86_64
+
           # Runs without `sha256sum` on PATH, so the `shasum -a 256` fallback the script uses on
           # macOS is the one hashing.
-          - { name: "mac aarch64 / shasum", os: blacksmith-6vcpu-macos-latest, asset: mirrord_mac_universal, hide: sha256sum }
+          - name: "mac aarch64 / shasum"
+            os: blacksmith-6vcpu-macos-latest
+            asset: mirrord_mac_universal
+            hide: sha256sum
+
     env:
       ASSET: ${{ matrix.asset }}
     steps:
