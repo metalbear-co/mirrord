@@ -306,7 +306,7 @@ mod tests {
     use super::{ControlPlaneSubscriber, ControlPlaneSubscription};
     use crate::{
         ServiceScope,
-        control_plane::{ControlPlaneEvent, ControlPlaneEventStream},
+        control_plane::{ControlPlaneEvent, ControlPlaneEventStream, EVENT_READ_TIMEOUT},
         error::SessionsManagerClientError,
         transport::SessionsManagerTransport,
     };
@@ -403,16 +403,22 @@ mod tests {
         )?))
     }
 
+    /// The read timeout of the tests' event streams, short so that the tests that wait for it to
+    /// run out take a fraction of a second. It's still several times the interval of the
+    /// heartbeats in [`does_not_reconnect_while_heartbeats_keep_arriving`], so that a test that
+    /// runs late on a loaded machine doesn't miss them.
+    const READ_TIMEOUT: Duration = Duration::from_millis(500);
+
     fn events(
         events: Vec<Result<ControlPlaneEvent, SessionsManagerClientError>>,
     ) -> ControlPlaneEventStream {
         let (_activity_tx, activity_rx) = watch::channel(Instant::now());
-        ControlPlaneEventStream::new(Box::pin(stream::iter(events)), activity_rx)
+        ControlPlaneEventStream::new(Box::pin(stream::iter(events)), activity_rx, READ_TIMEOUT)
     }
 
     fn stalled_events() -> ControlPlaneEventStream {
         let (_activity_tx, activity_rx) = watch::channel(Instant::now());
-        ControlPlaneEventStream::new(Box::pin(stream::pending()), activity_rx)
+        ControlPlaneEventStream::new(Box::pin(stream::pending()), activity_rx, READ_TIMEOUT)
     }
 
     #[tokio::test]
@@ -442,7 +448,7 @@ mod tests {
         );
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn reconnects_after_event_read_timeout_without_caller_deadline() {
         let subscription = TestSubscription::new(vec![
             Box::new(|| Ok(stalled_events())),
@@ -470,7 +476,7 @@ mod tests {
         ));
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn does_not_reconnect_while_heartbeats_keep_arriving() {
         let (activity_tx, activity_rx) = watch::channel(Instant::now());
         // Only one stream is ever handed out: if a reconnect is attempted, `subscribe()` panics
@@ -479,12 +485,13 @@ mod tests {
             Ok(ControlPlaneEventStream::new(
                 Box::pin(stream::pending()),
                 activity_rx,
+                READ_TIMEOUT,
             ))
         })]);
         let mut subscriber = subscriber(subscription, false);
 
         tokio::spawn(async move {
-            let mut ticks = tokio::time::interval(Duration::from_secs(15));
+            let mut ticks = tokio::time::interval(READ_TIMEOUT / 10);
             loop {
                 ticks.tick().await;
                 if activity_tx.send(Instant::now()).is_err() {
@@ -493,32 +500,33 @@ mod tests {
             }
         });
 
-        // 5 simulated minutes, well past EVENT_READ_TIMEOUT (60s): the call must still be
-        // pending because heartbeats keep resetting the watchdog.
-        let result = tokio::time::timeout(Duration::from_secs(5 * 60), subscriber.next(None)).await;
+        // Well past the read timeout: the call must still be pending because heartbeats keep
+        // resetting the watchdog.
+        let result = tokio::time::timeout(READ_TIMEOUT * 3, subscriber.next(None)).await;
         assert!(result.is_err());
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn next_times_out_promptly_on_a_healthy_but_silent_connection() {
         let subscription = TestSubscription::new(vec![Box::new(|| {
             let (_activity_tx, activity_rx) = watch::channel(Instant::now());
             Ok(ControlPlaneEventStream::new(
                 Box::pin(stream::pending()),
                 activity_rx,
+                EVENT_READ_TIMEOUT,
             ))
         })]);
         let mut subscriber = subscriber(subscription, false);
 
-        // The caller deadline (10s) is well inside EVENT_READ_TIMEOUT (60s), so this must fail
-        // with the caller's own deadline rather than waiting out the staleness watchdog.
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // The caller deadline is well inside EVENT_READ_TIMEOUT (60s), so this must fail with the
+        // caller's own deadline rather than waiting out the staleness watchdog.
+        let deadline = Instant::now() + Duration::from_millis(100);
         let started = Instant::now();
         let result = subscriber.next(Some(deadline)).await;
         assert!(matches!(
             result,
             Err(SessionsManagerClientError::OperationTimeout)
         ));
-        assert!(started.elapsed() < Duration::from_secs(60));
+        assert!(started.elapsed() < EVENT_READ_TIMEOUT);
     }
 }

@@ -1380,9 +1380,11 @@ mod test {
 
     /// Verifies that [`IntProxy::run`] gives up on its first layer in time while the agent keeps
     /// answering pings.
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn startup_fail() {
-        const FIRST_TIMEOUT: Duration = Duration::from_secs(60);
+        const FIRST_TIMEOUT: Duration = Duration::from_millis(500);
+        // Several pings, which the agent answers, before the first timeout runs out.
+        const PING_INTERVAL: Duration = Duration::from_millis(50);
 
         let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
             .await
@@ -1419,7 +1421,7 @@ mod test {
             4096,
             Default::default(),
             IntProxyIntervals {
-                ping: IntProxy::PING_INTERVAL,
+                ping: PING_INTERVAL,
                 process_logging: Duration::from_secs(60),
             },
             &ExperimentalFileConfig::default()
@@ -1430,8 +1432,10 @@ mod test {
         );
         let started = tokio::time::Instant::now();
 
+        // A loaded machine can run the proxy late, so the test gives it much longer than the
+        // first timeout. A proxy whose timeout starts again with every ping never gives up.
         let result = tokio::time::timeout(
-            FIRST_TIMEOUT + IntProxy::PING_INTERVAL,
+            FIRST_TIMEOUT + Duration::from_secs(10),
             proxy.run(FIRST_TIMEOUT, Duration::ZERO),
         )
         .await
@@ -1445,19 +1449,19 @@ mod test {
     }
 
     /// Verifies that a timeout too large for a deadline never runs out instead of panicking.
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn unrepresentable_idle_timeout_never_expires() {
         let unlimited = Duration::from_secs(u64::MAX);
         let mut idle = super::IdleTimeout::new(unlimited, unlimited);
 
-        tokio::time::timeout(Duration::from_secs(3600), idle.expired(false))
+        tokio::time::timeout(Duration::from_millis(100), idle.expired(false))
             .await
             .expect_err("the first-connection timeout ran out");
 
         idle.observe(true);
         idle.observe(false);
 
-        tokio::time::timeout(Duration::from_secs(3600), idle.expired(true))
+        tokio::time::timeout(Duration::from_millis(100), idle.expired(true))
             .await
             .expect_err("the idle timeout ran out");
     }

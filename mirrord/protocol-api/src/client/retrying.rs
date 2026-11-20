@@ -194,6 +194,13 @@ impl MirrordClientRetry for MirrordClient {
 /// retried before giving up, each after an exponentially growing backoff.
 const MAX_RETRYABLE_ERROR_ATTEMPTS: usize = 8;
 
+/// The factor of the backoff between the attempts after a retryable [`ClientError::Response`]:
+/// the n-th retry waits up to 2^n times this many milliseconds, and at most 2 seconds.
+///
+/// The tests wait 125 times less, so that a test that runs out of attempts ends in about a
+/// quarter of a second rather than in seconds.
+const RETRYABLE_ERROR_BACKOFF_FACTOR: u64 = if cfg!(test) { 1 } else { 125 };
+
 /// Retries the given async operation according to the [`MirrordClientRetry`] policies.
 async fn retry_op<F, Fut, R>(mut make_fut: F, timeout: Duration) -> ClientResult<R>
 where
@@ -202,7 +209,7 @@ where
 {
     let mut timeout_fut = std::pin::pin!(tokio::time::sleep(timeout));
     let mut retryable_error_backoff = ExponentialBackoff::from_millis(2)
-        .factor(125)
+        .factor(RETRYABLE_ERROR_BACKOFF_FACTOR)
         .max_delay(Duration::from_secs(2))
         .map(jitter)
         .take(MAX_RETRYABLE_ERROR_ATTEMPTS);
