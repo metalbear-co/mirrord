@@ -1,0 +1,112 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@crates//mirrord-cli:data.bzl", "crate_data")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY", "WINDOWS_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+# CLI ----------------------------------------------------------------------------------------------
+
+# The files that the CLI bundles on each platform, by the variable that gives the CLI each file's
+# path: `:cli_standalone` gets the file's path in the build, which it embeds, and `:cli` the file's
+# path in its runfiles. The targets need each file both as a label and as a path, and Starlark can't
+# read the values of a `select()`, so each attribute builds its own `select()` from this dict.
+#
+# The dict has no `//conditions:default`, so Bazel refuses to build a CLI for a platform without a
+# layer.
+BUNDLED_FILES = {
+    "@platforms//os:linux": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer",
+        "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
+    },
+}
+
+# The variables of `BUNDLED_FILES` that name a layer.
+LAYER_VARIABLES = [
+    "MIRRORD_BUNDLED_LAYER",
+    "MIRRORD_BUNDLED_LAYER_MACOS_ARM64",
+]
+
+py_binary(
+    name = "layer_id",
+    srcs = ["scripts/layer_id.py"],
+)
+
+# The `rustc_env_files` file that gives `:cli_standalone` the ID of the layers that it embeds.
+run_binary(
+    name = "bundled_layer_id",
+    srcs = select({
+        condition: [files[variable] for variable in LAYER_VARIABLES if variable in files]
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    outs = ["bundled/layer_id.env"],
+    tool = ":layer_id",
+    args = ["$(execpath bundled/layer_id.env)"] + select({
+        condition: [
+            "$(execpath {})".format(files[variable])
+            for variable in LAYER_VARIABLES
+            if variable in files
+        ]
+        for condition, files in BUNDLED_FILES.items()
+    }),
+)
+
+# The CLI that the tests and `bazel run //mirrord/cli` run.
+crate.binary(
+    # Reads the layer and the UI from the runfiles rather than embedding them, so that a change to
+    # either doesn't compile the CLI again. Its compile only gets their paths, and not the files,
+    # which rules_rust leaves out of the compile's inputs when they're in `data`.
+    data = select({
+        condition: files.values()
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    rustc_env = select({
+        condition: {
+            variable: "$(rlocationpath {})".format(file)
+            for variable, file in files.items()
+        }
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    # Public for the modules that depend on mirrord and run the CLI.
+    visibility = ["//visibility:public"],
+)
+
+# The CLI that mirrord distributes. It embeds the bundled files, so that it runs without runfiles.
+crate.binary(
+    name = "cli_standalone",
+    # `:cli` writes `mirrord`, and two targets of a package can't write the same file.
+    binary_name = "standalone/mirrord",
+    crate_features = ["standalone"],
+    compile_data = select({
+        condition: files.values()
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    # `include_bytes!` and rust-embed resolve a relative path from different directories, so they
+    # need the absolute paths that rules_rust makes of each `$(execpath)` here.
+    rustc_env = select({
+        condition: {
+            variable: "$(execpath {})".format(file)
+            for variable, file in files.items()
+        }
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    rustc_env_files = [":bundled_layer_id"],
+    # Both binaries build the same crate, so only `:cli` documents it.
+    doc = False,
+    # Public for the modules that depend on mirrord and put the CLI in an image.
+    visibility = ["//visibility:public"],
+)
+
+# Tests the crate as `:cli` builds it, which reads the layer and the UI from its runfiles, so that a
+# change to either doesn't compile the tests again.
+crate.unit_tests(
+    # A few tests wait for several seconds each, so they run four at a time to fit in a `small`
+    # test's timeout.
+    test_threads = 4,
+)
+
+crate.integration_tests(
+    target_compatible_with = UNIX_ONLY,
+)
+

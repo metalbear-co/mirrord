@@ -314,11 +314,19 @@ use nix::errno::Errno;
 use no_layer::NoLayer;
 use operator::operator_command;
 use port_forward::{PortForwardError, PortForwarder, ReversePortForwarder};
+// Only the integration tests use this dev-dependency, but Cargo and Bazel pass it to the unit tests
+// too, where `unused_crate_dependencies` would reject it.
+#[cfg(test)]
+use mirrord_test_utils as _;
 use regex::Regex;
-// Suppressor for the `unused-extern-crate` lint: `rust_embed` is only referenced from the
-// `#[derive(Embed)]` in `ui_impl.rs` that's gated to release builds.
-#[cfg(debug_assertions)]
+// Only `standalone` builds embed files, so `unused_crate_dependencies` would reject these crates in
+// the others.
+#[cfg(not(feature = "standalone"))]
 use rust_embed as _;
+// `standalone` builds don't read runfiles. The dependency can't be optional behind the feature,
+// because rules_rs gives a crate all of its dependencies whatever its features.
+#[cfg(feature = "standalone")]
+use mirrord_runfiles as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;

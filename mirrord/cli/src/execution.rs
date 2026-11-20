@@ -64,9 +64,24 @@ use crate::{
     util::remove_proxy_env,
 };
 
+/// Returns the gzipped tar of the macOS utilities that the CLI uses to run SIP-protected programs.
 #[cfg(target_os = "macos")]
-pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
+fn compressed_sip_binaries() -> std::borrow::Cow<'static, [u8]> {
+    #[cfg(feature = "standalone")]
+    let archive = include_bytes!(env!("MIRRORD_BUNDLED_SIP_BINARIES"))
+        .as_slice()
+        .into();
+
+    #[cfg(not(feature = "standalone"))]
+    let archive = {
+        let path = mirrord_runfiles::rlocation!(env!("MIRRORD_BUNDLED_SIP_BINARIES"));
+        std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("can't read {}: {error}", path.display()))
+            .into()
+    };
+
+    archive
+}
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
@@ -494,7 +509,10 @@ impl MirrordExecution {
                             load_type: None,
                         });
                 if config.experimental.sip_utils {
-                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
+                    extract_sip_binaries(
+                        &MIRRORD_BINARIES_DIR_PATH_BUF,
+                        &compressed_sip_binaries(),
+                    )?;
                 }
 
                 let result = executable
