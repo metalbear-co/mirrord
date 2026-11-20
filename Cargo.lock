@@ -5843,6 +5843,7 @@ dependencies = [
  "libc",
  "object 0.36.7",
  "once_cell",
+ "plist",
  "rand 0.10.2",
  "rstest",
  "serde",
