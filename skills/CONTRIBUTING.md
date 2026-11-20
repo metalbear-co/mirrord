@@ -31,7 +31,7 @@ Config blocks must parse: no `...` placeholders, no `//` comments, no trailing c
 
 ### Fragment paths
 
-`<path>` is the dotted schema path of the object the block's top-level keys belong to. Use `[]` for array items and `*` for map values. By default, `mirrord=<path>` resolves against [`skills/mirrord-config/references/schema.json`](skills/mirrord-config/references/schema.json). `mirrord-up=<path>` resolves against [`skills/mirrord-up/references/schema.json`](skills/mirrord-up/references/schema.json).
+`<path>` is the dotted schema path of the object the block's top-level keys belong to. Use `[]` for array items and `*` for map values. `mirrord=<path>` resolves against the schema given with `--mirrord-schema`, and `mirrord-up=<path>` against the schema given with `--mirrord-up-schema`. CI gives both flags the schemas at the repository root, as the start of this file says. Without the flags, both resolve against the copies in [`skills/mirrord-config/references/schema.json`](skills/mirrord-config/references/schema.json) and [`skills/mirrord-up/references/schema.json`](skills/mirrord-up/references/schema.json).
 
 A block whose root keys are `copy` and `connection` sits inside one entry of `feature.db_branches`:
 
@@ -66,7 +66,7 @@ run:
 
 ### Exempt files
 
-These files are verbatim copies of files generated elsewhere, which `.github/workflows/update-references.yml` overwrote in metalbear-co/skills, so they are not tagged and the check skips them. That workflow doesn't run from the mirrord repository, so nothing updates them here. Keep this list in sync with `EXEMPT` in `.github/scripts/check_fence_tags.py`.
+These files are verbatim copies of files generated elsewhere (the operator chart's `values.yaml`, the mirrord config schemas and the configuration reference), so they are not tagged and the check skips them. Nothing in the mirrord repository updates them. Keep this list in sync with `EXEMPT` in `.github/scripts/check_fence_tags.py`.
 
 - `skills/mirrord-config/references/configuration.md`
 - `skills/mirrord-config/references/schema.json`
