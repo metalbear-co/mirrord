@@ -40,20 +40,11 @@ pub enum Application {
     PythonFastApiHTTPIPv6,
     NodeHTTP,
     NodeHTTP2,
-    /// Can run as both HTTP and HTTPS server, listens on port 80.
-    ///
-    /// Env:
-    /// * `SERVER_TLS_CERT`: path to a PEM file with certificate chain to use
-    /// * `SERVER_TLS_KEY`: path to a PEM file with a private key matching the certificate
-    ///
-    /// Pass both `SERVER_CERT` and `SERVER_KEY` to enable HTTPS mode.
-    GoHTTP(GoVersion),
     CurlToKubeApi,
     CurlToKubeApiOverIpv6,
     PythonCloseSocket,
     PythonCloseSocketKeepConnection,
     RustWebsockets,
-    RustSqs,
     /// Tries to open files in the remote target, but these operations should succeed or fail based
     /// on mirrord `FsPolicy`.
     ///
@@ -133,9 +124,6 @@ impl Application {
                     app_path("node-e2e/fspolicy/test_operator_fs_policy.mjs"),
                 ]
             }
-            Application::GoHTTP(go_version) => {
-                vec![app_path(&format!("go-e2e/{go_version}.go_test_app"))]
-            }
             Application::CurlToKubeApi => ["curl", "https://kubernetes/api", "--insecure"]
                 .map(String::from)
                 .to_vec(),
@@ -145,7 +133,6 @@ impl Application {
                     .to_vec()
             }
             Application::RustWebsockets => vec![app_path("../target/debug/rust-websockets")],
-            Application::RustSqs => vec![app_path("../target/debug/rust-sqs-printer")],
             Application::IntproxyChild => vec![app_path("intproxy_child/out.c_test_app")],
         }
     }
