@@ -4,9 +4,7 @@
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Related to issue [#2903](https://github.com/metalbear-co/mirrord/issues/2903)
 ///

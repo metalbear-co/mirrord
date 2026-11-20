@@ -6,9 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that issue [#2614](https://github.com/metalbear-co/mirrord/issues/2614) is fixed
 /// and the file open mode is honoured on bypass.

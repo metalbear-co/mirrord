@@ -16,9 +16,7 @@ use nix::{
 use rstest::rstest;
 use tokio::net::TcpListener;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that issue [#864](https://github.com/metalbear-co/mirrord/issues/864) is fixed.
 ///

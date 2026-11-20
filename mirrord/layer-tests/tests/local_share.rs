@@ -1,10 +1,7 @@
 #![cfg(target_os = "linux")]
 
-mod common;
-
 use std::{io::Write, ops::Not};
 
-pub use common::*;
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, MirrordConfig},

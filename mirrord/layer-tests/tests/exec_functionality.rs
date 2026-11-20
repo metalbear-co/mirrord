@@ -6,8 +6,7 @@ use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::{io::copy_bidirectional, net::TcpStream};
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Runs `python3 apps/<script>` under `mirrord exec` in `simple` progress mode, with the
 /// layer connecting to `intproxy`.
@@ -17,6 +16,7 @@ async fn exec_python(
     script: &str,
     extra_env: Vec<(&str, &str)>,
 ) -> TestProcess {
+    let script = app_script(script);
     let env = get_env(
         intproxy,
         [

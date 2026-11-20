@@ -2,9 +2,7 @@
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 use mirrord_protocol::tcp::LayerTcp;
 
 /// Verify that if mirrord application connects to its own listening port it

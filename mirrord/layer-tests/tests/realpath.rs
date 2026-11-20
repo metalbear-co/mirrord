@@ -7,8 +7,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Tests the layer's [`libc::realpath`] on local and remote paths.
 ///

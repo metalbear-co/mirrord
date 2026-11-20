@@ -18,9 +18,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// How long the test waits for something that must happen.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -38,6 +36,7 @@ async fn app_reuses_low_fds() {
             ("MIRRORD_FILE_READ_WRITE_PATTERN", "^/mirrord-test/"),
         ],
     );
+    let app_path = app_script("low-fd-reuse/main.py");
     let application = Application::DynamicApp(python(), vec!["-u".to_owned(), app_path]);
     let mut process = application.get_test_process(env, None).await;
 

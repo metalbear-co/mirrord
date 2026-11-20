@@ -14,8 +14,7 @@ use mirrord_protocol::{
 use rstest::rstest;
 use tempfile::NamedTempFile;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 async fn serve_remote_file(intproxy: &mut TestIntProxy, contents: &str, remote_fd: u64) {
     intproxy

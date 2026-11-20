@@ -20,14 +20,14 @@ use winapi::{
     um::{processthreadsapi::OpenProcess, synchapi::WaitForSingleObject, winnt::SYNCHRONIZE},
 };
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// One `services` entry of a `mirrord-up.yaml` that runs the python app `apps/<script>`
 /// with `args`.
 ///
 /// Files stay local and DNS is not remote, as the test intproxy answers neither.
 fn service(python: &str, name: &str, script: &str, args: &[&Path]) -> String {
+    let script = app_script(script);
     let command = [python, script.as_str()]
         .into_iter()
         .chain(args.iter().map(|arg| arg.to_str().unwrap()))

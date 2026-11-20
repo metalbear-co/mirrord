@@ -17,8 +17,7 @@ use nix::{
 };
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 fn get_rw_test_file_env_vars() -> Vec<(&'static str, &'static str)> {
     vec![

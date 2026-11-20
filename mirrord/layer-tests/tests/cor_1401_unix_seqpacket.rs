@@ -12,9 +12,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verifies that a Unix `SOCK_SEQPACKET` connection is intercepted by outgoing unix socket
 /// handling, routed through intproxy, and can receive a packet back from the fake agent.

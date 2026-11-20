@@ -5,8 +5,7 @@ use std::{env::temp_dir, os::unix::fs};
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Creates a new [`Application`], which is a symlink to the existing executable.
 /// The link is created in the temporary directory and its name is randomized.
