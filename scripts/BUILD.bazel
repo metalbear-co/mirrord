@@ -79,3 +79,22 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "update_images",
+    srcs = ["mirrord_update_images.py"],
+    main = "mirrord_update_images.py",
+    deps = [":update_images_lib"],
+)
+
+# For the modules, like the operator, that move their own pins with it: a program of theirs calls
+# `main` with the functions that move the pins that only they have.
+py_library(
+    name = "update_images_lib",
+    srcs = ["mirrord_update_images.py"],
+    imports = ["."],
+    deps = [
+        ":tools",
+        requirement("certifi"),
+    ],
+    visibility = ["//visibility:public"],
+)
