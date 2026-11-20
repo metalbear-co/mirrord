@@ -140,4 +140,3 @@ tar.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
-windows_build = []
