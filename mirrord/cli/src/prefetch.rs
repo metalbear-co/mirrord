@@ -15,6 +15,7 @@
 
 use std::{
     collections::HashSet,
+    fmt::Debug,
     fs::{self, File, Permissions},
     io::{self, Write},
     mem,
@@ -31,7 +32,7 @@ use mirrord_protocol::file::{
     OpenOptionsInternal, READDIR_BATCH_VERSION, ReadDirBatchRequest, ReadDirRequest,
     ReadFileRequest, XstatRequest,
 };
-use mirrord_protocol_api::client::{ClientError, MirrordClient, MirrordClientRetry};
+use mirrord_protocol_api::client::{ClientError, MirrordClient, MirrordClientRetry, SimpleRequest};
 use nix::libc;
 use thiserror::Error;
 use tracing::Level;
@@ -202,6 +203,17 @@ struct Downloader<'a> {
 }
 
 impl Downloader<'_> {
+    /// Closes a remote file or directory the download opened.
+    ///
+    /// Prefetch only reads, so a failed close says nothing about what was copied, and must not
+    /// fail the copy or skip its cleanup: the error is only logged. The close always finishes,
+    /// since the client fails every waiting request when it loses the connection.
+    async fn close_remote<R: SimpleRequest + Clone + Debug>(&self, request: R) {
+        if let Err(error) = self.client.make_request(request.clone()).await {
+            tracing::warn!(?request, %error, "Failed to close a prefetched remote file");
+        }
+    }
+
     /// Copies `path`, and everything below it when it is a directory.
     ///
     /// The copy of a configured path is all or nothing: the first failure gives up on the tree
@@ -361,7 +373,7 @@ impl Downloader<'_> {
 
         let fd = self.open_remote(remote).await?;
         let result = self.copy_contents(fd, &partial).await;
-        self.client.make_request(CloseFileRequest { fd }).await?;
+        self.close_remote(CloseFileRequest { fd }).await;
 
         if let Err(error) = result {
             let _ = fs::remove_file(&partial);
@@ -411,7 +423,7 @@ impl Downloader<'_> {
         {
             Ok(response) => response.fd,
             Err(error) => {
-                self.client.make_request(CloseFileRequest { fd }).await?;
+                self.close_remote(CloseFileRequest { fd }).await;
 
                 return Err(error.into());
             }
@@ -419,10 +431,9 @@ impl Downloader<'_> {
 
         let entries = self.drain_dir(dir_fd).await;
 
-        self.client
-            .make_request(CloseDirRequest { remote_fd: dir_fd })
-            .await?;
-        self.client.make_request(CloseFileRequest { fd }).await?;
+        self.close_remote(CloseDirRequest { remote_fd: dir_fd })
+            .await;
+        self.close_remote(CloseFileRequest { fd }).await;
 
         entries
     }
