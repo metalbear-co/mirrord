@@ -31,11 +31,7 @@ members = [
     "tests/rust-e2e-fileops",
     "tests/rust-unix-socket-client",
     "tests/rust-bypassed-unix-socket",
-    "tests/issue1317",
     "tests/rust-websockets",
-    "tests/rust-sqs-printer",
-    "tests/kafka-consumer",
-    "tests/rust-access-denied-server",
     "xtask",
     "mirrord/sessions-manager/client",
     "mirrord/sessions-manager/protocol",
@@ -109,7 +105,6 @@ async-trait = "0.1"
 aws-config = { version = "1.5", default-features = false }
 aws-credential-types = "1.2"
 aws-sigv4 = { version = "1.2", default-features = false }
-aws-sdk-sqs = { version = "1.39", default-features = false }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 base64 = "0.22"
@@ -135,7 +130,6 @@ dotenvy = "0.15"
 drain = "0.1"
 dunce = "1"
 enum_dispatch = "0.3"
-env_logger = "0.11"
 errno = "0.3"
 eventsource-stream = "0.2"
 exec = "0.3"
@@ -232,10 +226,6 @@ quote = "1"
 rand = "0.10"
 ratatui = "0.30.2"
 rcgen = { version = "0.14", features = ["x509-parser"] }
-rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e84de5dcb5d3cbe2b7036b21f016581445e445c", features = [
-    "cmake-build",
-    "ssl-vendored",
-] }
 regex = { version = "1", features = ["unicode-case"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
