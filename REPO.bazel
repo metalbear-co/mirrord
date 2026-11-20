@@ -1,0 +1,7 @@
+ignore_directories([
+    # rules_js requires Bazel to ignore `node_modules`.
+    "**/node_modules",
+    # Cargo's build directory. `//...` would otherwise walk it, and fail when Cargo or rust-analyzer
+    # writes to it at the same time.
+    "target",
+])

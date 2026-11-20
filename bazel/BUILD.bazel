@@ -1,0 +1,13 @@
+
+config_setting(
+    name = "opt",
+    values = {"compilation_mode": "opt"},
+    visibility = ["//visibility:public"],
+)
+
+# Public, because the modules that depend on mirrord keep a copy of it (see the file).
+exports_files(
+    ["module.bazelrc"],
+    visibility = ["//visibility:public"],
+)
+

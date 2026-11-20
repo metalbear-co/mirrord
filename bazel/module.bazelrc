@@ -1,0 +1,63 @@
+# The flags that mirrord's rules and macros need in the build of any module that uses them.
+#
+# Bazel only reads the root module's `.bazelrc`. mirrord's own imports this file, and a module that
+# depends on mirrord, like the operator, imports a checked-in copy of it, which a `write_source_file`
+# of `@mirrord//bazel:module.bazelrc` keeps up to date. So the flags name mirrord's targets as
+# `@mirrord//`, which mirrord's own build resolves too, and `//:` names a file of the root module.
+
+# Platforms ----------------------------------------------------------------------------------------
+
+common --enable_platform_specific_config
+
+# `platform_filegroup` builds for the machine's own OS and CPU with the `<os>-host` platforms, so
+# the top-level build uses them too, or the same files would build in two configurations.
+#
+# On Linux, the platform also links the binaries against glibc 2.17, so that they run on old
+# distributions.
+common:linux --platforms=@mirrord//bazel/platforms:linux-host
+common:macos --platforms=@mirrord//bazel/platforms:macos-host
+
+# The oldest macOS that the macOS files run on, which the llvm toolchain passes to clang and lld,
+# and rules_rust to rustc and to the C code of build scripts. Without it, the toolchain targets
+# macOS 14.0.
+#
+# 10.13 is the oldest that the toolchain's macOS SDK and frida's prebuilt x86-64 devkit support.
+# Apple's arm64 Macs started with macOS 11.0, and clang and rustc raise the version to it for
+# arm64 code.
+#
+# It applies on every machine, because a release builds the macOS files on Linux.
+common --macos_minimum_os=10.13
+
+# Makes a build that the llvm toolchain doesn't cover fail, rather than use the machine's own C++
+# compiler, which would make the build depend on the machine.
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+
+# C and C++ ----------------------------------------------------------------------------------------
+
+# Silences the thousands of warnings in third-party C and C++ code, which only upstream can fix.
+build --per_file_copt=external/.*@-w
+build --host_per_file_copt=external/.*@-w
+
+# Turns off clang's warning about unused arguments when it links the build scripts and proc macros.
+# `RUSTC_FLAGS` turns it off for our own targets, but can't turn it off for the tools that build for
+# this machine.
+#
+# Windows has no line, because it links its tools with `lld-link`, which rejects the flag.
+#
+# The Linux line can go once rules_rs ships https://github.com/hermeticbuild/rules_rust/pull/38.
+build:linux --host_linkopt=-Wno-unused-command-line-argument
+build:macos --host_linkopt=-Wno-unused-command-line-argument
+
+# Other languages' rules ---------------------------------------------------------------------------
+
+# Uses rules_python's interpreter rather than the `python3` on `PATH`, which NixOS may not have.
+common --@rules_python//python/config_settings:bootstrap_impl=script
+
+# Running and testing ------------------------------------------------------------------------------
+
+# `bazel run` starts the program in the directory that it was run from rather than in its runfiles,
+# so that relative paths in its arguments, and the programs that it starts, resolve where the
+# developer expects. Bazel unsets `RUNFILES_DIR` for `bazel run`, so each program still finds its
+# runfiles next to its own executable.
+run --run_in_cwd
+

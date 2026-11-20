@@ -1,0 +1,1 @@
+Another Bazel module can now depend on mirrord's module, to build its Rust crates with mirrord's macros, to run the CLI, to ship the agent's image, and to define its own end-to-end suites, `//:lint` and `//:format` with mirrord's.

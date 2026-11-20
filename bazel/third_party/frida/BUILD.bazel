@@ -1,0 +1,36 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+# Frida's prebuilt devkit, with what a program needs to link it.
+cc_library(
+    name = "devkit",
+    # The devkit calls compiler builtins, like `__clear_cache` on arm64, that rustc doesn't link.
+    srcs = ["@llvm//runtimes/compiler-rt:clang_rt.builtins.static"],
+    # The system libraries that the devkit needs, as its example program links them.
+    linkopts = select({
+        "@platforms//os:linux": [
+            "-ldl",
+            "-lm",
+            "-lresolv",
+            "-lrt",
+            "-pthread",
+        ],
+        "@platforms//os:macos": [
+            "-lm",
+            "-lresolv",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["@frida_gum_devkit_macos_arm64//:devkit"],
+        "@rules_rs//rs/platforms/config:aarch64-unknown-linux-gnu": ["@frida_gum_devkit_linux_arm64//:devkit"],
+        "@rules_rs//rs/platforms/config:x86_64-apple-darwin": ["@frida_gum_devkit_macos_x86_64//:devkit"],
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["@frida_gum_devkit_linux_x86_64//:devkit"],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+)

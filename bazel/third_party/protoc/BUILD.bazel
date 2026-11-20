@@ -1,0 +1,16 @@
+# The agent talks to the container runtimes through `containerd-client` and `k8s-cri`, whose build
+# scripts run `protoc` to generate their gRPC code. Bazel downloads `protoc` itself, because using
+# the machine's copy would make the build depend on the machine, breaking hermeticity.
+#
+# The build scripts take it as a tool, so the `select()` picks the release for the execution
+# platform.
+alias(
+    name = "protoc",
+    actual = select({
+        "//bazel/platforms:is_linux_aarch64": "@protoc_linux_aarch_64//:protoc",
+        "//bazel/platforms:is_linux_x86_64": "@protoc_linux_x86_64//:protoc",
+        "@platforms//os:macos": "@protoc_osx_universal_binary//:protoc",
+        "@platforms//os:windows": "@protoc_win64//:protoc",
+    }),
+    visibility = ["//visibility:public"],
+)

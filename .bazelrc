@@ -1,0 +1,22 @@
+# Bazel only reads the root module's `.bazelrc`, so the flags that every module that uses mirrord
+# needs are in `bazel/module.bazelrc`, which other modules copy.
+import %workspace%/bazel/module.bazelrc
+
+# Build performance --------------------------------------------------------------------------------
+
+# Gives the tools that run during the build, like build scripts and proc macros, the default value
+# of each Starlark flag rather than the top-level build's, unless the flag's `scope` is
+# `universal`. Without it, a flag that a transition sets, like rules_go's SDK version or the
+# platform of a universal macOS file, also gave those tools a configuration of their own, so they
+# built again for each.
+common --incompatible_exclude_starlark_flags_from_exec_config
+
+# The Python tools need the bootstrap of `module.bazelrc` too, because the default one runs the
+# machine's `python3`.
+common --experimental_propagate_custom_flag=@rules_python//python/config_settings:bootstrap_impl
+
+# A developer's own settings -----------------------------------------------------------------------
+
+# A developer's own flags, like `--jobs` or a disk cache.
+# Git ignores the file.
+try-import %workspace%/user.bazelrc
