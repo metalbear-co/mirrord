@@ -7,7 +7,7 @@ kube
 kubectl
 kubeconfig
 Kubernetes
-Minikube
+minikube
 namespace
 namespaces
 namespaced
@@ -56,6 +56,7 @@ Tera
 tera
 pnpm
 nextest
+rustc
 
 # Async / concurrency
 async
@@ -274,3 +275,8 @@ Nagle
 Zooplus
 eMudhra
 ```
+Bazel
+bazelisk
+buildifier
+Starlark
+toolchains?

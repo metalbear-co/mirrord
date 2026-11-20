@@ -6,11 +6,23 @@ exports_files([
     # A module that depends on mirrord must repeat these files' settings and versions in its own root
     # files, so its lint or its diff tests read mirrord's files to check that the two match.
     ".bazelversion",
+    ".buildifier-tables.json",
+    ".buildifier.json",
     ".config/nextest.toml",
     "Cargo.toml",
     "clippy.toml",
     "mirrord-schema.json",
     "mirrord-up-schema.json",
     "rust-toolchain.toml",
+    "rustfmt.toml",
 ])
 
+alias(
+    name = "lint",
+    actual = "//scripts:lint",
+)
+
+alias(
+    name = "format",
+    actual = "//scripts:format",
+)

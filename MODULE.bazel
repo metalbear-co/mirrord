@@ -11,6 +11,7 @@ bazel_dep(name = "rules_cc", version = "0.2.28")
 bazel_dep(name = "rules_distroless", version = "0.9.4")
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "rules_img", version = "0.3.25")
+bazel_dep(name = "rules_multitool", version = "1.11.1")
 bazel_dep(name = "rules_nodejs", version = "6.7.7")
 bazel_dep(name = "rules_powershell", version = "0.3.1")
 bazel_dep(name = "rules_python", version = "2.4.6")
@@ -376,6 +377,17 @@ go_deps_dev.module_override(
 )
 
 # Prebuilt tools and libraries ---------------------------------------------------------------------
+
+# The programs that `bazel run //:lint`, `bazel run //:format` and the end-to-end tests run, which
+# their projects publish prebuilt, like typos, Ruff, kind and kubectl. The lockfile names each
+# program's download for each platform, and `@multitool//tools/<program>` runs the one for the
+# machine (`CONTRIBUTING.md` says how to move them to newer versions).
+#
+# A module that depends on mirrord gets these programs in the same `@multitool`, and adds its own
+# with a lockfile of its own.
+multitool = use_extension("@rules_multitool//multitool:extension.bzl", "multitool")
+multitool.hub(lockfile = "//bazel:multitool.lock.json")
+use_repo(multitool, "multitool")
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 

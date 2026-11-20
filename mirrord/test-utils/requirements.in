@@ -1,3 +1,11 @@
 fastapi
 flask
 uvicorn
+# `//:lint`'s fence-tag check of the skills, and its tests, use these
+# (`skills/.github/scripts/requirements.txt`).
+jsonschema
+markdown-it-py
+pyyaml
+# `bazel run //:lint` runs `towncrier check` with it. The release workflow builds the changelog with
+# the same version.
+towncrier==23.11.0

@@ -1,0 +1,69 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+
+py_binary(
+    name = "lint",
+    srcs = ["lint.py"],
+    data = [
+        "//scripts/tools",
+        "//skills:check_fence_tags",
+    ],
+    env = {"RUNNER_TOOLS": "$(rlocationpaths //scripts/tools)"},
+    # ty type-checks the workspace's Python code against these, so they must hold every package
+    # that the code imports.
+    deps = all_requirements + [
+        ":frontends",
+        ":runner",
+        ":tools",
+        "@rules_python//python/runfiles",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+py_binary(
+    name = "format",
+    srcs = ["format.py"],
+    data = [
+        "//scripts/tools",
+        "@rules_rust//tools/rustfmt",
+    ],
+    env = {
+        "RUNNER_TOOLS": "$(rlocationpaths //scripts/tools)",
+        "RUSTFMT": "$(rlocationpath @rules_rust//tools/rustfmt)",
+    },
+    deps = [
+        ":frontends",
+        ":runner",
+        ":tools",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+py_library(
+    name = "frontends",
+    srcs = ["frontends.py"],
+)
+
+# The libraries below are public, for the programs of other modules, which import them by the
+# names of their files, like `mirrord_tools`: `imports` puts this directory on their `sys.path`.
+# Each name starts with `mirrord_`, so that it can't clash with a module of the program's own
+# repository, like the operator's `scripts/tools.py`.
+
+# For the modules, like the operator, that define their own `//:lint` and `//:format` with it.
+py_library(
+    name = "runner",
+    srcs = ["mirrord_runner.py"],
+    imports = ["."],
+    deps = [":tools"],
+    visibility = ["//visibility:public"],
+)
+
+# For the scripts of other modules, which find their files and run their commands with it, as their
+# lint, their formatters and the setup programs of their `cluster_test` targets do.
+py_library(
+    name = "tools",
+    srcs = ["mirrord_tools.py"],
+    imports = ["."],
+    deps = ["@rules_python//python/runfiles"],
+    visibility = ["//visibility:public"],
+)

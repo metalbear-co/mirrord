@@ -1,3 +1,7 @@
+load("@pip//:requirements.bzl", "requirement")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_test.bzl", "py_test")
+
 # The skills that `mirrord mcp` embeds (`//mirrord/mcp:corpus`): their Markdown and the JSON and
 # YAML files bundled with them, such as Helm values, which the skills point the agent at.
 filegroup(
@@ -22,4 +26,35 @@ filegroup(
         if path.endswith((".md", ".json", ".yaml", ".yml"))
     ],
     visibility = ["//mirrord/mcp:__pkg__"],
+)
+
+FENCE_TAGS_DEPS = [
+    requirement("jsonschema"),
+    requirement("markdown-it-py"),
+    requirement("pyyaml"),
+]
+
+# `bazel run //:lint` checks the fence tags and config blocks of the skills with this. The script
+# finds the skills from its own path, which it resolves through the runfiles' symlinks to the
+# workspace.
+py_binary(
+    name = "check_fence_tags",
+    srcs = [".github/scripts/check_fence_tags.py"],
+    main = ".github/scripts/check_fence_tags.py",
+    deps = FENCE_TAGS_DEPS,
+    visibility = ["//scripts:__pkg__"],
+)
+
+py_test(
+    name = "check_fence_tags_test",
+    srcs = [
+        ".github/scripts/check_fence_tags.py",
+        ".github/scripts/test_check_fence_tags.py",
+    ],
+    # The tests validate the examples against the schema copies in `skills/`, which the script finds
+    # from its own path, so a change to the copies must run the tests again.
+    data = glob(["skills/*/references/*schema.json"]),
+    main = ".github/scripts/test_check_fence_tags.py",
+    imports = [".github/scripts"],
+    deps = FENCE_TAGS_DEPS,
 )
