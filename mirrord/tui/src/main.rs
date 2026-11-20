@@ -20,6 +20,10 @@ async fn main() -> anyhow::Result<()> {
             .init();
     }
 
+    // Bazel builds rustls with more than one crypto provider, so rustls has no default one.
+    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+        .expect("Failed to install crypto provider");
+
     // No telemetry: this binary exists for working on the interface itself.
     mirrord_tui::run(None, None).await
 }
