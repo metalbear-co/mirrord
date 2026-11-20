@@ -8,7 +8,6 @@ use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
-    services::basic_service, watch::Watcher, KubeClient,
     AgentMode, KubeClient, application::env::EnvApp, client::kube_client,
     kube_service::KubeService, services::basic_service, watch::Watcher,
 };
@@ -17,24 +16,29 @@ use crate::utils::{
 ///
 /// This test runs only with ephemeral agents, because it's easier to get their status
 /// (it's always part of the target pod status).
+///
+/// It still takes the agent mode as an `rstest` value, which puts `Ephemeral` in its name, so that
+/// `-E 'test(/Ephemeral/)'` selects it.
 #[cfg_attr(target_os = "windows", ignore)]
 #[rstest]
 #[tokio::test]
-#[cfg_attr(not(feature = "ephemeral"), ignore)]
 async fn agent_container_exits(
     #[future] basic_service: KubeService,
     #[future] kube_client: KubeClient,
+    #[values(AgentMode::Ephemeral)] agent_mode: AgentMode,
 ) {
     let service = basic_service.await;
     let kube_client = kube_client.await;
 
     let application = EnvApp::NodeInclude;
+    let mut args = application.mirrord_args().unwrap_or_default();
+    args.extend(agent_mode.flags());
     let mut process = run_exec_with_target(
         application.command(),
         &service.pod_container_target(),
         Some(&service.namespace),
-        application.mirrord_args(),
-        Some(vec![("MIRRORD_EPHEMERAL_CONTAINER", "true")]),
+        Some(args),
+        None,
     )
     .await;
     let res = process.wait().await;
