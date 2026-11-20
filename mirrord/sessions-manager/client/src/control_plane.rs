@@ -24,7 +24,7 @@ use crate::error::SessionsManagerClientError;
 
 /// How long a connection may go without any activity before it's considered stalled. See
 /// [`ControlPlaneEventStream::next`].
-const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const EVENT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Tracks how recently any bytes were read off the socket, including SSE keep-alive comment
 /// frames. `eventsource-stream` discards those internally before they'd ever surface as a
@@ -72,6 +72,8 @@ pub struct ControlPlaneEventStream {
     events:
         Pin<Box<dyn Stream<Item = Result<ControlPlaneEvent, SessionsManagerClientError>> + Send>>,
     last_activity: watch::Receiver<Instant>,
+    /// [`EVENT_READ_TIMEOUT`], or a shorter one in the tests, which wait for it to run out.
+    read_timeout: Duration,
 }
 
 impl ControlPlaneEventStream {
@@ -94,6 +96,7 @@ impl ControlPlaneEventStream {
         Self {
             events,
             last_activity,
+            read_timeout: EVENT_READ_TIMEOUT,
         }
     }
 
@@ -103,10 +106,12 @@ impl ControlPlaneEventStream {
             Box<dyn Stream<Item = Result<ControlPlaneEvent, SessionsManagerClientError>> + Send>,
         >,
         last_activity: watch::Receiver<Instant>,
+        read_timeout: Duration,
     ) -> Self {
         Self {
             events,
             last_activity,
+            read_timeout,
         }
     }
 
@@ -116,7 +121,7 @@ impl ControlPlaneEventStream {
 
     /// Waits for the next event, failing with [`SessionsManagerClientError::OperationTimeout`] if
     /// no activity — including SSE keep-alives, which never surface as a decoded event — has been
-    /// seen for [`EVENT_READ_TIMEOUT`].
+    /// seen for the read timeout, [`EVENT_READ_TIMEOUT`].
     ///
     /// Only this stream's own liveness is guarded here; an overall caller deadline is the
     /// enclosing retry loop's job, not this stream's.
@@ -127,11 +132,11 @@ impl ControlPlaneEventStream {
         SessionsManagerClientError,
     > {
         loop {
-            let stale_at = self.last_activity() + EVENT_READ_TIMEOUT;
+            let stale_at = self.last_activity() + self.read_timeout;
             tokio::select! {
                 event = self.events.next() => return Ok(event),
                 _ = tokio::time::sleep_until(stale_at) => {
-                    if Instant::now() >= self.last_activity() + EVENT_READ_TIMEOUT {
+                    if Instant::now() >= self.last_activity() + self.read_timeout {
                         tracing::warn!(
                             last_activity = ?self.last_activity(),
                             "sessions-manager control-plane event stream timed out"

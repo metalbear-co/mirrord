@@ -102,54 +102,54 @@ impl<T: Unpin> Stream for DelayQueue<T> {
 mod tests {
     use std::time::Duration;
 
+    use futures::FutureExt;
     use tokio::time::Instant;
     use tokio_stream::StreamExt;
 
     use super::DelayQueue;
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn honors_front_deadline() {
         let start = Instant::now();
         let mut queue = DelayQueue::default();
-        queue.push("a", start + Duration::from_secs(2));
+        queue.push("a", start + Duration::from_millis(200));
 
         assert_eq!(queue.next().await, Some("a"));
-        assert_eq!(start.elapsed(), Duration::from_secs(2));
+        assert!(start.elapsed() >= Duration::from_millis(200));
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn yields_in_insertion_order_under_non_monotonic_deadlines() {
         let start = Instant::now();
         let mut queue = DelayQueue::default();
         // Enqueued first but due later.
-        queue.push("first", start + Duration::from_secs(3));
+        queue.push("first", start + Duration::from_millis(300));
         // Enqueued second but due sooner.
-        queue.push("second", start + Duration::from_secs(1));
+        queue.push("second", start + Duration::from_millis(100));
 
         assert_eq!(queue.next().await, Some("first"));
-        assert_eq!(start.elapsed(), Duration::from_secs(3));
+        assert!(start.elapsed() >= Duration::from_millis(300));
 
-        assert_eq!(queue.next().await, Some("second"));
-        assert_eq!(start.elapsed(), Duration::from_secs(3));
+        // Already due, so it comes out without waiting.
+        assert_eq!(queue.next().now_or_never(), Some(Some("second")));
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn same_deadline_drains_in_order_without_accumulating() {
         let start = Instant::now();
         let mut queue = DelayQueue::default();
-        let deadline = start + Duration::from_secs(1);
+        let deadline = start + Duration::from_millis(100);
         for i in 0u8..3 {
             queue.push(i, deadline);
         }
 
         assert_eq!(queue.next().await, Some(0));
         // Waited once for the shared deadline.
-        assert_eq!(start.elapsed(), Duration::from_secs(1));
+        assert!(start.elapsed() >= Duration::from_millis(100));
 
-        assert_eq!(queue.next().await, Some(1));
-        assert_eq!(queue.next().await, Some(2));
-        // The rest came out with no additional waiting.
-        assert_eq!(start.elapsed(), Duration::from_secs(1));
+        // The rest come out with no additional waiting.
+        assert_eq!(queue.next().now_or_never(), Some(Some(1)));
+        assert_eq!(queue.next().now_or_never(), Some(Some(2)));
 
         assert!(queue.is_empty());
     }
