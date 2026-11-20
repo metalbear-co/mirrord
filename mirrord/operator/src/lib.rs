@@ -21,5 +21,7 @@ pub mod sync;
 
 pub mod share;
 
+pub mod wake;
+
 /// Types used in the operator that don't require any special dependencies
 pub mod types;
