@@ -1,4 +1,5 @@
 load("@crates//medschool:data.bzl", "crate_data")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel:rust.bzl", "crate_package")
 
 crate = crate_package(crate_data = crate_data())
@@ -9,3 +10,9 @@ crate.binary(
 
 crate.unit_tests()
 
+py_binary(
+    name = "residency",
+    srcs = ["scripts/residency.py"],
+    data = [":medschool"],
+    deps = ["//scripts:tools"],
+)

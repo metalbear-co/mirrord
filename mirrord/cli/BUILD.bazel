@@ -1,3 +1,4 @@
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
@@ -359,3 +360,122 @@ pwsh_binary(
     target_compatible_with = WINDOWS_ONLY,
 )
 
+# Release files ------------------------------------------------------------------------------------
+
+# The platforms whose files the release builds on Linux, keyed by the platform's name in the file
+# names, as in `mirrord_mac_universal`.
+#
+# The Windows files aren't here, because the release signs them on Windows after the build.
+RELEASE_PLATFORMS = {
+    "linux_x86_64": {
+        "cli": ":cli_standalone",
+        "cpu": "x86_64",
+        "layer": "//mirrord/layer",
+        "layer_file": "libmirrord_layer_linux_x86_64.so",
+        "os": "linux",
+    },
+    "linux_aarch64": {
+        "cli": ":cli_standalone",
+        "cpu": "aarch64",
+        "layer": "//mirrord/layer",
+        "layer_file": "libmirrord_layer_linux_aarch64.so",
+        "os": "linux",
+    },
+    # The universal targets build the slices of both CPUs themselves, so either CPU works here.
+    # `platform_filegroup` only needs one to pick a macOS platform.
+    "mac_universal": {
+        "cli": ":cli_universal_signed",
+        "cpu": "aarch64",
+        "layer": "//mirrord/layer:universal_layer",
+        "layer_file": "libmirrord_layer_mac_universal.dylib",
+        "os": "macos",
+    },
+}
+
+py_binary(
+    name = "zip_with_checksum",
+    srcs = ["scripts/zip_with_checksum.py"],
+)
+
+# The CLI and the layer of each platform, so that one machine builds the release's files for every
+# platform. Each file keeps the name that its own target gives it, like `standalone/mirrord` or
+# `libmirrord_layer.so`, which is the same for every platform.
+[
+    platform_filegroup(
+        name = "release_{}_{}".format(name, part),
+        srcs = [platform[part]],
+        cpu = platform["cpu"],
+        os = platform["os"],
+        tags = ["manual"],
+    )
+    for name, platform in RELEASE_PLATFORMS.items()
+    for part in [
+        "cli",
+        "layer",
+    ]
+]
+
+# Copies each platform's CLI to the name that the release publishes it under, like
+# `release/mirrord_linux_x86_64`. GitHub names each asset of a release after its file, and the files
+# above have the same names on every platform, so they need names of their own.
+#
+# A target can't have the same name as its output file, so the targets take a `_copy` suffix, and
+# other targets use the file's label, like `ci.yaml` does with `:release/mirrord_<platform>`.
+[
+    copy_file(
+        name = "release_mirrord_{}_copy".format(name),
+        src = ":release_{}_cli".format(name),
+        out = "release/mirrord_" + name,
+        is_executable = True,
+        tags = ["manual"],
+    )
+    for name in RELEASE_PLATFORMS
+]
+
+# The same for each platform's layer, like `release/libmirrord_layer_linux_x86_64.so`.
+[
+    copy_file(
+        name = "release_{}_copy".format(platform["layer_file"]),
+        src = ":release_{}_layer".format(name),
+        out = "release/" + platform["layer_file"],
+        tags = ["manual"],
+    )
+    for name, platform in RELEASE_PLATFORMS.items()
+]
+
+# Zips each platform's CLI as `mirrord`, next to a file with the zip's checksum, which the Homebrew
+# formula takes.
+[
+    run_binary(
+        name = "release_mirrord_{}_zip".format(name),
+        srcs = [":release/mirrord_" + name],
+        outs = [
+            "release/mirrord_{}.zip".format(name),
+            "release/mirrord_{}.shasum256".format(name),
+        ],
+        tool = ":zip_with_checksum",
+        args = [
+            "$(execpath :release/mirrord_{})".format(name),
+            "$(execpath release/mirrord_{}.zip)".format(name),
+            "$(execpath release/mirrord_{}.shasum256)".format(name),
+        ],
+        tags = ["manual"],
+    )
+    for name in RELEASE_PLATFORMS
+]
+
+# `release.yaml` builds these files on Linux and uploads them to the GitHub release under the names
+# they have here.
+filegroup(
+    name = "release_unix",
+    srcs = [
+        target
+        for name, platform in RELEASE_PLATFORMS.items()
+        for target in [
+            ":release/mirrord_" + name,
+            ":release/" + platform["layer_file"],
+            ":release_mirrord_{}_zip".format(name),
+        ]
+    ],
+    tags = ["manual"],
+)

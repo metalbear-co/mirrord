@@ -313,33 +313,118 @@ jobs:
     if: ${{ needs.plan.outputs.build_changed == 'true' && needs.plan.outputs.content_only != 'true' }}
     uses: ./.github/workflows/test-e2e.yaml
 
-  # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
-  # building concurrently can run faster the release ide tests
-  build_mirrord_on_release_branch:
-    name: build mirrord CLI
+  # ── release branches ────────────────────────────────────────────────
+
+  # A release pull request builds what `release.yaml` builds, with `-c opt`, so that the
+  # release build fails on the pull request rather than in the release, which may have pushed some
+  # images by then.
+  #
+  # This job only builds the Linux x86-64 CLI and the agent's image, which the IDE extensions'
+  # end-to-end tests download as the `mirrord-artifacts` and `test` artifacts, so that those tests
+  # don't wait for the rest of the release build.
+  build_e2e_files_on_release_branch:
+    name: build release (e2e files)
     needs: [plan]
     if: ${{ needs.plan.outputs.release_branch == 'true' }}
-    uses: ./.github/workflows/build-mirrord-cli.yaml
-    secrets: inherit
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # `release.yaml` releases the head of the release branch, not its merge with `main`.
+          ref: ${{ github.event.pull_request.head.sha }}
 
-  test_agent_image:
-    needs: plan
-    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-agent-image.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
+      - uses: ./.github/actions/setup-bazel
+
+      # The `tarball` output group of `image_load` holds the archive that `minikube image load`
+      # reads. The extensions' tests run the agent image `test`, and the tag is the full name that
+      # Kubernetes looks it up by, because a runtime that imports the archive into containerd keeps
+      # the name exactly as the archive gives it.
+      - name: Build the CLI and the agent image
+        run: |
+          bazel build -c opt --//mirrord/agent:image_tag=docker.io/library/test:latest \
+            --output_groups=+tarball \
+            //mirrord/cli:release/mirrord_linux_x86_64 //mirrord/agent:image_load
+          mkdir "$RUNNER_TEMP/cli"
+          cp bazel-bin/mirrord/cli/release/mirrord_linux_x86_64 "$RUNNER_TEMP/cli/mirrord"
+          cp bazel-bin/mirrord/agent/image_load_docker.tar "$RUNNER_TEMP/test.tar"
+
+      - name: Upload the CLI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mirrord-artifacts
+          path: ${{ runner.temp }}/cli/mirrord
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload the agent image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test
+          path: ${{ runner.temp }}/test.tar
+          if-no-files-found: error
+          retention-days: 2
+
+  # Builds what `build_unix_and_release_images` in `release.yaml` builds.
+  build_on_release_branch:
+    name: build release (unix)
+    # Waiting for `build_e2e_files_on_release_branch` lets this job take the Linux x86-64 CLI and
+    # the agent from the remote cache rather than build them again.
+    needs: [plan, build_e2e_files_on_release_branch]
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # `release.yaml` releases the head of the release branch, not its merge with `main`.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the release files and the images
+        run: |
+          bazel build -c opt --remote_download_outputs=minimal \
+            //mirrord/cli:release_unix \
+            //mirrord/agent:image_push //mirrord/agent:image_index.digest \
+            //mirrord/cli:image_push //mirrord/cli:image_index.digest
+
+  # Builds what `build_binaries_windows` in `release.yaml` builds.
+  build_windows_on_release_branch:
+    name: build release (windows)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.release_branch == 'true' }}
+    runs-on: blacksmith-16vcpu-windows-2025
+    timeout-minutes: 150
+    env:
+      MSYS2_ARG_CONV_EXCL: "*"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # `release.yaml` releases the head of the release branch, not its merge with `main`.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the release files
+        run: |
+          bazel build -c opt --remote_download_outputs=minimal \
+            //mirrord/cli:cli_standalone //mirrord/layer-win
 
   intellij_e2e_on_release_branch:
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [build_e2e_files_on_release_branch]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
 
   vscode_e2e_on_release_branch:
-    needs: [build_mirrord_on_release_branch, test_agent_image]
+    needs: [build_e2e_files_on_release_branch]
     uses: metalbear-co/mirrord-vscode/.github/workflows/reusable_e2e.yaml@main
     with:
       mirrord_release_branch: true
@@ -356,7 +441,9 @@ jobs:
         plan,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
-        test_agent_image,
+        build_e2e_files_on_release_branch,
+        build_on_release_branch,
+        build_windows_on_release_branch,
         build-test,
         e2e,
         lint,
