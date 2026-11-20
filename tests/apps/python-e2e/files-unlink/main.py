@@ -1,4 +1,4 @@
-""" Unlink and unlinkat hooks tests """
+"""Unlink and unlinkat hooks tests"""
 
 import os
 import unittest

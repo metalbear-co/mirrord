@@ -40,6 +40,9 @@ else:
 # Answers Linear's GraphQL API from the environment: $REPEAT has an open issue already track the
 # test, $FAIL names the operations Linear answers with errors, and $REFUSE the ones it reports as
 # unsuccessful.
+#
+# The script is filled in with `%` rather than `str.format`, which would need every brace of its
+# dicts doubled. Ruff's UP031 flags `%`, so its line has a `noqa`.
 CURL = """
 import json, os, sys
 from pathlib import Path
@@ -84,7 +87,7 @@ elif operation == 'fileUpload':
     print(json.dumps({'data': {operation: {'success': True, 'uploadFile': upload}}}))
 else:
     print(json.dumps({'data': {operation: {'success': operation not in refuse, 'issue': issue}}}))
-""" % (OPERATIONS, ASSET_URL)
+""" % (OPERATIONS, ASSET_URL)  # noqa: UP031
 
 
 class FlakyReportTests(unittest.TestCase):
@@ -140,24 +143,17 @@ class FlakyReportTests(unittest.TestCase):
         )
 
     def requests(self):
-        return [
-            json.loads(line)
-            for line in (self.root / "requests").read_text().splitlines()
-        ]
+        return [json.loads(line) for line in (self.root / "requests").read_text().splitlines()]
 
     def operations(self):
         return [
-            "upload"
-            if "upload" in request
-            else next(name for name in OPERATIONS if name + "(" in request["query"])
+            "upload" if "upload" in request else next(name for name in OPERATIONS if name + "(" in request["query"])
             for request in self.requests()
         ]
 
     def request(self, operation):
         return next(
-            request
-            for request in self.requests()
-            if "query" in request and operation + "(" in request["query"]
+            request for request in self.requests() if "query" in request and operation + "(" in request["query"]
         )
 
     def test_collector_groups_rstest_cases_under_their_test(self):
