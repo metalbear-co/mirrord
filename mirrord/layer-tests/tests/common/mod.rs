@@ -5,18 +5,32 @@ use std::{
     io,
     net::SocketAddr,
     path::{Path, PathBuf},
-    process::Stdio,
     sync::Arc,
 };
 
-use mirrord_command::resolve_tokio_command;
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 pub use mirrord_layer_tests::intproxy::TestIntProxy;
-pub use mirrord_test_utils::{TestProcess, run_command::run_exec};
+pub use mirrord_test_utils::{TestProcess, node, python, run_command::run_exec};
 use rstest::fixture;
-use tokio::{io::AsyncWriteExt, net::TcpListener};
+use tokio::net::TcpListener;
 use tracing::subscriber::DefaultGuard;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
+/// Returns the absolute path of the file at `path` in this package, like `configs/fs.json`,
+/// from the test's runfiles.
+///
+/// Most apps in [`Application::get_executable`] run from a relative path instead, which starts
+/// from the working directory: nextest runs the tests in this package's directory in the runfiles.
+pub fn package_file(path: &str) -> PathBuf {
+    mirrord_runfiles::runfile(&format!("layer-tests/{path}"))
+}
+
+/// Returns the absolute path of the script at `path` in `apps`, like `app-flask/main.py`, from
+/// the test's runfiles.
+pub fn app_script(path: &str) -> String {
+    package_file(&format!("apps/{path}"))
+        .to_string_lossy()
+        .into_owned()
+}
 
 /// Configuration for [`Application::RustOutgoingTcp`] and [`Application::RustOutgoingUdp`].
 pub const RUST_OUTGOING_PEERS: &str = "1.1.1.1:1111,2.2.2.2:2222,3.3.3.3:3333";
@@ -46,7 +60,11 @@ pub fn init_tracing() -> DefaultGuard {
         .map(|name| name.replace(':', "_"))
     {
         Some(test_name) => {
-            let mut logs_file = PathBuf::from("/tmp/intproxy_logs");
+            // Bazel deletes a test's `/tmp`, but keeps `TEST_UNDECLARED_OUTPUTS_DIR`, in the
+            // test's `test.outputs` in `bazel-testlogs`.
+            let mut logs_file = std::env::var_os("TEST_UNDECLARED_OUTPUTS_DIR")
+                .map(|outputs| PathBuf::from(outputs).join("intproxy_logs"))
+                .unwrap_or_else(|| PathBuf::from("/tmp/intproxy_logs"));
 
             #[cfg(target_os = "macos")]
             logs_file.push("macos");
@@ -209,261 +227,135 @@ pub enum Application {
 }
 
 impl Application {
-    /// Run python with shell resolving to find the actual executable.
-    ///
-    /// This is to help tests that run python with mirrord work locally on systems with pyenv.
-    /// If we run `python3` on a system with pyenv the first executed is not python but bash. On mac
-    /// that prevents the layer from loading because of SIP.
-    pub(crate) async fn get_python3_executable() -> String {
-        // `python3` doesn't exist on windows :D
-        let python_exec = if cfg!(target_os = "windows") {
-            "python"
-        } else {
-            "python3"
-        };
-
-        let mut python = resolve_tokio_command(python_exec)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let child_stdin = python.stdin.as_mut().unwrap();
-        child_stdin
-            .write_all(b"import sys\nprint(sys.executable)")
-            .await
-            .unwrap();
-        let output = python.wait_with_output().await.unwrap();
-        String::from(String::from_utf8_lossy(&output.stdout).trim())
-    }
-
-    pub async fn get_executable(&self) -> String {
+    pub fn get_executable(&self) -> String {
         match self {
             Application::PythonFlaskHTTP
             | Application::PythonSelfConnect
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::PythonDontLoad
-            Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
-            Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
-            Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
-            Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
             | Application::PythonListen
             | Application::PythonFastApiHTTP
+            | Application::PythonIssue864 => python(),
+            Application::Fork => String::from("apps/fork/fork"),
+            Application::ReadLink => String::from("apps/readlink/readlink"),
+            Application::StatfsFstatfs => String::from("apps/statfs-fstatfs/statfs-fstatfs"),
+            Application::MkdirRmdir => String::from("apps/mkdir-rmdir/mkdir-rmdir"),
             Application::Cor1734FileMode => {
-                String::from("tests/apps/cor_1734_file_mode/out.c_test_app")
+                String::from("apps/cor-1734-file-mode/cor-1734-file-mode.out")
             }
-            Application::SendfileEagain => {
-                String::from("tests/apps/sendfile_eagain/out.c_test_app")
-            }
-            Application::SendfilePartial => {
-                String::from("tests/apps/sendfile_partial/out.c_test_app")
-            }
-            Application::Realpath => String::from("tests/apps/realpath/out.c_test_app"),
+            Application::SendfileEagain => String::from("apps/sendfile-eagain/sendfile-eagain"),
+            Application::SendfilePartial => String::from("apps/sendfile-partial/sendfile-partial"),
+            Application::Realpath => String::from("apps/realpath/realpath"),
             Application::NodeHTTP
             | Application::NodeIssue2283
             | Application::NodeIssue2807
-            | Application::NodeIssue3456 => String::from("node"),
-            Application::GoHTTP(version) => format!("tests/apps/app_go/{version}.go_test_app"),
+            | Application::NodeIssue3456 => node(),
+            Application::GoHTTP(version) => format!("apps/app-go/app-go.{version}"),
             Application::GoFileOps(version) => {
-                format!("tests/apps/fileops/go/{version}.go_test_app")
+                format!("apps/fileops/go/fileops.{version}")
             }
-            Application::RustFileOps => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/fileops"
-                )
-            }
-            Application::EnvBashCat => String::from("tests/apps/env_bash_cat.sh"),
+            Application::RustFileOps => String::from("apps/fileops/rust/fileops"),
+            Application::EnvBashCat => String::from("apps/env-bash-cat/main.sh"),
             Application::NodeFileOps
             | Application::NodeSpawn
             | Application::NodeCopyFile
             | Application::NodeStat
             | Application::NodeIssue2903
-            | Application::NodeMakeConnections => String::from("node"),
-            Application::GoDir(version) => format!("tests/apps/dir_go/{version}.go_test_app"),
+            | Application::NodeMakeConnections => node(),
+            Application::GoDir(version) => format!("apps/dir-go/dir-go.{version}"),
             Application::GoIssue834(version) => {
-                format!("tests/apps/issue834/{version}.go_test_app")
+                format!("apps/issue834/issue834.{version}")
             }
             Application::GoDirBypass(version) => {
-                format!("tests/apps/dir_go_bypass/{version}.go_test_app")
+                format!("apps/dir-go-bypass/dir-go-bypass.{version}")
             }
-            Application::BashShebang => String::from("tests/apps/nothing.sh"),
-            Application::GoRead(version) => format!("tests/apps/read_go/{version}.go_test_app"),
-            Application::GoWrite(version) => format!("tests/apps/write_go/{version}.go_test_app"),
-            Application::GoLSeek(version) => format!("tests/apps/lseek_go/{version}.go_test_app"),
+            Application::BashShebang => String::from("apps/nothing/main.sh"),
+            Application::GoRead(version) => format!("apps/read-go/read-go.{version}"),
+            Application::GoWrite(version) => format!("apps/write-go/write-go.{version}"),
+            Application::GoLSeek(version) => format!("apps/lseek-go/lseek-go.{version}"),
             Application::GoFAccessAt(version) => {
-                format!("tests/apps/faccessat_go/{version}.go_test_app")
+                format!("apps/faccessat-go/faccessat-go.{version}")
             }
             Application::GoSelfOpen(version) => {
-                format!("tests/apps/self_open/{version}.go_test_app")
+                format!("apps/self-open/self-open.{version}")
             }
-            Application::RustIssue1123 => String::from("tests/apps/issue1123/target/issue1123"),
-            Application::RustIssue1054 => String::from("tests/apps/issue1054/target/issue1054"),
-            Application::RustIssue1458 => String::from("tests/apps/issue1458/target/issue1458"),
+            Application::RustIssue1123 => String::from("apps/issue1123/issue1123"),
+            Application::RustIssue1054 => String::from("apps/issue1054/issue1054"),
+            Application::RustIssue1458 => String::from("apps/issue1458/issue1458"),
             Application::RustIssue1458PortNot53 => {
-                String::from("tests/apps/issue1458portnot53/target/issue1458portnot53")
+                String::from("apps/issue1458portnot53/issue1458portnot53")
             }
-            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "../../target/debug/outgoing",
-            ),
-            Application::RustDnsResolve => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "../../target/debug/dns_resolve",
-            ),
-            Application::RustRecvFrom => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/recv_from"
-                )
+            Application::RustOutgoingUdp | Application::RustOutgoingTcp { .. } => {
+                String::from("apps/outgoing/outgoing")
             }
-            Application::RustListenPorts => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/listen_ports"
-                )
-            }
-            Application::RustIssue1776 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1776"
-                )
-            }
+            Application::RustDnsResolve => String::from("apps/dns-resolve/dns-resolve"),
+            Application::RustRecvFrom => String::from("apps/recv-from/recv-from"),
+            Application::RustListenPorts => String::from("apps/listen-ports/listen-ports"),
+            Application::RustIssue1776 => String::from("apps/issue1776/issue1776"),
             Application::RustIssue1776PortNot53 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1776portnot53"
-                )
+                String::from("apps/issue1776portnot53/issue1776portnot53")
             }
-            Application::RustIssue1899 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue1899"
-                )
-            }
-            Application::RustIssue2438 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue2438"
-                )
-            }
-            Application::RustIssue2001 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue2001"
-                )
-            }
-            Application::RustIssue3248 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/issue3248"
-                )
-            }
-            Application::RustRebind0 => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/rebind0"
-                )
-            }
-            Application::OpenFile => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/open_file/out.c_test_app",
-            ),
-            Application::CIssue2055 => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/gethostbyname/out.c_test_app",
-            ),
-            Application::CIssue2178 => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/issue2178/out.c_test_app",
-            ),
-            Application::RustIssue2058 => String::from("tests/apps/issue2058/target/issue2058"),
-            Application::RustIssue2204 => String::from("tests/apps/issue2204/target/issue2204"),
+            Application::RustIssue1899 => String::from("apps/issue1899/issue1899"),
+            Application::RustIssue2438 => String::from("apps/issue2438/issue2438"),
+            Application::RustIssue2001 => String::from("apps/issue2001/issue2001"),
+            Application::RustIssue3248 => String::from("apps/issue3248/issue3248"),
+            Application::RustRebind0 => String::from("apps/rebind0/rebind0"),
+            Application::OpenFile => package_file("apps/open-file/open-file")
+                .to_string_lossy()
+                .into_owned(),
+            Application::CIssue2055 => package_file("apps/gethostbyname/gethostbyname")
+                .to_string_lossy()
+                .into_owned(),
+            Application::CIssue2178 => package_file("apps/issue2178/issue2178")
+                .to_string_lossy()
+                .into_owned(),
+            Application::RustIssue2058 => String::from("apps/issue2058/issue2058"),
+            Application::RustIssue2204 => String::from("apps/issue2204/issue2204"),
             Application::GoOpen { version, .. } => {
-                format!("tests/apps/open_go/{version}.go_test_app")
+                format!("apps/open-go/open-go.{version}")
             }
             Application::DynamicApp(exe, _) => exe.clone(),
             Application::NodeIssue4622 => String::from("sh"),
             Application::GoIssue2988(version) => {
-                format!("tests/apps/issue2988/{version}.go_test_app")
+                format!("apps/issue2988/issue2988.{version}")
             }
             Application::GoIssue5092(version) => {
-                format!("tests/apps/issue5092/{version}.go_test_app")
+                format!("apps/issue5092/issue5092.{version}")
             }
-            Application::DlopenCgo => String::from("tests/apps/dlopen_cgo/out.cpp_dlopen_cgo"),
-            Application::Connectx => String::from("tests/apps/connectx/out.c_test_app"),
-            Application::DnsSd => String::from("tests/apps/dns_sd/out.c_test_app"),
-            Application::DupListen => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/dup-listen"
-                )
-            }
+            Application::DlopenCgo => String::from("apps/dlopen-cgo/dlopen-cgo"),
+            Application::Connectx => String::from("apps/connectx/connectx"),
+            Application::DnsSd => String::from("apps/dns-sd/dns-sd"),
+            Application::DupListen => String::from("apps/dup-listen/dup-listen"),
             Application::PosixSpawnSharedSockets => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/posix-spawn-shared-sockets"
-                )
+                String::from("apps/posix-spawn-shared-sockets/posix-spawn-shared-sockets")
             }
-            Application::DoubleListen => {
-                format!(
-                    "{}/{}",
-                    env!("CARGO_MANIFEST_DIR"),
-                    "../../target/debug/double_listen"
-                )
+            Application::DoubleListen => String::from("apps/double-listen/double-listen"),
+            Application::UnixConnectAddrlen => {
+                package_file("apps/unix-connect-addrlen/unix-connect-addrlen")
+                    .to_string_lossy()
+                    .into_owned()
             }
-            Application::UnixConnectAddrlen => format!(
-                "{}/{}",
-                env!("CARGO_MANIFEST_DIR"),
-                "tests/apps/unix_connect_addrlen/out.c_test_app",
-            ),
         }
     }
 
     pub fn get_args(&self) -> Vec<String> {
-        let mut app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        app_path.push("tests/apps/");
         match self {
             Application::PythonFlaskHTTP => {
-                app_path.push("app_flask.py");
-                println!("using flask server from {app_path:?}");
-                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+                vec![String::from("-u"), app_script("app-flask/main.py")]
             }
             Application::PythonDontLoad => {
-                app_path.push("dont_load.py");
-                println!("using script from {app_path:?}");
-                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+                vec![String::from("-u"), app_script("dont_load/main.py")]
             }
-            Application::PythonListen => {
-                app_path.push("app_listen.py");
-                println!("using script from {app_path:?}");
-                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
-            }
+            Application::PythonListen => vec![String::from("-u"), app_script("app-listen/main.py")],
             // Bazel's Python environment has no `uvicorn` program, so uvicorn runs as a module.
             Application::PythonFastApiHTTP => vec![
                 String::from("-m"),
                 String::from("uvicorn"),
                 String::from("--port=9999"),
                 String::from("--host=0.0.0.0"),
-                String::from("--app-dir=tests/apps/"),
-                String::from("app_fastapi:app"),
+                String::from("--app-dir=apps/app-fastapi"),
+                String::from("main:app"),
             ],
             Application::PythonIssue864 => vec![
                 "-m".to_owned(),
@@ -471,62 +363,41 @@ impl Application {
                 "--reload".to_owned(),
                 "--port=18064".to_owned(),
                 "--host=0.0.0.0".to_owned(),
-                "--app-dir=tests/apps/".to_owned(),
-                "shared_sockets:app".to_owned(),
+                "--app-dir=apps/shared-sockets".to_owned(),
+                "main:app".to_owned(),
             ],
-            Application::NodeHTTP => {
-                app_path.push("app_node.js");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeFileOps => {
-                app_path.push("fileops.js");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeIssue3456 => {
-                app_path.push("issue3456.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeSpawn => {
-                app_path.push("node_spawn.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeCopyFile => {
-                app_path.push("node_copyfile.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeStat => {
-                app_path.push("node_stat.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeIssue2903 => {
-                app_path.push("issue2903.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeIssue2283 => {
-                app_path.push("issue2283.js");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeIssue2807 => {
-                app_path.push("issue2807.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
-            Application::NodeMakeConnections => {
-                app_path.push("make_connections.mjs");
-                vec![app_path.to_string_lossy().to_string()]
-            }
+            // Node resolves a script's imports, like `express`, from the script's real path, which
+            // is outside the runfiles. With the main script's symlink kept, Node resolves them from
+            // the runfiles, where the app's `js_binary` puts the packages that it imports. Only the
+            // main script keeps its symlink, because the packages' own imports must still resolve
+            // from their real paths, in the pnpm store that rules_js lays out.
+            Application::NodeHTTP => vec![
+                "--preserve-symlinks-main".to_owned(),
+                app_script("app-node/main.js"),
+            ],
+            Application::NodeFileOps => vec![app_script("fileops/node/main.js")],
+            Application::NodeIssue3456 => vec![app_script("issue3456/main.mjs")],
+            Application::NodeSpawn => vec![app_script("node-spawn/main.mjs")],
+            Application::NodeCopyFile => vec![app_script("node-copyfile/main.mjs")],
+            Application::NodeStat => vec![app_script("node-stat/main.mjs")],
+            Application::NodeIssue2903 => vec![app_script("issue2903/main.mjs")],
+            Application::NodeIssue2283 => vec![app_script("issue2283/main.js")],
+            // Imports `portfinder`, as `NodeHTTP` imports `express`.
+            Application::NodeIssue2807 => vec![
+                "--preserve-symlinks-main".to_owned(),
+                app_script("issue2807/main.mjs"),
+            ],
+            Application::NodeMakeConnections => vec![app_script("make-connections/main.mjs")],
             Application::PythonSelfConnect => {
-                app_path.push("self_connect.py");
-                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+                vec![String::from("-u"), app_script("self-connect/main.py")]
             }
             Application::PythonSocketPair => {
-                app_path.push("socketpair.py");
-                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+                vec![String::from("-u"), app_script("socketpair/main.py")]
             }
             Application::PythonCor1401Seqpacket => {
-                app_path.push("cor_1401_seqpacket.py");
                 vec![
                     String::from("-u"),
-                    app_path.to_string_lossy().to_string(),
+                    app_script("cor-1401-seqpacket/main.py"),
                     COR_1401_SEQPACKET_SOCKET.to_owned(),
                 ]
             }
@@ -610,13 +481,14 @@ impl Application {
                 ]
             }
             Application::DynamicApp(_, args) => args.to_owned(),
-            Application::NodeIssue4622 => {
-                app_path.push("issue4622.js");
-                vec![
-                    "-c".to_owned(),
-                    format!("exec 0<&- ; exec node {}", app_path.to_string_lossy()),
-                ]
-            }
+            Application::NodeIssue4622 => vec![
+                "-c".to_owned(),
+                format!(
+                    "exec 0<&- ; exec {} {}",
+                    node(),
+                    app_script("issue4622/main.js")
+                ),
+            ],
             Application::PosixSpawnSharedSockets => vec![],
         }
     }
@@ -706,7 +578,7 @@ impl Application {
         env: HashMap<String, String>,
         config_path: Option<&Path>,
     ) -> TestProcess {
-        let executable = self.get_executable().await;
+        let executable = self.get_executable();
         println!("Using executable: {executable}");
         println!("Using args: {:?}", self.get_args());
 
@@ -768,9 +640,7 @@ impl Application {
 #[fixture]
 #[once]
 pub fn config_dir() -> PathBuf {
-    let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    config_path.push("tests/configs");
-    config_path
+    package_file("configs")
 }
 
 /// Environment for the user application.

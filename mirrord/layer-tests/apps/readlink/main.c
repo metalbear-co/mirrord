@@ -28,6 +28,7 @@ int main() {
   printf("'%s' -> '%s'", path, out_buffer);
 
   // "/gatos/rajado.txt" is the original file.
-  assert(strcmp("/gatos/rajado.txt", out_buffer) == 0);
+  int comparison = strcmp("/gatos/rajado.txt", out_buffer);
+  assert(comparison == 0);
   return 0;
 }

@@ -1,0 +1,49 @@
+load("@bazel_skylib//rules:select_file.bzl", "select_file")
+load("@crates//mirrord-test-utils:data.bzl", "crate_data")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:runfiles_link.bzl", "runfiles_link")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+crate.unit_tests()
+
+# The Node.js that the tests run their Node apps with, so that they don't depend on the machine's
+# `node`. The link puts it at `test-utils/node` in the runfiles, whatever repository it's from.
+#
+# It and `:python_env` are only in the runfiles of the tests that run such apps, so that the other
+# tests don't depend on them, which each Node app's or Python app's package gives its tests in its
+# `data`. Both are public, for the apps and tests of other modules too.
+runfiles_link(
+    name = "node",
+    src = ":node_bin",
+    visibility = ["//visibility:public"],
+)
+
+# The `node` binary of the Node.js toolchain for the target platform, which also has `npm`. The
+# tests run the binary itself rather than rules_nodejs's `:node` launcher, because the launcher is a
+# shell script, and the layer would load into the shell too and make calls that the tests don't
+# expect.
+select_file(
+    name = "node_bin",
+    srcs = "@rules_nodejs//nodejs:current_node_runtime",
+    subpath = select({
+        "@platforms//os:windows": "/node.exe",
+        "//conditions:default": "/bin/node",
+    }),
+)
+
+py_binary(
+    name = "python_env",
+    srcs = ["python_env.py"],
+    deps = [
+        "@pip//fastapi",
+        "@pip//flask",
+        "@pip//uvicorn",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["requirements.txt"])

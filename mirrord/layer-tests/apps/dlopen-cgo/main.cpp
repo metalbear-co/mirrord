@@ -9,8 +9,6 @@
 #include <string>
 #include <libgen.h>
 
-#include "libgo_server.h"
-
 using namespace std;
 
 static atomic<bool> running{true};

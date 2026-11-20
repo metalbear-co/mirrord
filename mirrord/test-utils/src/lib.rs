@@ -10,13 +10,13 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
 use chrono::{Timelike, Utc};
 use fancy_regex::Regex;
-use mirrord_command::resolve_tokio_command;
+use mirrord_command::{resolve_command, resolve_tokio_command};
 use tempfile::TempDir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -25,16 +25,93 @@ use tokio::{
     task::JoinHandle,
 };
 
+// The tests find the programs and files in their `data` with these.
+pub use mirrord_runfiles::{runfile, runfile_program};
+
 pub mod run_command;
 #[cfg(all(test, unix))]
 mod wait_for_line_tests;
 
 /// Directory this harness keeps a copy of every process's output in, one file per process
-/// named `<label>-<pid>.log`, when set. The operator's `cargo xtask e2e-staging --logs` sets
-/// it, so what an app run under mirrord writes can be read while the test runs, next to the
-/// logs of the pods in the cluster, instead of only in nextest's report of a failure. Nothing
-/// is written when it is unset.
+/// named `<label>-<pid>.log`, when set. With it, what an app run under mirrord writes can be read
+/// while the test runs, next to the logs of the pods in the cluster, instead of only in nextest's
+/// report of a failure. Nothing is written when it is unset.
 pub const LOG_DIR_ENV: &str = "MIRRORD_TESTS_LOG_DIR";
+
+/// Returns the Node.js that runs the Node apps, so that the tests don't depend on the machine's
+/// `node`.
+///
+/// The test must have `//mirrord/test-utils:node` in its runfiles, which the package of each Node
+/// app gives it.
+pub fn node() -> String {
+    mirrord_runfiles::runfile_program("test-utils/node")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The Python interpreter that Bazel provides for the Python apps, and the path of their packages.
+struct BazelPython {
+    /// The path of the interpreter.
+    executable: String,
+
+    /// The `PYTHONPATH` that holds the apps' pip packages.
+    python_path: String,
+}
+
+/// The Python interpreter that Bazel provides, once a test asks for it.
+static BAZEL_PYTHON: OnceLock<BazelPython> = OnceLock::new();
+
+/// Returns the Python interpreter that Bazel provides.
+///
+/// The test must have `//mirrord/test-utils:python_env` in its runfiles, which the package of each
+/// Python app gives it. It's a program that prints the interpreter and the path of the apps' pip
+/// packages. The tests can't run the apps with that
+/// program, because Bazel starts a Python program with a shell script, and the layer would load
+/// into the shell and make calls that the tests don't expect. So the tests run the interpreter
+/// directly, with that path in `PYTHONPATH`.
+fn bazel_python() -> &'static BazelPython {
+    BAZEL_PYTHON.get_or_init(|| {
+        let python_env = mirrord_runfiles::runfile_program("test-utils/python_env");
+        // On Windows, rules_python deletes the program's virtual environment, which holds the
+        // interpreter that the program prints, when the program exits, unless
+        // `RULES_PYTHON_EXTRACT_ROOT` is set.
+        //
+        // Each test process needs its own directory, because the tests run in parallel, and
+        // the program rewrites the virtual environment's configuration each time it runs.
+        let venv_root = std::env::var_os("TEST_TMPDIR")
+            .map_or_else(std::env::temp_dir, PathBuf::from)
+            .join(format!("python-env-{}", std::process::id()));
+        let output = resolve_command(python_env)
+            .env("RULES_PYTHON_EXTRACT_ROOT", venv_root)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let mut lines = stdout.lines().map(str::to_owned);
+        BazelPython {
+            executable: lines.next().unwrap(),
+            python_path: lines.next().unwrap(),
+        }
+    })
+}
+
+/// Returns the Python interpreter that Bazel provides for the Python apps, so that the tests don't
+/// depend on the machine's `python3` and its packages.
+///
+/// The interpreter only finds the apps' pip packages with [`python_path`] in `PYTHONPATH`, which
+/// [`run_command::run_exec`] sets.
+pub fn python() -> String {
+    bazel_python().executable.clone()
+}
+
+/// Returns the `PYTHONPATH` that the interpreter of [`python`] needs, or `None` when the test
+/// hasn't called [`python`].
+///
+/// A test builds an app's command, and so calls [`python`], before it runs the app. A test that
+/// hasn't called it runs no Python app, and shouldn't wait for `:python_env` to start.
+pub fn python_path() -> Option<&'static str> {
+    BAZEL_PYTHON.get().map(|python| python.python_path.as_str())
+}
 
 /// The file a process's output is copied to under [`LOG_DIR_ENV`], or `None` when the
 /// directory is unset or cannot be written; a copy that fails must not fail the test.
@@ -55,8 +132,10 @@ fn copy_output(copy: &Option<Arc<Mutex<File>>>, stream: &str, chunk: &str) {
 }
 
 /// The name a process's output copy is filed under: what runs, so a `mirrord exec ... --
-/// /path/to/app` is filed as `app`, not `mirrord`. A Go test app is built as
-/// `<app dir>/<n>.go_test_app`, where only the directory says which app it is.
+/// /path/to/app` is filed as `app`, not `mirrord`. The label is the stem of the program's file
+/// name, which is the app's name for every test app, including a Go app's build for each Go
+/// version, named `<app>.<minor>` like `go-e2e-dir.27`, and the C app that the layer tests build
+/// against another glibc, named `<app>.out`.
 pub fn output_label<S: AsRef<str>>(program: &str, args: &[S]) -> String {
     let executable = args
         .iter()
@@ -64,16 +143,9 @@ pub fn output_label<S: AsRef<str>>(program: &str, args: &[S]) -> String {
         .and_then(|separator| args.get(separator + 1))
         .map(AsRef::as_ref)
         .unwrap_or(program);
-    let path = Path::new(executable);
-    let name = if path
-        .extension()
-        .is_some_and(|extension| extension == "go_test_app")
-    {
-        path.parent().and_then(Path::file_name)
-    } else {
-        path.file_stem()
-    };
-    name.map(|name| name.to_string_lossy().into_owned())
+    Path::new(executable)
+        .file_stem()
+        .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "process".to_owned())
 }
 
@@ -94,17 +166,13 @@ mod output_label_tests {
     }
 
     #[test]
-    fn a_go_test_app_is_filed_under_its_directory() {
+    fn a_go_build_is_filed_under_its_app() {
         assert_eq!(
             output_label(
                 "mirrord",
-                &[
-                    "exec",
-                    "--",
-                    "/src/tests/go-e2e-pg-branching/27.go_test_app"
-                ]
+                &["exec", "--", "/src/tests/go-e2e-dir/go-e2e-dir.27"]
             ),
-            "go-e2e-pg-branching"
+            "go-e2e-dir"
         );
     }
 }

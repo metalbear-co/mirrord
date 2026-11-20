@@ -20,6 +20,7 @@ workspace = true
 chrono.workspace = true
 fancy-regex.workspace = true
 mirrord-command = { path = "../command", features = ["tokio"] }
+mirrord-runfiles = { path = "../runfiles" }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "process", "time", "io-util", "sync"] }
 

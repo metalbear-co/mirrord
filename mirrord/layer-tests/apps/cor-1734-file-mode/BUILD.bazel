@@ -1,0 +1,33 @@
+load("@bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//bazel:platform.bzl", "platform_label")
+
+cc_binary(
+    name = "cor-1734-file-mode.out",
+    srcs = ["main.c"],
+    target_compatible_with = UNIX_ONLY,
+)
+
+# On Linux, the app builds against glibc 2.34 rather than the 2.17 of the binaries that mirrord
+# ships, because the function that a call like `stat` reaches depends on the glibc that the program
+# compiles against. Against 2.17, `stat`, `fstat`, `lstat` and `fstatat` compile to calls to
+# `__xstat`, `__fxstat` and their variants, so the test would only cover the layer's hooks for
+# those. Since glibc 2.33, programs call these functions themselves, as programs built on current
+# distributions do. The test runs the app on the machine, and a program built against glibc 2.34
+# still runs on machines like Ubuntu 22.04 and RHEL 9. On macOS, the app builds for the platform
+# that the rest of the build uses.
+#
+# The test lists this target, and runs the app from `cor-1734-file-mode.out` in its runfiles.
+platform_transition_filegroup(
+    name = "cor-1734-file-mode",
+    srcs = [":cor-1734-file-mode.out"],
+    target_platform = select({
+        "//bazel/platforms:is_linux_aarch64": "//bazel/platforms:aarch64-linux-glibc-2.34",
+        "//bazel/platforms:is_linux_x86_64": "//bazel/platforms:x86_64-linux-glibc-2.34",
+        "//bazel/platforms:is_macos_aarch64": platform_label("macos", "aarch64"),
+        "//bazel/platforms:is_macos_x86_64": platform_label("macos", "x86_64"),
+    }),
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

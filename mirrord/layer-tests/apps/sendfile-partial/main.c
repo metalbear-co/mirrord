@@ -55,13 +55,15 @@ static void fill_pipe_but_one_page(int pipe_read, int pipe_write, unsigned char 
 {
   drain_pipe(pipe_read, chunk);
   fill_pipe(pipe_write, chunk);
-  assert(read(pipe_read, chunk, page) == (ssize_t)page);
+  ssize_t read_size = read(pipe_read, chunk, page);
+  assert(read_size == (ssize_t)page);
 }
 
 static void partial_write_with_offset(int source, int pipe_read, int pipe_write, unsigned char *chunk)
 {
   fill_pipe_but_one_page(pipe_read, pipe_write, chunk);
-  assert(lseek(source, 0, SEEK_SET) == 0);
+  off_t rewound = lseek(source, 0, SEEK_SET);
+  assert(rewound == 0);
 
   off_t offset = 0;
   ssize_t result = sendfile(pipe_write, source, &offset, source_size);
@@ -80,7 +82,8 @@ static void eagain_without_offset(int source, int pipe_read, int pipe_write, uns
 {
   drain_pipe(pipe_read, chunk);
   fill_pipe(pipe_write, chunk);
-  assert(lseek(source, 0, SEEK_SET) == 0);
+  off_t rewound = lseek(source, 0, SEEK_SET);
+  assert(rewound == 0);
 
   ssize_t result = sendfile(pipe_write, source, NULL, page);
   int sendfile_errno = errno;
@@ -98,7 +101,8 @@ static void eagain_without_offset(int source, int pipe_read, int pipe_write, uns
 static void partial_write_without_offset(int source, int pipe_read, int pipe_write, unsigned char *chunk)
 {
   fill_pipe_but_one_page(pipe_read, pipe_write, chunk);
-  assert(lseek(source, 0, SEEK_SET) == 0);
+  off_t rewound = lseek(source, 0, SEEK_SET);
+  assert(rewound == 0);
 
   ssize_t result = sendfile(pipe_write, source, NULL, source_size);
   off_t position = lseek(source, 0, SEEK_CUR);
@@ -116,7 +120,8 @@ static void partial_write_without_offset(int source, int pipe_read, int pipe_wri
 static void copy_whole_file(int source, int pipe_read, int pipe_write, unsigned char *chunk, int use_offset)
 {
   drain_pipe(pipe_read, chunk);
-  assert(lseek(source, 0, SEEK_SET) == 0);
+  off_t rewound = lseek(source, 0, SEEK_SET);
+  assert(rewound == 0);
 
   unsigned char *received = malloc(source_size);
   assert(received != NULL);
@@ -155,7 +160,8 @@ static void copy_whole_file(int source, int pipe_read, int pipe_write, unsigned 
   }
   assert(sent == source_size);
   assert(received_size == source_size);
-  assert(memcmp(received, source_data, source_size) == 0);
+  int comparison = memcmp(received, source_data, source_size);
+  assert(comparison == 0);
 
   free(received);
 }
@@ -165,7 +171,8 @@ int main()
   page = (size_t)sysconf(_SC_PAGESIZE);
 
   int pipes[2];
-  assert(pipe2(pipes, O_NONBLOCK) == 0);
+  int result = pipe2(pipes, O_NONBLOCK);
+  assert(result == 0);
   int pipe_read = pipes[0];
   int pipe_write = pipes[1];
 
@@ -184,8 +191,10 @@ int main()
 
   int source = open(SOURCE_PATH, O_CREAT | O_RDWR | O_TRUNC, 0600);
   assert(source >= 0);
-  assert(write(source, source_data, source_size) == (ssize_t)source_size);
-  assert(unlink(SOURCE_PATH) == 0);
+  ssize_t written = write(source, source_data, source_size);
+  assert(written == (ssize_t)source_size);
+  result = unlink(SOURCE_PATH);
+  assert(result == 0);
 
   unsigned char *chunk = malloc(page);
   assert(chunk != NULL);

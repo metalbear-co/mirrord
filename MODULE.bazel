@@ -2,9 +2,12 @@ module(name = "mirrord")
 
 bazel_dep(name = "bazel_lib", version = "3.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "llvm", version = "0.8.27")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "rules_nodejs", version = "6.7.7")
 bazel_dep(name = "rules_python", version = "2.4.6")
 bazel_dep(name = "rules_rs", version = "0.2.4")
 bazel_dep(name = "rules_shell", version = "0.8.0")
@@ -76,6 +79,23 @@ python.toolchain(
 # pip packages ship their own.
 rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")
 rules_python_config.explicit_init_py(default = True)
+
+# The packages of the Python test apps and of the scripts, like `//:lint`.
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pip",
+    python_version = "3.13",
+    requirements_lock = "//mirrord/test-utils:requirements.txt",
+    # By default, only the host's wheels resolve, so a build for another platform would fail.
+    target_platforms = [
+        "linux_aarch64",
+        "linux_x86_64",
+        "osx_aarch64",
+        "osx_x86_64",
+        "windows_x86_64",
+    ],
+)
+use_repo(pip, "pip")
 
 # Crate hub ----------------------------------------------------------------------------------------
 
@@ -179,6 +199,50 @@ crate.annotation(
     crate = "lzma-sys",
     gen_build_script = "off",
     deps = ["@xz//:lzma"],
+)
+
+# Test apps ----------------------------------------------------------------------------------------
+
+# The tests run their Node apps with this Node.js (see `//mirrord/test-utils:node`).
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+
+# Pinned, because rules_nodejs's default changes with its releases, so upgrading rules_nodejs would
+# also change the Node.js that the tests run.
+node.toolchain(node_version = "24.22.1")
+
+# One SDK for each version in `GO_VERSIONS`.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+
+# The first SDK is the default, which a `go_binary` that doesn't pick a version builds with, like
+# the end-to-end tests' staging apps.
+go_sdk.download(version = "1.27.3")
+go_sdk.download(version = "1.26.10")
+go_sdk.download(version = "1.25.14")
+
+# `go_deps` runs Go's minimal version selection over the `go.mod` of every app in
+# `//:go_apps.work` and of every other Bazel module that uses `go_deps`. So all the apps get the
+# same version of a module, the highest that any of them requires, which can be newer than what an
+# app's own `go.mod` requires.
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:go_apps.work")
+use_repo(
+    go_deps,
+    "com_github_gin_gonic_gin",
+    "com_rogchap_v8go",
+    "net_kuoruan_go_v8go_polyfills",
+)
+
+# The patch makes v8go's prebuilt V8 archive an input of the link, and turns off warnings in v8go's
+# C++. Its commit message says why.
+#
+# gazelle only lets the root module override a Go module, so the override is a dev dependency,
+# which Bazel ignores when another module depends on mirrord. Such a module builds v8go without the
+# patch, which only the layer tests' `issue834` app needs.
+go_deps_dev = use_extension("@gazelle//:extensions.bzl", "go_deps", dev_dependency = True)
+go_deps_dev.module_override(
+    patch_strip = 1,
+    patches = ["//bazel/third_party/v8go:libv8.patch"],
+    path = "rogchap.com/v8go",
 )
 
 # Prebuilt tools and libraries ---------------------------------------------------------------------

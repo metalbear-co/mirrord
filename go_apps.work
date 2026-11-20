@@ -1,0 +1,13 @@
+// The Go apps that use external dependencies.
+//
+// `go_deps` accepts only one `from_file`, so it reads the apps' `go.mod` files through this file.
+// Each app has to be a Bazel package, so that `go_deps` can name its `go.mod` with a label.
+//
+// The file isn't named `go.work`, because the go command would then use it for every module in the
+// repository.
+go 1.25
+
+use (
+	./mirrord/layer-tests/apps/app-go
+	./mirrord/layer-tests/apps/issue834
+)

@@ -1,0 +1,8 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+
+js_binary(
+    name = "node-stat",
+    data = ["//mirrord/test-utils:node"],
+    entry_point = "main.mjs",
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

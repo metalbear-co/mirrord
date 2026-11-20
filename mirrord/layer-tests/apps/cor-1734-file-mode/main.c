@@ -29,7 +29,8 @@ static const int CREATE_FLAGS = O_CREAT | O_WRONLY | O_TRUNC;
 static void fresh_path(char *out, size_t len, const char *name, mode_t mode)
 {
   snprintf(out, len, "/tmp/cor_1734_%s_%04o", name, mode);
-  assert(unlink(out) == 0 || errno == ENOENT);
+  int result = unlink(out);
+  assert(result == 0 || errno == ENOENT);
 }
 
 static void assert_created_with_mode(const char *path, mode_t expected, int fd)
@@ -37,8 +38,10 @@ static void assert_created_with_mode(const char *path, mode_t expected, int fd)
   assert(fd >= 0);
 
   struct stat file_stat;
-  assert(fstat(fd, &file_stat) == 0);
-  assert(close(fd) == 0);
+  int result = fstat(fd, &file_stat);
+  assert(result == 0);
+  result = close(fd);
+  assert(result == 0);
 
   mode_t actual = file_stat.st_mode & 07777;
   if (actual != expected)
@@ -47,7 +50,8 @@ static void assert_created_with_mode(const char *path, mode_t expected, int fd)
   }
   assert(actual == expected);
 
-  assert(unlink(path) == 0);
+  result = unlink(path);
+  assert(result == 0);
 }
 
 int main()
@@ -92,17 +96,21 @@ int main()
 #endif
 
     snprintf(path, sizeof(path), "/tmp/cor_1734_mkdir_%04o", mode);
-    assert(rmdir(path) == 0 || errno == ENOENT);
-    assert(mkdir(path, mode) == 0);
+    int result = rmdir(path);
+    assert(result == 0 || errno == ENOENT);
+    result = mkdir(path, mode);
+    assert(result == 0);
     struct stat dir_stat;
-    assert(stat(path, &dir_stat) == 0);
+    result = stat(path, &dir_stat);
+    assert(result == 0);
     if ((dir_stat.st_mode & 07777) != mode)
     {
       fprintf(stderr, "%s created with mode %04o, expected %04o\n", path,
               dir_stat.st_mode & 07777, mode);
     }
     assert((dir_stat.st_mode & 07777) == mode);
-    assert(rmdir(path) == 0);
+    result = rmdir(path);
+    assert(result == 0);
   }
 
   return 0;

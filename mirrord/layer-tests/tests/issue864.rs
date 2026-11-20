@@ -24,7 +24,7 @@ pub use common::*;
 ///
 /// Share sockets between `execve` and `execv` with python's uvicorn.
 ///
-/// We run the `shared_sockets.py` app with the `--reload` flag to trigger the issue.
+/// We run the `shared-sockets` app with the `--reload` flag to trigger the issue.
 /// The worker completion line verifies request handling. A successful parent exit checks
 /// parent shutdown, but does not establish the worker's exit status.
 #[rstest]
