@@ -394,10 +394,6 @@ yamlpath = "0.32.0"
 private_intra_doc_links = "allow"
 
 [workspace.lints.clippy]
-[profile.release]
-strip = "debuginfo"
-# Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
-lto = false
 indexing_slicing = "warn"
 str_to_string = "warn"
 

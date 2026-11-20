@@ -1,17 +1,3 @@
-[profile.dev]
-opt-level = 0
-debug = true
-
-[profile.test.package."*"]
-incremental = true
-
-[profile.debug-overflow]
-inherits = "dev"
-opt-level = 0
-debug = 2  # full debug info
-overflow-checks = true
-debug-assertions = true
-incremental = false
 [env]
 # Placeholders for the files that `mirrord-mcp` and the `standalone` CLI embed, like the layer and the
 # UI, which keep rust-analyzer's `cargo check` working. Bazel builds the real files and passes their
