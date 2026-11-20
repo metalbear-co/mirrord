@@ -5138,7 +5138,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
- "tower-test",
+ "tower",
  "tracing",
  "whoami",
  "x509-certificate",
@@ -5474,7 +5474,6 @@ dependencies = [
  "tokio",
  "tokio-retry",
  "tower",
- "tower-test",
  "tracing",
 ]
 
@@ -5727,7 +5726,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower",
- "tower-test",
  "tracing",
  "uuid",
  "walkdir",
@@ -9651,17 +9649,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-test"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6d24790a10a7af737693a3e8f1d03faef7e6ca0cc99aae5066f533766de545"
-dependencies = [
- "futures-core",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "tokio-tungstenite"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9905,20 +9892,6 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
-
-[[package]]
-name = "tower-test"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4546773ffeab9e4ea02b8872faa49bb616a80a7da66afc2f32688943f97efa7"
-dependencies = [
- "futures-util",
- "pin-project",
- "tokio",
- "tokio-test",
- "tower-layer",
- "tower-service",
-]
 
 [[package]]
 name = "tracing"

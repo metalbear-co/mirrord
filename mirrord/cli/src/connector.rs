@@ -410,7 +410,11 @@ mod test {
     /// rejected it.
     #[tokio::test]
     async fn rejected_direct_upgrade_reports_status_and_body() {
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let service = tower::service_fn(|_: Request<Body>| async {
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(b"proxy rejected the upgrade".to_vec()))
+        });
         let mut connector = AgentConnector::Direct(DirectConnector {
             api: Api::namespaced(Client::new(service, "default"), "default"),
             info: AgentKubernetesConnectInfo {
@@ -420,15 +424,7 @@ mod test {
             },
         });
 
-        let (result, ()) = tokio::join!(connector.connect(), async {
-            let (_, send) = handle.next_request().await.unwrap();
-            send.send_response(
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::from(b"proxy rejected the upgrade".to_vec()))
-                    .unwrap(),
-            );
-        });
+        let result = connector.connect().await;
 
         let Err(error) = result else {
             panic!("connect must fail when the upgrade is rejected");

@@ -240,7 +240,11 @@ mod test {
     #[case::json_without_code(r#"{"error":"no healthy upstream"}"#)]
     #[tokio::test]
     async fn rejected_upgrade_keeps_status_and_body(#[case] body: &'static str) {
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
+        let service = tower::service_fn(move |_: Request<Body>| async move {
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(body.as_bytes().to_vec()))
+        });
         let pod_api = Api::<Pod>::namespaced(Client::new(service, "default"), "default");
         let connect_info = AgentKubernetesConnectInfo {
             pod_name: "mirrord-agent".to_owned(),
@@ -250,18 +254,7 @@ mod test {
 
         let mut no_retries = std::iter::empty();
 
-        let (result, ()) = tokio::join!(
-            create_portforward_streams(&pod_api, &connect_info, &mut no_retries),
-            async {
-                let (_, send) = handle.next_request().await.unwrap();
-                send.send_response(
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(body.as_bytes().to_vec()))
-                        .unwrap(),
-                );
-            },
-        );
+        let result = create_portforward_streams(&pod_api, &connect_info, &mut no_retries).await;
 
         let Err(error) = result else {
             panic!("port-forward must fail when the upgrade is rejected");
