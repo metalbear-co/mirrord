@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{
     borrow::Borrow,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     ops::Not,
     vec,
 };
@@ -29,74 +29,20 @@ macro_rules! dummy_file_response {
     };
 }
 
-/// Lightweight (no allocations) [`FileResponse`] to be returned when connection with the
-/// mirrord-agent is lost. Must be converted into real [`FileResponse`] via [`From`].
-pub struct AgentLostFileResponse(LayerId, MessageId, FileResponse);
-
-impl From<AgentLostFileResponse> for ToLayer {
-    fn from(value: AgentLostFileResponse) -> Self {
-        let AgentLostFileResponse(layer_id, message_id, response) = value;
-        let error = agent_lost_io_error();
-
-        let real_response = match response {
-            FileResponse::Access(..) => FileResponse::Access(Err(error)),
-            FileResponse::GetDEnts64(..) => FileResponse::GetDEnts64(Err(error)),
-            FileResponse::Open(..) => FileResponse::Open(Err(error)),
-            FileResponse::OpenDir(..) => FileResponse::OpenDir(Err(error)),
-            FileResponse::Read(..) => FileResponse::Read(Err(error)),
-            FileResponse::ReadDir(..) => FileResponse::ReadDir(Err(error)),
-            FileResponse::ReadDirBatch(..) => FileResponse::ReadDirBatch(Err(error)),
-            FileResponse::ReadLimited(..) => FileResponse::ReadLimited(Err(error)),
-            FileResponse::Seek(..) => FileResponse::Seek(Err(error)),
-            FileResponse::Write(..) => FileResponse::Write(Err(error)),
-            FileResponse::WriteLimited(..) => FileResponse::WriteLimited(Err(error)),
-            FileResponse::Xstat(..) => FileResponse::Xstat(Err(error)),
-            FileResponse::XstatFs(..) => FileResponse::XstatFs(Err(error)),
-            FileResponse::XstatFsV2(..) => FileResponse::XstatFsV2(Err(error)),
-            FileResponse::ReadLink(..) => FileResponse::ReadLink(Err(error)),
-            FileResponse::MakeDir(..) => FileResponse::MakeDir(Err(error)),
-            FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
-            FileResponse::Unlink(..) => FileResponse::Unlink(Err(error)),
-            FileResponse::Rename(..) => FileResponse::Rename(Err(error)),
-            FileResponse::Ftruncate(..) => FileResponse::Ftruncate(Err(error)),
-            FileResponse::Futimens(..) => FileResponse::Futimens(Err(error)),
-            FileResponse::Fchown(..) => FileResponse::Fchown(Err(error)),
-            FileResponse::Fchmod(..) => FileResponse::Fchmod(Err(error)),
-            FileResponse::Close(..) => FileResponse::Close(Err(error)),
-        };
-
-        debug_assert_eq!(
-            std::mem::discriminant(&response),
-            std::mem::discriminant(&real_response),
-        );
-
-        ToLayer {
-            layer_id,
-            message_id,
-            message: ProxyToLayerMessage::File(real_response),
-        }
-    }
-}
+#[derive(Debug)]
+struct AgentLostFileResponsePlaceholder(FileResponse);
 
 /// Convenience trait for [`FileRequest`].
 trait FileRequestExt: Sized {
-    /// If this [`FileRequest`] requires a [`FileResponse`] from the agent, return corresponding
-    /// [`AgentLostFileResponse`].
-    fn agent_lost_response(
-        &self,
-        layer_id: LayerId,
-        message_id: MessageId,
-    ) -> Option<AgentLostFileResponse>;
+    /// Returns the response the layer gets for this request if the agent is lost before
+    /// answering it.
+    fn agent_lost_response_placeholder(&self) -> AgentLostFileResponsePlaceholder;
 }
 
 impl FileRequestExt for FileRequest {
-    fn agent_lost_response(
-        &self,
-        layer_id: LayerId,
-        message_id: MessageId,
-    ) -> Option<AgentLostFileResponse> {
-        let response = match self {
-            Self::Close(..) | Self::CloseDir(..) => return None,
+    fn agent_lost_response_placeholder(&self) -> AgentLostFileResponsePlaceholder {
+        AgentLostFileResponsePlaceholder(match self {
+            Self::Close(..) | Self::CloseDir(..) => dummy_file_response!(Close),
             Self::Access(..) => dummy_file_response!(Access),
             Self::FdOpenDir(..) => dummy_file_response!(OpenDir),
             Self::GetDEnts64(..) => dummy_file_response!(GetDEnts64),
@@ -125,9 +71,53 @@ impl FileRequestExt for FileRequest {
             Self::Futimens(..) => dummy_file_response!(Futimens),
             Self::Fchown(..) => dummy_file_response!(Fchown),
             Self::Fchmod(..) => dummy_file_response!(Fchmod),
+        })
+    }
+}
+
+impl AgentLostFileResponsePlaceholder {
+    /// Constructs a real [`FileResponse`] that should be sent to the layer.
+    /// Uses the "cached" [`FileResponse`] variant and constructs the correct
+    /// `AgentLost` error.
+    fn hydrate(self, layer_id: LayerId, message_id: MessageId) -> ToLayer {
+        let error = agent_lost_io_error();
+        let real_response = match self.0 {
+            FileResponse::Access(..) => FileResponse::Access(Err(error)),
+            FileResponse::GetDEnts64(..) => FileResponse::GetDEnts64(Err(error)),
+            FileResponse::Open(..) => FileResponse::Open(Err(error)),
+            FileResponse::OpenDir(..) => FileResponse::OpenDir(Err(error)),
+            FileResponse::Read(..) => FileResponse::Read(Err(error)),
+            FileResponse::ReadDir(..) => FileResponse::ReadDir(Err(error)),
+            FileResponse::ReadDirBatch(..) => FileResponse::ReadDirBatch(Err(error)),
+            FileResponse::ReadLimited(..) => FileResponse::ReadLimited(Err(error)),
+            FileResponse::Seek(..) => FileResponse::Seek(Err(error)),
+            FileResponse::Write(..) => FileResponse::Write(Err(error)),
+            FileResponse::WriteLimited(..) => FileResponse::WriteLimited(Err(error)),
+            FileResponse::Xstat(..) => FileResponse::Xstat(Err(error)),
+            FileResponse::XstatFs(..) => FileResponse::XstatFs(Err(error)),
+            FileResponse::XstatFsV2(..) => FileResponse::XstatFsV2(Err(error)),
+            FileResponse::ReadLink(..) => FileResponse::ReadLink(Err(error)),
+            FileResponse::MakeDir(..) => FileResponse::MakeDir(Err(error)),
+            FileResponse::RemoveDir(..) => FileResponse::RemoveDir(Err(error)),
+            FileResponse::Unlink(..) => FileResponse::Unlink(Err(error)),
+            FileResponse::Rename(..) => FileResponse::Rename(Err(error)),
+            FileResponse::Ftruncate(..) => FileResponse::Ftruncate(Err(error)),
+            FileResponse::Futimens(..) => FileResponse::Futimens(Err(error)),
+            FileResponse::Fchown(..) => FileResponse::Fchown(Err(error)),
+            FileResponse::Fchmod(..) => FileResponse::Fchmod(Err(error)),
+            FileResponse::Close(..) => FileResponse::Close(Err(error)),
         };
 
-        Some(AgentLostFileResponse(layer_id, message_id, response))
+        debug_assert_eq!(
+            std::mem::discriminant(&self.0),
+            std::mem::discriminant(&real_response),
+        );
+
+        ToLayer {
+            layer_id,
+            message_id,
+            message: ProxyToLayerMessage::File(real_response),
+        }
     }
 }
 
@@ -233,9 +223,33 @@ enum AdditionalRequestData {
     Other,
 }
 
+#[derive(Debug)]
+struct RequestQueueEntry {
+    /// Any additional state we need for handling the response to this
+    /// request.
+    additional_data: AdditionalRequestData,
+    /// Stores the right [`FileResponse`] variant that we need to
+    /// reply to the layer with if/when the agent connection is
+    /// dropped. When that happens, all pending requests are
+    /// collected, this field is hydrated in each one, and sent to the
+    /// layer.
+    on_agent_lost: AgentLostFileResponsePlaceholder,
+}
+
+impl RequestQueueEntry {
+    /// Creates a new queue entry for the given request.
+    /// [`Self::additional_data`] will be initialized to the default.
+    /// If more control is needed, construct this struct by hand.
+    fn for_request(request: &FileRequest) -> Self {
+        Self {
+            additional_data: Default::default(),
+            on_agent_lost: request.agent_lost_response_placeholder(),
+        }
+    }
+}
+
 /// Manages state of file operations. Remaps remote file descriptors and returns early
 /// [`ResponseError`]s for [`FileRequest`]s related to invalidated (agent lost) descriptors.
-/// Tracks state of outstanding [`FileRequest`]s to respond with errors in case the agent is lost.
 #[derive(Default)]
 pub struct RouterFileOps {
     /// Highest file fd we've returned to the client (after remapping).
@@ -244,10 +258,6 @@ pub struct RouterFileOps {
     /// All lesser fds received from the clients are invalid (probably lost with previous
     /// mirrord-agent responsible for file ops).
     current_fd_offset: u64,
-    /// Prepared error responses to outstanding [`FileRequest`]s.
-    /// We must flush these when connection to the mirrord-agent is lost, otherwise the layer will
-    /// hang.
-    queued_error_responses: VecDeque<AgentLostFileResponse>,
 }
 
 impl fmt::Debug for RouterFileOps {
@@ -297,18 +307,11 @@ impl RouterFileOps {
             | FileRequest::Rename(..)
             | FileRequest::UnlinkAt(UnlinkAtRequest { dirfd: None, .. }) => {}
 
-            // These requests do not require any response from the agent.
-            // We need to remap the fd, but if the fd is invalid we simply drop them.
-            FileRequest::Close(CloseFileRequest { fd: remote_fd })
-            | FileRequest::CloseDir(CloseDirRequest { remote_fd }) => {
-                if !self.map_fd(remote_fd) {
-                    return Ok(None);
-                }
-            }
-
             // These requests refer to an open remote fd and require a response from the agent.
             // We need to remap the fd and respond with an error if the fd is invalid.
-            FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd })
+            FileRequest::Close(CloseFileRequest { fd: remote_fd })
+            | FileRequest::CloseDir(CloseDirRequest { remote_fd })
+            | FileRequest::FdOpenDir(FdOpenDirRequest { remote_fd })
             | FileRequest::GetDEnts64(GetDEnts64Request { remote_fd, .. })
             | FileRequest::OpenRelative(OpenRelativeFileRequest {
                 relative_fd: remote_fd,
@@ -340,17 +343,12 @@ impl RouterFileOps {
             | FileRequest::Fchmod(FchmodRequest { fd: remote_fd, .. }) => {
                 if !self.map_fd(remote_fd) {
                     let error_response = request
-                        .agent_lost_response(layer_id, message_id)
-                        .expect("these requests require responses")
-                        .into();
+                        .agent_lost_response_placeholder()
+                        .hydrate(layer_id, message_id);
                     return Err(Box::new(error_response));
                 }
             }
         };
-
-        if let Some(response) = request.agent_lost_response(layer_id, message_id) {
-            self.queued_error_responses.push_back(response);
-        }
 
         Ok(Some(request))
     }
@@ -399,17 +397,11 @@ impl RouterFileOps {
         response
     }
 
-    /// Removes the fallback response for a request completed by the agent.
-    fn agent_response_received(&mut self) {
-        self.queued_error_responses.pop_front();
-    }
-
     /// Notify this manager that the agent was lost.
     /// Return messages to be sent to the user.
     #[tracing::instrument(level = Level::TRACE)]
-    pub fn agent_lost(&mut self) -> VecDeque<AgentLostFileResponse> {
+    pub fn agent_lost(&mut self) {
         self.current_fd_offset = self.highest_user_facing_fd.map(|fd| fd + 1).unwrap_or(0);
-        std::mem::take(&mut self.queued_error_responses)
     }
 }
 
@@ -448,7 +440,7 @@ pub struct FilesProxy {
     file_buffer_size: u64,
 
     /// Stores metadata of outstanding requests.
-    request_queue: RequestQueue<AdditionalRequestData>,
+    request_queue: RequestQueue<RequestQueueEntry>,
 
     /// For tracking remote file descriptors across layer instances (forks).
     remote_files: RemoteResources<u64>,
@@ -535,36 +527,44 @@ impl FilesProxy {
         let close_responses = self.close_responses();
         for fd in self.remote_files.remove_all(closed.id) {
             self.buffered_files.remove(&fd);
-            message_bus
-                .send_agent(ClientMessage::FileRequest(FileRequest::Close(
-                    CloseFileRequest { fd },
-                )))
-                .await;
+            let request = FileRequest::Close(CloseFileRequest { fd });
 
             if close_responses {
                 // This works because once the layer is removed,
                 // messages sent to it will be silently dropped. So
                 // when the response from agent arrives, we'll forward
                 // it to a nonexistent layer => drop => all good.
-                self.request_queue.push_back(0, closed.id);
+                self.request_queue.push_back_with_data(
+                    0,
+                    closed.id,
+                    RequestQueueEntry::for_request(&request),
+                );
             }
+
+            message_bus
+                .send_agent(ClientMessage::FileRequest(request))
+                .await;
         }
 
         for remote_fd in self.remote_dirs.remove_all(closed.id) {
             self.buffered_dirs.remove(&remote_fd);
-            message_bus
-                .send_agent(ClientMessage::FileRequest(FileRequest::CloseDir(
-                    CloseDirRequest { remote_fd },
-                )))
-                .await;
+            let request = FileRequest::CloseDir(CloseDirRequest { remote_fd });
 
             if close_responses {
                 // This works because once the layer is removed,
                 // messages sent to it will be silently dropped. So
                 // when the response from agent arrives, we'll forward
                 // it to a nonexistent layer => drop => all good.
-                self.request_queue.push_back(0, closed.id);
+                self.request_queue.push_back_with_data(
+                    0,
+                    closed.id,
+                    RequestQueueEntry::for_request(&request),
+                );
             }
+
+            message_bus
+                .send_agent(ClientMessage::FileRequest(request))
+                .await;
         }
     }
 
@@ -647,6 +647,11 @@ impl FilesProxy {
             return;
         }
 
+        // Built from the request as the layer sent it, since the agent may get another request in
+        // its place (`ReadDirBatch` for `ReadDir`, `StatFs` for `StatFsV2`, ...), and the layer
+        // expects a response of its own kind if the agent is lost.
+        let mut queue_entry = RequestQueueEntry::for_request(&request);
+
         match request {
             // Should trigger remote close only when the fd is closed in all layer instances.
             FileRequest::Close(close) => {
@@ -659,7 +664,8 @@ impl FilesProxy {
                         .await;
 
                     if self.close_responses() {
-                        self.request_queue.push_back(message_id, layer_id);
+                        self.request_queue
+                            .push_back_with_data(message_id, layer_id, queue_entry);
                     }
                 }
 
@@ -686,7 +692,8 @@ impl FilesProxy {
 
                     // Handle old protocol versions
                     if self.close_responses() {
-                        self.request_queue.push_back(message_id, layer_id);
+                        self.request_queue
+                            .push_back_with_data(message_id, layer_id, queue_entry);
                     }
                 }
 
@@ -703,13 +710,11 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::Open(open) => {
-                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() {
-                    AdditionalRequestData::OpenBuffered
-                } else {
-                    Default::default()
-                };
+                if self.buffer_reads() && open.open_options.is_read_only() {
+                    queue_entry.additional_data = AdditionalRequestData::OpenBuffered;
+                }
                 self.request_queue
-                    .push_back_with_data(message_id, layer_id, additional_data);
+                    .push_back_with_data(message_id, layer_id, queue_entry);
                 message_bus
                     .send_agent(ClientMessage::FileRequest(FileRequest::Open(open)))
                     .await;
@@ -717,13 +722,11 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::OpenRelative(open) => {
-                let additional_data = if self.buffer_reads() && open.open_options.is_read_only() {
-                    AdditionalRequestData::OpenBuffered
-                } else {
-                    Default::default()
-                };
+                if self.buffer_reads() && open.open_options.is_read_only() {
+                    queue_entry.additional_data = AdditionalRequestData::OpenBuffered;
+                }
                 self.request_queue
-                    .push_back_with_data(message_id, layer_id, additional_data);
+                    .push_back_with_data(message_id, layer_id, queue_entry);
                 message_bus
                     .send_agent(ClientMessage::FileRequest(FileRequest::OpenRelative(open)))
                     .await;
@@ -750,16 +753,13 @@ impl FilesProxy {
                             })
                             .await;
                     } else {
-                        let additional_data = AdditionalRequestData::ReadBuffered {
+                        queue_entry.additional_data = AdditionalRequestData::ReadBuffered {
                             fd: read.remote_fd,
                             requested_amount: read.buffer_size,
                             update_fd_position: true,
                         };
-                        self.request_queue.push_back_with_data(
-                            message_id,
-                            layer_id,
-                            additional_data,
-                        );
+                        self.request_queue
+                            .push_back_with_data(message_id, layer_id, queue_entry);
                         message_bus
                             .send_agent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                                 ReadLimitedFileRequest {
@@ -777,7 +777,8 @@ impl FilesProxy {
 
                 // File is not buffered.
                 None => {
-                    self.request_queue.push_back(message_id, layer_id);
+                    self.request_queue
+                        .push_back_with_data(message_id, layer_id, queue_entry);
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::Read(read)))
                         .await;
@@ -804,16 +805,13 @@ impl FilesProxy {
                             })
                             .await;
                     } else {
-                        let additional_data = AdditionalRequestData::ReadBuffered {
+                        queue_entry.additional_data = AdditionalRequestData::ReadBuffered {
                             fd: read.remote_fd,
                             requested_amount: read.buffer_size,
                             update_fd_position: false,
                         };
-                        self.request_queue.push_back_with_data(
-                            message_id,
-                            layer_id,
-                            additional_data,
-                        );
+                        self.request_queue
+                            .push_back_with_data(message_id, layer_id, queue_entry);
                         message_bus
                             .send_agent(ClientMessage::FileRequest(FileRequest::ReadLimited(
                                 ReadLimitedFileRequest {
@@ -831,7 +829,8 @@ impl FilesProxy {
 
                 // File is not buffered.
                 None => {
-                    self.request_queue.push_back(message_id, layer_id);
+                    self.request_queue
+                        .push_back_with_data(message_id, layer_id, queue_entry);
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::ReadLimited(read)))
                         .await;
@@ -856,7 +855,8 @@ impl FilesProxy {
                             })
                             .await;
                     } else {
-                        self.request_queue.push_back(message_id, layer_id);
+                        self.request_queue
+                            .push_back_with_data(message_id, layer_id, queue_entry);
                         message_bus
                             .send_agent(ClientMessage::FileRequest(FileRequest::ReadDirBatch(
                                 ReadDirBatchRequest {
@@ -870,7 +870,8 @@ impl FilesProxy {
 
                 // Directory is not buffered.
                 None => {
-                    self.request_queue.push_back(message_id, layer_id);
+                    self.request_queue
+                        .push_back_with_data(message_id, layer_id, queue_entry);
                     message_bus
                         .send_agent(ClientMessage::FileRequest(FileRequest::ReadDir(read_dir)))
                         .await;
@@ -884,7 +885,7 @@ impl FilesProxy {
 
             // May require storing additional data in the request queue.
             FileRequest::Seek(mut seek) => {
-                let additional_data =
+                queue_entry.additional_data =
                     match (self.buffered_files.get_mut(&seek.fd), &mut seek.seek_from) {
                         (Some(data), SeekFromInternal::Current(diff)) => {
                             let result = u64::try_from(data.fd_position as i128 + *diff as i128);
@@ -914,7 +915,7 @@ impl FilesProxy {
                     };
 
                 self.request_queue
-                    .push_back_with_data(message_id, layer_id, additional_data);
+                    .push_back_with_data(message_id, layer_id, queue_entry);
                 message_bus
                     .send_agent(ClientMessage::FileRequest(FileRequest::Seek(seek)))
                     .await;
@@ -925,7 +926,8 @@ impl FilesProxy {
                     .as_ref()
                     .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
             {
-                self.request_queue.push_back(message_id, layer_id);
+                self.request_queue
+                    .push_back_with_data(message_id, layer_id, queue_entry);
                 message_bus
                     .send_agent(ClientMessage::FileRequest(FileRequest::StatFs(
                         statfs_v2.into(),
@@ -938,7 +940,8 @@ impl FilesProxy {
                     .as_ref()
                     .is_none_or(|version| !STATFS_V2_VERSION.matches(version)) =>
             {
-                self.request_queue.push_back(message_id, layer_id);
+                self.request_queue
+                    .push_back_with_data(message_id, layer_id, queue_entry);
                 message_bus
                     .send_agent(ClientMessage::FileRequest(FileRequest::XstatFs(
                         xstatfs_v2.into(),
@@ -948,7 +951,8 @@ impl FilesProxy {
 
             // Doesn't require any special logic.
             other => {
-                self.request_queue.push_back(message_id, layer_id);
+                self.request_queue
+                    .push_back_with_data(message_id, layer_id, queue_entry);
                 message_bus
                     .send_agent(ClientMessage::FileRequest(other))
                     .await;
@@ -965,7 +969,7 @@ impl FilesProxy {
         match response {
             // Update file maps.
             FileResponse::Open(Ok(open)) => {
-                let (message_id, layer_id, additional_data) =
+                let (message_id, layer_id, entry) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(
                             DaemonMessage::File(FileResponse::Open(Ok(open.clone()))).into(),
@@ -974,7 +978,7 @@ impl FilesProxy {
 
                 self.remote_files.add(layer_id, open.fd);
 
-                if matches!(additional_data, AdditionalRequestData::OpenBuffered) {
+                if matches!(entry.additional_data, AdditionalRequestData::OpenBuffered) {
                     self.buffered_files.insert(open.fd, Default::default());
                 }
 
@@ -1018,7 +1022,7 @@ impl FilesProxy {
 
             // If the file is buffered, update `files_data`.
             FileResponse::ReadLimited(Ok(read)) => {
-                let (message_id, layer_id, additional_data) =
+                let (message_id, layer_id, entry) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(
                             DaemonMessage::File(FileResponse::ReadLimited(Ok(read.clone()))).into(),
@@ -1029,7 +1033,7 @@ impl FilesProxy {
                     fd,
                     requested_amount,
                     update_fd_position,
-                } = additional_data
+                } = entry.additional_data
                 else {
                     // This file is not buffered.
                     message_bus
@@ -1090,7 +1094,7 @@ impl FilesProxy {
             FileResponse::ReadLimited(Err(error)) => {
                 // need to ensure that if a Read request was sent by layer, a Read response is
                 // returned containing the error rather than a ReadLimited
-                let (message_id, layer_id, additional_data) =
+                let (message_id, layer_id, entry) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(
                             DaemonMessage::File(FileResponse::ReadLimited(Err(error.clone())))
@@ -1098,7 +1102,7 @@ impl FilesProxy {
                         )
                     })?;
 
-                let message = match additional_data {
+                let message = match entry.additional_data {
                     AdditionalRequestData::ReadBuffered {
                         update_fd_position, ..
                     } if update_fd_position => FileResponse::Read(Err(error)),
@@ -1116,14 +1120,14 @@ impl FilesProxy {
 
             // If the file is buffered, update `files_data`.
             FileResponse::Seek(Ok(seek)) => {
-                let (message_id, layer_id, additional_data) =
+                let (message_id, layer_id, entry) =
                     self.request_queue.pop_front_with_data().ok_or_else(|| {
                         UnexpectedAgentMessage(
                             DaemonMessage::File(FileResponse::Seek(Ok(seek.clone()))).into(),
                         )
                     })?;
 
-                if let AdditionalRequestData::SeekBuffered { fd } = additional_data {
+                if let AdditionalRequestData::SeekBuffered { fd } = entry.additional_data {
                     let Some(data) = self.buffered_files.get_mut(&fd) else {
                         // File must have been closed from other thread in user application.
                         message_bus
@@ -1251,14 +1255,17 @@ impl FilesProxy {
                     self.buffered_dirs.remove(&fd);
                 }
 
-                let responses = self.reconnect_tracker.agent_lost();
-                self.request_queue = Default::default();
+                self.reconnect_tracker.agent_lost();
                 tracing::debug!(
-                    num_responses = responses.len(),
+                    num_responses = self.request_queue.len(),
                     "Flushing error responses to file requests"
                 );
-                for response in responses {
-                    message_bus.send(ToLayer::from(response)).await;
+                while let Some((message_id, layer_id, entry)) =
+                    self.request_queue.pop_front_with_data()
+                {
+                    message_bus
+                        .send(entry.on_agent_lost.hydrate(layer_id, message_id))
+                        .await;
                 }
                 // Reset protocol version since we'll need another negotiation
                 // round for the new connection.
@@ -1297,7 +1304,6 @@ impl BackgroundTask for FilesProxy {
                     };
                 }
                 FilesProxyMessage::FileRes(response) => {
-                    self.reconnect_tracker.agent_response_received();
                     self.file_response(response, message_bus).await?;
                 }
                 FilesProxyMessage::LayerClosed(closed) => {
