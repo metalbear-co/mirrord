@@ -19,9 +19,14 @@ The doc comments here are user documentation. They go into `mirrord-schema.json`
 it, the release workflow publishes them as the configuration reference, onto this repository's `docs` branch.
 `<!--${internal}-->` keeps a doc comment out of the reference. `typos` checks this crate's Rust in CI.
 
-After any change to the types or their docs, regenerate the schema, or `schema_file_is_up_to_date` fails. The same
-change can reach `mirrord-up-schema.json`, which `mirrord/up/AGENTS.md` covers.
+The build generates the schema as `//mirrord/config:schema`, which runs `src/bin/print_schema.rs`, and `mirrord-schema.json`
+must be a copy of it. After any change to the types or their docs, copy it again, or
+`//mirrord/config:write_schema_test` fails. The same change can reach `mirrord-up-schema.json`, which
+`mirrord/up/AGENTS.md` covers.
 
 ```bash
-cargo test -p mirrord-config check_schema_file_exists_and_is_valid_or_create_it -- --ignored --nocapture
+bazel run //mirrord/config:write_schema
 ```
+
+`schema_file_text` sorts the keys of every object, because Bazel builds `serde_json` with `preserve_order`, which would
+otherwise write each type's properties in the order of its fields.
