@@ -3,6 +3,9 @@ use std::{
     path::{Component, Path, PathBuf, Prefix},
 };
 
+#[cfg(test)]
+mod tests;
+
 // This prefix is a way to explicitly indicate that we're looking in
 // the global namespace for a path.
 pub const GLOBAL_NAMESPACE_PATH: &str = r#"\??\"#;

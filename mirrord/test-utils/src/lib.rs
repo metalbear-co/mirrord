@@ -26,6 +26,8 @@ use tokio::{
 };
 
 pub mod run_command;
+#[cfg(all(test, unix))]
+mod wait_for_line_tests;
 
 /// Directory this harness keeps a copy of every process's output in, one file per process
 /// named `<label>-<pid>.log`, when set. The operator's `cargo xtask e2e-staging --logs` sets

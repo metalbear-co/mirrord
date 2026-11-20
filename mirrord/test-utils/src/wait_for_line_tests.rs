@@ -1,9 +1,7 @@
-#![cfg(unix)]
-
 use std::{collections::HashMap, panic::AssertUnwindSafe, time::Duration};
 
+use crate::TestProcess;
 use futures::FutureExt;
-use mirrord_test_utils::TestProcess;
 
 /// Spawns `script` under `sh`, capturing its output.
 async fn spawn(script: &str) -> TestProcess {

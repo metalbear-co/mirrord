@@ -4,7 +4,7 @@
 // Tests index into the JSON results with `value[key]`; a panic just fails the test.
 #![allow(clippy::indexing_slicing)]
 
-use mirrord_mcp::{INSTRUCTIONS, McpServer, McpTelemetry};
+use crate::{INSTRUCTIONS, McpServer, McpTelemetry};
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
     model::{

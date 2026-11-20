@@ -44,6 +44,9 @@ mod schema;
 mod telemetry;
 pub mod tools;
 
+#[cfg(test)]
+mod tests;
+
 /// Handed to the model by the client, to steer it towards the tools.
 pub const INSTRUCTIONS: &str = "mirrord runs local processes in the context of a Kubernetes \
 cluster.
