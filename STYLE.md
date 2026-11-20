@@ -19,3 +19,15 @@
   - Also, the code is easier to read this way: you don't have to somehow know
     that an `Option` is expected to never be `None` in order to understand the
     code.
+
+## Starlark
+
+`bazel run //:format` sorts the keyword arguments of each call in a `BUILD.bazel` or `MODULE.bazel` file by
+the priorities in `.buildifier-tables.json`. A call gives the target's name and what the target is first, then its
+inputs and outputs, what it runs and with which arguments (`tool` before `args`), what it's built with (crate
+features, compile data, rustc variables), its dependencies, and last its metadata, like `tags`,
+`target_compatible_with` and `visibility`.
+
+buildifier puts an argument that the table doesn't list between what the target is built with and its dependencies,
+in alphabetical order, so add the argument to the table when that place reads badly. buildifier doesn't sort the calls
+in `.bzl` files, so write the calls in a macro in the same order by hand.

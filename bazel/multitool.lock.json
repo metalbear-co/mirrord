@@ -1,0 +1,545 @@
+{
+  "$schema": "https://raw.githubusercontent.com/bazel-contrib/rules_multitool/main/lockfile.schema.json",
+  "buildifier": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/bazelbuild/buildtools/releases/download/v10.2.0/buildifier-linux-arm64",
+        "sha256": "e33b41bdb36eca5dfa69647333f4f148272654b98cddcea12f38fac5ec0a00ff",
+        "os": "linux",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/bazelbuild/buildtools/releases/download/v10.2.0/buildifier-linux-amd64",
+        "sha256": "470844069d710d0b7740e55007071c63e4d00be89a833dce5d1a91790e84dc28",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/bazelbuild/buildtools/releases/download/v10.2.0/buildifier-darwin-arm64",
+        "sha256": "d9c9c3a2826d1d8f592a9d463e62aed7f4dcacc5ab48e8de6be53c420b34b971",
+        "os": "macos",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/bazelbuild/buildtools/releases/download/v10.2.0/buildifier-darwin-amd64",
+        "sha256": "9e78881e91266e3567ed6d590f6c19bb5cd8cfa7aa80c7e1b6e479264d1051b8",
+        "os": "macos",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/bazelbuild/buildtools/releases/download/v10.2.0/buildifier-windows-amd64.exe",
+        "sha256": "ae9b0632ff4bc56607b9c8512716b7fd63371387136005d25e94ec668f89361d",
+        "os": "windows",
+        "cpu": "x86_64"
+      }
+    ]
+  },
+  "cargo-deny": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-unknown-linux-musl.tar.gz",
+        "sha256": "995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "cargo-deny-0.20.2-aarch64-unknown-linux-musl/cargo-deny"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz",
+        "sha256": "fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "cargo-deny-0.20.2-aarch64-apple-darwin/cargo-deny"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-apple-darwin.tar.gz",
+        "sha256": "248da7f581724e470071990c088ffc55c811981715f4cbdb258621fb79f8b7a6",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "cargo-deny-0.20.2-x86_64-apple-darwin/cargo-deny"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-pc-windows-msvc.tar.gz",
+        "sha256": "975a22143262fd27476d19ee00c7af67978426e40e1dee94eed6bbade1cf87dc",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "cargo-deny-0.20.2-x86_64-pc-windows-msvc/cargo-deny.exe"
+      }
+    ]
+  },
+  "cargo-shear": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/Boshen/cargo-shear/releases/download/v1.14.0/cargo-shear-aarch64-unknown-linux-musl.tar.gz",
+        "sha256": "d83f7c5b02c4c237d0454697c12df041df0bd83ffecc1aba46c6e06315fd47e1",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "cargo-shear"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/Boshen/cargo-shear/releases/download/v1.14.0/cargo-shear-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "9004df4eb031a456026c4326ae0d0ce545321527a67be90f4524c1be729dc40e",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "cargo-shear"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/Boshen/cargo-shear/releases/download/v1.14.0/cargo-shear-aarch64-apple-darwin.tar.gz",
+        "sha256": "e50b9375b1e93d2293c803819c118337f1e8fce519e4188a93bb0f5e08041ca3",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "cargo-shear"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/Boshen/cargo-shear/releases/download/v1.14.0/cargo-shear-x86_64-apple-darwin.tar.gz",
+        "sha256": "ea0df899fecd1ae8116d588c97ebdeef8c1ed487ac7df2701ab39d05063a7930",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "cargo-shear"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/Boshen/cargo-shear/releases/download/v1.14.0/cargo-shear-x86_64-pc-windows-msvc.zip",
+        "sha256": "1f81bdb905cb2cfbc95cb412ab4c1506136686b8d20b90b9ca1aa1ceded46760",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "cargo-shear.exe"
+      }
+    ]
+  },
+  "helm": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v4.3.1-linux-arm64.tar.gz",
+        "sha256": "8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "linux-arm64/helm"
+      },
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz",
+        "sha256": "0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "linux-amd64/helm"
+      },
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v4.3.1-darwin-arm64.tar.gz",
+        "sha256": "6b4e61c8cd27d99e5a801e63ff25dd5c70b36875c2cd659d3e9ce6b76fc23198",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "darwin-arm64/helm"
+      },
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v4.3.1-darwin-amd64.tar.gz",
+        "sha256": "34bec4eba761ba5c16d1965ee6b8f5b0abe5993974a802274e2a4f0418893d89",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "darwin-amd64/helm"
+      },
+      {
+        "kind": "archive",
+        "url": "https://get.helm.sh/helm-v4.3.1-windows-amd64.zip",
+        "sha256": "fcfd7b796dcf0f225abc40b5636a3b01f55f3de2fb1dfb18475df94e62c14112",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "windows-amd64/helm.exe"
+      }
+    ]
+  },
+  "jq": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-arm64",
+        "sha256": "8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309",
+        "os": "linux",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64",
+        "sha256": "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-arm64",
+        "sha256": "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
+        "os": "macos",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-amd64",
+        "sha256": "e94b266e3c26690550006abe63152b782280f4e14374accdf04cbde844f00bc0",
+        "os": "macos",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe",
+        "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+        "os": "windows",
+        "cpu": "x86_64"
+      }
+    ]
+  },
+  "kind": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-arm64",
+        "sha256": "20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2",
+        "os": "linux",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64",
+        "sha256": "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-darwin-arm64",
+        "sha256": "0c8c7dbe5e23594a198b786c4bc13dacc101fa6196b0cb0b23a1ca44e61f4b4f",
+        "os": "macos",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-darwin-amd64",
+        "sha256": "5a99f26f57246dc9319dd294803313197a0f34d33c525b3ea8b655db5916ece0",
+        "os": "macos",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-windows-amd64",
+        "sha256": "4b22adaa135368c5a465d56bbd8e520cbea87272a06ca00b6078e7b81515c9fc",
+        "os": "windows",
+        "cpu": "x86_64"
+      }
+    ]
+  },
+  "kubectl": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.37.2/bin/linux/arm64/kubectl",
+        "sha256": "fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509",
+        "os": "linux",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.37.2/bin/linux/amd64/kubectl",
+        "sha256": "c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.37.2/bin/darwin/arm64/kubectl",
+        "sha256": "55701af0d51815ee335f240e48acf0959c3c23017ed3fa816e880c4a92bae581",
+        "os": "macos",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.37.2/bin/darwin/amd64/kubectl",
+        "sha256": "88379aff5c8111de6be0a394adffba2819e44cde269f3ab23cef76de1a48eaa8",
+        "os": "macos",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://dl.k8s.io/release/v1.37.2/bin/windows/amd64/kubectl.exe",
+        "sha256": "1691938f7de0e931969f9968c3601cf32d6b0d573573afb4ce471f3d28f51984",
+        "os": "windows",
+        "cpu": "x86_64"
+      }
+    ]
+  },
+  "minikube": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-linux-arm64",
+        "sha256": "a0b8a1ebfc8c07a247271d8df98ac0ddd7c8c855b601d402463e2e50c08c6bab",
+        "os": "linux",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-linux-amd64",
+        "sha256": "099477eaf248bcb5bcea8ce78a2898e93ac01461c35189da1848c3de82ecd22e",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-darwin-arm64",
+        "sha256": "f9b0c70bb7daf38c683c0b6e46dc1b612600247ae826bf74576807746a919ee8",
+        "os": "macos",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-darwin-amd64",
+        "sha256": "db11dffba835609988e4e98c3a91a38653ce66ddfa8ea3aaea92d87c54a0a348",
+        "os": "macos",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/kubernetes/minikube/releases/download/v1.38.1/minikube-windows-amd64.exe",
+        "sha256": "04215bec5632a976b48eb632856b50f1eaaa183b9c2a5904e11d1bacc4961ff7",
+        "os": "windows",
+        "cpu": "x86_64"
+      }
+    ]
+  },
+  "ruff": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-aarch64-unknown-linux-musl.tar.gz",
+        "sha256": "71491cf93242d1bde15dcc628fd105f27c54738bef6b94050b9363ba6795f97e",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "ruff-aarch64-unknown-linux-musl/ruff"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "d1d6ec9ce1ce0c01e23532a157a677077ba1f82f7cd2cde6f0bd75e65f85df93",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "ruff-x86_64-unknown-linux-musl/ruff"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-aarch64-apple-darwin.tar.gz",
+        "sha256": "6ef8b3a7fd5294f5e8384ceb29784a6f5657da0853824312b1d2cef53aef17af",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "ruff-aarch64-apple-darwin/ruff"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-x86_64-apple-darwin.tar.gz",
+        "sha256": "0475a156ae8d73ba3386c90207804a72b3d7002ceb9dbca38dabc5d84aa95c9b",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "ruff-x86_64-apple-darwin/ruff"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-x86_64-pc-windows-msvc.zip",
+        "sha256": "d37f57c7a0cfb8ed5a39adc96f7a0a63767b3c5abe4629c4c84e33c06da46885",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "ruff.exe"
+      }
+    ]
+  },
+  "starpls": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/withered-magic/starpls/releases/download/v0.1.22/starpls-linux-aarch64",
+        "sha256": "55877ec4c3ff03e1d90d59c76f69a3a144b6c29688747c8ac4d77993e2eef1ad",
+        "os": "linux",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/withered-magic/starpls/releases/download/v0.1.22/starpls-linux-amd64",
+        "sha256": "7c661cdde0d1c026665086d07523d825671e29056276681616bb32d0273c5eab",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/withered-magic/starpls/releases/download/v0.1.22/starpls-darwin-arm64",
+        "sha256": "675b7be4554e6c219b6774a6b814ec21061096e08ecdd8b8aeeaf3913eb20a4e",
+        "os": "macos",
+        "cpu": "arm64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/withered-magic/starpls/releases/download/v0.1.22/starpls-darwin-amd64",
+        "sha256": "97967f041d950c1055664a8f1afc36b01c6793b2fb3af488fd20139720d32131",
+        "os": "macos",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/withered-magic/starpls/releases/download/v0.1.22/starpls-windows-amd64.exe",
+        "sha256": "87626a4226ed2f3f0f9e573501731bbe225a53cf009df845ec547ee984a1857e",
+        "os": "windows",
+        "cpu": "x86_64"
+      }
+    ]
+  },
+  "ty": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ty/releases/download/0.0.99/ty-aarch64-unknown-linux-musl.tar.gz",
+        "sha256": "1aeb90425e934914f437f30ec7de6f5a55352aa858628903adb08a24a852191e",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "ty-aarch64-unknown-linux-musl/ty"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ty/releases/download/0.0.99/ty-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "cae79385c6db78ecb62ff113edd02d8b79536849beb9771f43a5a68e1df7ca21",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "ty-x86_64-unknown-linux-musl/ty"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ty/releases/download/0.0.99/ty-aarch64-apple-darwin.tar.gz",
+        "sha256": "9967b1433cc65f2c89c74794bca7a767bcb45f400ff0d61102b93486657bb1d4",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "ty-aarch64-apple-darwin/ty"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ty/releases/download/0.0.99/ty-x86_64-apple-darwin.tar.gz",
+        "sha256": "55690b8bb224f186e84bd3ea32eb9855a2408a7866ca3ed439ebc56b89bcc82f",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "ty-x86_64-apple-darwin/ty"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/ty/releases/download/0.0.99/ty-x86_64-pc-windows-msvc.zip",
+        "sha256": "b6ee52f5921ba8c911e8b4dc28b0860c12aae96774c1e33369d2ee3bdb4df76a",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "ty.exe"
+      }
+    ]
+  },
+  "typos": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/crate-ci/typos/releases/download/v1.52.0/typos-v1.52.0-aarch64-unknown-linux-musl.tar.gz",
+        "sha256": "63b7d4478d467a61fe47cdb3162f720c6797856e61a04f7e125d1cdc282488b8",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "typos"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/crate-ci/typos/releases/download/v1.52.0/typos-v1.52.0-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "6155d4114f9a0f5b8f6d4fda96266c9d5f6add71df80da7f684ee5e72eb14588",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "typos"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/crate-ci/typos/releases/download/v1.52.0/typos-v1.52.0-aarch64-apple-darwin.tar.gz",
+        "sha256": "90724dd2905cb1ce033343c71ed60e52fe898674f882803e3110cd228e09e1c5",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "typos"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/crate-ci/typos/releases/download/v1.52.0/typos-v1.52.0-x86_64-apple-darwin.tar.gz",
+        "sha256": "8de057f425909b02c0184892539755d70ecc3244c4b214ae9382cedd691127e0",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "typos"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/crate-ci/typos/releases/download/v1.52.0/typos-v1.52.0-x86_64-pc-windows-msvc.zip",
+        "sha256": "7da6eb1932ad86921420a7198dbc9e62a10bcd995144704dc19b81d3fb802182",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "typos.exe"
+      }
+    ]
+  },
+  "vale": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/errata-ai/vale/releases/download/v3.26.0/vale_3.26.0_Linux_arm64.tar.gz",
+        "sha256": "3154179f4611140c9af54a8b3bc6a90bc02b73fe6c1f635369604dde0490406d",
+        "os": "linux",
+        "cpu": "arm64",
+        "file": "vale"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/errata-ai/vale/releases/download/v3.26.0/vale_3.26.0_Linux_64-bit.tar.gz",
+        "sha256": "22aa69a556558e4a9dfc63c17030777383d8d3c48dcdfad655fa98e839d666ed",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "vale"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/errata-ai/vale/releases/download/v3.26.0/vale_3.26.0_macOS_arm64.tar.gz",
+        "sha256": "a6c3370f53bad93086c6b85f3163676e44e08049d69743afdcc13f3aab5b7482",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "vale"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/errata-ai/vale/releases/download/v3.26.0/vale_3.26.0_macOS_64-bit.tar.gz",
+        "sha256": "df42b317be6ece6a6a70d06b952deec581d047046eb93ea4632f58da56a86ff9",
+        "os": "macos",
+        "cpu": "x86_64",
+        "file": "vale"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/errata-ai/vale/releases/download/v3.26.0/vale_3.26.0_Windows_64-bit.zip",
+        "sha256": "c42f4b413aa29b6b36fa4e3ac0c18322588a54ac860db4c84b8255997f7d1ec2",
+        "os": "windows",
+        "cpu": "x86_64",
+        "file": "vale.exe"
+      }
+    ]
+  }
+}

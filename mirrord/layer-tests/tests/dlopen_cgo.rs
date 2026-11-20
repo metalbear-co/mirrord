@@ -6,9 +6,7 @@
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 use mirrord_protocol::tcp::{LayerTcpSteal, StealType};
 
 #[rstest]

@@ -2,11 +2,9 @@
 
 use rstest::rstest;
 
-mod common;
-
 use std::io::Write;
 
-pub use common::*;
+use mirrord_layer_tests::*;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, FileRequest, FileResponse,
     file::OpenFileResponse,

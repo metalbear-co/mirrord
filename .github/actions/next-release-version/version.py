@@ -45,9 +45,7 @@ def read_version(manifest: pathlib.Path) -> tuple[tomlkit.TOMLDocument, str]:
     return document, str(version)
 
 
-def write_version(
-    manifest: pathlib.Path, document: tomlkit.TOMLDocument, version: str
-) -> None:
+def write_version(manifest: pathlib.Path, document: tomlkit.TOMLDocument, version: str) -> None:
     document["workspace"]["package"]["version"] = version
     manifest.write_text(tomlkit.dumps(document))
 

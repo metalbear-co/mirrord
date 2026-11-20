@@ -26,6 +26,8 @@ use mirrord_config::{
 #[cfg(windows)]
 use mirrord_config::{MIRRORD_CRASH_EPHEMERAL_DIR, MIRRORD_LAYER_CRASH_MONITOR_ADDR};
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
+#[cfg(windows)]
+use mirrord_layer_lib::process::windows::execution::MIRRORD_LAYER_FILE_ENV;
 use mirrord_operator::client::{OperatorSession, SessionShareReadError, SessionShareReader};
 use mirrord_progress::{
     IdeAction, IdeMessage, LineMode, NotificationLevel, Progress, ProgressTracker,
@@ -64,15 +66,27 @@ use crate::{
     util::remove_proxy_env,
 };
 
+/// Returns the gzipped tar of the macOS utilities that the CLI uses to run SIP-protected programs.
 #[cfg(target_os = "macos")]
-pub(crate) const COMPRESSED_SIP_BINARIES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/apple-utils.tar.gz"));
+fn compressed_sip_binaries() -> std::borrow::Cow<'static, [u8]> {
+    #[cfg(feature = "standalone")]
+    let archive = include_bytes!(env!("MIRRORD_BUNDLED_SIP_BINARIES"))
+        .as_slice()
+        .into();
+
+    #[cfg(not(feature = "standalone"))]
+    let archive = {
+        let path = mirrord_runfiles::rlocation!(env!("MIRRORD_BUNDLED_SIP_BINARIES"));
+        std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("can't read {}: {error}", path.display()))
+            .into()
+    };
+
+    archive
+}
 
 /// Environment variable for saving the execution kind for analytics.
 pub const MIRRORD_EXECUTION_KIND_ENV: &str = "MIRRORD_EXECUTION_KIND";
-
-/// Environment variable pointing to the mirrord layer DLL/dylib/so path.
-const MIRRORD_LAYER_FILE_ENV: &str = "MIRRORD_LAYER_FILE";
 
 /// Alias to "LD_PRELOAD" enviromnent variable used to mount mirrord-layer on linux targets and as
 /// part of the `mirrord container` command.
@@ -382,7 +396,7 @@ impl MirrordExecution {
     /// # Returns
     ///
     /// Returned [`MirrordExecution::environment`] contains everything that the user application
-    /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
+    /// might need, including `INJECTION_ENV_VAR` and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal(
         config: &mut LayerConfig,
@@ -394,21 +408,7 @@ impl MirrordExecution {
         mirrord_for_ci: Option<&MirrordCi>,
         #[cfg_attr(not(windows), allow(unused_variables))] crash_reporting: CrashReporting,
     ) -> CliResult<Self> {
-        // Extract Layer from exe, or use existing file if MIRRORD_LAYER_FILE env var is set (for
-        // debugging)
-        let lib_path = match std::env::var(MIRRORD_LAYER_FILE_ENV) {
-            Ok(existing_path) => {
-                tracing::debug!(
-                    "Using existing library file from {MIRRORD_LAYER_FILE_ENV}: {}",
-                    existing_path
-                );
-                std::path::PathBuf::from(existing_path)
-            }
-            Err(_) => {
-                tracing::debug!("{MIRRORD_LAYER_FILE_ENV} not set, extracting library from binary");
-                extract_library(None, progress, true)?
-            }
-        };
+        let lib_path = extract_library(None, progress, true)?;
 
         if !config.use_proxy {
             remove_proxy_env();
@@ -494,7 +494,10 @@ impl MirrordExecution {
                             load_type: None,
                         });
                 if config.experimental.sip_utils {
-                    extract_sip_binaries(&MIRRORD_BINARIES_DIR_PATH_BUF, COMPRESSED_SIP_BINARIES)?;
+                    extract_sip_binaries(
+                        &MIRRORD_BINARIES_DIR_PATH_BUF,
+                        &compressed_sip_binaries(),
+                    )?;
                 }
 
                 let result = executable

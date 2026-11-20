@@ -36,6 +36,7 @@ jobs:
           owner: metalbear-co
           repositories: docs-changelog
           permission-contents: write
+
       - name: Prepare changelog to be published at /docs/changelog
         uses: metalbear-co/release-changelog-docs@747e23c4fbb265ddd583a37e709549e1dbfc4e60
         with:

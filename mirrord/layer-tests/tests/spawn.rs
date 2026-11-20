@@ -13,9 +13,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Some versions of node use `posix_spawn` and not `execve`, so make sure we load into processes
 /// that are created by node, with the node version installed where this test is executed.

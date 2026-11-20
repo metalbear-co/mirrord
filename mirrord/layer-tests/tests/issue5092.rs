@@ -3,9 +3,7 @@
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that issue [#5092](https://github.com/metalbear-co/mirrord/issues/5092) is fixed: a
 /// hooked Go syscall returning a value wider than 32 bits (here, an `mmap` address) reaches the Go

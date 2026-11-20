@@ -1,0 +1,347 @@
+load("@crates//mirrord-layer-tests:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY", "WINDOWS_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+# What each layer test, a file in `tests/`, needs beyond the CLI. Each test depends only on what its
+# entry lists, so changing an app reruns only the tests that run it:
+#
+# - `target_compatible_with`: the platforms that the file's `#![cfg]` allows, if not all of them.
+# - `apps`: the apps that the test runs, compiled apps and scripts alike, by their packages' paths
+#   under `apps`, like `fork` or `fileops/go`. A script's package builds a `py_binary`,
+#   `js_binary` or `sh_binary`, but the test runs the script itself, `main.<ext>`, from its
+#   runfiles, with Bazel's interpreter for a Python or Node app (`python` and `node` in
+#   `mirrord-test-utils`), because the layer would load into the binary's launcher too. Each
+#   script's package has the interpreter, `//mirrord/test-utils:python_env` or
+#   `//mirrord/test-utils:node`, in its `data`.
+# - `configs`: the files in `configs` that the test reads.
+# - `data`: the other files that the test needs, like the interpreter of a script that the test
+#   writes itself.
+# - `test_threads`: how many of the test's cases run at a time, if not one.
+TESTS = {
+    "bash": {
+        "apps": ["env-bash-cat"],
+        "configs": ["bash_script.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "close_while_blocked": {
+        "apps": ["close-while-blocked"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "connectx": {
+        "apps": ["connectx"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "cor_1401_unix_seqpacket": {
+        "apps": ["cor-1401-seqpacket"],
+        "configs": ["cor_1401_seqpacket.toml"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "cor_1734_file_mode": {
+        "apps": ["cor-1734-file-mode"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "dlopen_cgo": {
+        "apps": ["dlopen-cgo"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "dns_resolve": {
+        "apps": ["dns-resolve"],
+    },
+    "dns_sd": {
+        "apps": ["dns-sd"],
+        "configs": ["dns_sd.json"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "double_listen": {
+        "apps": ["double-listen"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "dup_listen": {
+        "apps": ["dup-listen"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "exec_freed_env": {
+        "apps": ["exec-freed-env"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "exec_functionality": {
+        "apps": [
+            "exec-debug-hold",
+            "up-greeter",
+        ],
+    },
+    "fileops": {
+        "apps": [
+            "dir-go",
+            "dir-go-bypass",
+            "faccessat-go",
+            "fileops/node",
+            "fileops/rust",
+            "lseek-go",
+            "read-go",
+            "self-open",
+            "write-go",
+        ],
+        # Only the Linux test `go_stat` runs the Go app.
+        "data": select({
+            "@platforms//os:linux": ["//mirrord/layer-tests/apps/fileops/go"],
+            "//conditions:default": [],
+        }),
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "filter_ports": {
+        "apps": ["listen-ports"],
+        "configs": [
+            "session_body.toml",
+            "session_composite.toml",
+            "session_jq.toml",
+        ],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "fork": {
+        "apps": ["fork"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "hide_ipv6_interfaces": {
+        "apps": ["issue2903"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "http_mirroring": {
+        "apps": [
+            "app-fastapi",
+            "app-flask",
+            "app-go",
+            "app-node",
+        ],
+        "configs": ["port_mapping.json"],
+    },
+    "ignore_ports": {
+        "apps": ["app-listen"],
+        "configs": ["ignore_ports.json"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "issue1054": {
+        "apps": ["issue1054"],
+        "configs": ["port_mapping.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue1123": {
+        "apps": ["issue1123"],
+    },
+    "issue1458": {
+        "apps": [
+            "issue1458",
+            "issue1458portnot53",
+        ],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue1776": {
+        "apps": [
+            "issue1776",
+            "issue1776portnot53",
+        ],
+        "configs": ["issue1776.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue1899": {
+        "apps": ["issue1899"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue2001": {
+        "apps": ["issue2001"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue2055": {
+        "apps": ["gethostbyname"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue2178": {
+        "apps": ["issue2178"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue2204": {
+        "apps": ["issue2204"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "issue2283": {
+        "apps": ["issue2283"],
+        "configs": ["outgoing_filter_local_not_existing_host.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue2614": {
+        "apps": ["open-go"],
+        "target_compatible_with": LINUX_ONLY,
+        # Each case runs the app built with another Go version, in a directory of its own, and takes
+        # about five seconds.
+        "test_threads": 3,
+    },
+    "issue2807": {
+        "apps": ["issue2807"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "issue2817": {
+        "apps": ["app-node"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue2988": {
+        "apps": ["issue2988"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue3248": {
+        "apps": ["issue3248"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "issue3456": {
+        "apps": ["issue3456"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue4622": {
+        "apps": ["issue4622"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue5092": {
+        "apps": ["issue5092"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "issue834": {
+        "apps": ["issue834"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "issue864": {
+        "apps": ["shared-sockets"],
+        "configs": ["port_mapping_shared_sockets.toml"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "listen_ports": {
+        "apps": ["listen-ports"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "local_share": {
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "low_fd_reuse": {
+        "apps": ["low-fd-reuse"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "mkdir_rmdir": {
+        "apps": ["mkdir-rmdir"],
+        "configs": ["fs.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "node_copyfile": {
+        "apps": ["node-copyfile"],
+        "configs": ["node_libuv.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "node_getaddrinfo_no_name": {
+        "data": ["//mirrord/test-utils:node"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "node_stat": {
+        "apps": ["node-stat"],
+        "configs": ["node_libuv.json"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "outgoing": {
+        "apps": [
+            "issue2438",
+            "make-connections",
+            "outgoing",
+        ],
+        "configs": [
+            "outgoing_filter.json",
+            "outgoing_filter_local.json",
+            "outgoing_filter_remote_incomplete.json",
+        ],
+    },
+    "port_mapping": {
+        "apps": ["issue2058"],
+        "configs": ["port_mapping.json"],
+    },
+    "posix_spawn_shared_sockets": {
+        "apps": ["posix-spawn-shared-sockets"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "readlink": {
+        "apps": ["readlink"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "realpath": {
+        "apps": ["realpath"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "rebind0": {
+        "apps": ["rebind0"],
+        "configs": ["http_filter_for_rebind0.json"],
+    },
+    "recv_from": {
+        "apps": ["recv-from"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "self_connect": {
+        "apps": ["self-connect"],
+    },
+    "sendfile_eagain": {
+        "apps": ["sendfile-eagain"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "sendfile_partial": {
+        "apps": ["sendfile-partial"],
+        "target_compatible_with": LINUX_ONLY,
+    },
+    "sip": {
+        "apps": ["nothing"],
+        "target_compatible_with": MACOS_ONLY,
+    },
+    "skipping_process": {
+        "apps": ["open-file"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "socketpair": {
+        "apps": ["socketpair"],
+        "target_compatible_with": WINDOWS_ONLY,
+    },
+    "spawn": {
+        "apps": ["node-spawn"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "statfs_fstatfs": {
+        "apps": ["statfs-fstatfs"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "unix_connect_addrlen": {
+        "apps": ["unix-connect-addrlen"],
+        "configs": ["unix_streams.json"],
+        "target_compatible_with": UNIX_ONLY,
+    },
+    "up": {
+        "apps": [
+            "up-failing",
+            "up-greeter",
+            "up-sleeper",
+        ],
+    },
+}
+
+# Each test runs `//mirrord/cli`, which loads the layer from its runfiles.
+crate.integration_tests(
+    data = ["//mirrord/cli"],
+    tests = {
+        name: {
+            "data": ["//mirrord/layer-tests/apps/" + app for app in test.get("apps", [])] + [
+                "configs/" + config
+                for config in test.get("configs", [])
+            ] + test.get("data", []),
+            "target_compatible_with": test.get("target_compatible_with", []),
+            "test_threads": test.get("test_threads", 1),
+        }
+        for name, test in TESTS.items()
+    },
+    # Some tests take half a minute, because each one starts the CLI and an app, and a small test's
+    # timeout is one minute, which a busy machine can exceed.
+    size = "medium",
+)

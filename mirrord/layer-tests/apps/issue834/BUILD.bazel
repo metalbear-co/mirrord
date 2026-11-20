@@ -1,0 +1,23 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//mirrord/test-utils:go_test_binary.bzl", "go_test_binary")
+
+go_test_binary(
+    name = "issue834",
+    # The app uses v8go, which links a prebuilt V8 that GCC compiled against libstdc++. The llvm
+    # toolchain links C++ code against LLVM's libc++, so the app builds for a Linux platform
+    # that asks for libstdc++ instead (see `//bazel/platforms`).
+    platform = select({
+        "//bazel/platforms:is_linux_aarch64": "//bazel/platforms:aarch64-linux-libstdcxx",
+        "//bazel/platforms:is_linux_x86_64": "//bazel/platforms:x86_64-linux-libstdcxx",
+        "//conditions:default": None,
+    }),
+    # The app links GCC's libstdc++, which the build compiles for each Go version's configuration,
+    # so it builds with one version only. The other Go apps cover the changes between versions.
+    versions = ["25"],
+    deps = [
+        "@com_rogchap_v8go//:v8go",
+        "@net_kuoruan_go_v8go_polyfills//:v8go-polyfills",
+    ],
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

@@ -1,0 +1,13 @@
+[package]
+name = "issue1776"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+libc.workspace = true
+socket2.workspace = true
+errno.workspace = true

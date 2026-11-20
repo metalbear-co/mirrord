@@ -123,10 +123,14 @@ pub struct FsMetadataInternal {
 
 #[cfg(target_os = "linux")]
 impl From<Statfs> for FsMetadataInternal {
+    #[allow(
+        clippy::unnecessary_cast,
+        reason = "glibc's `statfs64` fields are `i64`, but musl's are `u64`, so the casts only do something on musl"
+    )]
     fn from(stat: Statfs) -> Self {
         FsMetadataInternal {
-            filesystem_type: stat.filesystem_type().0,
-            block_size: stat.block_size(),
+            filesystem_type: stat.filesystem_type().0 as i64,
+            block_size: stat.block_size() as i64,
             blocks: stat.blocks(),
             blocks_free: stat.blocks_free(),
             blocks_available: stat.blocks_available(),
@@ -214,14 +218,18 @@ impl From<FsMetadataInternalV2> for FsMetadataInternal {
 
 #[cfg(target_os = "linux")]
 impl From<Statfs> for FsMetadataInternalV2 {
+    #[allow(
+        clippy::unnecessary_cast,
+        reason = "glibc's `statfs64` fields are `i64`, but musl's are `u64`, so the casts only do something on musl"
+    )]
     fn from(stat: Statfs) -> Self {
         // The reason we need the inner `statfs64` struct is that nix's `Statfs` just does not give
         // any access to some fields, like `f_frsize` and the value of `f_fsid`.
         // SAFETY: Statfs is just a `#[repr(transparent)]` wrapper around `libc::statfs64` on Linux.
         let inner: libc::statfs64 = unsafe { std::mem::transmute(stat) };
         Self {
-            filesystem_type: inner.f_type,
-            block_size: inner.f_bsize,
+            filesystem_type: inner.f_type as i64,
+            block_size: inner.f_bsize as i64,
             blocks: inner.f_blocks,
             blocks_free: inner.f_bfree,
             blocks_available: inner.f_bavail,
@@ -231,9 +239,9 @@ impl From<Statfs> for FsMetadataInternalV2 {
             // you can't see that at first glance because it's added via the `s!` macro), and only
             // contains 1 field which has the same type as `Self.filesystem_id`.
             filesystem_id: unsafe { std::mem::transmute::<libc::fsid_t, [i32; 2]>(inner.f_fsid) },
-            name_len: inner.f_namelen,
-            fragment_size: inner.f_frsize,
-            flags: inner.f_flags,
+            name_len: inner.f_namelen as i64,
+            fragment_size: inner.f_frsize as i64,
+            flags: inner.f_flags as i64,
         }
     }
 }

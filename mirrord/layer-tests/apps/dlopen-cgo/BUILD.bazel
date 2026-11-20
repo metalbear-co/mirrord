@@ -1,0 +1,35 @@
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_go//go:def.bzl", "go_binary")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+
+# A C++ program that loads a Go library with `dlopen`.
+
+go_binary(
+    name = "go_server",
+    srcs = ["main.go"],
+    cgo = True,
+    linkmode = "c-shared",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The loader opens `libgo_server.so` from the directory that its own file is in, rather than from
+# its runfiles. So this copy gives the library that name, in the loader's directory: rules_go names
+# it after its target, and builds it in a configuration of its own, whose output directory differs.
+copy_file(
+    name = "libgo_server",
+    src = ":go_server",
+    out = "libgo_server.so",
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The loader declares the library's functions itself, and looks them up with `dlsym`, so it doesn't
+# include the library's cgo header.
+cc_binary(
+    name = "dlopen-cgo",
+    srcs = ["main.cpp"],
+    data = [":libgo_server"],
+    linkopts = ["-ldl"],
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

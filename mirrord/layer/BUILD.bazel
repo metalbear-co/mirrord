@@ -1,0 +1,148 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@crates//mirrord-layer:data.bzl", "crate_data")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("//bazel:compatibility.bzl", "MACOS_ONLY", "UNIX_ONLY")
+load("//bazel:platform.bzl", "platform_filegroup")
+load("//bazel:rust.bzl", "crate_package")
+load("//mirrord/cli:macos_sign.bzl", "macos_sign")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.shared_library(
+    # The layer is loaded into arbitrary programs, so it links the C++ runtime and the unwinder
+    # statically rather than relying on libraries that users' machines may not have.
+    cc_runtime_linkage = "static",
+    # Turns off the run paths, which would make every program that the layer is loaded into search
+    # Bazel's directories for libraries first. The layer needs none: rules_rust adds a run path to
+    # the directory of each C++ runtime library even when it links them statically.
+    features = [
+        "-runtime_library_search_directories",
+        # The llvm toolchain's own feature, which passes the same run paths as the one above.
+        "-runtime_library_search_directories_workaround",
+    ],
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/cli:__pkg__"],
+)
+
+crate.unit_tests(
+    target_compatible_with = UNIX_ONLY,
+)
+
+# On macOS, the CLI embeds a universal layer, so that it can load the layer into programs of any
+# architecture: an x86-64 program under Rosetta, an arm64 program, or an arm64e one, like the
+# system's own binaries. dyld kills a program when a dylib in `DYLD_INSERT_LIBRARIES` has no slice
+# for the program's architecture, so without an arm64e slice, every arm64e program that a program
+# under mirrord starts would die.
+
+# The arm64e slice is a shim that `dlopen`s the arm64 layer, which the CLI also embeds on its own
+# and passes in `MIRRORD_MACOS_ARM64_LIBRARY`.
+#
+# clang compiles arm64e code for the `--target` below, but `ld64.lld` can't link arm64e before
+# LLVM 24 (llvm/llvm-project#234002), so the dylib gets an arm64 header, which `:shim_arm64e` then
+# fixes. Once the llvm module ships LLVM 24, this target can link the arm64e shim by itself.
+cc_binary(
+    name = "arm64e/libshim_arm64_header.dylib",
+    srcs = ["shim.c"],
+    copts = ["--target=arm64e-apple-darwin"],
+    # dyld on macOS 26.3 didn't run the initializer of a shim without chained fixups, so the layer
+    # never loaded. Xcode's linker also writes them for an arm64e dylib.
+    linkopts = ["-Wl,-fixup_chains"],
+    linkshared = True,
+    tags = ["manual"],
+    target_compatible_with = MACOS_ONLY,
+)
+
+genrule(
+    name = "shim_arm64e",
+    srcs = [":arm64e/libshim_arm64_header.dylib"],
+    outs = ["arm64e/libshim.dylib"],
+    tools = ["@llvm//tools:llvm-objcopy"],
+    cmd = " && ".join([
+        "cp $< $@",
+        "chmod u+w $@",
+        # dyld only loads a dylib into an arm64e process when its header says arm64e, so this sets
+        # the header's CPU subtype, the 4 little-endian bytes at offset 8, to 0x80000002
+        # (`CPU_SUBTYPE_ARM64E | CPU_SUBTYPE_ARM64E_VERSIONED_PTRAUTH_ABI_MASK`), as Xcode's
+        # linker does.
+        #
+        # The code stays arm64, because dyld doesn't need the authenticated stubs of an arm64e
+        # link: the shim's constructor runs in arm64e processes as it does when Xcode builds it.
+        "printf '\\002\\000\\000\\200' | dd of=$@ bs=1 seek=8 conv=notrunc 2>/dev/null",
+        # The header is in the first page that lld's ad hoc signature covers, and the kernel kills
+        # a process that maps a page whose hash doesn't match. So `llvm-objcopy` rewrites the file,
+        # which signs it ad hoc again.
+        "$(execpath @llvm//tools:llvm-objcopy) $@",
+    ]),
+    tags = ["manual"],
+    target_compatible_with = MACOS_ONLY,
+)
+
+[
+    platform_filegroup(
+        name = "layer_" + cpu,
+        srcs = [":layer"],
+        cpu = cpu,
+        os = "macos",
+        target_compatible_with = MACOS_ONLY,
+        visibility = ["//mirrord/cli:__pkg__"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# Depend on `:universal_layer` instead, which signs this and builds it in one configuration.
+run_binary(
+    name = "universal_layer_unsigned_per_configuration",
+    srcs = [
+        ":layer_aarch64",
+        ":layer_x86_64",
+        ":shim_arm64e",
+    ],
+    outs = ["universal/unsigned/libmirrord_layer.dylib"],
+    tool = "@llvm//tools:llvm-lipo",
+    args = [
+        "-create",
+        "-output",
+        "$(execpath universal/unsigned/libmirrord_layer.dylib)",
+        "$(execpath :layer_x86_64)",
+        # `llvm-lipo` writes the slices in the order of its arguments, and dyld on macOS 26.3 loads
+        # whichever of the arm64 and arm64e slices comes first into an arm64 program. So the arm64
+        # layer must come before the arm64e shim: with the shim first, no layer test passed there.
+        "$(execpath :layer_aarch64)",
+        "$(execpath :shim_arm64e)",
+    ],
+    tags = ["manual"],
+    target_compatible_with = MACOS_ONLY,
+)
+
+# Depend on `:universal_layer` instead, which builds this in one configuration.
+macos_sign(
+    name = "universal_layer_per_configuration",
+    src = ":universal_layer_unsigned_per_configuration",
+    out = "universal/libmirrord_layer.dylib",
+    identifier = "libmirrord_layer",
+    tags = ["manual"],
+    target_compatible_with = MACOS_ONLY,
+)
+
+# The universal layer that the CLI embeds and that a release distributes, signed with MetalBear's
+# Developer ID in a release, and ad hoc otherwise (see `//mirrord/cli:macos_sign.bzl`). So the layer
+# that the tests load is signed the way that the released one is.
+#
+# The shim and the `_per_configuration` targets are `manual`, so `//...` builds them only through
+# this target.
+platform_filegroup(
+    name = "universal_layer",
+    srcs = [":universal_layer_per_configuration"],
+    # This builds and signs the layer once, in the arm64 Mac configuration, whichever configuration
+    # asks for it, rather than once for each slice of the universal CLI. Since a release signature
+    # carries a timestamp, two signatures would also make the two slices embed different bytes.
+    #
+    # The file still has every slice, because each slice picks its own platform.
+    cpu = "aarch64",
+    os = "macos",
+    target_compatible_with = MACOS_ONLY,
+    visibility = ["//mirrord/cli:__pkg__"],
+)

@@ -3130,47 +3130,63 @@ mod tests {
     /// The creation timeout of a session with `sync` measures time without progress: it doesn't
     /// run while the preview pod is busy, such as while `prepare` runs, and each report of progress
     /// starts it again.
-    #[tokio::test(start_paused = true)]
+    ///
+    /// The test reads the deadline that each step sets, rather than waiting for the timeout, so
+    /// that it takes milliseconds.
+    #[tokio::test]
     async fn the_creation_timeout_counts_time_without_progress() {
         let timeout = Duration::from_secs(60);
         let mut deadline = ProgressDeadline::new(timeout);
-        let expires_within = async |deadline: &ProgressDeadline, within: Duration| {
-            tokio::time::timeout(within, deadline.expired())
-                .await
-                .is_ok()
+        // Whether the timeout runs, in full, from a moment after `before`. The test waits a
+        // little before each step, so that a deadline that didn't move fails the check.
+        let restarted_after = |deadline: &ProgressDeadline, before: tokio::time::Instant| {
+            deadline.at.is_some_and(|at| at >= before + timeout)
         };
 
-        tokio::time::advance(Duration::from_secs(50)).await;
+        // A long `prepare`: no timeout at all while it runs.
         deadline.on_activity(&sync::SyncActivity {
             busy: true,
             progress: 1,
             ..Default::default()
         });
-        // A long `prepare`: no timeout at all while it runs.
-        tokio::time::advance(Duration::from_secs(600)).await;
+        assert!(deadline.at.is_none());
         assert!(
-            expires_within(&deadline, Duration::from_secs(600))
+            tokio::time::timeout(Duration::from_millis(100), deadline.expired())
                 .await
-                .not()
+                .is_err()
         );
 
+        let before = tokio::time::Instant::now();
+        tokio::time::sleep(Duration::from_millis(10)).await;
         deadline.on_activity(&sync::SyncActivity {
             busy: false,
             progress: 2,
             ..Default::default()
         });
-        assert!(
-            expires_within(&deadline, Duration::from_secs(59))
-                .await
-                .not()
-        );
+        assert!(restarted_after(&deadline, before));
+
+        let before = tokio::time::Instant::now();
+        tokio::time::sleep(Duration::from_millis(10)).await;
         deadline.on_progress();
+        assert!(restarted_after(&deadline, before));
+
+        // Activity without progress, while the pod isn't busy, leaves the timeout running.
+        let at = deadline.at;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        deadline.on_activity(&sync::SyncActivity {
+            busy: false,
+            progress: 2,
+            ..Default::default()
+        });
+        assert_eq!(deadline.at, at);
+
+        // Once the timeout runs out, the deadline expires.
+        let deadline = ProgressDeadline::new(Duration::from_millis(100));
         assert!(
-            expires_within(&deadline, Duration::from_secs(59))
+            tokio::time::timeout(Duration::from_secs(10), deadline.expired())
                 .await
-                .not()
+                .is_ok()
         );
-        assert!(expires_within(&deadline, Duration::from_secs(61)).await);
     }
 
     /// The operator rebuilds the config target from the session target. A label target with no

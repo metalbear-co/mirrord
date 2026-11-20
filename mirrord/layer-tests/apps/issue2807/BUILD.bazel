@@ -1,0 +1,11 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+
+js_binary(
+    name = "issue2807",
+    data = [
+        "//:node_modules/portfinder",
+        "//mirrord/test-utils:node",
+    ],
+    entry_point = "main.mjs",
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

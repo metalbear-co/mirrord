@@ -2,8 +2,7 @@
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verifies that the `sendfile` hook reports a would-block socket the way libc does: -1 with
 /// `EAGAIN`, and on macOS `*len` set to the zero bytes actually sent. Callers such as Ruby's

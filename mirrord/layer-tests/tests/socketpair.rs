@@ -6,9 +6,7 @@ use std::time::Duration;
 use rstest::rstest;
 
 #[allow(dead_code)]
-mod common;
-
-use common::*;
+use mirrord_layer_tests::*;
 
 /// Validate that Python's socketpair works under mirrord on Windows.
 #[rstest]

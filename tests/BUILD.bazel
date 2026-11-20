@@ -1,0 +1,166 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@crates//mirrord-tests:data.bzl", "crate_data")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "UNIX_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+load(":e2e.bzl", "cluster_test", "optimized_image_load")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+# The apps of `:e2e`'s tests. Each app is a package of its own, and the tests run it by its path in
+# the runfiles, relative to this package. The tests run each script, `main.<ext>`, with an
+# interpreter rather than through its package's binary, as the layer tests do, and each script's
+# package has the interpreter, `//mirrord/test-utils:python_env` or `//mirrord/test-utils:node`, in
+# its `data`. So a suite only gets an interpreter when it runs an app of that language. A Go app's
+# package builds it with each Go version that the tests run it with.
+#
+# Public for the modules that run the suite on a cluster that their own setup prepared.
+filegroup(
+    name = "apps",
+    srcs = [
+        "//tests/apps/go-e2e-dir",
+        "//tests/apps/go-e2e-dns",
+        "//tests/apps/go-e2e-env",
+        "//tests/apps/go-e2e-outgoing",
+        "//tests/apps/intproxy-child",
+        "//tests/apps/rust-bypassed-unix-socket",
+        "//tests/apps/rust-e2e-fileops",
+        "//tests/apps/rust-unix-socket-client",
+        "//tests/apps/rust-websockets",
+    ] + [
+        "//tests/" + script
+        for script in subpackages(include = [
+            "apps/bash-e2e/**",
+            "apps/node-e2e/**",
+            "apps/python-e2e/**",
+        ])
+    ] + glob(["configs/**"]) + [
+        # `npm --prefix apps/node-e2e` runs the scripts of this `package.json`.
+        "apps/node-e2e/package.json",
+    ] + select({
+        # Only Linux has the `statfs` test.
+        "@platforms//os:linux": ["//tests/apps/go-e2e-statfs"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# The tests run the agent as a release builds it, with `-c opt`, which also makes it as fast as the
+# agent that users run. Other modules' `cluster_test` targets load it too, for their tests that
+# start the agent.
+#
+# The agent image's tag in the cluster is the image's digest, without its `sha256:`, so the tag
+# changes with every build of the agent. In a cluster that the current build wasn't loaded into,
+# the agent's pod then fails to start, rather than the tests running an older agent by mistake.
+optimized_image_load(
+    name = "agent_image_load",
+    image = "//mirrord/agent:image",
+    tag = "docker.io/library/mirrord-agent-e2e:{{slice .digest 7}}",
+    tracks_content = True,
+    # Only the `cluster_test` targets, which are `manual` too, build it, so that `bazel build //...`
+    # doesn't build the agent a second time, with `-c opt`.
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//visibility:public"],
+)
+
+# The tool that runs the end-to-end tests' clusters: `kind` or `minikube`, or `none` for a cluster
+# that the developer prepares and passes with `--test_env=KUBECONFIG`. The end-to-end targets are
+# `manual`, so the default only creates a cluster for a command that names one of them.
+string_flag(
+    name = "cluster_runtime",
+    build_setting_default = "kind",
+    values = [
+        "kind",
+        "minikube",
+        "none",
+    ],
+)
+
+# The settings that `cluster_test` selects the runtime by.
+[
+    config_setting(
+        name = "cluster_runtime_" + runtime,
+        flag_values = {":cluster_runtime": runtime},
+    )
+    for runtime in [
+        "kind",
+        "minikube",
+        "none",
+    ]
+]
+
+# The executable of the `cluster_test` targets.
+py_binary(
+    name = "e2e_runner",
+    srcs = ["scripts/e2e_runner.py"],
+    deps = ["//scripts:tools"],
+    # It runs the cluster tools with the user's home, which it looks up with `pwd`.
+    target_compatible_with = UNIX_ONLY,
+)
+
+# The test binary that the end-to-end targets below run on their clusters (see `cluster_test`). Each
+# target adds the apps that its own tests run.
+crate.unit_tests(
+    name = "_e2e",
+    data = ["//mirrord/cli"],
+    # The tests run `bash` and `curl` from the machine, and on some machines Bazel's fixed `PATH`
+    # doesn't have them. `cluster_test` puts the helm that Bazel downloads before them.
+    env_inherit = ["PATH"],
+    test_threads = 6,
+    # It only runs through the targets below, which give it a cluster.
+    tags = ["manual"],
+    target_compatible_with = UNIX_ONLY,
+    # Public for the modules that run the suite on a cluster that their own setup prepared, like the
+    # operator, whose `cluster_test` installs the operator first.
+    visibility = ["//visibility:public"],
+)
+
+# The images that the targets below load into their clusters. The mirrord CLI that the tests start
+# reads the agent's image from `MIRRORD_AGENT_IMAGE`.
+E2E_IMAGES = {":agent_image_load": "MIRRORD_AGENT_IMAGE"}
+
+cluster_test(
+    name = "e2e",
+    data = [":apps"],
+    tests = ":_e2e",
+    # The `argo_rollout` tests target rollouts.
+    argo_rollouts = True,
+    cluster = "mirrord-e2e",
+    images = E2E_IMAGES,
+    timeout = "eternal",
+)
+
+# The `operator_install` tests install the operator for the whole cluster, and the sessions of the
+# other tests would then go through it. So they run on a cluster of their own. They start no agent,
+# so the cluster doesn't get its image.
+cluster_test(
+    name = "e2e_operator_install",
+    tests = ":_e2e",
+    args = [
+        "--profile",
+        "operator-install",
+    ],
+    cluster = "mirrord-e2e-operator",
+    timeout = "eternal",
+)
+
+# These tests need an IPv6-only cluster.
+cluster_test(
+    name = "e2e_ipv6",
+    data = [
+        "//tests/apps/node-e2e/outgoing/test-outgoing-traffic-single-request-ipv6",
+        "//tests/apps/python-e2e/app-fastapi",
+    ],
+    tests = ":_e2e",
+    args = [
+        "--profile",
+        "ipv6",
+    ],
+    cluster = "mirrord-e2e-ipv6",
+    images = E2E_IMAGES,
+    ipv6 = True,
+    timeout = "eternal",
+)

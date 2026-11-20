@@ -247,22 +247,6 @@ impl Launch {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        // The mirrord CLI injects MIRRORD_LAYER_FILE into every launched
-        // service instead of its embedded layer - a development override
-        // that dev workspaces set globally (e.g. through cargo's [env]).
-        // Passing through a path that does not exist makes dyld abort
-        // every service, so drop it and let the CLI use its embedded layer.
-        let mut layer_note = None;
-        if let Ok(layer) = std::env::var("MIRRORD_LAYER_FILE")
-            && !Path::new(&layer).is_file()
-        {
-            command.env_remove("MIRRORD_LAYER_FILE");
-            layer_note = Some(format!(
-                "note: MIRRORD_LAYER_FILE points to missing file {layer} - ignoring it, \
-                 mirrord will use its embedded layer"
-            ));
-        }
-
         let mut child = command.spawn().map_err(|error| {
             anyhow::anyhow!("failed to start `{} up`: {error}", binary.display())
         })?;
@@ -273,7 +257,6 @@ impl Launch {
         context.telemetry.session_started();
         let mut first_lines = vec![format!("$ mirrord up -f {}", config_path.display())];
         first_lines.extend(note);
-        first_lines.extend(layer_note);
         let logs = Arc::new(RwLock::new(first_lines));
         let status = Arc::new(RwLock::new(LaunchStatus::Running { pid }));
 

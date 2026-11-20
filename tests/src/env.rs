@@ -6,12 +6,12 @@ mod env_tests {
     use rstest::*;
 
     use crate::utils::{
-        application::{env::EnvApp, GoVersion},
+        application::{GoVersion, env::EnvApp},
         kube_service::KubeService,
         services::basic_service,
     };
 
-    #[cfg_attr(any(not(feature = "job"), target_os = "windows"), ignore)]
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn bash_remote_env_vars(
@@ -21,7 +21,6 @@ mod env_tests {
         remote_env_vars_works(basic_service, application).await;
     }
 
-    #[cfg_attr(not(feature = "job"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn remote_env_vars_works(

@@ -1,0 +1,71 @@
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@rules_distroless//distroless:defs.bzl", "cacerts")
+load("@rules_img//img:layer.bzl", "layer_from_tar")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_test.bzl", "py_test")
+load(":compatibility.bzl", "LINUX_ONLY")
+
+config_setting(
+    name = "opt",
+    values = {"compilation_mode": "opt"},
+    visibility = ["//visibility:public"],
+)
+
+# An image layer that maps a path to this directory gets an entry for a directory at that path, and
+# nothing under it. `image_layer` has no other way to add an empty directory, or the entry for one
+# directory without the entries for all of its parents.
+copy_to_directory(
+    name = "empty_directory",
+    srcs = [],
+    visibility = ["//visibility:public"],
+)
+
+# The image layer with a trust store, which the programs of an image verify TLS certificates
+# against, for the images whose base has none, like `debian`. It holds Debian's `ca-certificates`
+# package from `@trixie`, which moves with the snapshot of Debian's archive in `MODULE.bazel`.
+#
+# Public, for the images of other modules too, like the operator's. Only images use it, so it's
+# `manual`, like the images.
+cacerts(
+    name = "cacerts",
+    package = "@trixie//ca-certificates:data",
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+layer_from_tar(
+    name = "cacerts_layer",
+    src = ":cacerts",
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//visibility:public"],
+)
+
+# The programs of the `write_source_file` targets and of the `vite_site` tests, which the macros add
+# to the packages that call them.
+exports_files([
+    "no_source_maps_test.py",
+    "write_source_file.py",
+])
+
+# Public, because the modules that depend on mirrord keep a copy of it (see the file).
+exports_files(
+    ["module.bazelrc"],
+    visibility = ["//visibility:public"],
+)
+
+# Public, because the images of other modules, like the operator's, take only the files they run out
+# of Debian packages too.
+py_binary(
+    name = "elf_closure",
+    srcs = ["elf_closure.py"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "elf_closure_test",
+    srcs = ["elf_closure_test.py"],
+    data = ["elf_closure.py"],
+    env = {"ELF_CLOSURE": "$(rlocationpath elf_closure.py)"},
+    deps = ["@rules_python//python/runfiles"],
+)

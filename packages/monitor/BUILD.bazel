@@ -1,0 +1,42 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/monitor:vitest/package_json.bzl", vitest_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "monitor",
+    srcs = glob(
+        ["src/**"],
+        exclude = [
+            "src/**/*.test.*",
+            "src/test/**",
+        ],
+    ) + [
+        "package.json",
+        # `packages/ui`'s Vite compiles each file with the options of its nearest `tsconfig.json`.
+        "tsconfig.json",
+    ],
+    deps = [
+        ":node_modules/@metalbear/ui",
+        ":node_modules/lucide-react",
+        ":node_modules/posthog-js",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+    ],
+    visibility = ["//packages/ui:__pkg__"],
+)
+
+# The tests get the production sources and dependencies from `:monitor`, and only the test files and
+# the packages that the tests and `vitest.config.ts` import, so that a change to a tool like ESLint
+# or Prettier doesn't run them again.
+vitest_bin.vitest_test(
+    name = "unit_tests",
+    data = glob(["src/**/*.test.*"]) + [
+        "vitest.config.ts",
+        ":monitor",
+        ":node_modules/vitest",
+    ],
+    args = ["run"],
+    chdir = package_name(),
+)

@@ -1,0 +1,2 @@
+# Each app that the layer tests run is a package of its own under this one, and the target named
+# after the package is the one that a test lists.

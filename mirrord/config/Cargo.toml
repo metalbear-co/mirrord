@@ -56,7 +56,7 @@ semver.workspace = true
 wildmatch.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-str-win = { path = "../str-win" }
+mirrord-str-win = { path = "../str-win" }
 
 [dev-dependencies]
 rstest.workspace = true

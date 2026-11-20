@@ -1,0 +1,117 @@
+name: "Set up Bazel"
+description: >-
+  Installs bazelisk, turns on the `ci` config of `.bazelrc`, and restores the GitHub cache of what
+  Bazel downloads: the Bazel release and the repository cache, which holds the toolchains, crates
+  and packages. With the cache, a job doesn't download them again, and fails less often on a flaky
+  download. On Windows, it also restores Bazel's disk cache.
+inputs:
+  cache-save:
+    description: >-
+      Whether the job saves the cache of Bazel's downloads and, on Windows, the disk cache. All the
+      jobs of a platform restore the same caches, so only the job that downloads and builds the
+      most should save them. A job that saves the disk cache must also call this action with
+      `save-disk-cache` at its end.
+
+      Only `main` should save them, because every branch can read `main`'s caches, while a branch's
+      cache only serves that branch.
+    default: "false"
+  accept-cached-outputs:
+    description: >-
+      Whether Bazel takes outputs from the remote cache and the disk cache. A job that publishes
+      or signs what it builds, or runs Bazel with credentials that can write, should set it to
+      `false` and build everything itself, because pull request jobs write to those caches too, so
+      a cached output could come from a pull request's unmerged code.
+    default: "true"
+  save-disk-cache:
+    description: >-
+      Set it to `true` in the last step of a job, after every Bazel command, to save the disk cache
+      that an earlier call of this action restored. A composite action can't add a step to the end
+      of the job, so the job calls it again. This call only saves the disk cache, and only when the
+      earlier call had `cache-save` and used a disk cache.
+    default: "false"
+runs:
+  using: "composite"
+  steps:
+    # This action doesn't set up a remote cache, because Blacksmith's Linux and macOS runners
+    # configure theirs in the system bazelrc. Blacksmith has no remote cache for Bazel on its
+    # Windows runners, and no plans for one, so the Windows jobs keep Bazel's results in a disk
+    # cache instead, which this action restores and saves like the other GitHub caches. A job that
+    # doesn't accept cached outputs doesn't restore the disk cache either.
+    #
+    # `setup-bazel` can cache the disk cache too, but it keys the cache by the hash of the
+    # lockfiles and BUILD files, and doesn't save the cache when it restored that exact key, so a
+    # push that only changes source files would save nothing. This action instead saves the cache
+    # of each commit of `main` under a key of its own, and a job restores the newest one.
+    #
+    # `cygpath -m` writes the path with forward slashes, because a bazelrc reads a backslash as an
+    # escape.
+    - name: Choose the disk cache
+      if: ${{ inputs.save-disk-cache != 'true' && runner.os == 'Windows' && inputs.accept-cached-outputs == 'true' }}
+      shell: bash
+      env:
+        CACHE_SAVE: ${{ inputs.cache-save }}
+      run: |
+        {
+          echo "BAZEL_DISK_CACHE=$(cygpath -m "$RUNNER_TEMP/bazel-disk")"
+          echo "BAZEL_DISK_CACHE_KEY_PREFIX=bazel-disk-$RUNNER_OS-$RUNNER_ARCH-"
+          echo "BAZEL_DISK_CACHE_SAVE=$CACHE_SAVE"
+        } >> "$GITHUB_ENV"
+
+    - name: Restore the disk cache
+      if: ${{ inputs.save-disk-cache != 'true' && env.BAZEL_DISK_CACHE }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.BAZEL_DISK_CACHE }}
+        key: ${{ env.BAZEL_DISK_CACHE_KEY_PREFIX }}${{ github.sha }}
+        restore-keys: ${{ env.BAZEL_DISK_CACHE_KEY_PREFIX }}
+
+    - if: ${{ inputs.save-disk-cache != 'true' }}
+      uses: metalbear-co/setup-bazel@f34d6a05eae3c24acab7fa54587492daeaeffdab # 0.19.2
+      with:
+        disk-cache: false
+        bazelisk-version: 1.30.0
+        bazelisk-cache: true
+        repository-cache: |
+          - MODULE.bazel
+          - MODULE.bazel.lock
+          - Cargo.lock
+          - pnpm-lock.yaml
+          - "**/go.sum"
+          - "**/requirements.txt"
+        cache-save: ${{ inputs.cache-save }}
+        bazelrc: |
+          common --config=ci
+          # Keeps the extracted repositories out of the repository cache, so that the GitHub cache
+          # only holds the downloads, which are several times smaller.
+          common --repo_contents_cache=
+          # Without symlinks, Bazel on Windows copies every file into the runfiles directories,
+          # including large ones like the CLI. Symlinks need admin rights, which the Windows
+          # runners have.
+          startup --windows_enable_symlinks
+          ${{ env.BAZEL_DISK_CACHE && format('common --disk_cache={0}', env.BAZEL_DISK_CACHE) || '' }}
+          # Each save of the disk cache starts from the last one, so without a limit it would only
+          # grow. Bazel deletes the least recently used entries past the limit while its server is
+          # idle, and the next command interrupts the deletion. In CI, the server is only idle
+          # between the steps, so the limit only holds roughly, and the cache can stay past it for
+          # a few runs.
+          #
+          # The cache action compresses a disk cache about five times, so a 20 GB disk cache stays
+          # well within Blacksmith's default storage of 25 GB per repository, which the caches of
+          # every platform share.
+          common:windows --experimental_disk_cache_gc_max_size=20G
+          common:windows --experimental_disk_cache_gc_idle_delay=0s
+          ${{ inputs.accept-cached-outputs != 'true' && 'common --noremote_accept_cached' || '' }}
+
+    # Stopping the server keeps it from deleting entries of the disk cache while the save reads
+    # them.
+    - name: Stop Bazel
+      if: ${{ inputs.save-disk-cache == 'true' && env.BAZEL_DISK_CACHE_SAVE == 'true' }}
+      shell: bash
+      run: bazel shutdown
+
+    - name: Save the disk cache
+      if: ${{ inputs.save-disk-cache == 'true' && env.BAZEL_DISK_CACHE_SAVE == 'true' }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.BAZEL_DISK_CACHE }}
+        key: ${{ env.BAZEL_DISK_CACHE_KEY_PREFIX }}${{ github.sha }}

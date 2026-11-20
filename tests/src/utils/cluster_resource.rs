@@ -1,24 +1,22 @@
 use k8s_openapi::{
+    DeepMerge, Resource,
     api::{
         apps::v1::{Deployment, StatefulSet},
         core::v1::{EnvFromSource, Probe, Service, TCPSocketAction},
     },
     apimachinery::pkg::util::intstr::IntOrString,
-    DeepMerge, Resource,
 };
 use kube::runtime::reflector::Lookup;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::utils::{
+    CONTAINER_NAME, TEST_RESOURCE_LABEL,
     images::{
         HTTP_KEEP_ALIVE_IMAGE, HTTP_LOGGER_IMAGE, NODE_IMAGE, PYTEST_IMAGE, TCP_ECHO_IMAGE,
         WEBSOCKET_IMAGE,
     },
-    CONTAINER_NAME, TEST_RESOURCE_LABEL,
 };
-
-pub(crate) mod operator;
 
 /// List of test images that run a TCP server on port 80.
 ///

@@ -36,6 +36,7 @@ mirrord-session-monitor-client.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 portable-pty.workspace = true
 ratatui.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true
@@ -62,3 +63,6 @@ vt100.workspace = true
 # read it from — for reading a process's parent.
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
+
+[dev-dependencies]
+mirrord-test-utils = { path = "../test-utils" }

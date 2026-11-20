@@ -1,0 +1,8 @@
+load("@crates//issue2438:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.binary(
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

@@ -22,7 +22,7 @@ use syn::{FnArg, ItemFn, Pat, ReturnType, parse_macro_input, spanned::Spanned};
 ///
 ///  ### Example usage
 ///
-/// ```
+/// ```ignore
 /// // In the `mirrord-protocol` crate
 /// #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
 /// pub enum StealType {

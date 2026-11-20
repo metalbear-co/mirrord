@@ -8,9 +8,10 @@ Every `mirrord-up.yaml` option records the plan it needs as `mirrord-config`'s o
 with `#[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]`; `every_up_option_has_a_plan` in
 `mirrord-mcp` fails on an option without one.
 
-`mirrord-up-schema.json` embeds this crate's config types and `mirrord-config`'s. After any change to either, or to
-their docs, regenerate it, or `up_schema_file_is_up_to_date` fails:
+`mirrord-up-schema.json` embeds this crate's config types and `mirrord-config`'s. It's a copy of `//mirrord/up:schema`,
+which the build generates with `src/bin/print_schema.rs`. After any change to either crate's types, or to their docs, copy it
+again, or `//mirrord/up:write_schema_test` fails:
 
 ```bash
-cargo test -p mirrord-up generate_up_schema -- --ignored
+bazel run //mirrord/up:write_schema
 ```

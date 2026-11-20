@@ -22,26 +22,24 @@ mirrord-intproxy = { path = "../intproxy" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec-async"] }
 mirrord-protocol = { path = "../protocol" }
 
-actix-codec.workspace = true
-futures.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
+mirrord-runfiles = { path = "../runfiles" }
+mirrord-test-utils = { path = "../test-utils" }
 
-[dev-dependencies]
-fancy-regex.workspace = true
 actix-codec.workspace = true
 futures.workspace = true
 rstest.workspace = true
-serde_json.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["rt", "macros", "fs"] }
+tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
+tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+fancy-regex.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
 libc.workspace = true
-mirrord-intproxy = { path = "../intproxy" }
 mirrord-command = { path = "../command", features = ["tokio"] }
 rand.workspace = true
-tracing.workspace = true
-mirrord-test-utils = { path = "../../test-utils" }
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["fs", "net", "process", "signal"] }

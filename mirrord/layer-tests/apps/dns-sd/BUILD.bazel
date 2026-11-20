@@ -1,0 +1,9 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("//bazel:compatibility.bzl", "MACOS_ONLY")
+
+cc_binary(
+    name = "dns-sd",
+    srcs = ["main.c"],
+    target_compatible_with = MACOS_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

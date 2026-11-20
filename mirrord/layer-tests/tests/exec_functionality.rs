@@ -1,15 +1,14 @@
 #[cfg(unix)]
-use std::{fs::OpenOptions, io::Write, net::SocketAddr, ops::Not, path::PathBuf, time::Duration};
+use std::{fs::OpenOptions, io::Write, net::SocketAddr, ops::Not, time::Duration};
 
 use rstest::rstest;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::{io::copy_bidirectional, net::TcpStream};
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
-/// Runs `python3 tests/apps/<script>` under `mirrord exec` in `simple` progress mode, with the
+/// Runs `python3 apps/<script>` under `mirrord exec` in `simple` progress mode, with the
 /// layer connecting to `intproxy`.
 #[cfg(unix)]
 async fn exec_python(
@@ -17,9 +16,7 @@ async fn exec_python(
     script: &str,
     extra_env: Vec<(&str, &str)>,
 ) -> TestProcess {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/apps")
-        .join(script);
+    let script = app_script(script);
     let env = get_env(
         intproxy,
         [
@@ -34,18 +31,16 @@ async fn exec_python(
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
-    let cmdline = vec![
-        Application::get_python3_executable().await,
-        script.to_str().unwrap().to_owned(),
-    ];
+    let cmdline = vec![python(), script];
 
     run_exec(cmdline, None, None, None, Some(env), None).await
 }
 
-/// Ensures that `mirrord exec` extracts the layer when `MIRRORD_LAYER_FILE` is not set.
+/// Ensures that `mirrord exec` loads the CLI's own layer into the program. The CLI finds the layer
+/// in its runfiles, or, built with `standalone`, extracts the layer that it embeds to a file.
 #[rstest]
 #[tokio::test]
-async fn exec_extracts_layer_without_env() {
+async fn exec_loads_the_clis_own_layer() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let env = get_env(address, vec![("MIRRORD_FILE_MODE", "local")]);
@@ -56,26 +51,15 @@ async fn exec_extracts_layer_without_env() {
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    let executable = Application::get_python3_executable().await;
+    let executable = python();
     let cmdline = vec![executable, "-c".to_owned(), "print('hi')".to_owned()];
 
-    let mut process = run_exec(
-        cmdline,
-        None,
-        None,
-        None,
-        Some(env_refs),
-        Some(&["MIRRORD_LAYER_FILE"]),
-    )
-    .await;
+    let mut process = run_exec(cmdline, None, None, None, Some(env_refs), None).await;
 
     let mut intproxy = TestIntProxy::new(listener, None).await;
 
     process.wait_assert_success().await;
     process.assert_stdout_contains("hi").await;
-    process
-        .assert_stderr_contains("MIRRORD_LAYER_FILE not set, extracting library from binary")
-        .await;
     if let Some(message) = intproxy.try_recv().await {
         panic!("unexpected message from layer: {message:?}");
     }
@@ -90,7 +74,7 @@ async fn exec_prints_ready_only_once_the_layer_is_connected() {
     let gate = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let intproxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let intproxy_address = intproxy_listener.local_addr().unwrap();
-    let mut process = exec_python(gate.local_addr().unwrap(), "up_greeter.py", vec![]).await;
+    let mut process = exec_python(gate.local_addr().unwrap(), "up-greeter/main.py", vec![]).await;
 
     let (layer_stream, _) = tokio::time::timeout(Duration::from_secs(30), gate.accept())
         .await
@@ -130,15 +114,15 @@ async fn exec_prints_ready_only_once_the_layer_is_connected() {
     );
 }
 
-/// What `tests/apps/exec_debug_hold.py` prints once it runs.
+/// What `apps/exec-debug-hold/main.py` prints once it runs.
 #[cfg(unix)]
 const HELD_PROGRAM_RAN: &str = "the held program runs";
 
-/// What the child `tests/apps/exec_debug_hold.py` starts prints once it runs.
+/// What the child `apps/exec-debug-hold/main.py` starts prints once it runs.
 #[cfg(unix)]
 const CHILD_RAN: &str = "its child runs";
 
-/// Starts `tests/apps/exec_debug_hold.py` under `mirrord exec`, held for a debugger the way
+/// Starts `apps/exec-debug-hold/main.py` under `mirrord exec`, held for a debugger the way
 /// `mirrord up --debug` asks for it, and waits for the hold's announcement.
 ///
 /// Returns the process, its intproxy, and the release path the announcement names.
@@ -147,7 +131,7 @@ async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let process = exec_python(
         listener.local_addr().unwrap(),
-        "exec_debug_hold.py",
+        "exec-debug-hold/main.py",
         vec![("MIRRORD_DEBUG_HOLD", "1")],
     )
     .await;

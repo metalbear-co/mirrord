@@ -1,0 +1,45 @@
+load("@cargo_packages//:packages.bzl", "PACKAGES")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/ui:vite/package_json.bzl", vite_bin = "bin")
+load("//bazel:vite.bzl", "vite_site")
+
+npm_link_all_packages(name = "node_modules")
+
+# The CLI embeds the host's build of the site, which is the same on every platform (see
+# `vite_site`).
+vite_site(
+    name = "dist",
+    srcs = glob([
+        "public/**",
+        "src/**",
+    ]) + [
+        "index.html",
+        "package.json",
+        "postcss.config.js",
+        "tailwind.config.js",
+        "tsconfig.json",
+        "vite.config.ts",
+        ":node_modules/@fontsource/poppins",
+        ":node_modules/@metalbear/ui",
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/autoprefixer",
+        ":node_modules/lucide-react",
+        ":node_modules/postcss",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/tailwindcss",
+        # `vite.config.ts` imports Vite itself.
+        ":node_modules/vite",
+        "//packages/monitor",
+        "//packages/wizard",
+    ],
+    # The runner loads `vite.config.ts` from the sandbox (see the config).
+    args = [
+        "--configLoader",
+        "runner",
+    ],
+    env = {"MIRRORD_VERSION": PACKAGES["mirrord/cli"].version},
+    vite = vite_bin.vite,
+    visibility = ["//mirrord/cli:__pkg__"],
+)

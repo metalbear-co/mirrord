@@ -1,0 +1,16 @@
+load("@crates//mirrord-kube:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+# Only crates outside the workspace, like the operator's, turn on the `incluster` feature, so this
+# target builds the code behind it, for the compiler and clippy to check.
+crate.library(
+    name = "kube_incluster",
+    crate_features = ["incluster"],
+    doc = False,
+)
+
+crate.unit_tests()

@@ -1,0 +1,13 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+
+py_binary(
+    name = "shared-sockets",
+    srcs = ["main.py"],
+    data = ["//mirrord/test-utils:python_env"],
+    main = "main.py",
+    deps = [
+        "@pip//fastapi",
+        "@pip//uvicorn",
+    ],
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

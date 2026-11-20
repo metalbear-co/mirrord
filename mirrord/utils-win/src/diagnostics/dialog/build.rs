@@ -3,7 +3,7 @@
 //! [`build`] creates the logo, the title and subtitle, the report box, and the buttons, then
 //! returns the owned [`DialogState`]. The parent module draws and drives them.
 
-use str_win::string_to_u16_buffer;
+use mirrord_str_win::string_to_u16_buffer;
 use winapi::{
     shared::{
         minwindef::{HINSTANCE, LPARAM, WPARAM},

@@ -1,5 +1,5 @@
 [package]
-name = "mirrord"
+name = "mirrord-cli"
 version.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -15,8 +15,6 @@ edition.workspace = true
 
 [lints]
 workspace = true
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 mirrord-macros = { path = "../macros" }
@@ -39,6 +37,7 @@ mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth = { path = "../auth" }
 mirrord-protocol-api = { path = "../protocol-api" }
 mirrord-operator-websocket = { path = "../operator-websocket" }
+mirrord-runfiles = { path = "../runfiles" }
 
 actix-codec.workspace = true
 atomic-write-file.workspace = true
@@ -57,7 +56,6 @@ secrecy.workspace = true
 semver.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }
-const-random.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "process", "signal", "sync"] }
 tokio-retry.workspace = true
 kube.workspace = true
@@ -111,7 +109,7 @@ sha2.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 mirrord-layer-lib = { path = "../layer-lib", features = ["cli-execution"] }
-utils-win = { path = "../utils-win" }
+mirrord-utils-win = { path = "../utils-win" }
 stork = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
@@ -123,15 +121,18 @@ mirrord-sip = { path = "../sip" }
 [target.'cfg(target_os = "linux")'.dependencies]
 xmas-elf.workspace = true
 
+[[bin]]
+name = "mirrord"
+path = "src/main.rs"
 
 [dev-dependencies]
+mirrord-test-utils = { path = "../test-utils" }
 rstest.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
 kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
-tower-test.workspace = true
 
 # Only the tests of `preview sync`, which runs on Unix alone, use these.
 [target.'cfg(unix)'.dev-dependencies]
@@ -140,4 +141,5 @@ tar.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
-windows_build = []
+# Embeds the layer's files and the UI in the CLI, rather than reading them from its runfiles.
+standalone = []

@@ -6,7 +6,7 @@ use crate::config::flag::{ConfigFlags, ConfigFlagsType, EnvFlag};
 
 /// Representation of a single field
 ///
-/// ```
+/// ```text
 /// |---------flags---------|
 ///  #[config(env = "TEST")]
 ///             |-----ty-----|
@@ -42,32 +42,32 @@ impl ConfigField {
     /// Will create the struct definition part of the code
     ///
     /// #### 1
-    /// ```rust
+    /// ```rust,ignore
     /// #[config(env = "TEST")]
     /// pub test: String,
     /// ```
     /// Will output
-    /// ```rust
+    /// ```rust,ignore
     /// pub test: Option<String>
     /// ```
     ///
     /// #### 2
-    /// ```rust
+    /// ```rust,ignore
     /// #[config(nested)]
     /// pub test: OtherConfig,
     /// ```
     /// Will output
-    /// ```rust
+    /// ```rust,ignore
     /// pub test: <OtherConfig as crate::config::FromMirrordConfig>::Generator
     /// ```
     ///
     /// #### 3
-    /// ```rust
+    /// ```rust,ignore
     /// #[config(rename = "test2")]
     /// pub test: OtherConfig,
     /// ```
     /// Will output
-    /// ```rust
+    /// ```rust,ignore
     /// #[serde(rename = "test2")]
     /// pub test: Option<String>
     /// ```
@@ -110,10 +110,13 @@ impl ConfigField {
             |plan| quote! { #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::#plan))] },
         );
 
+        let skip_schema = flags.skip_schema.then(|| quote! { #[schemars(skip)] });
+
         quote! {
             #(#docs)*
             #deprecated
             #plan
+            #skip_schema
             #rename
             #[serde(default, skip_serializing_if = "Option::is_none")]
             #vis #ident: Option<#target>
@@ -124,12 +127,12 @@ impl ConfigField {
     /// Will create the actual implementation of the
     ///
     /// #### 1
-    /// ```rust
+    /// ```rust,ignore
     /// #[config(env = "TEST")]
     /// pub test: String,
     /// ```
     /// Will output
-    /// ```rust
+    /// ```rust,ignore
     /// test: crate::config::from_env::FromEnv::new("TEST").or(self.test)
     ///           .source_value().transpose()?
     ///           .ok_or(crate::config::ConfigError::ValueNotProvided("MyConfig", "test", Some("TEST")))?

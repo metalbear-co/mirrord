@@ -10,8 +10,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that macOS DNS-SD address queries (what Bun uses) are resolved through the agent, for
 /// every DNS-SD client style, and that the queries we don't answer go to `mDNSResponder`.

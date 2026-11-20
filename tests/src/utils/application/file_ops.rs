@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use mirrord_test_utils::TestProcess;
+use mirrord_test_utils::{TestProcess, python};
 
-use crate::utils::application::{app_path, GoVersion};
+use crate::utils::application::GoVersion;
 
 #[derive(Debug)]
 pub enum FileOps {
@@ -16,19 +16,19 @@ impl FileOps {
     pub fn command(&self) -> Vec<String> {
         match self {
             FileOps::Python => vec![
-                "python3".into(),
+                python(),
                 "-B".into(),
                 "-m".into(),
                 "unittest".into(),
                 "-f".into(),
-                app_path("python-e2e/ops.py"),
+                "apps/python-e2e/ops/main.py".to_owned(),
             ],
-            FileOps::Rust => vec![app_path("../target/debug/rust-e2e-fileops")],
+            FileOps::Rust => vec!["apps/rust-e2e-fileops/rust-e2e-fileops".to_owned()],
             FileOps::GoDir(go_version) => {
-                vec![app_path(&format!("go-e2e-dir/{go_version}.go_test_app"))]
+                vec![format!("apps/go-e2e-dir/go-e2e-dir.{go_version}")]
             }
             FileOps::GoStatfs(go_version) => {
-                vec![app_path(&format!("go-e2e-statfs/{go_version}.go_test_app"))]
+                vec![format!("apps/go-e2e-statfs/go-e2e-statfs.{go_version}")]
             }
         }
     }

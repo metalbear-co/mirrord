@@ -1,0 +1,135 @@
+load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
+
+# The Linux binaries link against glibc 2.17, so that they run on old distributions. The llvm
+# toolchain takes the glibc version from the platform, so we need platforms of our own.
+#
+# Only the build's outputs target `linux-host`, not its tools. In an optimized build against glibc
+# 2.17's headers, clang deletes the code after calls to fortified functions like `getcwd`, which
+# breaks C++ tools like rules_rust's process wrapper.
+platform(
+    name = "linux-host",
+    constraint_values = ["@llvm//constraints/libc:gnu.2.17"],
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
+)
+
+# The machine's own platform, under a label that `platform_label` can name, so that a
+# transition back to the machine's CPU lands in the top-level build's configuration.
+platform(
+    name = "macos-host",
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
+)
+
+[
+    platform(
+        name = cpu + "-linux",
+        constraint_values = ["@llvm//constraints/libc:gnu.2.17"],
+        parents = ["@rules_rs//rs/platforms:{}-unknown-linux-gnu".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# rules_rs's macOS platforms under the `{cpu}-{os}` names that `platform_label` returns.
+[
+    alias(
+        name = cpu + "-macos",
+        actual = "@rules_rs//rs/platforms:{}-apple-darwin".format(cpu),
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+platform(
+    name = "windows-host",
+    constraint_values = [
+        # The same C++ standard library as a cross build to `:x86_64-windows`.
+        "@llvm//constraints/cxxstdlib:msvcstl",
+        # MinHook, which the Windows layer hooks with, includes headers that only the Windows SDK
+        # has.
+        "@llvm//constraints/windows/abi:msvc",
+    ],
+    parents = ["@platforms//host"],
+    visibility = ["//visibility:public"],
+)
+
+platform(
+    name = "x86_64-windows",
+    # A cross build compiles Bazel's Windows launcher, which only compiles against Microsoft's STL.
+    constraint_values = ["@llvm//constraints/cxxstdlib:msvcstl"],
+    parents = ["@rules_rs//rs/platforms:x86_64-pc-windows-msvc"],
+    visibility = ["//visibility:public"],
+)
+
+[
+    config_setting(
+        name = "is_{}_{}".format(os, cpu),
+        constraint_values = [
+            "@platforms//cpu:" + cpu,
+            "@platforms//os:" + os,
+        ],
+        visibility = ["//visibility:public"],
+    )
+    for os, cpu in [
+        ("linux", "aarch64"),
+        ("linux", "x86_64"),
+        ("macos", "aarch64"),
+        ("macos", "x86_64"),
+        ("windows", "x86_64"),
+    ]
+]
+
+# Whether the build targets the OS and CPU of the machine that runs Bazel, so that the build's
+# programs can run in its actions (see `program_stdout`).
+config_setting(
+    name = "is_host",
+    constraint_values = HOST_CONSTRAINTS,
+    visibility = ["//visibility:public"],
+)
+
+# Lets `bazel test` run the tests for any target platform on the host, the only execution platform.
+# Without it, Bazel only runs a test on an execution platform with all of the target platform's
+# constraints, which the host lacks even for `linux-host`, because of glibc 2.17.
+toolchain(
+    name = "tests_run_on_the_host",
+    toolchain = "@bazel_tools//tools/test:empty_toolchain",
+    toolchain_type = "@bazel_tools//tools/test:default_test_toolchain_type",
+)
+
+# Code that links a C++ library that GCC compiled, like the prebuilt V8 of the layer tests'
+# `issue834` app, needs GCC's libstdc++, and the llvm toolchain only uses it when the platform
+# names it.
+[
+    platform(
+        name = cpu + "-linux-libstdcxx",
+        constraint_values = ["@llvm//constraints/cxxstdlib:libstdcxx.16.1.0"],
+        parents = [":{}-linux".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The layer tests' `cor_1734_file_mode` builds against a newer glibc than the binaries that mirrord
+# ships (see `//mirrord/layer-tests/apps/cor-1734-file-mode`).
+[
+    platform(
+        name = cpu + "-linux-glibc-2.34",
+        constraint_values = ["@llvm//constraints/libc:gnu.2.34"],
+        parents = [":{}-linux".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]

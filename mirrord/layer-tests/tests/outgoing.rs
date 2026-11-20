@@ -19,8 +19,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 use tokio::net::TcpListener;
 
 // TODO: add a test for when DNS lookup is unsuccessful, to make sure the layer returns a valid

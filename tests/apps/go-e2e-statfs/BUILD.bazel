@@ -1,0 +1,10 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//mirrord/test-utils:go_test_binary.bzl", "go_test_binary")
+
+go_test_binary(
+    name = "go-e2e-statfs",
+    # The `statfs` test only runs it with Go 1.25.
+    versions = ["25"],
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//tests:__pkg__"],
+)

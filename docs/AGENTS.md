@@ -17,7 +17,7 @@ The Configuration tab is generated from the doc comments in `mirrord/config/src`
 python3 .github/scripts/check_plan_tags.py
 ```
 
-CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. There is no local build, and GitBook doesn't build pull requests to the mirrord repository, so they get no preview.
+CI runs it as the `docs-plan-tags` check of the mirrord repository's `bazel run //:lint`. There is no local build, and GitBook doesn't build pull requests to the mirrord repository, so they get no preview.
 
 ## Publishing a Fix Between Releases
 

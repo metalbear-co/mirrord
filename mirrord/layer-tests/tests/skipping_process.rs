@@ -5,16 +5,15 @@ use std::{env::temp_dir, os::unix::fs};
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Creates a new [`Application`], which is a symlink to the existing executable.
 /// The link is created in the temporary directory and its name is randomized.
-async fn symlink_app(app: &Application) -> Application {
+fn symlink_app(app: &Application) -> Application {
     let path = temp_dir().join(format!("test-dynamic-app-{}", rand::random::<u128>()));
-    println!("{}", app.get_executable().await);
+    println!("{}", app.get_executable());
 
-    fs::symlink(app.get_executable().await, &path).expect("failed to create executable symlink");
+    fs::symlink(app.get_executable(), &path).expect("failed to create executable symlink");
 
     Application::DynamicApp(path.to_str().unwrap().to_owned(), vec![])
 }
@@ -25,15 +24,9 @@ async fn symlink_app(app: &Application) -> Application {
 #[tokio::test]
 async fn skip_based_on_exec_name() {
     let app = Application::OpenFile;
-    let symlinked_app = symlink_app(&app).await;
+    let symlinked_app = symlink_app(&app);
 
-    let ignore = app
-        .get_executable()
-        .await
-        .rsplit('/')
-        .next()
-        .unwrap()
-        .to_owned();
+    let ignore = app.get_executable().rsplit('/').next().unwrap().to_owned();
 
     let (mut test_process, _intproxy) = symlinked_app
         .start_process(vec![("MIRRORD_SKIP_PROCESSES", &ignore)], None)
@@ -46,11 +39,10 @@ async fn skip_based_on_exec_name() {
 #[tokio::test]
 async fn skip_based_on_invocation_name() {
     let app = Application::OpenFile;
-    let symlinked_app = symlink_app(&app).await;
+    let symlinked_app = symlink_app(&app);
 
     let ignore = symlinked_app
         .get_executable()
-        .await
         .rsplit('/')
         .next()
         .unwrap()
@@ -68,7 +60,7 @@ async fn skip_based_on_invocation_name() {
 #[tokio::test]
 async fn dont_skip() {
     let app = Application::OpenFile;
-    let symlinked_app = symlink_app(&app).await;
+    let symlinked_app = symlink_app(&app);
 
     let (mut test_process, mut intproxy) = symlinked_app.start_process(vec![], None).await;
 

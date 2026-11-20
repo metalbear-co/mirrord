@@ -449,6 +449,9 @@ mod tests {
         rcgen::CertifiedKey<rcgen::KeyPair>,
         tokio::task::JoinHandle<Result<CertificateDer<'static>, std::io::Error>>,
     ) {
+        // Bazel builds rustls with more than one crypto provider, so rustls has no default one.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let root = generate_cert("test.root", None, true).unwrap();
         let server = generate_cert("localhost", Some(&root), false).unwrap();
 
@@ -636,6 +639,9 @@ mod tests {
         #[case] original_client_sans: &[&str],
         #[case] expected: Option<usize>,
     ) {
+        // Bazel builds rustls with more than one crypto provider, so rustls has no default one.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let client_identities = [
             &["client-a.example.com"][..],
             &["client-b.example.com"],

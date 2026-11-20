@@ -1,22 +1,20 @@
-//! Tests that need a single-stack IPv6 cluster, compiled only with the `ipv6` cargo
-//! feature - the regular e2e jobs never see them. The `e2e-ipv6` CI job runs them on an
-//! IPv6 kind cluster; see the IPv6 section of CONTRIBUTING.md for running them locally.
+//! Tests that need a single-stack IPv6 cluster. Only nextest's `ipv6` profile selects them, and
+//! `//tests:e2e_ipv6` runs that profile.
 #![cfg(test)]
-#![cfg(feature = "ipv6")]
 
 use std::time::Duration;
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
-use mirrord_test_utils::run_command::run_exec_with_target;
+use mirrord_test_utils::{node, run_command::run_exec_with_target};
 use rstest::*;
 
 use crate::utils::{
+    KubeClient,
     application::Application,
     client::kube_client,
     ipv6::{ipv6_service, portforward_http_requests, portforward_http_requests_with_body},
     kube_service::KubeService,
-    KubeClient,
 };
 
 #[rstest]
@@ -29,11 +27,7 @@ async fn steal_http_ipv6_traffic(
     let service = ipv6_service.await;
     let kube_client = kube_client.await;
 
-    let mut flags = vec!["--steal"];
-
-    if cfg!(feature = "ephemeral") {
-        flags.extend(["-e"].into_iter());
-    }
+    let flags = vec!["--steal"];
 
     let mut process = application
         .run(
@@ -126,8 +120,8 @@ async fn connect_to_kubernetes_api_service_over_ipv6() {
 async fn outgoing_traffic_single_request_ipv6_enabled(#[future] ipv6_service: KubeService) {
     let service = ipv6_service.await;
     let node_command = [
-        "node",
-        "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
+        node().as_str(),
+        "apps/node-e2e/outgoing/test-outgoing-traffic-single-request-ipv6/main.mjs",
     ]
     .map(String::from)
     .to_vec();

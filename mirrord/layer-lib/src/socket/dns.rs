@@ -18,8 +18,8 @@ use crate::{
     },
 };
 
-/// Handles the remote communication part of [`libc::getaddrinfo`], call this if you want to resolve
-/// a DNS query through the agent, but don't need to deal with all the [`libc::getaddrinfo`] stuff.
+/// Handles the remote communication part of `libc::getaddrinfo`, call this if you want to resolve
+/// a DNS query through the agent, but don't need to deal with all the `libc::getaddrinfo` stuff.
 ///
 /// # Note
 ///

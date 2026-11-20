@@ -345,7 +345,7 @@ unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
 
 /// on macOS aarch, for some reason when hooking it it crashes with illegal instruction on bypass
 /// so we implement our own bypass
-/// inspired by https://github.com/apple-oss-distributions/Libc/blob/c5a3293354e22262702a3add5b2dfc9bb0b93b85/gen/FreeBSD/opendir.c#L118
+/// inspired by <https://github.com/apple-oss-distributions/Libc/blob/c5a3293354e22262702a3add5b2dfc9bb0b93b85/gen/FreeBSD/opendir.c#L118>
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 unsafe fn opendir_bypass(raw_filename: *const c_char) -> usize {
     unsafe {
@@ -783,7 +783,7 @@ unsafe fn pwrite_logic(
 ///
 /// On linux, this is `pwrite64`, but if you try to hook it and call as `FN_PWRITE64`, you won't
 /// find it, resulting in an `unwrap on None` error when the detour is called. So, even though
-/// golang receives a syscall of [`libc::SYS_pwrite64`], hooking it like this is what works.
+/// golang receives a syscall of `libc::SYS_pwrite64`, hooking it like this is what works.
 #[hook_guard_fn]
 pub(crate) unsafe extern "C" fn pwrite_detour(
     fd: RawFd,

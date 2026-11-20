@@ -5,9 +5,7 @@
 use mirrord_protocol::ClientMessage;
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that mirrord ignores the temp dir with the SIP-patched binaries.
 #[rstest]

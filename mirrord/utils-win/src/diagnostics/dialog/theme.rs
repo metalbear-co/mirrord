@@ -3,7 +3,7 @@
 //! These are the knobs that decide how the dialog looks. The window logic in the parent module
 //! draws against them.
 
-use str_win::string_to_u16_buffer;
+use mirrord_str_win::string_to_u16_buffer;
 use winapi::{
     shared::windef::{COLORREF, HFONT},
     um::{
@@ -15,7 +15,7 @@ use winapi::{
     },
 };
 
-/// Resource id of the embedded logo bitmap. See `logo.rc` / `build.rs`.
+/// Resource id of the embedded logo bitmap. See `logo.rc`.
 pub(super) const LOGO_RESOURCE_ID: u16 = 100;
 
 /// Control id of the Report-Crash button. Also the one default button.

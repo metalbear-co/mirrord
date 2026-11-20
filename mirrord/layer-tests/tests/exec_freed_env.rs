@@ -2,9 +2,7 @@
 
 use std::{fs, process::Command};
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Regression test for `execve` reading an environment that the layer itself freed.
 ///
@@ -22,7 +20,7 @@ async fn exec_with_environment_freed_by_sip_patching() {
     let macos_dir = bundle.path().join("Test.app/Contents/MacOS");
     fs::create_dir_all(&macos_dir).unwrap();
     let binary = macos_dir.join("exec_freed_env");
-    fs::copy("tests/apps/exec_freed_env/out.c_test_app", &binary).unwrap();
+    fs::copy("apps/exec-freed-env/exec-freed-env", &binary).unwrap();
 
     // The hardened runtime makes the layer patch the copy for SIP.
     #[allow(
@@ -37,7 +35,7 @@ async fn exec_with_environment_freed_by_sip_patching() {
     assert!(signed.success());
 
     let application = Application::DynamicApp(
-        "tests/apps/exec_freed_env/out.c_test_app".to_owned(),
+        "apps/exec-freed-env/exec-freed-env".to_owned(),
         vec![binary.to_str().unwrap().to_owned()],
     );
     let (mut test_process, _intproxy) = application

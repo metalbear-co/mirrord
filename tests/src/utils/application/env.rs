@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use crate::utils::application::{app_path, GoVersion};
+use mirrord_test_utils::node;
+
+use crate::utils::application::GoVersion;
 
 #[derive(Debug)]
 pub enum EnvApp {
@@ -15,21 +17,29 @@ pub enum EnvApp {
 impl EnvApp {
     pub fn command(&self) -> Vec<String> {
         match self {
-            Self::Go(go_version) => vec![app_path(&format!("go-e2e-env/{go_version}.go_test_app"))],
-            Self::Bash => vec!["bash".into(), app_path("bash-e2e/env.sh")],
+            Self::Go(go_version) => vec![format!("apps/go-e2e-env/go-e2e-env.{go_version}")],
+            Self::Bash => vec!["bash".into(), "apps/bash-e2e/env/main.sh".to_owned()],
             Self::BashInclude => {
-                vec!["bash".into(), app_path("bash-e2e/env.sh"), "include".into()]
+                vec![
+                    "bash".into(),
+                    "apps/bash-e2e/env/main.sh".to_owned(),
+                    "include".into(),
+                ]
             }
             Self::BashExclude => {
-                vec!["bash".into(), app_path("bash-e2e/env.sh"), "exclude".into()]
+                vec![
+                    "bash".into(),
+                    "apps/bash-e2e/env/main.sh".to_owned(),
+                    "exclude".into(),
+                ]
             }
             Self::NodeInclude => vec![
-                "node".into(),
-                app_path("node-e2e/remote_env/test_remote_env_vars_include_works.mjs"),
+                node(),
+                "apps/node-e2e/remote-env/test-remote-env-vars-include-works/main.mjs".to_owned(),
             ],
             Self::NodeExclude => vec![
-                "node".into(),
-                app_path("node-e2e/remote_env/test_remote_env_vars_exclude_works.mjs"),
+                node(),
+                "apps/node-e2e/remote-env/test-remote-env-vars-exclude-works/main.mjs".to_owned(),
             ],
         }
     }

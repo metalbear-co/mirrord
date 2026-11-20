@@ -1,0 +1,8 @@
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//mirrord/test-utils:go_test_binary.bzl", "go_test_binary")
+
+go_test_binary(
+    name = "go-e2e-dir",
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//tests:__pkg__"],
+)

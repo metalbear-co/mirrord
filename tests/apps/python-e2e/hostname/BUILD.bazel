@@ -1,0 +1,9 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+
+py_binary(
+    name = "hostname",
+    srcs = ["main.py"],
+    data = ["//mirrord/test-utils:python_env"],
+    main = "main.py",
+    visibility = ["//tests:__pkg__"],
+)

@@ -1,0 +1,69 @@
+name: Update images
+
+# The images are built from a base image pinned by digest and from Debian packages pinned to a
+# snapshot of Debian's archive, so they only get the fixes in either when the pins move. Every week,
+# this moves them with `bazel run //scripts:update_images` and opens a pull request with what changed,
+# whose CI builds and tests the images with the new pins.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update-images:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: main
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Move the pins
+        run: bazel run //scripts:update_images
+
+      # An app token rather than `GITHUB_TOKEN`, because a pull request opened with the latter
+      # doesn't start CI.
+      - id: token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # The branch is the same every week, so a pull request that nobody merged yet gets the newer
+      # pins instead of another pull request opening next to it.
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          if git diff --quiet -- MODULE.bazel MODULE.bazel.lock; then
+            echo "The pins are the latest already."
+            exit 0
+          fi
+
+          branch=update-images
+          title="images: move the base images and the Debian snapshot to the latest"
+          echo "Updated the base images and the Debian packages of the agent's and the CLI's images to their latest versions." \
+            > changelog.d/+update-images.fixed.md
+
+          git config user.name "cubby-mb[bot]"
+          git config user.email "273354325+cubby-mb[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add MODULE.bazel MODULE.bazel.lock changelog.d/+update-images.fixed.md
+          git commit -m "$title"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force --set-upstream origin "$branch"
+
+          body="\`bazel run //scripts:update_images\` moved the pins of what the images are built from."
+          if gh pr view "$branch" --json state --jq .state | grep -q OPEN; then
+            gh pr edit "$branch" --title "$title" --body "$body"
+          else
+            gh pr create --base main --head "$branch" --title "$title" --body "$body"
+          fi

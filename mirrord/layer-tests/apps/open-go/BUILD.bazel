@@ -1,0 +1,8 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//mirrord/test-utils:go_test_binary.bzl", "go_test_binary")
+
+go_test_binary(
+    name = "open-go",
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

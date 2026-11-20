@@ -1,0 +1,176 @@
+# The flags that mirrord's rules and macros need in the build of any module that uses them.
+#
+# Bazel only reads the root module's `.bazelrc`. mirrord's own imports this file, and a module that
+# depends on mirrord, like the operator, imports a checked-in copy of it, which a `write_source_file`
+# of `@mirrord//bazel:module.bazelrc` keeps up to date. So the flags name mirrord's targets as
+# `@mirrord//`, which mirrord's own build resolves too, and `//:` names a file of the root module.
+
+# Platforms ----------------------------------------------------------------------------------------
+
+common --enable_platform_specific_config
+
+# `platform_filegroup` builds for the machine's own OS and CPU with the `<os>-host` platforms, so
+# the top-level build uses them too, or the same files would build in two configurations.
+#
+# On Linux, the platform also links the binaries against glibc 2.17, so that they run on old
+# distributions.
+common:linux --platforms=@mirrord//bazel/platforms:linux-host
+common:macos --platforms=@mirrord//bazel/platforms:macos-host
+
+# The oldest macOS that the macOS files run on, which the llvm toolchain passes to clang and lld,
+# and rules_rust to rustc and to the C code of build scripts. Without it, the toolchain targets
+# macOS 14.0.
+#
+# 10.13 is the oldest that the toolchain's macOS SDK and frida's prebuilt x86-64 devkit support.
+# Apple's arm64 Macs started with macOS 11.0, and clang and rustc raise the version to it for
+# arm64 code.
+#
+# It applies on every machine, because a release builds the macOS files on Linux.
+common --macos_minimum_os=10.13
+
+# Makes a build that the llvm toolchain doesn't cover fail, rather than use the machine's own C++
+# compiler, which would make the build depend on the machine.
+common --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+
+# Windows ------------------------------------------------------------------------------------------
+
+# Both the builds and the tools that run during them target MSVC through the llvm toolchain, as on
+# other machines that build for Windows.
+common:windows --host_platform=@mirrord//bazel/platforms:windows-host
+
+# The llvm toolchain only downloads the MSVC runtime and the Windows SDK once their license terms
+# (https://visualstudio.microsoft.com/license-terms) are accepted, and builds for Windows need both.
+# They apply on every machine, because other machines cross-build for Windows too.
+common --repo_env=BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1
+common --repo_env=BAZEL_WINDOWS_SDK_EULA=1
+
+# Hides the machine's Visual Studio from cc-rs in the build scripts. cc-rs would pass Visual
+# Studio's library directory to rustc, and rules_rust rejects the directory because it's outside the
+# build. `none` hides it because cc-rs only looks for the MSVC version that `VCToolsVersion` names.
+build:windows --action_env=VCToolsVersion=none
+build:windows --host_action_env=VCToolsVersion=none
+
+# Makes `__FILE__` relative in the C code that the build scripts compile on Windows. cc-rs passes
+# absolute source paths, which `__FILE__` puts in the objects, and rules_rust fails a compile whose
+# output contains its working directory.
+#
+# rules_rust already passes this flag to every compiler but MSVC's.
+build:windows --copt=/clang:-ffile-prefix-map=${pwd}=.
+build:windows --host_copt=/clang:-ffile-prefix-map=${pwd}=.
+
+# On Windows, Bazel only creates runfiles directories when it's asked to, and the nextest runner,
+# the Rust tests and the CLI look for their files in them.
+build:windows --enable_runfiles
+
+# Bazel's test environment leaves out these Windows variables, so the tests take them from the
+# machine.
+#
+# The tests that find commands the way Windows does need `PATHEXT`.
+test:windows --test_env=PATHEXT
+# The layer warns without `USERPROFILE`.
+test:windows --test_env=USERPROFILE
+
+# C and C++ ----------------------------------------------------------------------------------------
+
+# Silences the thousands of warnings in third-party C and C++ code, which only upstream can fix.
+build --per_file_copt=external/.*@-w
+build --host_per_file_copt=external/.*@-w
+
+# Turns off clang's warning about unused arguments when it links the build scripts and proc macros.
+# `RUSTC_FLAGS` turns it off for our own targets, but can't turn it off for the tools that build for
+# this machine.
+#
+# Windows has no line, because it links its tools with `lld-link`, which rejects the flag.
+#
+# The Linux line can go once rules_rs ships https://github.com/hermeticbuild/rules_rust/pull/38.
+build:linux --host_linkopt=-Wno-unused-command-line-argument
+build:macos --host_linkopt=-Wno-unused-command-line-argument
+
+# Other languages' rules ---------------------------------------------------------------------------
+
+# The layer finds the Go runtime in a Go app by its symbols, which rules_go would strip with `-s -w`
+# in fastbuild builds.
+#
+# `--strip` doesn't reach the Rust code. rules_rust passes rustc its own `--codegen=strip`, from
+# the toolchain's `strip_level`, so `STRIP_SYMBOLS_FLAGS` strips the Rust programs separately, and
+# only in `-c opt` builds.
+build --strip=never
+
+# Makes the `js_binary` launchers native programs, so that they run on Windows without bash.
+common --@aspect_rules_js//js:use_hermetic_launcher
+
+# Uses rules_python's interpreter rather than the `python3` on `PATH`, which NixOS may not have.
+common --@rules_python//python/config_settings:bootstrap_impl=script
+
+# Compresses the image layers with parallel gzip in `-c opt` builds too. rules_img's default there
+# is Go's single-threaded gzip at level 9, which takes about five times as long for layers of the
+# same size. pgzip writes the same bytes with any number of jobs above 1, so the layers' digests
+# don't depend on how many cores the machine has.
+common --@rules_img//img/settings:compression_jobs=nproc
+
+# Rustfmt and clippy -------------------------------------------------------------------------------
+
+common --@rules_rust//rust/settings:rustfmt.toml=//:rustfmt.toml
+
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=clippy_checks
+
+# Set on every build, not only with `--config=clippy`, because changing a build setting makes Bazel
+# analyze the whole workspace again.
+build --@rules_rust//rust/settings:clippy_flag=-Dwarnings
+
+# CI's clippy command names the end-to-end tests, which don't build for Windows, so on Windows clippy
+# skips them rather than fail.
+build:clippy --skip_incompatible_explicit_targets
+
+# CI only checks that clippy passes, so the build doesn't download its outputs from the remote
+# cache.
+build:clippy --remote_download_outputs=minimal
+
+# Rustdoc ------------------------------------------------------------------------------------------
+
+# The filter also applies to the targets that a command names, so building a single rustdoc target
+# needs `--config=doc` too.
+build --build_tag_filters=-rustdoc
+build:doc --build_tag_filters=rustdoc
+
+# CI only checks that rustdoc passes, so the build doesn't download its outputs from the remote
+# cache.
+build:doc --remote_download_outputs=minimal
+
+# Running and testing ------------------------------------------------------------------------------
+
+# `bazel run` starts the program in the directory that it was run from rather than in its runfiles,
+# so that relative paths in its arguments, and the programs that it starts, resolve where the
+# developer expects. Bazel unsets `RUNFILES_DIR` for `bazel run`, so each program still finds its
+# runfiles next to its own executable.
+run --run_in_cwd
+
+# A `js_binary`'s launcher expects to start in the output tree, and fails when `--run_in_cwd` starts
+# it in the developer's directory instead. With this variable, the launcher runs where it starts.
+run --run_env=JS_BINARY__NO_CD_BINDIR=1
+
+# Bazel's default summary has one line for each target, which says `PASSED` even when
+# `--test_filter` left no test to run. The detailed one lists each test case.
+test --test_summary=detailed
+
+# CI -----------------------------------------------------------------------------------------------
+
+# `.github/actions/setup-bazel` turns this config on for every command in CI.
+common:ci --announce_rc
+common:ci --color=yes
+common:ci --curses=no
+common:ci --show_progress_rate_limit=60
+common:ci --show_timestamps
+build:ci --keep_going
+build:ci --verbose_failures
+test:ci --test_output=errors
+test:ci --test_env=NEXTEST_PROFILE=ci
+
+# Bazel's test environment leaves out the runner's own `CI`. Without it, mirrord's crash monitor on
+# Windows shows a dialog, which blocks the test until someone closes it.
+test:ci --test_env=CI=true
+
+# Bazel's test environment leaves out the workflows' `MIRRORD_TELEMETRY` too, and without it, every
+# mirrord session that a test starts reports its usage.
+test:ci --test_env=MIRRORD_TELEMETRY=false

@@ -4,12 +4,12 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use k8s_openapi::api::core::v1::Service;
-use kube::{api::GroupVersionKind, discovery, Client, Resource};
+use kube::{Client, Resource, api::GroupVersionKind, discovery};
 use mirrord_operator::crd::MirrordOperatorCrd;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub mod application;
 pub mod client;
@@ -26,10 +26,30 @@ pub mod windows;
 
 pub mod watch;
 
-pub use client::{kube_client, KubeClient};
+pub use client::{KubeClient, kube_client};
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
+
+/// How the CLI runs the agent: as a Kubernetes job, or as an ephemeral container in the target's
+/// pod.
+///
+/// A test that covers both takes the mode as an `rstest` value, which puts the mode in the names of
+/// its runs, so that `-E 'test(/Ephemeral/)'` selects the runs with ephemeral agents.
+#[derive(Debug, Clone, Copy)]
+pub enum AgentMode {
+    Job,
+    Ephemeral,
+}
+
+impl AgentMode {
+    pub fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Job => &[],
+            Self::Ephemeral => &["-e"],
+        }
+    }
+}
 
 /// Name of the environment variable used to control cleanup after failed tests.
 /// By default, resources from failed tests are deleted.
@@ -212,12 +232,12 @@ pub async fn send_requests(url: &str, expect_response: bool, headers: reqwest::h
     .await;
 }
 
+/// The directory of the mirrord configs that the tests use, relative to this package's directory
+/// in the test's runfiles, where nextest runs the tests.
 #[fixture]
 #[once]
 pub fn config_dir() -> PathBuf {
-    let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    config_path.push("configs");
-    config_path
+    PathBuf::from("configs")
 }
 
 /// Detect if Operator is installed

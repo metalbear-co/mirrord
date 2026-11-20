@@ -26,173 +26,115 @@ The following guide details the steps to setup a local development environment f
 
 ### Prerequisites
 
-- [GCC](https://gcc.gnu.org/) - only on Linux, GCC is needed for Go dynamic linking
-- [Rust](https://www.rust-lang.org/)
-- [NodeJS](https://nodejs.org/en/), [ExpressJS](https://expressjs.com/), [portfinder](https://www.npmjs.com/package/portfinder)
-- [Python (recommended 3.13+)](https://www.python.org/), [Flask](https://flask.palletsprojects.com/en/2.1.x/), [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/)
-- [Go](https://go.dev/)
-- Kubernetes Cluster (local/remote)
-- [Argo Rollouts CRD](https://argoproj.github.io/argo-rollouts/) - required for rollout-related E2E tests (`kubectl create namespace argo-rollouts && kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml`)
+- [Bazel](https://bazel.build/), through [bazelisk](https://github.com/bazelbuild/bazelisk). Bazel downloads its own
+  toolchains, and the tools that `bazel run //:lint`, `bazel run //:format` and the E2E tests run, like typos, Ruff,
+  pnpm, kind and kubectl, at the versions in `bazel/multitool.lock.json`, `package.json` and
+  `mirrord/test-utils/requirements.in`.
+- [Git](https://git-scm.com/).
+- For the E2E tests, [Docker](https://www.docker.com/).
 
-### Building mirrord layer and binary
+### Building mirrord
 
-If you run integration or e2e tests, both are automatically built.
-To build it from scratch, run `cargo xtask build-layer`.
-The layer is at `target/debug/<layer binary name>`.
-Then, build the project with `MIRRORD_LAYER_FILE=$(pwd)/target/debug/<layer binary name> cargo build --all`.
-On macOS, when you give an explicit path to the layer binary, use the universal layer at `target/universal-apple-darwin/debug/<layer binary name>`.
-
-<layer binary name> is OS specific:
-- Linux: libmirrord_layer.so
-- macOS: libmirrord_layer.dylib
-- Windows: mirrord_layer_win.dll
-
-### Compiling Rust test binaries
-
-There are a couple rough edges which are tested with standalone Rust binaries.
-For more info on these, check the respective GitHub issues.
-`rustc` is used rather than `cargo` for faster and lighter compilation
-
-```rust
-    cd mirrord/layer-tests/tests/apps
-    rustc issue1123/issue1123.rs --out-dir target
-    rustc issue1054/issue1054.rs --out-dir target
-    rustc issue1458/issue1458.rs --out-dir target
-    rustc issue1458portnot53/issue1458portnot53.rs --out-dir target
-    rustc issue2058/issue2058.rs --out-dir target
-    rustc issue2204/issue2204.rs --out-dir target
-```
-
-### Build Go and C test apps
-
-Both E2E and integration run tests with simple C, Go, Python and Node.js apps.
-C and Go need to be built before testing. ([this should be automated in the future](https://github.com/metalbear-co/mirrord/issues/982)).
-
-Build Go test apps:
 ```bash
-./scripts/build_go_apps.sh 25
-./scripts/build_go_apps.sh 26
-./scripts/build_go_apps.sh 27
+# build everything for this machine
+bazel build //...
+
+# the CLI as one file, with the layer and the UI embedded, at bazel-bin/mirrord/cli/standalone/mirrord
+bazel build //mirrord/cli:cli_standalone
+
+# run the CLI; it reads the layer and the UI from Bazel's runfiles, so a change to either doesn't
+# rebuild the CLI. `bazel/module.bazelrc` makes `bazel run` start programs in the current
+# directory, so relative paths in the arguments work.
+bazel run //mirrord/cli -- <args>
+
+# serve the UI
+bazel run //mirrord/cli -- ui
 ```
 
-Build C test apps: (script uses clang, but feel free to use another compiler);
-```bash
-./scripts/build_c_apps.sh
+`AGENTS.md` lists the commands that lint, document and test the code.
+
+Bazel only keeps the outputs of the last build, so a build for another platform, like
+`bazel build --platforms=//bazel/platforms:x86_64-windows //...`, a switch to another branch or a `bazel clean` makes
+Bazel build again what it had built before. A disk cache keeps the outputs of earlier builds, so Bazel takes them from
+the cache instead. To set one up, put these lines in `user.bazelrc` at the repository's root, which Git ignores, or in
+`~/.bazelrc` to share the cache between checkouts:
+
+```text
+common --disk_cache=~/.cache/bazel/disk
+# Bazel deletes the least recently used entries once the cache grows past this size.
+common --experimental_disk_cache_gc_max_size=250G
 ```
+
+Bazel expands `~/` to your home directory on every OS, so the same lines work on Windows.
+
+Bazel builds each dependency once, with one set of features for the whole workspace: every feature that any
+`Cargo.toml` of the workspace turns on, in `[dev-dependencies]` too. So a feature that only a test needs also ships in
+the agent, the CLI and the layer. For example, tests that paused tokio's clock with
+`#[tokio::test(start_paused = true)]` needed tokio's `test-util`, which gave every binary a clock behind a lock that
+each read of the time takes. A dev-dependency that turns such a feature on, like `tower-test`, does the same. Write the
+test without the feature instead, with short real durations, or with a duration that the test passes to the code.
+`cargo tree -e features,no-dev` lists the features that the shipped code needs, to compare with what `@crates` gives
+each crate.
+
 ### Setup a Kubernetes cluster
 
-For E2E tests and testing mirrord manually you will need a working Kubernetes cluster. A minimal cluster can be easily setup locally using either of the following:
+The E2E tests prepare their own cluster, with the kind or minikube that Bazel downloads, so there's nothing to set up
+besides Docker. Bazel also downloads the kubectl and the [Helm](https://helm.sh/) that the tests run, like the
+`operator_install` tests, which install the operator with Helm. Each E2E
+target names its cluster in `tests/BUILD.bazel`, like `mirrord-e2e` for `//tests:e2e`. Before the
+tests start, the target creates the cluster if it doesn't exist, installs
+[Argo Rollouts](https://argoproj.github.io/argo-rollouts/) if its tests target rollouts, as `:e2e`'s do, and loads the
+agent's image, which Bazel builds from the checkout with `-c opt`, as a release does. The cluster stays after the
+tests, so the next run reuses it.
 
-- [Minikube](https://minikube.sigs.k8s.io/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/)
-
-For the ease of illustration and testing, we will conform to using Minikube for the rest of the guide.
-
-### Minikube
-
-Download [Minikube](https://minikube.sigs.k8s.io/)
-
-Start a Minikube cluster with preferred driver. Here we will use the Docker driver.
-
-```bash
-minikube start --driver=docker
-```
-
-### Prepare a cluster
-
-Build the mirrord-agent image. Images are defined in `ci/docker-bake.hcl`.
-For a local development build (single platform, loaded into the local Docker daemon):
-
-```bash
-PLATFORMS="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" AGENT_TAGS=test docker buildx bake -f ci/docker-bake.hcl agent --load
-```
-
-```bash
-❯ docker images
-REPOSITORY                                     TAG       IMAGE ID       CREATED         SIZE
-test                                           latest    5080c20a8222   2 hours ago     300MB
-```
+To run the same kind, minikube, kubectl or Helm yourself, run it through Bazel, like
+`bazel run @multitool//tools/kubectl -- get pods`.
 
 > **Note:** mirrord-agent is shipped as a container image as mirrord creates a job with this image, providing it with
 > elevated permissions on the same node as the impersonated pod.
 
-Load mirrord-agent image to Minikube.
-
-```bash
-minikube image load test
-```
-
-Switch Kubernetes context to `minikube`.
-
-```bash
-kubectl config get-contexts
-```
-
-```bash
-kubectl config use-context minikube
-```
-
 ## E2E Tests
 
-The E2E tests create Kubernetes resources in the cluster that kubectl is configured to use and then run sample apps with the mirrord CLI. The mirrord CLI spawns an agent for the target on the cluster, and runs the test app, with the layer injected into it. 
+The E2E tests create Kubernetes resources in their cluster, and then run sample apps with the mirrord CLI. The mirrord
+CLI spawns an agent for the target on the cluster, and runs the test app, with the layer injected into it.
 
-Both E2E and integration tests require a mirrord binary and a layer binary. These can be provided as arguments:  
-
-```bash
-cargo xtask test-e2e \
---binary $(pwd)/target/<arch>/debug/mirrord \
---layer $(pwd)/target/<arch>/debug/<layer binary name>
-```
-... or as environment variables: 
+The E2E targets create their clusters with kind, or with minikube when you pass
+`--//tests:cluster_runtime=minikube`:
 
 ```bash
-MIRRORD_TESTS_USE_BINARY=$(pwd)/target/<arch>/debug/mirrord \
-MIRRORD_LAYER_FILE=$(pwd)/target/<arch>/debug/<layer binary name> \ 
-cargo xtask test-e2e 
+bazel test //tests:e2e
 ```
 
-For each binary, arguments have precedence over environment variables. If neither is passed in for that binary, then it is built from source:
+To run the tests with another agent, like a released one, pass its image with
+`--test_env=MIRRORD_AGENT_IMAGE=<image>`. The target then doesn't load the agent that Bazel built, and the cluster pulls
+the image instead.
 
-Ex1:
-```bash
-cargo xtask test-e2e # builds both mirrord binary and layer binary from source
-```
+To run the tests on a cluster of your own, pass `--//tests:cluster_runtime=none` with
+`--test_env=KUBECONFIG=<path>`, and an agent image that the cluster can pull with
+`--test_env=MIRRORD_AGENT_IMAGE=<image>`.
 
-Ex2:
-```bash
-cargo xtask test-e2e --binary <path to mirrord binary> # builds only layer binary from source, takes mirrord binary from arg
-```
+`tests/BUILD.bazel` lists the other E2E targets, like `:e2e_operator_install`, whose tests install the operator.
+They run on a cluster of their own, `mirrord-e2e-operator`, because once the operator is in a cluster, the other tests'
+sessions would go through it.
 
-If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
-For example, a test which only tests sanity of the ephemeral container feature should be decorated with
-`#[cfg_attr(not(feature = "ephemeral"), ignore)]`
+A test that should run with both kinds of agent, a job and an ephemeral container, takes
+`#[values(AgentMode::Job, AgentMode::Ephemeral)] agent_mode: AgentMode` and passes `agent_mode.flags()` to
+`mirrord exec`. A test that works with only one kind takes only that value, so that the filter
+`-E 'test(/Ephemeral/)'` still finds every test that runs an ephemeral agent.
 
-On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
-If running on a laptop, you might want to pass the `--no-fail-fast` flag, as some tests can timeout. This is applicable to both integration and e2e.
+On Linux, building and running the tests may use up the machine's RAM and crash it, so limit Bazel's parallel jobs
+with e.g. `--jobs=4`.
+
+On a laptop, where some tests can time out, you might want to pass `--test_arg=--no-fail-fast`.
 
 ### IPv6
 
-Some tests create a single-stack IPv6 service. They can only be run on clusters with IPv6 enabled.
-In order to test IPv6 on a local cluster on macOS, you can use Kind:
+Some tests create a single-stack IPv6 service, so they need an IPv6-only cluster. `:e2e_ipv6` runs them on a kind
+cluster of its own, `mirrord-e2e-ipv6`, which needs IPv6 forwarding on the machine:
 
-1. `brew install kind`
-2. ```shell
-   cat >kind-config.yaml <<EOF
-   kind: Cluster
-   apiVersion: kind.x-k8s.io/v1alpha4
-   networking:
-     ipFamily: ipv6
-     apiServerAddress: 127.0.0.1
-   EOF
-   ```
-3. `kind create cluster --config kind-config.yaml`
-4. When you run `kubectl get svc -o wide --all-namespaces` you should see IPv6 addresses.
-
-In order to use an agent image from a local registry, you can load the image to kind's registry with:
-
-```
-kind load docker-image test:latest
+```bash
+sudo sysctl -w net.ipv6.conf.all.forwarding=1
+bazel test //tests:e2e_ipv6
 ```
 
 In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraform-aws-eks-blueprints/tree/main/patterns/ipv6-eks-cluster
@@ -200,13 +142,7 @@ In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraf
 After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
 Feel free to add instructions on how to make that "manual" step unnecessary.
 
-Tests that need such a cluster are gated on the `ipv6` cargo feature (not in the default
-feature set, so they are ignored everywhere else). The `e2e-ipv6` CI job runs them on a
-single-stack IPv6 kind cluster (`tests/kind-cluster-ipv6-config.yaml`); locally:
-
-```bash
-cargo xtask test-e2e -- --no-default-features --features ipv6 -E 'test(ipv6)'
-```
+Tests that need such a cluster are in `traffic::ipv6`, which only `:e2e_ipv6` and CI's `e2e (ipv6)` job run:
 
 - steal_http_ipv6_traffic
 - mirror_http_ipv6_traffic
@@ -225,14 +161,34 @@ fallback (outgoing_traffic_ipv6_fallback_to_ipv4).
 The Kubernetes resources created by the E2E tests are automatically deleted when the test exits. However, you can preserve resources from failed tests for debugging. To do this, set the `MIRRORD_E2E_PRESERVE_FAILED` variable to any value.
 
 ```bash
-MIRRORD_E2E_PRESERVE_FAILED=y \
-cargo xtask test-e2e
+bazel test //tests:e2e --test_env=MIRRORD_E2E_PRESERVE_FAILED=y
+```
+
+The tests' clusters aren't in `~/.kube/config`, so to look at one with `kubectl`, write its kubeconfig to a file of
+its own:
+
+```bash
+bazel run @multitool//tools/kind -- get kubeconfig --name mirrord-e2e > mirrord-e2e.kubeconfig
+export KUBECONFIG=$PWD/mirrord-e2e.kubeconfig
+```
+
+For minikube, have minikube write the cluster into that file:
+
+```bash
+KUBECONFIG=$PWD/mirrord-e2e.kubeconfig bazel run @multitool//tools/minikube -- update-context --profile mirrord-e2e
 ```
 
 All test resources share a common label `mirrord-e2e-test-resource=true`. To delete them, simply run:
 
 ```bash
-kubectl delete namespaces,deployments,services -l mirrord-e2e-test-resource=true
+bazel run @multitool//tools/kubectl -- delete namespaces,deployments,services -l mirrord-e2e-test-resource=true
+```
+
+To delete a cluster, use kind or minikube itself:
+
+```bash
+bazel run @multitool//tools/kind -- delete cluster --name mirrord-e2e
+bazel run @multitool//tools/minikube -- delete --profile mirrord-e2e
 ```
 
 ## Integration Tests
@@ -251,15 +207,15 @@ Therefore, whenever possible we create integration tests, and only resort to E2E
 
 The basic command to run the integration tests is:
 ```bash
-cargo xtask test-integration
+bazel test //mirrord/layer-tests/...
 ```
 
 ### Integration Tests logs and you
 
-These tests will try writing the `mirrord-intproxy` logs to a file in `/tmp/intproxy_logs`
-(the dir will be created if it doesn't exist), the file name should be the same as the test name,
-e.g. `/tmp/intproxy_logs/node_close_application_1_Application__NodeFileOps.log`.
-If log file creation fails, then you should see the logs in `stderr`.
+These tests will try writing the `mirrord-intproxy` logs of each test to a file named after the test, e.g.
+`node_close_application_1_Application__NodeFileOps.log`, in
+`bazel-testlogs/mirrord/layer-tests/<test target>/test.outputs/intproxy_logs`. If log file creation fails, then you
+should see the logs in `stderr`.
 
 When running these in CI, an artifact is produced (scroll to `Artifacts` which is under
 the `Actions` -> `Summary` page) with all the test log files that could be created.
@@ -342,37 +298,14 @@ py-serv-deployment-ff89b5974-x9tjx   1/1     Running   0          3h8m
 
 ### Build and run mirrord
 
-To build this project, you will first need a [Protocol Buffer Compiler](https://grpc.io/docs/protoc-installation/) installed.
-
-We recommend using `xtask` for building mirrord, which handles all platform-specific requirements:
+Build the CLI as one file, with the layer and the UI embedded:
 
 ```bash
-# Debug build for your platform (auto-detected)
-cargo xtask build-cli
-
-# Release build
-cargo xtask build-cli --release
-
-# Build for specific platform
-cargo xtask build-cli --release --platform macos-universal
-cargo xtask build-cli --release --platform linux-x86_64
+bazel build //mirrord/cli:cli_standalone
 ```
 
-See [xtask/README.md](xtask/README.md) for complete documentation.
-
-**Alternative (platform-specific methods):**
-
-#### macOS
-```bash
-scripts/build_fat_mac.sh
-```
-
-#### Linux
-```bash
-cargo build
-```
-
-The binary is created at `./target/<platform>/debug/mirrord`
+The binary is created at `bazel-bin/mirrord/cli/standalone/mirrord`. Add `-c opt` for an optimized build,
+like the released one, or `--platforms=//bazel/platforms:<platform>` to build for another platform.
 
 #### Run mirrord with a local process
 
@@ -450,7 +383,7 @@ function handleConnection(conn) {
 </details>
 
 ```bash
-MIRRORD_LOG=debug target/debug/mirrord exec -i test -l debug -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
+MIRRORD_LOG=debug bazel-bin/mirrord/cli/standalone/mirrord exec -l debug -c --target pod/py-serv-deployment-ff89b5974-x9tjx node sample/node/app.mjs
 ```
 > **Note:** You need to change the pod name here to the name of the pod created on your system.
 
@@ -529,7 +462,7 @@ Debugging mirrord can get hard since we're running from another app flow, so the
 The recommended way to do it is to use `mirrord-console`. It is a small application that receives log information from different mirrord instances and prints it, controlled via the `MIRRORD_LOG` environment variable.
 
 To use mirrord console, run it:
-`cargo run --bin mirrord-console --features binary`
+`bazel run //mirrord/console:mirrord-console`
 
 Then run mirrord with the environment variable:
 `MIRRORD_CONSOLE_ADDR=127.0.0.1:11233`
@@ -633,7 +566,8 @@ In order to have a more structured approach, here's the flow you should follow w
 `mirrord` is cross-platform and natively supports compiling from a macOS host, with one exception: `mirrord-agent` - the component/crate that runs inside of the Kubernetes cluster.
 
 `mirrord-agent` feature-gates dependencies, modules and its entrypoint to allow compilation on macOS, but produces a binary that does nothing.
-To be able to properly compile and work on the code (using rust-analyzer) you need to be able to cross-compile to Linux, which requires the following steps:
+Bazel cross-compiles it for Linux with no setup, for example `bazel build --config=clippy --platforms=//bazel/platforms:x86_64-linux //mirrord/agent/...`.
+rust-analyzer builds with Cargo, though, and Cargo needs the following steps to cross-compile to Linux:
 
 1. Install the x86 Linux target
 ```sh
@@ -680,6 +614,10 @@ The standard CI workflow runs when you open a new PR, but in some cases you'll a
 From [the release workflow definition](/.github/workflows/release.yaml):
 >   Running from workflow dispatch (AKA manual) will not publish anything. This is intended for testing changes to this flow.
 
+A manual run pushes the images only to their staging repositories and publishes nothing else. Every job or step that
+publishes checks `should_release`, which `validate_release_request` never sets to `true` on a manual run, so a new job
+or step that publishes must check it too.
+
 To test the release workflow:
 
 1. Push your changes to a branch on the main mirrord repository (not a fork)
@@ -691,11 +629,7 @@ You can check the run as it progresses and download the completed artifacts from
 
 ## Changing the release on macOS
 
-If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, you need to update the build logic in both:
-- [xtask/](/xtask/) - the recommended build automation tool
-- [scripts/build_fat_mac.sh](/scripts/build_fat_mac.sh) - the legacy build script (still supported)
-
-The xtask approach is preferred for new development as it provides better error messages, type safety, and consistency across platforms. See [xtask/README.md](xtask/README.md) for details.
+If you're making changes to the release and/or CI workflows for macOS specifically - for example changing how the universal binary is created, the build logic is in `//mirrord/cli:cli_universal`, `//mirrord/layer:universal_layer` and `//mirrord/cli:cli_universal_signed`. `mirrord/cli/macos_sign.bzl` signs the universal layer in every macOS build, and the universal CLI only in `:cli_universal_signed`, with MetalBear's Developer ID in a release and ad hoc otherwise.
 
 # Submitting a Pull Request
 
@@ -736,7 +670,7 @@ an exception in the [typos configuration file](typos.toml) at the root of the re
 mirrord uses [Vale](https://vale.sh) to enforce writing style in Markdown files and Rust doc comments. CI runs it on the Markdown files at the root of the repository, except `CHANGELOG.md`, and on every Markdown file in `changelog.d/`. To run it locally:
 
 ```bash
-vale .
+bazel run //:lint -- vale
 ```
 
 If Vale reports a false positive, you have two options depending on the type of issue:
@@ -892,10 +826,13 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Bumps the workspace version in `Cargo.toml` (patch bump if all changes are `fixed`/`security`/`internal`; minor bump otherwise).
    - Updates `Cargo.lock`.
    - Generates `CHANGELOG.md` by consuming the `changelog.d/` fragments.
-3. Review the release PR, fix any changelog issues or typos, then merge it.
+3. Review the release PR, fix any changelog issues or typos, then merge it. Merge the open `update-images` PR first, if
+   there is one, so that the release's images get the latest base images and Debian packages (see
+   [Updating the images](#updating-the-images)).
 4. Merging triggers the [Release workflow](/.github/workflows/release.yaml), which:
    - Validates the PR came from a `releases/*` branch.
-   - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
+   - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows) with `-c opt`.
+   - Signs the macOS files with `rcodesign` and the Windows files with Azure Artifact Signing.
    - Publishes the Docker images to GHCR.
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
    - Publishes to Homebrew, Chocolatey, and WinGet.
@@ -906,18 +843,34 @@ Releases are fully automated. Under normal circumstances no manual steps are req
 
 If you don't want to wait for the daily schedule, you can trigger the [Auto Release PR workflow](/.github/workflows/auto-release-pr.yaml) directly from the [Actions tab](https://github.com/metalbear-co/mirrord/actions/workflows/auto-release-pr.yaml) using the "Run workflow" button. It will create (or update) the release PR immediately.
 
-## Manual release
+## Updating the tools
 
-If you need to create a release outside the automated flow entirely, run:
+Bazel downloads the programs that `bazel run //:lint`, `bazel run //:format` and the E2E tests run, like typos, Ruff
+and kind, at the versions in `bazel/multitool.lock.json`. To move them to their latest releases:
 
 ```bash
-./scripts/release.sh 3.333.0
+bazel run //scripts:update_tools
 ```
 
-Ensure there are no uncommitted changes before running the script. It will:
-- Create a `releases/3.333.0` branch off `main`.
-- Bump the workspace version in `Cargo.toml` and refresh `Cargo.lock`.
-- Generate the changelog with `towncrier`.
-- Push the branch.
+Then run `bazel run //:lint` and `bazel run //:format -- --check`, which also check that each program is still where
+the lockfile says in its archive, and fix what the new versions report. A module that depends on mirrord, like the
+operator, moves its own lockfile with `bazel run @mirrord//scripts:update_tools -- --lockfile <path>`.
 
-Open a PR from that branch to `main`, then merge it — the Release workflow will fire automatically.
+pnpm, markdownlint-cli2 and towncrier come from other places: pnpm is the version in `packageManager` in
+`package.json`, markdownlint-cli2 is a dependency in the same file, and towncrier is in
+`mirrord/test-utils/requirements.in`.
+
+## Updating the images
+
+The images are built from base images that `MODULE.bazel` pins by digest in its `pull` calls, and from Debian packages
+that it pins to a snapshot of Debian's archive in `apt.sources_list`, so that every build gets the same files. The images
+only get the fixes of a newer base image or package when the pins move, which this command does:
+
+```bash
+bazel run //scripts:update_images
+```
+
+It resolves each `pull`'s `digest` again from its `tag`, moves the snapshot to the latest one, and updates
+`MODULE.bazel.lock`. Every Monday, the [Update images workflow](/.github/workflows/update-images.yaml) runs it and opens
+(or updates) a PR from the `update-images` branch when a pin moved.
+

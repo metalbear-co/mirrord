@@ -1,17 +1,17 @@
 #![cfg(test)]
-#![cfg(all(not(feature = "operator"), feature = "job"))]
 //! Test that the agent can successfully detect and exit on dirty IP tables in the target.
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::{api::PostParams, Api};
+use kube::{Api, api::PostParams};
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 use serde_json::json;
+use tempfile::NamedTempFile;
 
 use crate::utils::{
-    application::env::EnvApp, client::kube_client, images::PYTEST_IMAGE, operator_installed,
-    random_string, resource_guard::ResourceGuard, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL, application::env::EnvApp,
+    client::kube_client, images::PYTEST_IMAGE, operator_installed, random_string,
+    resource_guard::ResourceGuard, watch,
 };
 
 struct DirtyIptablesTest {
@@ -20,6 +20,9 @@ struct DirtyIptablesTest {
     kube_client: KubeClient,
     // Keep the target alive through assertions; consumers must bind this guard.
     namespace_guard: ResourceGuard,
+    /// The mirrord config that makes the agent use iptables-nft, where the init container leaves
+    /// the chain.
+    config_file: NamedTempFile,
 }
 
 /// This fixture only creates resources if a mirrord operator is NOT installed.
@@ -43,12 +46,8 @@ async fn dirty_iptables_test(#[future] kube_client: KubeClient) -> DirtyIptables
 async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest {
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");
-    // Without `MIRRORD_AGENT_IMAGE` the init container uses the locally built `test` agent image,
-    // which is never pulled. An explicitly set image (e.g. a released agent) may be pulled.
-    let (init_image, init_image_pull_policy) = match std::env::var("MIRRORD_AGENT_IMAGE") {
-        Ok(image) => (image, "IfNotPresent"),
-        Err(_) => ("test".to_owned(), "Never"),
-    };
+    let init_image =
+        std::env::var("MIRRORD_AGENT_IMAGE").expect("the e2e targets set MIRRORD_AGENT_IMAGE");
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
     // Create a namespace and a pod to target and check for pre-existing mirrord chain names
@@ -93,8 +92,11 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
                         {
                             "name": "init-bad-cleanup",
                             "image": init_image,
-                            "imagePullPolicy": init_image_pull_policy,
-                            "command": ["/usr/sbin/iptables-legacy", "-t", "nat", "-N", "MIRRORD_INPUT"],
+                            // The e2e targets load the agent that Bazel built into the nodes, so
+                            // the nodes only pull an image that the developer named, like a
+                            // released agent.
+                            "imagePullPolicy": "IfNotPresent",
+                            "command": ["/usr/sbin/iptables-nft", "-t", "nat", "-N", "MIRRORD_INPUT"],
                             "securityContext": {
                                 "capabilities": {
                                     "add": ["CAP_NET_ADMIN"]
@@ -132,11 +134,23 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
     println!("Waiting for target `{target}` in namespace `{namespace}` to be ready...");
     watch::wait_until_pod_ready(&pod_name, &namespace, kube_client.get_client()).await;
 
+    // The init container leaves the chain in nftables, because since Linux 6.17 the legacy tables
+    // are behind `CONFIG_NETFILTER_XTABLES_LEGACY`, which some kernels leave out. The agent uses
+    // iptables-legacy whenever the kernel has it, and only looks for leftover chains in the backend
+    // that it uses, so the config makes it use nftables too.
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+    serde_json::to_writer(
+        config_file.as_file_mut(),
+        &json!({ "agent": { "nftables": true } }),
+    )
+    .unwrap();
+
     DirtyIptablesTest {
         namespace,
         target,
         kube_client,
         namespace_guard,
+        config_file,
     }
 }
 
@@ -163,13 +177,16 @@ pub async fn agent_exits_on_dirty_tables(
         namespace,
         target,
         namespace_guard: _namespace_guard,
+        config_file,
         ..
     }) = oss_only_dirty_iptables_test.await
     else {
         return;
     };
     let application = EnvApp::NodeInclude;
-    let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
+    let mut mirrord_args = application.mirrord_args().unwrap_or_default();
+    mirrord_args.extend(["-f", config_file.path().to_str().unwrap()]);
+    let mirrord_args = Some(mirrord_args);
     let mut process = run_exec_with_target(
         application.command(),
         &target,
@@ -215,6 +232,7 @@ pub async fn agent_cleans_up_and_starts_on_dirty_tables(
         target,
         kube_client,
         namespace_guard: _namespace_guard,
+        config_file,
     } = dirty_iptables_test.await;
     let env = if operator_installed(&kube_client).await.unwrap() {
         // if the operator is installed, cleanup should be enabled by default.
@@ -223,7 +241,9 @@ pub async fn agent_cleans_up_and_starts_on_dirty_tables(
         Some(vec![("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START", "true")])
     };
     let application = EnvApp::NodeInclude;
-    let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
+    let mut mirrord_args = application.mirrord_args().unwrap_or_default();
+    mirrord_args.extend(["-f", config_file.path().to_str().unwrap()]);
+    let mirrord_args = Some(mirrord_args);
     let mut process = run_exec_with_target(
         application.command(),
         &target,

@@ -1,0 +1,26 @@
+load("@crates//mirrord-config:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+load("//bazel:write_source_file.bzl", "program_stdout", "write_source_file")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+crate.unit_tests()
+
+crate.binary(name = "print_schema")
+
+# The schema that the config types and their docs give, which `mirrord-schema.json` must equal.
+program_stdout(
+    name = "schema",
+    out = "schema.json",
+    program = ":print_schema",
+)
+
+# `bazel run` writes `mirrord-schema.json`, and `write_schema_test` fails when it differs from
+# `:schema`, with a message that says to run this target.
+write_source_file(
+    name = "write_schema",
+    in_file = ":schema",
+    out_file = "//:mirrord-schema.json",
+)

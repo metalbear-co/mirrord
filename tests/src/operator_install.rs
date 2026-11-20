@@ -19,9 +19,9 @@ use k8s_openapi::api::{
     core::v1::Pod,
 };
 use kube::{
-    api::{DeleteParams, DynamicObject, ListParams, PostParams},
-    discovery::{verbs, Discovery},
     Api, Client, Config, ResourceExt,
+    api::{DeleteParams, DynamicObject, ListParams, PostParams},
+    discovery::{Discovery, verbs},
 };
 use mirrord_command::resolve_tokio_command;
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME};
@@ -29,7 +29,7 @@ use mirrord_test_utils::run_command::run_mirrord;
 use rstest::rstest;
 use tempfile::TempDir;
 
-use crate::utils::client::{kube_client, KubeClient};
+use crate::utils::client::{KubeClient, kube_client};
 
 const API_KEY: &str = "mirrord-e2e-tests-invalid-api-key";
 

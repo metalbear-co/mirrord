@@ -15,18 +15,6 @@ build/
 .porchlight/
 .claude/settings.local.json
 
-### go tests ###
-*.go_test_app
-*.go_test_app.exe
-
-### c test apps ###
-*.c_test_app
-*.c_test_app.exe
-
-### other test apps ###
-*.test_app
-mirrord/layer-tests/tests/apps/*/target
-
 ### C# (dotnet) test apps ###
 /tests/cs-e2e/**/bin/
 /tests/cs-e2e/**/obj/
@@ -50,3 +38,6 @@ wizard-frontend.tar.gz
 
 ### pnpm store ###
 .pnpm-store/
+
+/bazel-*
+/user.bazelrc

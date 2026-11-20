@@ -1,9 +1,0 @@
-target/*
-**/node_modules
-**/.vscode*
-**/.git*
-**/.github*
-**/.devcontainer*
-# No image reads `guides/`. `docs/` and `skills/` stay in the context, because `mirrord/mcp/build.rs`
-# embeds `docs/docs` and `skills/skills` in `mirrord mcp` when an image builds mirrord.
-guides
