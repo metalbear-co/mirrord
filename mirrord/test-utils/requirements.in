@@ -1,6 +1,9 @@
 fastapi
 flask
 uvicorn
+# `//scripts:render_tui_logo` renders the logos with these.
+pillow
+resvg-py
 # `//:lint`'s fence-tag check of the skills, and its tests, use these
 # (`skills/.github/scripts/requirements.txt`).
 jsonschema

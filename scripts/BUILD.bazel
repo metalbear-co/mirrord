@@ -1,6 +1,8 @@
+load("@pip//:requirements.bzl", "all_requirements", "requirement")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 
+# The scripts are Python rather than shell scripts because they run on Windows too.
 py_binary(
     name = "lint",
     srcs = ["lint.py"],
@@ -67,3 +69,13 @@ py_library(
     deps = ["@rules_python//python/runfiles"],
     visibility = ["//visibility:public"],
 )
+
+py_binary(
+    name = "render_tui_logo",
+    srcs = ["render_tui_logo.py"],
+    deps = [
+        requirement("pillow"),
+        requirement("resvg-py"),
+    ],
+)
+
