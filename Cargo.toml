@@ -81,12 +81,10 @@ members = [
     "tests/apps/rust-e2e-fileops",
     "tests/apps/rust-unix-socket-client",
     "tests/apps/rust-websockets",
-    "xtask",
     # A member, so that the runner takes its dependencies from this workspace.
     "bazel/nextest-runner",
 ]
 
-    "xtask",
 exclude = [
     "mirrord/sessions-manager",
 ]
@@ -157,7 +155,6 @@ containerd-client = "0.9"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 ctor = "0.2"
 derive_more = "2.0.1"
-dirs = "6"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
