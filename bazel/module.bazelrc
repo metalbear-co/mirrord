@@ -64,6 +64,12 @@ common --@aspect_rules_js//js:use_hermetic_launcher
 # Uses rules_python's interpreter rather than the `python3` on `PATH`, which NixOS may not have.
 common --@rules_python//python/config_settings:bootstrap_impl=script
 
+# Compresses the image layers with parallel gzip in `-c opt` builds too. rules_img's default there
+# is Go's single-threaded gzip at level 9, which takes about five times as long for layers of the
+# same size. pgzip writes the same bytes with any number of jobs above 1, so the layers' digests
+# don't depend on how many cores the machine has.
+common --@rules_img//img/settings:compression_jobs=nproc
+
 # Rustfmt and clippy -------------------------------------------------------------------------------
 
 

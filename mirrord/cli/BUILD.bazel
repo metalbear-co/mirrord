@@ -1,7 +1,11 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@crates//mirrord-cli:data.bzl", "crate_data")
+load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY", "WINDOWS_ONLY")
+load("//bazel:image.bzl", "IMAGE_LABELS", "image_targets")
+load("//bazel:platform.bzl", "platform_filegroup")
 load("//bazel:rust.bzl", "crate_package")
 
 crate = crate_package(crate_data = crate_data())
@@ -108,5 +112,109 @@ crate.unit_tests(
 
 crate.integration_tests(
     target_compatible_with = UNIX_ONLY,
+)
+
+# Container image of `mirrord container`'s sidecar -------------------------------------------------
+
+# The image and every target that only the image uses are `manual`, so that `//...` doesn't package
+# the standalone CLI into a layer on every change to the CLI. `ci.yaml` builds the image on release
+# branches, where it builds what `release.yaml` publishes.
+#
+# The layers have entries only for the directories under `/opt/mirrord`, so that they leave the
+# directories of the base image, like `/usr/bin`, as they are.
+image_layer(
+    name = "image_layer",
+    srcs = {
+        "/opt/mirrord": "//bazel:empty_directory",
+        "/opt/mirrord/bin": "//bazel:empty_directory",
+        "/opt/mirrord/bin/mirrord": ":cli_standalone",
+        "/opt/mirrord/lib": "//bazel:empty_directory",
+        # `mirrord container` mounts the certificate of the external proxy in this directory, at
+        # `container.cli_tls_path`.
+        "/opt/mirrord/tls": "//bazel:empty_directory",
+    },
+    file_metadata = {
+        path: file_metadata(mode = "0777")
+        for path in [
+            "/opt/mirrord/lib/libmirrord_layer.so",
+            "/usr/bin/mirrord",
+        ]
+    },
+    include_runfiles = False,
+    # Without `container.platform`, `mirrord container` gives the user's container
+    # `/opt/mirrord/lib/libmirrord_layer.so`, and the container runs on the image's own CPU (see
+    # `resolve_library_path`), so this path links to the layer for that CPU.
+    symlinks = {"/usr/bin/mirrord": "/opt/mirrord/bin/mirrord"} | select({
+        "@platforms//cpu:aarch64": {"/opt/mirrord/lib/libmirrord_layer.so": "aarch64/libmirrord_layer.so"},
+        "//conditions:default": {"/opt/mirrord/lib/libmirrord_layer.so": "x86_64/libmirrord_layer.so"},
+    }),
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The image has the layer for each Linux CPU in `/opt/mirrord/lib/<cpu>`, because `mirrord
+# container` gives each container the layer for its own CPU (see `resolve_library_path`).
+[
+    platform_filegroup(
+        name = "layer_" + cpu,
+        srcs = ["//mirrord/layer"],
+        cpu = cpu,
+        os = "linux",
+        tags = ["manual"],
+        target_compatible_with = LINUX_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+[
+    image_layer(
+        name = "image_layer_{}_lib".format(cpu),
+        srcs = {
+            "/opt/mirrord/lib/" + cpu: "//bazel:empty_directory",
+            "/opt/mirrord/lib/{}/libmirrord_layer.so".format(cpu): ":layer_" + cpu,
+        },
+        tags = ["manual"],
+        target_compatible_with = LINUX_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# `mirrord container` gives the user's container the layer by mounting the volumes of the sidecar
+# that runs this image, with `--volumes-from`.
+write_file(
+    name = "image_config_fragment",
+    out = "image_config_fragment.json",
+    content = [json.encode({"config": {"Volumes": {"/opt/mirrord": {}}}})],
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The arm64 image also builds the x86-64 layer, which a build on an arm64 machine would otherwise
+# cross-compile in every `//...`.
+image_targets(
+    name = "image",
+    registry = "ghcr.io",
+    repository = "metalbear-co/mirrord-cli",
+    base = "@debian",
+    layers = [
+        "//bazel:cacerts_layer",
+        ":image_layer",
+    ] + select({
+        # The arm64 image also has the x86-64 layer, for x86-64 containers that run under emulation.
+        "@platforms//cpu:aarch64": [
+            ":image_layer_aarch64_lib",
+            ":image_layer_x86_64_lib",
+        ],
+        "//conditions:default": [":image_layer_x86_64_lib"],
+    }),
+    config_fragment = ":image_config_fragment",
+    labels = IMAGE_LABELS,
+    manual = True,
 )
 
