@@ -106,13 +106,12 @@ fn set_force_v2(value: Option<u32>) -> LegacyConsoleResult<()> {
         return Ok(());
     }
 
-    if value.is_none() {
-        if let Some(code) = output.status.code() {
-            if code == 1 || code == 2 {
-                // Treat missing value as already clean.
-                return Ok(());
-            }
-        }
+    if value.is_none()
+        && let Some(code) = output.status.code()
+        && (code == 1 || code == 2)
+    {
+        // Treat missing value as already clean.
+        return Ok(());
     }
 
     Err(format!(

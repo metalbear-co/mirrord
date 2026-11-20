@@ -29,7 +29,7 @@ def kill_later():
 
 
 def handle_request(method: HttpMethod):
-    print(f'{method}: Request completed')
+    print(f"{method}: Request completed")
     done[method] = True
     if all(done.values()):
         kill_later()

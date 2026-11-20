@@ -1,6 +1,7 @@
 """
 Validate Python's socketpair on Windows under mirrord.
 """
+
 import socket
 
 

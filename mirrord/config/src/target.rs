@@ -111,7 +111,7 @@ pub fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Sche
 /// | statefulset | `{ "target": { "stateful_set": "statefulset-name", "container": "container-name" } }` |
 /// | service | `{ "target": { "service": "service-name", "container": "container-name" } }` |
 /// | label | `{ "target": { "labels": { "key": "value" }, "container": "container-name" } }` |
-/// | serverless | `{ "target": { "service": "service-name", "container": "replice-id" } }` |
+/// | serverless | `{ "target": { "service": "service-name", "container": "replica-id" } }` |
 ///
 /// Please note that:
 ///

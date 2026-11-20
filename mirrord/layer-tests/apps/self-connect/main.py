@@ -2,10 +2,12 @@
 Test the use case of listening and connecting to the same port,
 making sure that we don't go through the layer for this.
 """
+
 import socket
 
 TEST_DATA = b"test"
 LISTEN_ADDR = ("127.0.0.1", 1337)
+
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listen:
@@ -21,5 +23,5 @@ def main():
                 assert data == TEST_DATA
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
