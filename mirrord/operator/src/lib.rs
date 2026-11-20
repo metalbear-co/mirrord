@@ -21,5 +21,8 @@ pub mod sync;
 
 pub mod share;
 
+/// Wire format of the operator's single sign-on login.
+pub mod sso;
+
 /// Types used in the operator that don't require any special dependencies
 pub mod types;

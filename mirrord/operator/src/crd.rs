@@ -34,6 +34,7 @@ pub mod db_branching;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod namespaces;
 pub mod preview;
 pub mod profile;
 pub mod queue_filter;
@@ -603,12 +604,34 @@ pub struct Session {
     /// view of the session, such as [`MirrordOperatorStatus::sessions`] and the `sessions` list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share: Option<SessionShare>,
+    /// How the developer who opened the session proved who they are. Absent from operators that
+    /// predate the field and from sessions another operator opened on the developer's behalf.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_method: Option<SessionAuthMethod>,
 }
 
 impl Session {
     pub fn is_preview(&self) -> bool {
         self.user == PREVIEW_SESSION_USER
     }
+}
+
+/// How the developer who opened a session proved who they are: the `authMethod` of the session
+/// resource, as the operator reports it in its status.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema, strum_macros::Display,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum SessionAuthMethod {
+    /// Through the Kubernetes API server, with the kubeconfig's credentials.
+    Kube,
+    /// Through the operator's SSO URL, with a login from `mirrord login --url`.
+    Sso,
+    /// Written by a newer operator.
+    #[schemars(skip)]
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -869,9 +892,24 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on NATS JetStream consumers
     NatsQueueSplitting,
 
+    /// This operator lets developers log in with the company identity provider from the CLI
+    /// (`mirrord login --url`) and accepts the resulting login tokens on its public URL.
+    /// Advertised when the chart's `sso.enabled` is true; Enterprise only.
+    SsoLogin,
+
     /// This operator can perform queue splitting on core NATS (non-JetStream) subject
     /// subscriptions, with best-effort delivery.
     NatsPubSubQueueSplitting,
+
+    /// This operator serves mirrord profiles under its own API
+    /// ([`profile::cluster_profile_api_path`]), so a CLI logged in through SSO can read them
+    /// without reaching the profile CRDs.
+    ProfileRoutes,
+
+    /// This operator lists the namespaces the caller may list targets in under its own API
+    /// ([`namespaces::namespaces_api_path`]), so a CLI logged in through SSO can offer them in
+    /// `mirrord ls` without reading the cluster's namespaces, which its URL does not reach.
+    NamespaceRoutes,
 
     /// This operator resolves `configmap` connection param sources for DB branching (values
     /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
@@ -1113,6 +1151,7 @@ impl NewOperatorFeature {
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
+            Self::SsoLogin => Some("sso"),
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
@@ -1129,6 +1168,8 @@ impl NewOperatorFeature {
             | Self::SubscribeEventOptions
             | Self::KeylessCi
             | Self::LicenseGateReporting
+            | Self::ProfileRoutes
+            | Self::NamespaceRoutes
             | Self::Unknown => None,
         }
     }
@@ -1199,6 +1240,8 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::SessionReadyCondition => "session readiness reporting",
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
+            NewOperatorFeature::ProfileRoutes => "mirrord profiles served by the operator API",
+            NewOperatorFeature::NamespaceRoutes => "namespace listing served by the operator API",
             NewOperatorFeature::PreviewAutoQueueSplitting => {
                 "default queue splitting in preview environments"
             }
@@ -1237,6 +1280,7 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::SsoLogin => "SSO login",
             NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
@@ -1339,7 +1383,10 @@ impl NewOperatorFeature {
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
             NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
+            NewOperatorFeature::SsoLogin => &["sso.enabled"],
             NewOperatorFeature::ProxyApi
+            | NewOperatorFeature::ProfileRoutes
+            | NewOperatorFeature::NamespaceRoutes
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
             | NewOperatorFeature::SessionManagement
@@ -1843,6 +1890,41 @@ mod tests {
             let filepath = path.join(format!("{filename}.yaml"));
             fs::write(filepath, yaml).unwrap();
         }
+    }
+
+    /// A status written before `authMethod` existed still parses, the field stays out of what a
+    /// session without one serializes to, and a value from a newer operator reads as unknown.
+    #[test]
+    fn session_auth_method_is_optional_and_tolerates_newer_values() {
+        let legacy = serde_json::json!({
+            "duration_secs": 5,
+            "user": "dev/dev@corp.example.com@laptop",
+            "target": "deployment/app",
+        });
+        let session: Session = serde_json::from_value(legacy).unwrap();
+        assert_eq!(session.auth_method, None);
+        assert!(
+            serde_json::to_value(&session)
+                .unwrap()
+                .get("auth_method")
+                .is_none()
+        );
+
+        for (written, expected) in [
+            ("kube", SessionAuthMethod::Kube),
+            ("sso", SessionAuthMethod::Sso),
+            ("passkey", SessionAuthMethod::Unknown),
+        ] {
+            let session: Session = serde_json::from_value(serde_json::json!({
+                "duration_secs": 5,
+                "user": "dev",
+                "target": "deployment/app",
+                "auth_method": written,
+            }))
+            .unwrap();
+            assert_eq!(session.auth_method, Some(expected), "{written}");
+        }
+        assert_eq!(SessionAuthMethod::Sso.to_string(), "sso");
     }
 
     #[test]

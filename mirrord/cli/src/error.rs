@@ -14,6 +14,7 @@ use mirrord_kube::{api::kubernetes::KubeEnvironment, error::KubeApiError};
 use mirrord_mcp::McpError;
 use mirrord_operator::{
     client::{
+        access::OperatorAccessError,
         error::{HttpError, OperatorApiError, OperatorOperation},
         preview_sync::PreviewSyncError,
     },
@@ -36,7 +37,7 @@ use crate::no_layer::NoLayer;
 use crate::{
     ci::error::CiError,
     container::{CommandDisplay, IntproxySidecarError},
-    data::GlobalConfigError,
+    data::{GlobalConfigError, auth_store::ActiveLoginError},
     dump::DumpSessionError,
     fix::FixKubeconfigError,
     kube::{ConfigSource, RunKubeEnvironment, RunNamespace, take_run_kube_environment},
@@ -717,6 +718,15 @@ pub(crate) enum CliError {
     ))]
     OperatorNotInstalled,
 
+    /// The operator login `mirrord login --url` selected cannot be used for this run: it expired,
+    /// the config turns the operator off, or the store could not be read. The message names the
+    /// command to run.
+    #[error(transparent)]
+    #[diagnostic(help(
+        "`mirrord whoami` shows the operator login in use. Log out of it with `mirrord logout --url <url>` to go back to your kubeconfig."
+    ))]
+    OperatorAccess(#[from] OperatorAccessError),
+
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
     OperatorReturnedUnknownTargetType(String),
@@ -1238,10 +1248,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     Mcp(#[from] McpError),
 
-    /// Errors produced by the `mirrord login` command.
+    /// Errors produced by the `mirrord login`, `mirrord logout` and `mirrord whoami` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Login(#[from] LoginError),
+    Login(LoginError),
 
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
@@ -1417,6 +1427,7 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
+            OperatorApiError::Access(error) => Self::OperatorAccess(error),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
             OperatorApiError::KubeError {
@@ -1548,6 +1559,31 @@ impl std::fmt::Display for RunKubeEnvironment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { inputs, resolved } = self;
 
+        let config = match &inputs.config_source {
+            ConfigSource::None => "(none)",
+            ConfigSource::File(path) => path.as_str(),
+            ConfigSource::MirrordUp => "(from mirrord up)",
+        };
+
+        // Under an operator login there is no context or cluster to show: the run went to the
+        // operator's URL, and the namespace is whatever the config named.
+        if let Some(host) = &inputs.operator_login {
+            let login = format!("{host} (SSO login)");
+            let namespace = match &inputs.namespace {
+                RunNamespace::All => "(all)",
+                RunNamespace::Named(namespace) => namespace.as_str(),
+                RunNamespace::KubeDefault => "(operator default)",
+            };
+            return write_rows(
+                f,
+                &[
+                    ("operator", login.as_str()),
+                    ("namespace", namespace),
+                    ("config", config),
+                ],
+            );
+        }
+
         let (context, cluster, server) = match resolved {
             Some(environment) => {
                 let cluster = match (&environment.cluster, &environment.context) {
@@ -1590,25 +1626,24 @@ impl std::fmt::Display for RunKubeEnvironment {
         if let Some(kubeconfig) = &inputs.kubeconfig {
             rows.push(("kubeconfig", kubeconfig));
         }
-
-        let config = match &inputs.config_source {
-            ConfigSource::None => "(none)",
-            ConfigSource::File(path) => path.as_str(),
-            ConfigSource::MirrordUp => "(from mirrord up)",
-        };
         rows.push(("config", config));
 
-        let width = rows
-            .iter()
-            .map(|(label, _)| label.len() + 1)
-            .max()
-            .unwrap_or_default();
-        let lines = rows
-            .iter()
-            .map(|(label, value)| format!(" {:<width$}  {value}", format!("{label}:")))
-            .collect::<Vec<_>>();
-        f.write_str(&lines.join("\n"))
+        write_rows(f, &rows)
     }
+}
+
+/// Writes labeled rows with the values aligned under each other.
+fn write_rows(f: &mut std::fmt::Formatter<'_>, rows: &[(&str, &str)]) -> std::fmt::Result {
+    let width = rows
+        .iter()
+        .map(|(label, _)| label.len() + 1)
+        .max()
+        .unwrap_or_default();
+    let lines = rows
+        .iter()
+        .map(|(label, value)| format!(" {:<width$}  {value}", format!("{label}:")))
+        .collect::<Vec<_>>();
+    f.write_str(&lines.join("\n"))
 }
 
 #[cfg(test)]
@@ -1854,6 +1889,30 @@ mod kube_environment_tests {
         );
     }
 
+    /// A run under an operator login never read a kubeconfig, so the block names the operator it
+    /// went to instead of a context and cluster it does not have.
+    #[test]
+    fn login_environment_names_the_operator_and_no_kubeconfig() {
+        let block = RunKubeEnvironment {
+            inputs: RunKubeInputs {
+                operator_login: Some("mirrord.corp.example.com".to_owned()),
+                ..inputs()
+            },
+            resolved: None,
+        }
+        .to_string();
+
+        assert_eq!(
+            block,
+            [
+                " operator:   mirrord.corp.example.com (SSO login)",
+                " namespace:  payments",
+                " config:     ./.mirrord/mirrord.json",
+            ]
+            .join("\n")
+        );
+    }
+
     #[test]
     fn namespace_defaults_to_kube_context_namespace() {
         let block = render(RunKubeInputs::default(), staging());
@@ -1936,5 +1995,27 @@ mod kube_environment_tests {
             ]
             .join("\n")
         );
+    }
+}
+
+impl From<ActiveLoginError> for CliError {
+    /// An expired login is the same refusal the operator client gives, so one message covers both
+    /// the config check and the client; a store that cannot be read is a login store error.
+    fn from(error: ActiveLoginError) -> Self {
+        match error {
+            ActiveLoginError::Expired(expired) => Self::OperatorAccess(expired.into()),
+            ActiveLoginError::Store(error) => Self::Login(LoginError::Store(error)),
+        }
+    }
+}
+
+impl From<LoginError> for CliError {
+    /// An operator whose license lacks SSO is reported like every other paid feature, with the
+    /// plan to ask for; the rest of the login errors speak for themselves.
+    fn from(error: LoginError) -> Self {
+        match error {
+            LoginError::NotLicensed(gate) => Self::PaidFeatureRequiresPlan { gate },
+            error => Self::Login(error),
+        }
     }
 }
