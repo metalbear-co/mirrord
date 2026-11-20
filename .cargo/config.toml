@@ -27,5 +27,6 @@ MIRRORD_BUNDLED_LAYER = { value = ".cargo/placeholders/empty", relative = true }
 MIRRORD_BUNDLED_LAYER_MACOS_ARM64 = { value = ".cargo/placeholders/empty", relative = true }
 MIRRORD_BUNDLED_SIP_BINARIES = { value = ".cargo/placeholders/empty", relative = true }
 MIRRORD_BUNDLED_UI = { value = ".cargo/placeholders/ui", relative = true }
+MIRRORD_BUNDLED_MCP_CORPUS = { value = ".cargo/placeholders/empty", relative = true }
 # The ID of the embedded layers, which a file that Bazel generates gives the `standalone` CLI.
 MIRRORD_BUNDLED_LAYER_ID = "0"

@@ -1,4 +1,4 @@
-# `mirrord mcp` embeds `docs/docs` and `skills/skills` (`mirrord/mcp/build.rs`) and parses their
+# `mirrord mcp` embeds `docs/docs` and `skills/skills` (`mirrord/mcp/BUILD.bazel`) and parses their
 # front matter with LF line endings only, so the imported trees stay LF in every checkout, Windows
 # included, whatever `core.autocrlf` says. `text=auto` lets Git normalize a file saved with CRLF on
 # commit while leaving the images, which it detects as binary, byte for byte.

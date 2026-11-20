@@ -19,9 +19,6 @@ workspace = true
 [lib]
 doctest = false
 
-[build-dependencies]
-embed-resource = "2"
-
 [target.'cfg(windows)'.dependencies]
 mirrord-config = { path = "../config" }
 mirrord-str-win = { path = "../str-win" }
