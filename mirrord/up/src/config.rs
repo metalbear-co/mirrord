@@ -4298,19 +4298,3 @@ mod tests {
         assert_eq!(result["run_types"]["container"], 1);
     }
 }
-
-#[cfg(test)]
-mod schema {
-    use super::UpConfig;
-
-    /// The `mirrord-up.yaml` schema at the repo root, next to `mirrord-schema.json`.
-    const SCHEMA_FILE_PATH: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../mirrord-up-schema.json");
-
-    #[test]
-    fn up_schema_file_is_up_to_date() {
-        assert!(
-            "mirrord-up-schema.json is outdated, regenerate it with \
-        );
-    }
-}

@@ -2,11 +2,9 @@
 #![deny(unused_crate_dependencies)]
 
 //! <!--${internal}-->
-//! To generate the `mirrord-schema.json` file see
-//! `tests::check_schema_file_exists_and_is_valid_or_create_it`.
-//!
-//! Remember to re-generate the `mirrord-schema.json` if you make **ANY** changes to this lib,
-//! including if you only made documentation changes.
+//! Remember to regenerate `mirrord-schema.json` with `bazel run //mirrord/config:write_schema` if
+//! you make **ANY** changes to this lib, including if you only made documentation changes, or
+//! `//mirrord/config:write_schema_test` fails.
 pub mod agent;
 pub mod ci;
 pub mod config;
@@ -2537,8 +2535,6 @@ mod tests {
         assert!(error.contains("unknown field"));
     }
 
-    const SCHEMA_FILE_PATH: &str = "../../mirrord-schema.json";
-
     /// Every kind of HTTP filter counts towards the one allowed at a time, or the layer would hit
     /// an unexpected combination when converting the filter.
     #[rstest]
@@ -2636,8 +2632,6 @@ mod tests {
             ),
             "{error}"
         );
-    #[test]
-    fn schema_file_is_up_to_date() {
     }
 
     /// Users copy parts of the config examples in the docs into their own config, so each example

@@ -5,3 +5,9 @@
 docs/** text=auto eol=lf
 guides/** text=auto eol=lf
 skills/** text=auto eol=lf
+
+# The schemas are copies of files that the build generates with LF line endings, and their
+# `write_schema_test` tests fail when the two differ, so git mustn't convert their line endings on
+# Windows either.
+mirrord-schema.json text eol=lf
+mirrord-up-schema.json text eol=lf

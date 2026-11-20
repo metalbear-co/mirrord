@@ -5,6 +5,8 @@ exports_files([
     ".config/nextest.toml",
     "Cargo.toml",
     "clippy.toml",
+    "mirrord-schema.json",
+    "mirrord-up-schema.json",
     "rust-toolchain.toml",
 ])
 
