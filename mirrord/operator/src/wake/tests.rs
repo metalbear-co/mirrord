@@ -28,6 +28,13 @@ fn status_keeps_its_wire_shape() {
                     message: "the connection closed".to_owned(),
                 },
             },
+            ClusterWake {
+                cluster: Some("north".to_owned()),
+                replica: true,
+                state: WakeState::NotReported {
+                    message: "nothing within 30s".to_owned(),
+                },
+            },
         ],
     };
 
@@ -47,6 +54,11 @@ fn status_keeps_its_wire_shape() {
                     "cluster": "west",
                     "replica": true,
                     "state": {"kind": "reconnecting", "message": "the connection closed"},
+                },
+                {
+                    "cluster": "north",
+                    "replica": true,
+                    "state": {"kind": "notReported", "message": "nothing within 30s"},
                 },
             ]
         })

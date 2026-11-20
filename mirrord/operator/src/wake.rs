@@ -2,9 +2,12 @@
 //! from idling while the CLI waits for it.
 //!
 //! The CLI opens the `previews/{name}/wake` websocket on the operator, and the operator answers
-//! with a [`WakeStatus`] as a JSON text message on connect and whenever the preview's state on one
-//! of its clusters changes. The CLI sends nothing: the operator holds the preview awake for as long
-//! as the connection lasts, and the idle countdown starts over once it closes.
+//! with a [`WakeStatus`] as a JSON text message once it observed the preview on every one of its
+//! clusters, and then whenever the preview's state on one of them changes, so that a CLI that
+//! connects again learns nothing it didn't know but what changed. A state that the CLI acts on
+//! whatever the rest is, such as a failure, goes out at once, with each cluster not observed yet
+//! as [`WakeState::Pending`]. The CLI sends nothing: the operator holds the preview awake for as
+//! long as the connection lasts, and the idle countdown starts over once it closes.
 //!
 //! A multi-cluster primary opens the same websocket on the operator of each workload cluster that
 //! runs a copy of the preview, and relays what each one reports under that cluster's name.
@@ -49,8 +52,9 @@ pub struct ClusterWake {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WakeState {
-    /// The operator hasn't asked the preview to wake yet: it waits for the preview's task to
-    /// start, or for the operator of the cluster to answer.
+    /// The operator hasn't asked the preview to wake yet: no task of the preview's runs once the
+    /// operator waited for one to register, or the cluster wasn't observed yet when another
+    /// cluster's state went out at once.
     Pending,
 
     /// The operator asked the preview to wake, and its pods aren't ready yet.
@@ -72,6 +76,11 @@ pub enum WakeState {
     /// and connects again: the cluster's state is unknown until the new connection reports it,
     /// or turns [`Self::Unreachable`] when it can't be made.
     Reconnecting { message: String },
+
+    /// The operator of the cluster is connected but hasn't reported the copy yet, for longer
+    /// than it usually takes, as `message` says. Its first report replaces this, and the cluster
+    /// turns [`Self::Unreachable`] when none comes for much longer.
+    NotReported { message: String },
 
     /// The operator of the cluster, which runs a replica copy of the preview, can't wake
     /// previews.

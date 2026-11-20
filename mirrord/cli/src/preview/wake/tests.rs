@@ -75,16 +75,17 @@ impl Operator {
 
 /// A preview whose every connection reaches the test as an [`Operator`] on the returned channel.
 fn target(label: &str) -> (WakeTarget<DuplexStream>, mpsc::UnboundedReceiver<Operator>) {
-    let (operators, operators_rx) = mpsc::unbounded_channel();
+    // Each connection the driver opens --its operator end--> the test
+    let (operators_tx, operators_rx) = mpsc::unbounded_channel();
     let connect: Connect<DuplexStream> = Box::new(move || {
-        let operators = operators.clone();
+        let operators_tx = operators_tx.clone();
         Box::pin(async move {
             let (cli, operator) = tokio::io::duplex(1 << 16);
             let (cli, operator) = tokio::join!(
                 WebSocketStream::from_raw_socket(cli, Role::Client, None),
                 WebSocketStream::from_raw_socket(operator, Role::Server, None),
             );
-            let _ = operators.send(Operator { socket: operator });
+            let _ = operators_tx.send(Operator { socket: operator });
             Ok(PreviewWakeConnection::new(cli))
         })
     });
@@ -115,8 +116,8 @@ fn start(
     })
 }
 
-async fn next_connection(operators: &mut mpsc::UnboundedReceiver<Operator>) -> Operator {
-    tokio::time::timeout(STEP_TIMEOUT, operators.recv())
+async fn next_connection(operators_rx: &mut mpsc::UnboundedReceiver<Operator>) -> Operator {
+    tokio::time::timeout(STEP_TIMEOUT, operators_rx.recv())
         .await
         .expect("the CLI connects in time")
         .unwrap()
@@ -134,12 +135,12 @@ async fn finished(wake: JoinHandle<WakeOutcome>) -> WakeOutcome {
 /// command waits for another.
 #[tokio::test]
 async fn waits_for_every_preview_and_holds_them_until_the_end() {
-    let (first, mut first_operators) = target("default/first");
-    let (second, mut second_operators) = target("default/second");
+    let (first, mut first_operators_rx) = target("default/first");
+    let (second, mut second_operators_rx) = target("default/second");
     let wake = start(vec![first, second], STEP_TIMEOUT, false);
 
-    let mut first = next_connection(&mut first_operators).await;
-    let mut second = next_connection(&mut second_operators).await;
+    let mut first = next_connection(&mut first_operators_rx).await;
+    let mut second = next_connection(&mut second_operators_rx).await;
     first.send_local(WakeState::Ready).await;
     second.send_local(WakeState::Waking).await;
 
@@ -161,12 +162,12 @@ async fn waits_for_every_preview_and_holds_them_until_the_end() {
 /// for the others.
 #[tokio::test]
 async fn a_failed_preview_fails_the_command_after_the_others() {
-    let (broken, mut broken_operators) = target("default/broken");
-    let (fine, mut fine_operators) = target("default/fine");
+    let (broken, mut broken_operators_rx) = target("default/broken");
+    let (fine, mut fine_operators_rx) = target("default/fine");
     let wake = start(vec![broken, fine], STEP_TIMEOUT, false);
 
-    let mut broken = next_connection(&mut broken_operators).await;
-    let mut fine = next_connection(&mut fine_operators).await;
+    let mut broken = next_connection(&mut broken_operators_rx).await;
+    let mut fine = next_connection(&mut fine_operators_rx).await;
     broken
         .send_local(WakeState::Failed {
             message: "image pull failed".to_owned(),
@@ -185,10 +186,10 @@ async fn a_failed_preview_fails_the_command_after_the_others() {
 /// A preview that a `mirrord exec` session pauses is skipped, and doesn't fail the command.
 #[tokio::test]
 async fn a_paused_preview_is_skipped() {
-    let (paused, mut operators) = target("default/paused");
+    let (paused, mut operators_rx) = target("default/paused");
     let wake = start(vec![paused], STEP_TIMEOUT, false);
 
-    next_connection(&mut operators)
+    next_connection(&mut operators_rx)
         .await
         .send_local(WakeState::Paused)
         .await;
@@ -199,10 +200,10 @@ async fn a_paused_preview_is_skipped() {
 /// A preview that isn't ready by the deadline fails the command.
 #[tokio::test]
 async fn a_preview_not_ready_in_time_fails_the_command() {
-    let (slow, mut operators) = target("default/slow");
+    let (slow, mut operators_rx) = target("default/slow");
     let wake = start(vec![slow], Duration::from_millis(300), false);
 
-    let mut slow = next_connection(&mut operators).await;
+    let mut slow = next_connection(&mut operators_rx).await;
     slow.send_local(WakeState::Waking).await;
 
     assert_eq!(
@@ -216,14 +217,14 @@ async fn a_preview_not_ready_in_time_fails_the_command() {
 /// and the operator holds the preview again.
 #[tokio::test]
 async fn a_broken_connection_is_opened_again() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], STEP_TIMEOUT, false);
 
-    let mut first = next_connection(&mut operators).await;
+    let mut first = next_connection(&mut operators_rx).await;
     first.send_local(WakeState::Waking).await;
     drop(first);
 
-    next_connection(&mut operators)
+    next_connection(&mut operators_rx)
         .await
         .send_local(WakeState::Ready)
         .await;
@@ -234,10 +235,10 @@ async fn a_broken_connection_is_opened_again() {
 /// warning: the preview counts as ready once every other cluster is.
 #[tokio::test]
 async fn an_unreachable_replica_cluster_does_not_fail_the_command() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], STEP_TIMEOUT, false);
 
-    next_connection(&mut operators)
+    next_connection(&mut operators_rx)
         .await
         .send(vec![
             (Some("default"), WakeState::Ready),
@@ -268,10 +269,10 @@ async fn an_unreachable_replica_cluster_does_not_fail_the_command() {
 /// command waits, and once the deadline passes it fails naming the cluster and why.
 #[tokio::test]
 async fn an_unreachable_default_cluster_fails_the_command_with_why() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], Duration::from_millis(300), false);
 
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator
         .send(vec![
             (
@@ -297,10 +298,10 @@ async fn an_unreachable_default_cluster_fails_the_command_with_why() {
 /// preview counts as asked to wake, and the command succeeds.
 #[tokio::test]
 async fn no_wait_names_the_replicas_it_cant_wake() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], STEP_TIMEOUT, true);
 
-    next_connection(&mut operators)
+    next_connection(&mut operators_rx)
         .await
         .send(vec![
             (Some("default"), WakeState::Waking),
@@ -332,10 +333,10 @@ async fn no_wait_names_the_replicas_it_cant_wake() {
 /// the developer doesn't take it for a preview that only needs a longer `--timeout`.
 #[tokio::test]
 async fn a_broken_connection_at_the_deadline_names_why() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], Duration::from_millis(300), false);
 
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator.send_local(WakeState::Waking).await;
     drop(operator);
 
@@ -354,10 +355,10 @@ async fn a_broken_connection_at_the_deadline_names_why() {
 /// for its pods.
 #[tokio::test]
 async fn no_wait_returns_once_every_cluster_is_waking() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], STEP_TIMEOUT, true);
 
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator
         .send(vec![
             (Some("default"), WakeState::Waking),
@@ -379,10 +380,10 @@ async fn no_wait_returns_once_every_cluster_is_waking() {
 /// A status the CLI can't read would repeat on every new connection, so it fails the preview.
 #[tokio::test]
 async fn an_unreadable_status_fails_the_preview() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], STEP_TIMEOUT, false);
 
-    next_connection(&mut operators)
+    next_connection(&mut operators_rx)
         .await
         .socket
         .send(Message::Text("{\"clusters\": 3}".into()))
@@ -435,7 +436,7 @@ fn verdict_of_a_status() {
     assert_eq!(
         Verdict::of(&status(vec![WakeState::Ready, WakeState::Unknown]), false).0,
         Verdict::Waiting {
-            triggered: true,
+            triggered: false,
             unreachable: Vec::new()
         }
     );
@@ -570,10 +571,10 @@ fn only_copies_of_primaries_the_run_doesnt_wake_are_named() {
 /// it is ready.
 #[tokio::test]
 async fn a_paused_replica_is_a_warning() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], STEP_TIMEOUT, false);
 
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator
         .send(vec![
             (Some("default"), WakeState::Waking),
@@ -659,11 +660,11 @@ fn a_reconnecting_cluster_is_waited_for() {
 /// succeeds once the cluster that runs the preview is ready, but not before the deadline.
 #[tokio::test]
 async fn a_replica_reconnecting_at_the_deadline_is_a_warning() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], Duration::from_millis(300), false);
 
     // Kept open: the command's own connection holds the preview until the deadline.
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator
         .send(vec![
             (Some("default"), WakeState::Ready),
@@ -693,10 +694,10 @@ async fn a_replica_reconnecting_at_the_deadline_is_a_warning() {
 /// no longer holds, and the preview fails, naming the broken connection.
 #[tokio::test]
 async fn a_stale_status_is_not_judged_ready_at_the_deadline() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], Duration::from_millis(300), false);
 
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator
         .send(vec![
             (Some("default"), WakeState::Ready),
@@ -724,10 +725,10 @@ async fn a_stale_status_is_not_judged_ready_at_the_deadline() {
 /// preview unreachable, the deadline names both causes.
 #[tokio::test]
 async fn a_broken_connection_after_an_unreachable_default_cluster_names_both() {
-    let (preview, mut operators) = target("default/preview");
+    let (preview, mut operators_rx) = target("default/preview");
     let wake = start(vec![preview], Duration::from_millis(300), false);
 
-    let mut operator = next_connection(&mut operators).await;
+    let mut operator = next_connection(&mut operators_rx).await;
     operator
         .send(vec![(
             Some("default"),
@@ -773,4 +774,185 @@ fn the_operator_default_is_needed_only_for_a_preview_without_its_own() {
         wake_timeouts([None], Some(Duration::from_secs(90)), true).unwrap(),
         [Duration::from_secs(90)]
     );
+}
+
+/// `--no-wait` doesn't take a state from a newer operator for a wake asked for: it waits for a
+/// state it knows.
+#[tokio::test]
+async fn no_wait_waits_past_an_unknown_state() {
+    let (preview, mut operators_rx) = target("default/preview");
+    let wake = start(vec![preview], STEP_TIMEOUT, true);
+
+    let mut operator = next_connection(&mut operators_rx).await;
+    operator.send_local(WakeState::Unknown).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!wake.is_finished());
+
+    operator.send_local(WakeState::Waking).await;
+    assert_eq!(finished(wake).await.failed, Vec::<String>::new());
+}
+
+/// A preview that fails after it was ready fails the command, naming it, though the command
+/// already counted it ready while another preview still woke.
+#[tokio::test]
+async fn a_ready_preview_that_fails_later_fails_the_command() {
+    let (first, mut first_operators_rx) = target("default/first");
+    let (second, mut second_operators_rx) = target("default/second");
+    let wake = start(vec![first, second], STEP_TIMEOUT, false);
+
+    let mut first = next_connection(&mut first_operators_rx).await;
+    let mut second = next_connection(&mut second_operators_rx).await;
+    first.send_local(WakeState::Ready).await;
+    second.send_local(WakeState::Waking).await;
+    first
+        .send_local(WakeState::Failed {
+            message: "the preview was deleted".to_owned(),
+        })
+        .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    second.send_local(WakeState::Ready).await;
+
+    assert_eq!(
+        finished(wake).await.failed,
+        ["default/first (the preview was deleted)"]
+    );
+}
+
+/// A preview that a `mirrord exec` session pauses after it was ready is skipped, with a warning
+/// naming it.
+#[tokio::test]
+async fn a_ready_preview_paused_later_is_skipped() {
+    let (first, mut first_operators_rx) = target("default/first");
+    let (second, mut second_operators_rx) = target("default/second");
+    let wake = start(vec![first, second], STEP_TIMEOUT, false);
+
+    let mut first = next_connection(&mut first_operators_rx).await;
+    let mut second = next_connection(&mut second_operators_rx).await;
+    first.send_local(WakeState::Ready).await;
+    second.send_local(WakeState::Waking).await;
+    first.send_local(WakeState::Paused).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    second.send_local(WakeState::Ready).await;
+
+    let outcome = finished(wake).await;
+    assert_eq!(outcome.failed, Vec::<String>::new());
+    assert!(
+        matches!(
+            outcome.warnings.as_slice(),
+            [warning] if warning.contains("skipping default/first")
+        ),
+        "{:?}",
+        outcome.warnings
+    );
+}
+
+/// A ready preview that the operator reports waking again, as when its pods restart, is waited
+/// for again until it is ready.
+#[tokio::test]
+async fn a_ready_preview_that_wakes_again_is_waited_for() {
+    let (first, mut first_operators_rx) = target("default/first");
+    let (second, mut second_operators_rx) = target("default/second");
+    let wake = start(vec![first, second], STEP_TIMEOUT, false);
+
+    let mut first = next_connection(&mut first_operators_rx).await;
+    let mut second = next_connection(&mut second_operators_rx).await;
+    first.send_local(WakeState::Ready).await;
+    second.send_local(WakeState::Waking).await;
+    first.send_local(WakeState::Waking).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    second.send_local(WakeState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!wake.is_finished());
+
+    first.send_local(WakeState::Ready).await;
+    assert_eq!(finished(wake).await.failed, Vec::<String>::new());
+}
+
+/// A break of a ready preview's connection is no news: the operator sends a new connection's
+/// first status only once it observed the preview, so a Ready there keeps it ready.
+#[tokio::test]
+async fn a_ready_preview_stays_ready_across_a_reconnect() {
+    let (first, mut first_operators_rx) = target("default/first");
+    let (second, mut second_operators_rx) = target("default/second");
+    let wake = start(vec![first, second], STEP_TIMEOUT, false);
+
+    let mut first = next_connection(&mut first_operators_rx).await;
+    let mut second = next_connection(&mut second_operators_rx).await;
+    first.send_local(WakeState::Ready).await;
+    second.send_local(WakeState::Waking).await;
+    drop(first);
+
+    let mut first = next_connection(&mut first_operators_rx).await;
+    first.send_local(WakeState::Ready).await;
+    second.send_local(WakeState::Ready).await;
+
+    assert_eq!(finished(wake).await.failed, Vec::<String>::new());
+}
+
+/// A ready preview whose new connection hasn't reported when the deadline passes counts as it
+/// stood: its pods stayed up, and only the command's hold on them broke.
+#[tokio::test]
+async fn a_ready_preview_still_reconnecting_at_the_deadline_is_ready() {
+    let (first, mut first_operators_rx) = target("default/first");
+    let (second, mut second_operators_rx) = target("default/second");
+    let wake = start(vec![first, second], Duration::from_millis(300), false);
+
+    let mut first = next_connection(&mut first_operators_rx).await;
+    let mut second = next_connection(&mut second_operators_rx).await;
+    first.send_local(WakeState::Ready).await;
+    second.send_local(WakeState::Waking).await;
+    drop(first);
+
+    assert_eq!(
+        finished(wake).await.failed,
+        ["default/second (not ready in time)"]
+    );
+}
+
+/// A cluster whose operator is connected but hasn't reported the copy yet is waited for, as a
+/// reconnecting one is: a replica's is only a warning at the deadline, naming the cluster and why,
+/// and the cluster that runs the preview itself fails it with why.
+#[test]
+fn a_cluster_not_reported_yet_is_waited_for() {
+    let not_reported = || WakeState::NotReported {
+        message: "the cluster's operator reported nothing about the copy within 30s".to_owned(),
+    };
+    let status = |states: Vec<(bool, WakeState)>| WakeStatus {
+        clusters: states
+            .into_iter()
+            .enumerate()
+            .map(|(index, (replica, state))| ClusterWake {
+                cluster: Some(format!("c{index}")),
+                replica,
+                state,
+            })
+            .collect(),
+    };
+
+    let replica = status(vec![(false, WakeState::Ready), (true, not_reported())]);
+    assert_eq!(
+        Verdict::of(&replica, false),
+        (
+            Verdict::Waiting {
+                triggered: false,
+                unreachable: Vec::new()
+            },
+            Vec::new()
+        )
+    );
+    assert!(matches!(
+        Verdict::of(&replica, true),
+        (Verdict::Ready, warnings)
+            if matches!(warnings.as_slice(), [warning] if warning.contains("`c1`")
+                && warning.contains("hasn't reported the replica")
+                && warning.contains("within 30s"))
+    ));
+
+    let default = status(vec![(false, not_reported())]);
+    assert!(matches!(
+        Verdict::of(&default, true).0,
+        Verdict::Waiting { triggered: false, unreachable }
+            if matches!(unreachable.as_slice(), [why] if why.contains("`c0`")
+                && why.contains("hasn't reported the preview"))
+    ));
 }

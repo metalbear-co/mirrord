@@ -153,6 +153,8 @@ pub(super) async fn preview_wake(
     }
 
     let timeout = args.timeout.map(Duration::from_secs).unwrap_or_else(|| {
+        // `targets` isn't empty, which returned above, and `find_previews` builds the targets and
+        // their wake timeouts from the same previews, one of each per preview.
         wake_timeouts
             .into_iter()
             .max()
@@ -374,6 +376,7 @@ fn local_previews_request() -> Request<Vec<u8>> {
         PreviewEnv::url_path(&(), None)
     ))
     .body(Vec::new())
+    // The path is the view's own, and the query fixed, so the uri is always valid.
     .expect("a fixed path with a fixed query is a valid uri")
 }
 
@@ -392,8 +395,9 @@ enum Verdict {
 
     /// The preview isn't ready yet. `triggered` says whether the operator asked it to wake on
     /// every cluster, which is all that `--no-wait` waits for. `unreachable` names each cluster
-    /// that runs the preview itself and that the operator can't reach for now, or reconnects to,
-    /// with why, which is why the preview isn't ready should the deadline pass.
+    /// that runs the preview itself and that the operator can't reach for now, reconnects to, or
+    /// hasn't heard about the preview from yet, with why, which is why the preview isn't ready
+    /// should the deadline pass.
     Waiting {
         triggered: bool,
         unreachable: Vec<String>,
@@ -405,7 +409,8 @@ impl Verdict {
     /// woken, which the command reports whatever the verdict.
     ///
     /// `at_deadline` says whether the command stopped waiting: a replica cluster whose connection
-    /// the operator re-establishes is waited for until then, and only a warning after.
+    /// the operator re-establishes, or whose operator hasn't reported the replica yet, is waited
+    /// for until then, and only a warning after.
     fn of(status: &WakeStatus, at_deadline: bool) -> (Self, Vec<String>) {
         let named = |cluster: &Option<String>, text: &str| match cluster {
             Some(cluster) => format!("cluster `{cluster}`: {text}"),
@@ -447,6 +452,25 @@ impl Verdict {
                         unreachable.push(named(&wake.cluster, &format!("{message}; reconnecting")));
                     }
                 }
+                WakeState::NotReported { message } if wake.replica && at_deadline => {
+                    warnings.push(named(
+                        &wake.cluster,
+                        &format!(
+                            "the operator hasn't reported the replica: {message}; the replica may \
+                             stay as it is"
+                        ),
+                    ))
+                }
+                WakeState::NotReported { message } => {
+                    ready = false;
+                    triggered = false;
+                    if wake.replica.not() {
+                        unreachable.push(named(
+                            &wake.cluster,
+                            &format!("the operator hasn't reported the preview: {message}"),
+                        ));
+                    }
+                }
                 WakeState::Unsupported => warnings.push(named(
                     &wake.cluster,
                     "the operator can't wake previews, so the replica stays as it is; upgrade \
@@ -465,7 +489,13 @@ impl Verdict {
                      session ends",
                 )),
                 WakeState::Paused => paused = true,
-                WakeState::Waking | WakeState::Unknown => ready = false,
+                WakeState::Waking => ready = false,
+                // A state from a newer operator says nothing the CLI can rely on, not even that the
+                // wake was asked for.
+                WakeState::Unknown => {
+                    ready = false;
+                    triggered = false;
+                }
             }
         }
 
@@ -501,12 +531,13 @@ enum Report {
 }
 
 /// Keeps the wake websocket of preview `index` open, and reports each status that the operator
-/// sends to `reports`, until the preview failed or is paused, which ends the wake, or the command
-/// drops the driver. Opens the websocket again, with a growing wait, after it broke.
+/// sends to `reports_tx`, until the preview failed or is paused, which ends the wake, or the
+/// command drops the driver. A preview that is ready stays held, so its connection stays open.
+/// Opens the websocket again, with a growing wait, after it broke.
 async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
     index: usize,
     mut connect: Connect<S>,
-    reports: mpsc::UnboundedSender<(usize, Report)>,
+    reports_tx: mpsc::UnboundedSender<(usize, Report)>,
 ) {
     let mut delay = RECONNECT_DELAY;
 
@@ -520,19 +551,19 @@ async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
                             Verdict::of(&status, false).0,
                             Verdict::Failed(_) | Verdict::Paused
                         );
-                        if reports.send((index, Report::Status(status))).is_err() || ends {
+                        if reports_tx.send((index, Report::Status(status))).is_err() || ends {
                             return;
                         }
                     }
                     Err(error @ PreviewWakeError::Decode(_)) => {
-                        let _ = reports.send((index, Report::Fatal(with_causes(&error))));
+                        let _ = reports_tx.send((index, Report::Fatal(with_causes(&error))));
                         return;
                     }
                     Err(error) => break with_causes(&error),
                 }
             },
             Err(error) if refused(&error) => {
-                let _ = reports.send((index, Report::Fatal(with_causes(&error))));
+                let _ = reports_tx.send((index, Report::Fatal(with_causes(&error))));
                 return;
             }
             Err(error) => with_causes(&error),
@@ -542,7 +573,7 @@ async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
             error,
             after: delay,
         };
-        if reports.send((index, report)).is_err() {
+        if reports_tx.send((index, report)).is_err() {
             return;
         }
         tokio::time::sleep(delay).await;
@@ -550,15 +581,32 @@ async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
+/// Where a preview stands while the command runs, which its last status decides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Standing {
+    /// The command waits for the preview.
+    Waiting,
+
+    /// The preview is ready, or with `--no-wait` asked to wake, as `outcome` says. A later status
+    /// can still fail it, pause it, or put it back to waiting.
+    Settled { outcome: &'static str },
+
+    /// A `mirrord exec` session pauses the preview, so the command skips it.
+    Paused,
+
+    /// The preview failed, for the reason given.
+    Failed(String),
+}
+
 /// One preview while the command waits for it.
 struct Waiting {
     label: String,
     progress: ProgressTracker,
-    done: bool,
+    standing: Standing,
 
     /// Why the preview's last status says that it isn't ready, when that is a cluster running
-    /// the preview itself that the operator can't reach, or reconnects to (see
-    /// [`Verdict::Waiting`]).
+    /// the preview itself that the operator can't reach, reconnects to, or hasn't heard about
+    /// the preview from yet (see [`Verdict::Waiting`]).
     unreachable: Vec<String>,
 
     /// The replica clusters that the preview's last status says can't be woken.
@@ -571,14 +619,49 @@ struct Waiting {
     last: Option<WakeStatus>,
 }
 
+impl Waiting {
+    /// Takes in `status`, the preview's latest. The operator sends a connection's first status
+    /// once it observed the preview on every cluster, or at once for news the command acts on
+    /// whatever the rest is, with the clusters not observed yet as pending, so a new connection
+    /// after a break brings no guess. Paused and failed are final, since the preview's driver
+    /// ends with them (see [`drive`]).
+    fn judge(&mut self, status: WakeStatus, no_wait: bool) {
+        let (verdict, warnings) = Verdict::of(&status, false);
+        self.last = Some(status);
+        self.warnings = warnings;
+        self.disconnected = None;
+
+        self.standing = match verdict {
+            Verdict::Ready => Standing::Settled { outcome: "ready" },
+            Verdict::Paused => Standing::Paused,
+            Verdict::Failed(message) => Standing::Failed(message),
+            Verdict::Waiting {
+                triggered: true, ..
+            } if no_wait => Standing::Settled { outcome: "waking" },
+            Verdict::Waiting { unreachable, .. } => {
+                if self.standing == (Standing::Settled { outcome: "ready" }) {
+                    self.progress.info("not ready any more, waiting again");
+                }
+                self.unreachable = unreachable;
+                Standing::Waiting
+            }
+        };
+    }
+
+    /// Whether the preview's standing can still change.
+    fn open(&self) -> bool {
+        matches!(self.standing, Standing::Waiting | Standing::Settled { .. })
+    }
+}
+
 /// How [`wake_all`] ended.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct WakeOutcome {
     /// Each preview that failed or wasn't ready in time, with why.
     failed: Vec<String>,
 
-    /// Each replica cluster that can't be woken, after the preview it belongs to, whatever
-    /// became of the preview.
+    /// Each preview skipped because a `mirrord exec` session pauses it, and each replica cluster
+    /// that can't be woken, after the preview it belongs to, whatever became of the preview.
     warnings: Vec<String>,
 }
 
@@ -586,13 +669,17 @@ struct WakeOutcome {
 /// until `deadline`; with `no_wait`, only until the operator asked each one to wake.
 ///
 /// Every connection stays open until this returns, so that no preview idles while the command
-/// waits for the others.
+/// waits for the others, and each status that comes meanwhile counts: a preview that was ready
+/// can fail, be paused, or need waiting for again, while a break of its connection alone leaves
+/// it as it stood. Each preview's outcome is reported once, at the end, from its last standing,
+/// and every line about a preview names it.
 async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     targets: Vec<WakeTarget<S>>,
     deadline: Instant,
     no_wait: bool,
     progress: &ProgressTracker,
 ) -> WakeOutcome {
+    // Each preview's driver --what the operator reports of the preview, by index--> this loop
     let (reports_tx, mut reports_rx) = mpsc::unbounded_channel();
     let mut drivers = Vec::with_capacity(targets.len());
     let mut previews = Vec::with_capacity(targets.len());
@@ -603,9 +690,11 @@ async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             reports_tx.clone(),
         ))));
         previews.push(Waiting {
-            progress: progress.subtask(&format!("waking {label}")),
+            progress: progress
+                .subtask(&format!("waking {label}"))
+                .prefixed(&label),
             label,
-            done: false,
+            standing: Standing::Waiting,
             unreachable: Vec::new(),
             warnings: Vec::new(),
             disconnected: None,
@@ -614,8 +703,10 @@ async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     }
     drop(reports_tx);
 
-    let mut failed = Vec::new();
-    while previews.iter().any(|preview| preview.done.not()) {
+    while previews
+        .iter()
+        .any(|preview| preview.standing == Standing::Waiting)
+    {
         let report = tokio::select! {
             report = reports_rx.recv() => report,
             () = tokio::time::sleep_until(deadline) => break,
@@ -623,43 +714,14 @@ async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
         let Some((index, report)) = report else {
             break;
         };
-        let Some(preview) = previews.get_mut(index).filter(|preview| preview.done.not()) else {
+        let Some(preview) = previews.get_mut(index).filter(|preview| preview.open()) else {
             continue;
         };
 
         match report {
-            Report::Status(status) => {
-                let (verdict, warnings) = Verdict::of(&status, false);
-                preview.last = Some(status);
-                preview.warnings = warnings;
-                preview.disconnected = None;
-                match verdict {
-                    Verdict::Ready => {
-                        preview.progress.success(Some("ready"));
-                        preview.done = true;
-                    }
-                    Verdict::Paused => {
-                        progress.warning(&format!(
-                            "skipping {}: a `mirrord exec` session pauses it",
-                            preview.label
-                        ));
-                        preview.progress.success(Some("skipped, paused"));
-                        preview.done = true;
-                    }
-                    Verdict::Failed(message) => {
-                        preview.progress.failure(Some(&message));
-                        failed.push(format!("{} ({message})", preview.label));
-                        preview.done = true;
-                    }
-                    Verdict::Waiting {
-                        triggered: true, ..
-                    } if no_wait => {
-                        preview.progress.success(Some("waking"));
-                        preview.done = true;
-                    }
-                    Verdict::Waiting { unreachable, .. } => preview.unreachable = unreachable,
-                }
-            }
+            Report::Status(status) => preview.judge(status, no_wait),
+            // The pods of a ready preview stay as they are, and the driver connects again to hold
+            // them, so the break alone doesn't undo the preview's standing.
             Report::Reconnecting { error, after } => {
                 preview.progress.warning(&format!(
                     "{error}; reconnecting in {} seconds",
@@ -667,70 +729,82 @@ async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 ));
                 preview.disconnected = Some(error);
             }
-            Report::Fatal(message) => {
-                preview.progress.failure(Some(&message));
-                failed.push(format!("{} ({message})", preview.label));
-                preview.done = true;
-            }
+            Report::Fatal(message) => preview.standing = Standing::Failed(message),
         }
     }
 
-    for preview in previews.iter_mut().filter(|preview| preview.done.not()) {
-        // A status from before the command's own connection broke no longer holds: the hold went
-        // with the connection.
-        if let Some(status) = preview
-            .last
-            .as_ref()
-            .filter(|_| preview.disconnected.is_none())
-        {
-            let (verdict, warnings) = Verdict::of(status, true);
-            preview.warnings = warnings;
-            match verdict {
-                Verdict::Ready => {
-                    preview.progress.success(Some("ready"));
-                    continue;
+    let mut failed = Vec::new();
+    let mut skipped = Vec::new();
+    for preview in &mut previews {
+        if preview.standing == Standing::Waiting {
+            // A status from before the command's own connection broke no longer holds: the hold
+            // went with the connection.
+            if let Some(status) = preview
+                .last
+                .as_ref()
+                .filter(|_| preview.disconnected.is_none())
+            {
+                let (verdict, warnings) = Verdict::of(status, true);
+                preview.warnings = warnings;
+                match verdict {
+                    Verdict::Ready => preview.standing = Standing::Settled { outcome: "ready" },
+                    Verdict::Waiting {
+                        triggered: true, ..
+                    } if no_wait => preview.standing = Standing::Settled { outcome: "waking" },
+                    Verdict::Waiting { unreachable, .. } => preview.unreachable = unreachable,
+                    Verdict::Paused | Verdict::Failed(_) => {}
                 }
-                Verdict::Waiting {
-                    triggered: true, ..
-                } if no_wait => {
-                    preview.progress.success(Some("waking"));
-                    continue;
-                }
-                Verdict::Waiting { unreachable, .. } => preview.unreachable = unreachable,
-                Verdict::Paused | Verdict::Failed(_) => {}
             }
         }
 
-        let late = if no_wait {
-            "the operator didn't start waking it in time"
-        } else {
-            "not ready in time"
-        };
-        let unreachable = preview.unreachable.join("; ");
-        let message = match (&preview.disconnected, unreachable.is_empty()) {
-            (Some(error), false) => {
-                format!("{unreachable}; then the connection to the operator broke: {error}")
+        match &preview.standing {
+            Standing::Settled { outcome } => preview.progress.success(Some(outcome)),
+            Standing::Paused => {
+                skipped.push(format!(
+                    "skipping {}: a `mirrord exec` session pauses it",
+                    preview.label
+                ));
+                preview.progress.success(Some("skipped, paused"));
             }
-            (None, false) => unreachable,
-            (Some(error), true) => format!("{late}, the connection to the operator broke: {error}"),
-            (None, true) => late.to_owned(),
-        };
-        preview.progress.failure(Some(&message));
-        failed.push(format!("{} ({message})", preview.label));
+            Standing::Failed(message) => {
+                preview.progress.failure(Some(message));
+                failed.push(format!("{} ({message})", preview.label));
+            }
+            Standing::Waiting => {
+                let late = if no_wait {
+                    "the operator didn't start waking it in time"
+                } else {
+                    "not ready in time"
+                };
+                let unreachable = preview.unreachable.join("; ");
+                let message = match (&preview.disconnected, unreachable.is_empty()) {
+                    (Some(error), false) => {
+                        format!("{unreachable}; then the connection to the operator broke: {error}")
+                    }
+                    (None, false) => unreachable,
+                    (Some(error), true) => {
+                        format!("{late}, the connection to the operator broke: {error}")
+                    }
+                    (None, true) => late.to_owned(),
+                };
+                preview.progress.failure(Some(&message));
+                failed.push(format!("{} ({message})", preview.label));
+            }
+        }
     }
 
     drop(drivers);
     WakeOutcome {
         failed,
-        warnings: previews
+        warnings: skipped
             .into_iter()
-            .flat_map(|preview| {
+            .chain(previews.into_iter().flat_map(|preview| {
                 let label = preview.label;
                 preview
                     .warnings
                     .into_iter()
                     .map(move |warning| format!("{label}: {warning}"))
-            })
+            }))
             .collect(),
     }
 }

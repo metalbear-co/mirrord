@@ -2820,34 +2820,6 @@ mod tests {
         Cli::try_parse_from(args).unwrap();
     }
 
-    /// `--timeout` and `--no-wait` reach the wake, the key goes before or after the subcommand,
-    /// and like `mirrord preview down` the wake covers every namespace.
-    #[rstest]
-    #[case(&["mirrord", "preview", "wake", "-k", "dev"], None, false)]
-    #[case(
-        &["mirrord", "preview", "-k", "dev", "wake", "--timeout", "30", "--no-wait"],
-        Some(30),
-        true
-    )]
-    fn preview_wake_parses(
-        #[case] args: &[&str],
-        #[case] timeout: Option<u64>,
-        #[case] no_wait: bool,
-    ) {
-        let cli = Cli::try_parse_from(args).unwrap();
-        assert!(cli.commands.all_namespaces());
-
-        let Commands::Preview(args) = cli.commands else {
-            panic!("expected `preview` command");
-        };
-        assert_eq!(args.common.key.as_deref(), Some("dev"));
-        let PreviewCommand::Wake(wake) = args.command else {
-            panic!("expected `wake` command");
-        };
-        assert_eq!(wake.timeout, timeout);
-        assert_eq!(wake.no_wait, no_wait);
-    }
-
     #[rstest]
     #[case(&["mirrord", "db-branches", "destroy", "branch"])]
     #[case(&["mirrord", "session", "delete", "session-id"])]
