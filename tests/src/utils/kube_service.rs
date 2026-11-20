@@ -3,7 +3,7 @@
 use std::ops::Not;
 
 use super::resource_guard::ResourceGuard;
-use crate::utils::{services::TestWorkloadType, CONTAINER_NAME};
+use crate::utils::{CONTAINER_NAME, services::TestWorkloadType};
 
 /// A service deployed to the kubernetes cluster.
 ///

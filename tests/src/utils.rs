@@ -4,12 +4,12 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use k8s_openapi::api::core::v1::Service;
-use kube::{api::GroupVersionKind, discovery, Client, Resource};
+use kube::{Client, Resource, api::GroupVersionKind, discovery};
 use mirrord_operator::crd::MirrordOperatorCrd;
 use rand::distr::{Alphanumeric, SampleString};
 use reqwest::{RequestBuilder, StatusCode};
 use rstest::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub mod application;
 pub mod client;
@@ -26,7 +26,7 @@ pub mod windows;
 
 pub mod watch;
 
-pub use client::{kube_client, KubeClient};
+pub use client::{KubeClient, kube_client};
 
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";

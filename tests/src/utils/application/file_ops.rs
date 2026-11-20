@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use mirrord_test_utils::TestProcess;
+use mirrord_test_utils::{TestProcess, python};
 
 use crate::utils::application::{app_path, GoVersion};
 

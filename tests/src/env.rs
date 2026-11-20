@@ -6,7 +6,7 @@ mod env_tests {
     use rstest::*;
 
     use crate::utils::{
-        application::{env::EnvApp, GoVersion},
+        application::{GoVersion, env::EnvApp},
         kube_service::KubeService,
         services::basic_service,
     };

@@ -12,11 +12,11 @@ use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
+    KubeClient,
     application::Application,
     client::kube_client,
     ipv6::{ipv6_service, portforward_http_requests, portforward_http_requests_with_body},
     kube_service::KubeService,
-    KubeClient,
 };
 
 #[rstest]

@@ -7,7 +7,7 @@ mod steal_tests {
     use k8s_openapi::api::core::v1::Pod;
     use kube::Api;
     use mirrord_test_utils::run_command::run_port_forward;
-    use reqwest::{header::HeaderMap, Url};
+    use reqwest::{Url, header::HeaderMap};
     use rstest::*;
     use tokio::{
         io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -16,10 +16,11 @@ mod steal_tests {
     };
     use tokio_tungstenite::{
         connect_async,
-        tungstenite::{client::IntoClientRequest, Message},
+        tungstenite::{Message, client::IntoClientRequest},
     };
 
     use crate::utils::{
+        AgentMode, KubeClient,
         application::Application,
         client::kube_client,
         config_dir,

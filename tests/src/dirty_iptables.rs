@@ -3,15 +3,15 @@
 //! Test that the agent can successfully detect and exit on dirty IP tables in the target.
 
 use k8s_openapi::api::core::v1::{Namespace, Pod};
-use kube::{api::PostParams, Api};
+use kube::{Api, api::PostParams};
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 use serde_json::json;
 
 use crate::utils::{
-    application::env::EnvApp, client::kube_client, images::PYTEST_IMAGE, operator_installed,
-    random_string, resource_guard::ResourceGuard, watch, KubeClient, PRESERVE_FAILED_ENV_NAME,
-    TEST_RESOURCE_LABEL,
+    KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL, application::env::EnvApp,
+    client::kube_client, images::PYTEST_IMAGE, operator_installed, random_string,
+    resource_guard::ResourceGuard, watch,
 };
 
 struct DirtyIptablesTest {

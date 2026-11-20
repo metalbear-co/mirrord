@@ -8,13 +8,13 @@ mod targetless_tests {
         api::{core::v1::Pod, scheduling::v1::PriorityClass},
         apimachinery::pkg::apis::meta::v1::ObjectMeta,
     };
-    use kube::{api::ListParams, Api};
+    use kube::{Api, api::ListParams};
     use rstest::rstest;
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        application::Application, client::kube_client, operator_installed, random_string,
-        resource_guard::ResourceGuard, KubeClient,
+        KubeClient, application::Application, client::kube_client, operator_installed,
+        random_string, resource_guard::ResourceGuard,
     };
 
     /// `mirrord exec` a program that connects to the kubernetes api service by its internal name
