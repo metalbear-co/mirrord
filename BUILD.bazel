@@ -1,3 +1,7 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages(name = "node_modules")
+
 exports_files([
     # A module that depends on mirrord must repeat these files' settings and versions in its own root
     # files, so its lint or its diff tests read mirrord's files to check that the two match.
