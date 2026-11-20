@@ -1,0 +1,19 @@
+load("@crates//mirrord-agent:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.binary(
+    compile_data = ["src/http/session_ended.html"],
+    target_compatible_with = LINUX_ONLY,
+    # Public for the modules that depend on mirrord and ship the agent themselves.
+    visibility = ["//visibility:public"],
+)
+
+crate.unit_tests(
+    test_threads = 4,
+    size = "medium",
+    target_compatible_with = LINUX_ONLY,
+)
+

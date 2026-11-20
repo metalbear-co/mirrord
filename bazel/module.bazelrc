@@ -53,6 +53,35 @@ build:macos --host_linkopt=-Wno-unused-command-line-argument
 # Uses rules_python's interpreter rather than the `python3` on `PATH`, which NixOS may not have.
 common --@rules_python//python/config_settings:bootstrap_impl=script
 
+# Rustfmt and clippy -------------------------------------------------------------------------------
+
+
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=clippy_checks
+
+# Set on every build, not only with `--config=clippy`, because changing a build setting makes Bazel
+# analyze the whole workspace again.
+build --@rules_rust//rust/settings:clippy_flag=-Dwarnings
+
+# CI's clippy command names the end-to-end tests, which don't build for Windows, so on Windows clippy
+# skips them rather than fail.
+build:clippy --skip_incompatible_explicit_targets
+
+# CI only checks that clippy passes, so the build doesn't download its outputs from the remote
+# cache.
+build:clippy --remote_download_outputs=minimal
+
+# Rustdoc ------------------------------------------------------------------------------------------
+
+# The filter also applies to the targets that a command names, so building a single rustdoc target
+# needs `--config=doc` too.
+build --build_tag_filters=-rustdoc
+build:doc --build_tag_filters=rustdoc
+
+# CI only checks that rustdoc passes, so the build doesn't download its outputs from the remote
+# cache.
+build:doc --remote_download_outputs=minimal
+
 # Running and testing ------------------------------------------------------------------------------
 
 # `bazel run` starts the program in the directory that it was run from rather than in its runfiles,
@@ -60,4 +89,8 @@ common --@rules_python//python/config_settings:bootstrap_impl=script
 # developer expects. Bazel unsets `RUNFILES_DIR` for `bazel run`, so each program still finds its
 # runfiles next to its own executable.
 run --run_in_cwd
+
+# Bazel's default summary has one line for each target, which says `PASSED` even when
+# `--test_filter` left no test to run. The detailed one lists each test case.
+test --test_summary=detailed
 

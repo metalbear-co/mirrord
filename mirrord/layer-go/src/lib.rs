@@ -8,24 +8,6 @@
 //! That trampoline machinery is identical for every layer that wants to interpose on a Go
 //! application; only the table deciding what to do with each syscall differs. This crate owns the
 //! trampolines, the Go runtime version detection, and the symbol hooking, and lets each layer plug
-//!
-//! # Usage
-//!
-//! Register the dispatch table once, before hooking, then install the hooks:
-//!
-//! ```no_run
-//! # use mirrord_layer_core::hooks::HookManager;
-//! # use mirrord_layer_go::{Handlers, passthrough};
-//! # unsafe extern "C" fn syscall6(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64 {
-//! #     unsafe { passthrough(n, a, b, c, d, e, f) }
-//! # }
-//! # unsafe extern "C" fn syscall(n: i64, a: i64, b: i64, c: i64) -> i64 {
-//! #     unsafe { passthrough(n, a, b, c, 0, 0, 0) }
-//! # }
-//! # let hook_manager = &mut HookManager::default();
-//! mirrord_layer_go::init(Handlers { syscall, syscall6 });
-//! mirrord_layer_go::enable_hooks(hook_manager, true);
-//! ```
 //! in its own dispatch table through `init`.
 #![cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
@@ -69,6 +51,22 @@ static HANDLERS: OnceLock<Handlers> = OnceLock::new();
 ///
 /// Must be called before [`enable_hooks`], otherwise intercepted syscalls fall through to
 /// [`passthrough`]. Only the first call takes effect.
+///
+/// A layer registers its handlers, then installs the hooks:
+///
+/// ```no_run
+/// # use mirrord_layer_core::hooks::HookManager;
+/// # use mirrord_layer_go::{Handlers, passthrough};
+/// # unsafe extern "C" fn syscall6(n: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64 {
+/// #     unsafe { passthrough(n, a, b, c, d, e, f) }
+/// # }
+/// # unsafe extern "C" fn syscall(n: i64, a: i64, b: i64, c: i64) -> i64 {
+/// #     unsafe { passthrough(n, a, b, c, 0, 0, 0) }
+/// # }
+/// # let hook_manager = &mut HookManager::default();
+/// mirrord_layer_go::init(Handlers { syscall, syscall6 });
+/// mirrord_layer_go::enable_hooks(hook_manager, true);
+/// ```
 pub fn init(handlers: Handlers) {
     let _ = HANDLERS.set(handlers);
 }

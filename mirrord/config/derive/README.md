@@ -18,9 +18,9 @@ This crate implements the derive macro `MirrordConfig`, which introduces the `co
     - `plan = Plan` record the mirrord plan the field needs, a variant of `crate::plan::Plan` (e.g. `plan = Team`), as `x-mirrord-plan` in the generated struct's schema. The generated struct must derive `JsonSchema` (`#[config(derive = "JsonSchema")]`).
     - `skip_schema` leave the field out of the generated struct's schema, as `#[schemars(skip)]` does. The generated struct must derive `JsonSchema`.
 
-Example
+Example, which only compiles in `mirrord-config`, whose `config` module the generated code uses:
 
-```rust
+```rust,ignore
 /// MyConfig Comments
 #[derive(MirrordConfig, Default)]
 #[config(map_to = "MyFileConfig", derive = "Eq,PartialEq")] // If map_to isn't given, it will default to FileMyConfig
@@ -46,7 +46,7 @@ pub struct MyConfig {
 
 The following struct will be generated:
 
-```rust
+```rust,ignore
 /// MyConfig Comments
 #[derive(Clone, Debug, Default, serde::Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
