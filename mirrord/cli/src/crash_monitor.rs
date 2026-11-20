@@ -4,8 +4,8 @@
 //! out-of-process minidump when a registered process signals a crash, and logs the exit code when a
 //! registered process dies with no handler firing (the external-kill case).
 //!
-//! The heavy lifting lives in [`utils_win::diagnostics::monitor`]. This module only binds the
-//! socket, reports its address to the parent CLI, and runs the server.
+//! The heavy lifting lives in [`mirrord_utils_win::diagnostics::monitor`]. This module only binds
+//! the socket, reports its address to the parent CLI, and runs the server.
 //!
 //! NOTE: more of the Windows-specific plumbing that still lives in the CLI (for instance next to
 //! the UI/token code) should migrate into `utils-win`, so platform logic has a single home instead
@@ -17,11 +17,11 @@ use std::{
 };
 
 use mirrord_config::MIRRORD_CRASH_EPHEMERAL_DIR;
-use tracing_subscriber::EnvFilter;
-use utils_win::diagnostics::{
+use mirrord_utils_win::diagnostics::{
     crash_dir, full_memory_dump,
     monitor::{MonitorConfig, serve},
 };
+use tracing_subscriber::EnvFilter;
 
 use crate::error::{CliError, CliResult};
 

@@ -55,12 +55,7 @@ pub enum Application {
     IntproxyChild,
 }
 
-/// Resolves an app path (relative to the `tests` directory) against the configured app root.
 ///
-/// The test apps are referenced by paths relative to the `tests` directory, which works when the
-/// suite runs from this repo. `MIRRORD_TESTS_APP_ROOT` points at that directory when it is
-/// elsewhere: the operator suite sets it to the mirrord checkout staged in the E2E runner image, so
-/// these apps resolve there instead of in the operator's own checkout. Unset, paths are returned
 /// unchanged.
 pub(crate) fn app_path(relative: &str) -> String {
     match std::env::var("MIRRORD_TESTS_APP_ROOT") {
@@ -132,7 +127,6 @@ impl Application {
                     .map(String::from)
                     .to_vec()
             }
-            Application::RustWebsockets => vec![app_path("../target/debug/rust-websockets")],
             Application::IntproxyChild => vec![app_path("intproxy_child/out.c_test_app")],
         }
     }

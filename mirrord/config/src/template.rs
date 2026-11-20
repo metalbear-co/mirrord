@@ -144,7 +144,7 @@ pub fn literal_path_pattern(path: &str) -> Result<String, PatternFilterError> {
 /// `path` in the form the `feature.fs` patterns match, without a trailing separator.
 fn pattern_form(path: &str) -> String {
     #[cfg(windows)]
-    let path = match str_win::path_to_unix_path(path) {
+    let path = match mirrord_str_win::path_to_unix_path(path) {
         Some(unix) => unix.with_drive().unwrap_or(unix.path),
         None => path.replace('\\', "/"),
     };
@@ -157,7 +157,7 @@ fn pattern_form(path: &str) -> String {
 /// [`None`] on Windows for a canonical path with no drive, such as one on a network share.
 fn canonical_form(canonical: &str) -> Option<String> {
     #[cfg(windows)]
-    str_win::path_to_unix_path(canonical)?.drive?;
+    mirrord_str_win::path_to_unix_path(canonical)?.drive?;
 
     Some(pattern_form(canonical))
 }

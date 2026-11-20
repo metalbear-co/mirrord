@@ -4,7 +4,7 @@ pub(crate) mod exception;
 pub(crate) mod files;
 // Re-exported from `utils-win`, where the crash handler can reach it too. This path is what
 // the `internal_bypass` macro expands to, so it must keep this name.
-pub(crate) use utils_win::internal_thread;
+pub(crate) use mirrord_utils_win::internal_thread;
 pub(crate) mod macros;
 pub(crate) mod process;
 pub(crate) mod socket;
@@ -43,7 +43,7 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
 
     // Keep mirrord's crash filter from being overridden by the target's runtime. Extension-managed
     // runs do not install that filter, so the target must retain normal ownership of this API.
-    let crash_reporting = utils_win::diagnostics::crash_reporting_enabled();
+    let crash_reporting = mirrord_utils_win::diagnostics::crash_reporting_enabled();
     if crash_reporting {
         exception::initialize_hooks(guard)?;
     }
@@ -69,11 +69,11 @@ pub fn initialize_hooks(guard: &mut DetourGuard<'static>) -> LayerResult<()> {
     }
 
     if crash_reporting {
-        utils_win::diagnostics::crash::install_filter();
+        mirrord_utils_win::diagnostics::crash::install_filter();
     }
 
     guard.enable_all_hooks().map_err(|err| {
-        utils_win::diagnostics::crash::restore_filter();
+        mirrord_utils_win::diagnostics::crash::restore_filter();
         LayerError::DetourGuard(err.to_string())
     })
 }

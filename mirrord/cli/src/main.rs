@@ -1204,7 +1204,7 @@ fn main() -> miette::Result<()> {
     // Armed before anything else runs: in a debug build, parsing the arguments alone takes about
     // half a megabyte of stack.
     #[cfg(target_os = "windows")]
-    utils_win::diagnostics::stack::report_stack_overflows();
+    mirrord_utils_win::diagnostics::stack::report_stack_overflows();
 
     rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
         .expect("Failed to install crypto provider");

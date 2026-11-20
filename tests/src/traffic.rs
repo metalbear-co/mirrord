@@ -571,7 +571,6 @@ mod traffic_tests {
     ) {
         let service = basic_service.await;
         let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../target/debug/rust-unix-socket-client")
             .to_string_lossy()
             .to_string();
         let executable = vec![app_path];
@@ -601,7 +600,6 @@ mod traffic_tests {
     pub async fn outgoing_bypassed_unix_stream_pathname(#[future] basic_service: KubeService) {
         let service = basic_service.await;
         let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../target/debug/rust-bypassed-unix-socket")
             .to_string_lossy()
             .to_string();
         let executable = vec![app_path];

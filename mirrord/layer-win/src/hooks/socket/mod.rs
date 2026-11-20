@@ -1724,7 +1724,7 @@ unsafe extern "system" fn getaddrinfo_detour(
 ) -> INT {
     let node_opt = match Option::from(raw_node) {
         Some(ptr) if !ptr.is_null() => {
-            Some(unsafe { str_win::u8_buffer_to_string(PCSTR(ptr).as_bytes()) })
+            Some(unsafe { mirrord_str_win::u8_buffer_to_string(PCSTR(ptr).as_bytes()) })
         }
         _ => None,
     };
@@ -1732,7 +1732,7 @@ unsafe extern "system" fn getaddrinfo_detour(
 
     let service_opt = match Option::from(raw_service) {
         Some(ptr) if !ptr.is_null() => {
-            Some(unsafe { str_win::u8_buffer_to_string(PCSTR(ptr).as_bytes()) })
+            Some(unsafe { mirrord_str_win::u8_buffer_to_string(PCSTR(ptr).as_bytes()) })
         }
         _ => None,
     };
@@ -1778,7 +1778,7 @@ unsafe extern "system" fn getaddrinfow_detour(
 ) -> INT {
     let node_opt = match Option::from(node_name) {
         Some(ptr) if !ptr.is_null() => unsafe {
-            Some(str_win::u16_buffer_to_string(PCWSTR(ptr).as_wide()))
+            Some(mirrord_str_win::u16_buffer_to_string(PCWSTR(ptr).as_wide()))
         },
         _ => None,
     };
@@ -1786,7 +1786,7 @@ unsafe extern "system" fn getaddrinfow_detour(
 
     let service_opt = match Option::from(service_name) {
         Some(ptr) if !ptr.is_null() => unsafe {
-            Some(str_win::u16_buffer_to_string(PCWSTR(ptr).as_wide()))
+            Some(mirrord_str_win::u16_buffer_to_string(PCWSTR(ptr).as_wide()))
         },
         _ => None,
     };
@@ -1912,7 +1912,7 @@ unsafe extern "system" fn getaddrinfoexw_detour(
     let mut node = if p_name.is_null() {
         return original();
     } else {
-        unsafe { str_win::u16_buffer_to_string(PCWSTR(p_name).as_wide()) }
+        unsafe { mirrord_str_win::u16_buffer_to_string(PCWSTR(p_name).as_wide()) }
     };
     if dw_name_space == NS_NETBT {
         hostname::trim_netbios_name(&mut node);
@@ -1921,7 +1921,7 @@ unsafe extern "system" fn getaddrinfoexw_detour(
     let service_opt = if p_service_name.is_null() {
         None
     } else {
-        Some(unsafe { str_win::u16_buffer_to_string(PCWSTR(p_service_name).as_wide()) })
+        Some(unsafe { mirrord_str_win::u16_buffer_to_string(PCWSTR(p_service_name).as_wide()) })
     };
     let port = service_opt
         .as_deref()
@@ -2447,7 +2447,7 @@ mod free_addrinfo {
         detour::DetourGuard,
         socket::dns::windows::utils::{ManagedAddrInfo, WindowsAddrInfo},
     };
-    use utils_win::internal_thread::InternalGuard;
+    use mirrord_utils_win::internal_thread::InternalGuard;
 
     use super::*;
 

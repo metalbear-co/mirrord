@@ -23,7 +23,7 @@ pub fn build_cli(
     println!("Building mirrord CLI for {}...", target.triple());
 
     let mut cmd = layer::cargo_build(target, options);
-    cmd.arg("-p").arg("mirrord");
+    cmd.arg("-p").arg("mirrord-cli");
 
     // Set layer file environment variable
     cmd.env(

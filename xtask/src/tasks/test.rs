@@ -156,7 +156,7 @@ pub fn run_unit(cargo_args: Vec<String>) -> Result<()> {
     let assets = create_dummy_cli_artifacts()?;
 
     let mut cmd = resolve_command("cargo");
-    cmd.args(["nextest", "run", "-p", "mirrord"]);
+    cmd.args(["nextest", "run", "-p", "mirrord-cli"]);
     cmd.args(cargo_args);
     cmd.env("MIRRORD_LAYER_FILE", &assets.layer);
     cmd.env("MIRRORD_LAYER_FILE_MACOS_ARM64", &assets.arm64_layer);

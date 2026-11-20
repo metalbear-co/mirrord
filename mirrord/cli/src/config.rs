@@ -65,6 +65,8 @@ macro_rules! windows_unsupported {
 
 #[derive(Debug, Parser)]
 #[command(
+    // Otherwise clap names the command after the package, `mirrord-cli`, which `--version` shows.
+    name = "mirrord",
     author,
     version,
     about,

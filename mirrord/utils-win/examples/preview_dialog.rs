@@ -1,6 +1,5 @@
 //! Preview the crash dialog without a real crash.
 //!
-//! Run: `cargo run -p utils-win --example preview_dialog`
 
 #[cfg(windows)]
 fn main() {
@@ -26,7 +25,7 @@ mirrord(33828)
   crasher(32908) [parent] X crashed
 ";
 
-    utils_win::diagnostics::dialog::show(
+    mirrord_utils_win::diagnostics::dialog::show(
         title,
         subtitle,
         body,

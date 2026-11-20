@@ -122,7 +122,7 @@ pub fn debugger_wait_names_a_program(setting: &str) -> bool {
 }
 
 /// The current process's executable name, without extension.
-pub use utils_win::process::get_current_process_name;
+pub use mirrord_utils_win::process::get_current_process_name;
 
 /// Checks if debugger waiting is enabled for any process.
 ///
