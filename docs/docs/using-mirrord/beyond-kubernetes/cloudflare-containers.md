@@ -138,7 +138,7 @@ The bootstrap's agent registers with sessions-manager while the container starts
 
 ## Troubleshooting
 
-The bootstrap's messages appear in the application container's output. For problems that don't depend on the platform, see [MetalBear Cloud Sessions-Manager](metalbear-cloud.md#troubleshooting).
+mirrord's messages appear in the application container's output. The bootstrap logs only when the container's `env` sets `MIRRORD_LOG` ([Collecting Logs](../../troubleshooting/collecting-logs.md#workloads-outside-kubernetes)). For problems that don't depend on the platform, see [MetalBear Cloud Sessions-Manager](metalbear-cloud.md#troubleshooting).
 
 | Symptom | Likely cause |
 | --- | --- |

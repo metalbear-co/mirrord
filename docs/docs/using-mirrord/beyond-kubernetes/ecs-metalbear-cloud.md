@@ -123,7 +123,7 @@ If you manage your infrastructure with Terraform, each step maps to standard res
 
 ## Troubleshooting
 
-The bootstrap's messages appear in the application container's logs. For problems that don't depend on the platform, see [MetalBear Cloud Sessions-Manager](metalbear-cloud.md#troubleshooting), and for ones that don't depend on the deployment mode, [Amazon ECS](ecs.md#troubleshooting).
+mirrord's messages appear in the application container's logs. The bootstrap logs only when the container's `environment` sets `MIRRORD_LOG` ([Collecting Logs](../../troubleshooting/collecting-logs.md#workloads-outside-kubernetes)). For problems that don't depend on the platform, see [MetalBear Cloud Sessions-Manager](metalbear-cloud.md#troubleshooting), and for ones that don't depend on the deployment mode, [Amazon ECS](ecs.md#troubleshooting).
 
 | Symptom | Likely cause |
 | --- | --- |

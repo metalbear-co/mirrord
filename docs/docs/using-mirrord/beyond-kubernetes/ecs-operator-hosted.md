@@ -278,7 +278,7 @@ Delete the access entry (`aws eks delete-access-entry`) to revoke one task role,
 
 ## Troubleshooting
 
-The bootstrap's messages appear in the application container's logs. For problems that don't depend on the deployment mode, see [Amazon ECS](ecs.md#troubleshooting). With `MIRRORD_AGENT_RUST_LOG=info` in the application container's `environment`, the bootstrap also logs which sessions-manager it registers with: `Registering with the sessions-manager hosted by the mirrord operator, selected by MIRRORD_OPERATOR_API_URL`.
+mirrord's messages appear in the application container's logs. The bootstrap logs only when the container's `environment` sets `MIRRORD_LOG` ([Collecting Logs](../../troubleshooting/collecting-logs.md#workloads-outside-kubernetes)). For problems that don't depend on the deployment mode, see [Amazon ECS](ecs.md#troubleshooting). With `MIRRORD_AGENT_RUST_LOG=info` in the application container's `environment`, the workload-companion also logs which sessions-manager it registers with: `Registering with the sessions-manager hosted by the mirrord operator, selected by MIRRORD_OPERATOR_API_URL`.
 
 | Symptom | Likely cause |
 | --- | --- |
