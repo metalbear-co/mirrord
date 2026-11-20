@@ -27,6 +27,7 @@ use mirrord_up::{
     PrepareConfig, RequestOrigin, RunConfig, RunType, ServiceMode, SubprocessCfg, SyncConfig,
     SyncEntry, SyncRestart, SyncRunConfig,
 };
+use notify::{RecursiveMode, Watcher};
 use tokio::{io::DuplexStream, sync::mpsc, task::JoinHandle};
 use tokio_tungstenite::{
     WebSocketStream,
@@ -258,6 +259,10 @@ fn start_with(
     mpsc::UnboundedReceiver<Operator>,
     tokio::sync::watch::Receiver<SyncActivity>,
 ) {
+    if watch {
+        wait_for_earlier_fs_events();
+    }
+
     let (operators, operators_rx) = mpsc::unbounded_channel();
     let connect: Connect<DuplexStream> = Box::new(move || {
         let operators = operators.clone();
@@ -284,6 +289,43 @@ fn start_with(
     )
     .unwrap();
     (tokio::spawn(driver.run()), operators_rx, activity)
+}
+
+/// Waits until a file-system watcher has reported every change that the test made so far, so that
+/// the driver's watcher, which starts later, doesn't see them.
+///
+/// FSEvents on macOS can report a change from shortly before a watch started. The driver would then
+/// take the entry's new directory for a replaced one, and push it in full where the test expects an
+/// incremental push or none.
+fn wait_for_earlier_fs_events() {
+    let marker_dir = tempfile::tempdir().unwrap();
+    let (events_tx, events_rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let _ = events_tx.send(event);
+    })
+    .unwrap();
+    watcher
+        .watch(marker_dir.path(), RecursiveMode::NonRecursive)
+        .unwrap();
+    // FSEvents reports a volume's changes in order, so once the watcher reports this file, it has
+    // reported every earlier change too.
+    write(marker_dir.path(), "marker", "");
+
+    loop {
+        let event = events_rx
+            .recv_timeout(FRAME_TIMEOUT)
+            .expect("the watcher didn't report the marker file in time")
+            .unwrap();
+        // The watcher resolves symlinks, and macOS's temporary directory is behind one, so only the
+        // file name matches.
+        if event
+            .paths
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == "marker"))
+        {
+            break;
+        }
+    }
 }
 
 /// The next connection that the driver opens.
