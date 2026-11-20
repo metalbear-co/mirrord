@@ -1,0 +1,9 @@
+load("//mirrord/test-utils:go_test_binary.bzl", "go_test_binary")
+
+go_test_binary(
+    name = "app-go",
+    deps = [
+        "@com_github_gin_gonic_gin//:gin",
+    ],
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

@@ -1,0 +1,9 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+
+cc_binary(
+    name = "issue2178",
+    srcs = ["main.c"],
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

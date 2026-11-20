@@ -22,6 +22,7 @@ mirrord-intproxy = { path = "../intproxy" }
 mirrord-intproxy-protocol = { path = "../intproxy/protocol", features = ["codec-async"] }
 mirrord-protocol = { path = "../protocol" }
 
+mirrord-runfiles = { path = "../runfiles" }
 actix-codec.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }

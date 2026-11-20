@@ -1,0 +1,11 @@
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//mirrord/test-utils:go_test_binary.bzl", "go_test_binary")
+
+# The builds are named after the app rather than after the package, because the layer skips programs
+# named like build tools, and `go` is one of them.
+go_test_binary(
+    name = "go",
+    binary_name = "fileops",
+    target_compatible_with = LINUX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

@@ -50,6 +50,14 @@ build:macos --host_linkopt=-Wno-unused-command-line-argument
 
 # Other languages' rules ---------------------------------------------------------------------------
 
+# The layer finds the Go runtime in a Go app by its symbols, which rules_go would strip with `-s -w`
+# in fastbuild builds.
+#
+# `--strip` doesn't reach the Rust code. rules_rust passes rustc its own `--codegen=strip`, from
+# the toolchain's `strip_level`, so `STRIP_SYMBOLS_FLAGS` strips the Rust programs separately, and
+# only in `-c opt` builds.
+build --strip=never
+
 # Uses rules_python's interpreter rather than the `python3` on `PATH`, which NixOS may not have.
 common --@rules_python//python/config_settings:bootstrap_impl=script
 
@@ -89,6 +97,10 @@ build:doc --remote_download_outputs=minimal
 # developer expects. Bazel unsets `RUNFILES_DIR` for `bazel run`, so each program still finds its
 # runfiles next to its own executable.
 run --run_in_cwd
+
+# A `js_binary`'s launcher expects to start in the output tree, and fails when `--run_in_cwd` starts
+# it in the developer's directory instead. With this variable, the launcher runs where it starts.
+run --run_env=JS_BINARY__NO_CD_BINDIR=1
 
 # Bazel's default summary has one line for each target, which says `PASSED` even when
 # `--test_filter` left no test to run. The detailed one lists each test case.

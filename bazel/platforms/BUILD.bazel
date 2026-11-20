@@ -103,3 +103,33 @@ toolchain(
     toolchain_type = "@bazel_tools//tools/test:default_test_toolchain_type",
 )
 
+# Code that links a C++ library that GCC compiled, like the prebuilt V8 of the layer tests'
+# `issue834` app, needs GCC's libstdc++, and the llvm toolchain only uses it when the platform
+# names it.
+[
+    platform(
+        name = cpu + "-linux-libstdcxx",
+        constraint_values = ["@llvm//constraints/cxxstdlib:libstdcxx.16.1.0"],
+        parents = [":{}-linux".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The layer tests' `cor_1734_file_mode` builds against a newer glibc than the binaries that mirrord
+# ships (see `//mirrord/layer-tests/apps/cor-1734-file-mode`).
+[
+    platform(
+        name = cpu + "-linux-glibc-2.34",
+        constraint_values = ["@llvm//constraints/libc:gnu.2.34"],
+        parents = [":{}-linux".format(cpu)],
+        visibility = ["//visibility:public"],
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
