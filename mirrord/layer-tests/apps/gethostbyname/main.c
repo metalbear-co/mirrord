@@ -13,7 +13,6 @@ void try_gethostbyname(const char name[]) {
     printf("h_addrtype %i\n\t", result->h_addrtype);
 
     for (int i = 0; result->h_addr_list[i]; i++) {
-      char str[INET6_ADDRSTRLEN];
       struct in_addr address = {};
       bcopy(result->h_addr_list[i], (char *)&address, sizeof(address));
       printf("h_addresses[%i] %s\n\t", i, inet_ntoa(address));

@@ -49,7 +49,6 @@ int main() {
     }
 
     typedef int  (*StartServerFn)(char*, int);
-    typedef void (*RunFileOpsFn)();
     typedef void (*StopServerFn)();
 
     StartServerFn StartServer = (StartServerFn)dlsym(handle, "StartServer");
