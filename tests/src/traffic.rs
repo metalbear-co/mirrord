@@ -6,22 +6,22 @@ mod steal;
 mod traffic_tests {
     use std::{ops::Not, path::PathBuf, time::Duration};
 
-    use futures::{stream, StreamExt};
-    use futures_util::{stream::TryStreamExt, AsyncBufReadExt};
+    use futures::{StreamExt, stream};
+    use futures_util::{AsyncBufReadExt, stream::TryStreamExt};
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api};
     use mirrord_test_utils::run_command::run_exec_with_target;
+    use kube::{Api, api::LogParams};
     use rstest::*;
 
     #[cfg(target_os = "windows")]
     use crate::utils::windows::LegacyConsoleGuard;
     use crate::utils::{
+        CONTAINER_NAME, KubeClient,
         application::GoVersion,
         client::kube_client,
         images::UNIX_SOCKET_SERVER_IMAGE,
         kube_service::KubeService,
         services::{basic_service, hostname_service, udp_logger_service},
-        KubeClient, CONTAINER_NAME,
     };
 
     #[cfg_attr(not(feature = "job"), ignore)]

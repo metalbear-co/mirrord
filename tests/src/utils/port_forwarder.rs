@@ -6,6 +6,7 @@ use k8s_openapi::api::core::v1::Service;
 #[cfg(feature = "operator")]
 use kube::api::ListParams;
 use kube::{Api, Client};
+use kube::{Api, Client, api::ListParams};
 use tokio::{
     net::TcpListener,
     task::{JoinHandle, JoinSet},
@@ -38,7 +39,9 @@ impl PortForwarder {
             port,
         ));
 
-        println!("Created a portforwarder for {pod_namespace}/{pod_name}:{port}. Local address is {address}");
+        println!(
+            "Created a portforwarder for {pod_namespace}/{pod_name}:{port}. Local address is {address}"
+        );
 
         Self { address, handle }
     }

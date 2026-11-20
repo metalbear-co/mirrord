@@ -3,14 +3,14 @@
 use std::{cmp::Ordering, time::Duration};
 
 use http_body_util::BodyExt;
-use hyper::{client::conn::http1::SendRequest, Method, Request};
+use hyper::{Method, Request, client::conn::http1::SendRequest};
 use hyper_util::rt::TokioIo;
 use rstest::*;
 use tokio::net::TcpStream;
 
 use crate::utils::{
-    application::Application, client::kube_client, images::HTTP_KEEP_ALIVE_IMAGE,
-    port_forwarder::PortForwarder, services::basic_service, KubeClient,
+    KubeClient, application::Application, client::kube_client, images::HTTP_KEEP_ALIVE_IMAGE,
+    port_forwarder::PortForwarder, services::basic_service,
 };
 
 async fn make_http_conn(portforwarder: &PortForwarder) -> SendRequest<String> {

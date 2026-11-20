@@ -3,13 +3,14 @@
 use std::time::Duration;
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::{runtime::watcher::Config, Api};
+use kube::{Api, runtime::watcher::Config};
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 
 use crate::utils::{
-    application::env::EnvApp, client::kube_client, kube_service::KubeService,
     services::basic_service, watch::Watcher, KubeClient,
+    AgentMode, KubeClient, application::env::EnvApp, client::kube_client,
+    kube_service::KubeService, services::basic_service, watch::Watcher,
 };
 
 /// Verifies that the agent container correctly exits after all clients are gone.

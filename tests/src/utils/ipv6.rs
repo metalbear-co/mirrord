@@ -3,18 +3,17 @@
 use http_body_util::{BodyExt, Empty};
 use hyper::{
     client::{conn, conn::http1::SendRequest},
-    Request,
 };
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
 use rstest::fixture;
 
 use crate::utils::{
+    KubeClient,
     client::kube_client,
     images::PYTEST_IMAGE,
     kube_service::KubeService,
-    services::{internal_service, TestWorkloadType},
-    KubeClient,
+    services::{TestWorkloadType, internal_service},
 };
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted

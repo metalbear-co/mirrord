@@ -2,12 +2,12 @@
 //! path and echoes all [`Message::Text`] and [`Message::Binary`] messages. The app exists
 //! successfully after any WebSockets connection closes.
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     routing::get,
-    Router,
 };
 use tokio::{net::TcpListener, sync::mpsc};
 

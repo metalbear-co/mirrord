@@ -10,14 +10,15 @@ mod file_ops_tests {
     };
 
     use k8s_openapi::api::core::v1::Pod;
-    use kube::{api::LogParams, Api};
     use mirrord_test_utils::run_command::run_exec_with_target;
+    use kube::{Api, api::LogParams};
     use rstest::*;
     use serde::Deserialize;
     use tempfile::NamedTempFile;
 
     use crate::utils::{
-        application::{file_ops::FileOps, GoVersion},
+        AgentMode, KubeClient,
+        application::{GoVersion, file_ops::FileOps},
         client::kube_client,
         kube_service::KubeService,
         services::{basic_service, go_statfs_service},

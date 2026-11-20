@@ -8,12 +8,11 @@ use k8s_openapi::api::{
     core::v1::{Pod, Service},
 };
 use kube::{
-    runtime::{
-        self,
-        watcher::{Config, Event},
-        WatchStreamExt,
-    },
     Api, Client, Resource,
+    runtime::{
+        self, WatchStreamExt,
+        watcher::{Config, Event},
+    },
 };
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use serde::de::DeserializeOwned;
