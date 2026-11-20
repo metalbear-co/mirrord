@@ -1,10 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
@@ -27,6 +23,15 @@
             if pkgs.stdenv.hostPlatform.isLinux then
               pkgs.buildFHSEnv {
                 name = "bazel";
+                targetPkgs =
+                  pkgs: with pkgs; [
+                    stdenv.cc.cc.lib
+                    zlib
+                    # Some tests run `git` from Bazel's default `PATH`.
+                    git
+                    # rules_powershell's build actions run PowerShell, which needs ICU.
+                    icu
+                  ];
                 runScript = lib.getExe pkgs.bazelisk;
                 # Ctrl-C reaches both bubblewrap and the Bazel client, which asks the Bazel server to
                 # cancel the command. If bubblewrap exited on it, the client would die with it, and
@@ -38,82 +43,30 @@
               pkgs.writeShellScriptBin "bazel" ''exec ${lib.getExe pkgs.bazelisk} "$@"'';
         in
         {
+          # An optional shell for the developers who use nix. Bazel downloads every tool that the
+          # build, `bazel run //:lint`, `bazel run //:format` and the end-to-end tests run, so the
+          # shell only has Bazel and the Rust tools of rust-analyzer.
           default = pkgs.mkShell {
             packages =
               with pkgs;
               let
-                # Packages required to build the rust workspace
-                rustPackages =
-                  let
-                    rustToolchain =
-                      if stdenv.hostPlatform.isDarwin then
-                        # On darwin we need the standard library for x86 too in order to compile universal binaries,
-                        # as well as the one for linux in order to work on the agent, which is linux-only. nixpkgs'
-                        # toolchain only ships the host's standard library, so we use rust-overlay to add the
-                        # cross-compilation ones.
-                        let
-                          rust-bin = inputs.rust-overlay.lib.mkRustBin { } pkgs;
-                        in
-                        [
-                          (rust-bin.stable.latest.default.override {
-                            extensions = [ "rust-src" ];
-                            targets = [
-                              "x86_64-apple-darwin"
-                              "x86_64-unknown-linux-gnu"
-                            ];
-                          })
-                          # The wrapper points `RUST_SRC_PATH` to nixpkgs' rust toolchain, but we use rust-overlay's,
-                          # so let rust-analyzer find out where it is on its own with `rustc --print sysroot`.
-                          rust-analyzer-unwrapped
-                        ]
-                      else
-                        [
-                          cargo
-                          clippy
-                          rustc
-                          rustfmt
-                          rust-analyzer
-                        ];
-                  in
-                  rustToolchain
-                  ++ [
-                    rustPlatform.bindgenHook
-                    # Required to build `containerd-client`
-                    protobuf
-                  ];
-
-                # Packages required to build the frontends
-                uiPackages = [
-                  nodejs
-                  pnpm_10
+                # For rust-analyzer's `cargo check`. Bazel brings its own toolchains.
+                rustPackages = [
+                  cargo
+                  clippy
+                  rustc
+                  rustfmt
+                  rust-analyzer
+                  rustPlatform.bindgenHook
+                  # Required to build `containerd-client`
+                  protobuf
                 ];
 
-                # Packages to run tests locally
-                testsPackages = [
-                  cargo-nextest
-                  go
-                  (python3.withPackages (
-                    pypkgs: with pypkgs; [
-                      fastapi
-                      flask
-                      uvicorn
-                    ]
-                  ))
-                ];
-
-                # Miscellaneous packages to run CI checks locally
-                miscPackages = [
-                  cargo-deny
-                  python3Packages.towncrier
-                  # CI's `content_check` runs the skills' fence-tag check through uv, on Python 3.12
-                  uv
-                  python312
-                ];
                 bazelPackages = [
                   bazel
                 ];
               in
-              rustPackages ++ uiPackages ++ testsPackages ++ miscPackages ++ bazelPackages;
+              rustPackages ++ bazelPackages;
           };
         }
       );
