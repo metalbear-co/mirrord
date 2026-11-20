@@ -6,6 +6,7 @@ use kube::{Api, api::PostParams};
 use mirrord_test_utils::run_command::run_exec_with_target;
 use rstest::*;
 use serde_json::json;
+use tempfile::NamedTempFile;
 
 use crate::utils::{
     KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL, application::env::EnvApp,
@@ -19,6 +20,9 @@ struct DirtyIptablesTest {
     kube_client: KubeClient,
     // Keep the target alive through assertions; consumers must bind this guard.
     namespace_guard: ResourceGuard,
+    /// The mirrord config that makes the agent use iptables-nft, where the init container leaves
+    /// the chain.
+    config_file: NamedTempFile,
 }
 
 /// This fixture only creates resources if a mirrord operator is NOT installed.
@@ -93,7 +97,7 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
                             "name": "init-bad-cleanup",
                             "image": init_image,
                             "imagePullPolicy": init_image_pull_policy,
-                            "command": ["/usr/sbin/iptables-legacy", "-t", "nat", "-N", "MIRRORD_INPUT"],
+                            "command": ["/usr/sbin/iptables-nft", "-t", "nat", "-N", "MIRRORD_INPUT"],
                             "securityContext": {
                                 "capabilities": {
                                     "add": ["CAP_NET_ADMIN"]
@@ -131,11 +135,23 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
     println!("Waiting for target `{target}` in namespace `{namespace}` to be ready...");
     watch::wait_until_pod_ready(&pod_name, &namespace, kube_client.get_client()).await;
 
+    // The init container leaves the chain in nftables, because since Linux 6.17 the legacy tables
+    // are behind `CONFIG_NETFILTER_XTABLES_LEGACY`, which some kernels leave out. The agent uses
+    // iptables-legacy whenever the kernel has it, and only looks for leftover chains in the backend
+    // that it uses, so the config makes it use nftables too.
+    let mut config_file = NamedTempFile::with_suffix(".json").unwrap();
+    serde_json::to_writer(
+        config_file.as_file_mut(),
+        &json!({ "agent": { "nftables": true } }),
+    )
+    .unwrap();
+
     DirtyIptablesTest {
         namespace,
         target,
         kube_client,
         namespace_guard,
+        config_file,
     }
 }
 
@@ -162,13 +178,16 @@ pub async fn agent_exits_on_dirty_tables(
         namespace,
         target,
         namespace_guard: _namespace_guard,
+        config_file,
         ..
     }) = oss_only_dirty_iptables_test.await
     else {
         return;
     };
     let application = EnvApp::NodeInclude;
-    let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
+    let mut mirrord_args = application.mirrord_args().unwrap_or_default();
+    mirrord_args.extend(["-f", config_file.path().to_str().unwrap()]);
+    let mirrord_args = Some(mirrord_args);
     let mut process = run_exec_with_target(
         application.command(),
         &target,
@@ -214,6 +233,7 @@ pub async fn agent_cleans_up_and_starts_on_dirty_tables(
         target,
         kube_client,
         namespace_guard: _namespace_guard,
+        config_file,
     } = dirty_iptables_test.await;
     let env = if operator_installed(&kube_client).await.unwrap() {
         // if the operator is installed, cleanup should be enabled by default.
@@ -222,7 +242,9 @@ pub async fn agent_cleans_up_and_starts_on_dirty_tables(
         Some(vec![("MIRRORD_AGENT_CLEAN_IPTABLES_ON_START", "true")])
     };
     let application = EnvApp::NodeInclude;
-    let mirrord_args = Some(application.mirrord_args().unwrap_or_default());
+    let mut mirrord_args = application.mirrord_args().unwrap_or_default();
+    mirrord_args.extend(["-f", config_file.path().to_str().unwrap()]);
+    let mirrord_args = Some(mirrord_args);
     let mut process = run_exec_with_target(
         application.command(),
         &target,
