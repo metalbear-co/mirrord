@@ -3,6 +3,7 @@ module(name = "mirrord")
 bazel_dep(name = "aspect_rules_js", version = "3.6.0")
 bazel_dep(name = "bazel_lib", version = "3.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "codesign.bzl", version = "0.0.13")
 bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "llvm", version = "0.8.27")
 bazel_dep(name = "platforms", version = "1.1.0")
@@ -48,6 +49,7 @@ use_repo(rules_rust, "rules_rust")
 # that the dependencies register.
 register_toolchains(
     "@llvm//toolchain:all",
+    "@codesign.bzl//toolchain:all",
     "//bazel/platforms:tests_run_on_the_host",
 )
 
@@ -329,6 +331,18 @@ go_deps_dev.module_override(
 )
 
 # Prebuilt tools and libraries ---------------------------------------------------------------------
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+# The macOS utilities that the CLI embeds to run SIP-protected programs.
+http_file(
+    name = "apple_utils",
+    downloaded_file_path = "apple-utils.tar.gz",
+    sha256 = "03125cd565e5a2f64274e7968e38289f3bfe68b86397fa1886568b1dd0e65c39",
+    # `mirrord-sip` only extracts the utilities again when `APPLE_UTILS_VERSION` changes, so this
+    # version has to match that constant, or users keep the utilities of an older CLI.
+    url = "https://github.com/metalbear-co/appleutils/releases/download/v10/apple-utils-v10.tar.gz",
+)
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 

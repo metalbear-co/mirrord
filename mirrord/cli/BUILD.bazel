@@ -1,4 +1,5 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@crates//mirrord-cli:data.bzl", "crate_data")
 load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
@@ -7,6 +8,7 @@ load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY", "WIND
 load("//bazel:image.bzl", "IMAGE_LABELS", "image_targets")
 load("//bazel:platform.bzl", "platform_filegroup")
 load("//bazel:rust.bzl", "crate_package")
+load(":macos_sign.bzl", "macos_sign")
 
 crate = crate_package(crate_data = crate_data())
 
@@ -22,6 +24,14 @@ crate = crate_package(crate_data = crate_data())
 BUNDLED_FILES = {
     "@platforms//os:linux": {
         "MIRRORD_BUNDLED_LAYER": "//mirrord/layer",
+        "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
+    },
+    "@platforms//os:macos": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer:universal_layer",
+        # The arm64e shim in the universal layer loads the arm64 layer.
+        "MIRRORD_BUNDLED_LAYER_MACOS_ARM64": "//mirrord/layer:layer_aarch64",
+        # The utilities that the CLI uses to run SIP-protected programs.
+        "MIRRORD_BUNDLED_SIP_BINARIES": "@apple_utils//file",
         "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
     },
 }
@@ -112,6 +122,83 @@ crate.unit_tests(
 
 crate.integration_tests(
     target_compatible_with = UNIX_ONLY,
+)
+
+# Universal macOS CLI ------------------------------------------------------------------------------
+
+# The standalone CLI for each Mac CPU, which `:cli_universal` combines.
+[
+    platform_filegroup(
+        name = "cli_" + cpu,
+        srcs = [":cli_standalone"],
+        cpu = cpu,
+        os = "macos",
+        tags = ["manual"],
+        target_compatible_with = MACOS_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The universal CLI for macOS, which keeps the ad hoc signature that lld gives its arm64 slice. That
+# signature is all that running it needs.
+run_binary(
+    name = "cli_universal",
+    srcs = [
+        ":cli_aarch64",
+        ":cli_x86_64",
+    ],
+    outs = ["universal/mirrord"],
+    tool = "@llvm//tools:llvm-lipo",
+    args = [
+        "-create",
+        "-output",
+        "$(execpath universal/mirrord)",
+        "$(execpath :cli_x86_64)",
+        "$(execpath :cli_aarch64)",
+    ],
+    target_compatible_with = MACOS_ONLY,
+    visibility = ["//visibility:public"],
+)
+
+# The paths of the PKCS #12 file with MetalBear's Developer ID and of its password, which
+# `macos_sign` signs the universal CLI and layer with. The `release.yaml` workflow sets them.
+#
+# The flags are in the CLI's package rather than the layer's because the CLI's release distributes
+# both files, and the layer only gets signed because the CLI embeds and distributes it.
+#
+# `rcodesign` only reads PKCS #12 files with the legacy encryption, and fails with "incorrect
+# password" on others, so export the identity with `openssl pkcs12 -export -legacy`.
+[
+    string_flag(
+        name = name,
+        build_setting_default = "",
+    )
+    for name in [
+        "macos_signing_p12_file",
+        "macos_signing_p12_password_file",
+    ]
+]
+
+# The universal CLI that a release distributes, signed with MetalBear's Developer ID.
+#
+# Without the signing flags, it's only signed ad hoc, despite its name. That lets a build of the
+# release's files without the identity, like `ci.yaml`'s on a release branch, still run the whole
+# signing chain. So a `signed` file from a build by hand isn't one that a release would ship.
+#
+# It's `manual`, so that only a build that asks for the release's file signs the CLI. The
+# `:cli_universal` that `//...` builds is the same CLI, with the same embedded layer.
+#
+# Releases don't notarize it.
+macos_sign(
+    name = "cli_universal_signed",
+    src = ":cli_universal",
+    out = "universal/signed/mirrord",
+    identifier = "mirrord",
+    tags = ["manual"],
+    target_compatible_with = MACOS_ONLY,
 )
 
 # Container image of `mirrord container`'s sidecar -------------------------------------------------
