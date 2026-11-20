@@ -115,9 +115,8 @@ push after it joins. Its `plan` job picks the other jobs from the changed paths,
 - The CI runner image (`tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
   A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
   when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
-- While the `windows-e2e` label is on a pull request, adding any label runs the Windows end-to-end tests; pushes
-  don't. `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's on before the pull request
-  leaves draft (`.pr_agent.toml`).
+- `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's on before the pull request leaves
+  draft (`.pr_agent.toml`).
 
 ## Changelog Fragments
 
