@@ -195,8 +195,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     find . \( -name '*.go_test_app' -o -name '*.c_test_app' \) \
         | tar -cf - -T - | tar -xf - -C /artifacts; \
     if [ -d node_modules ]; then tar -cf - node_modules | tar -xf - -C /artifacts; fi; \
+    # Each app's binary is named in the `[[bin]]` section at the end of its manifest.
     for dir in $(find tests/*/* -name Cargo.toml -printf '%h\n'); do \
-        name="$(sed -n 's/^name = "\(.*\)"/\1/p' "${dir}/Cargo.toml" | head -1)"; \
+        name="$(sed -n 's/^name = "\(.*\)"/\1/p' "${dir}/Cargo.toml" | tail -1)"; \
         cp "target/debug/${name}" /artifacts/target/debug/; \
     done
 

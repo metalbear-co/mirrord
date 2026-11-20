@@ -2,7 +2,7 @@
 
 ## Overview
 
-`mirrord-tests` is the end-to-end suite.
+`mirrord-tests` is the end-to-end suite: tests that run apps with the mirrord CLI against a Kubernetes cluster.
 
 - Gate a new test on what it targets with `#[cfg_attr(not(feature = "..."), ignore)]`, using the features in
   `Cargo.toml`. No workflow here or in the operator repository runs the tests behind `operator`; that repository's

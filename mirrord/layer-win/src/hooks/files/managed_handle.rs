@@ -12,8 +12,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use mirrord_str_win::{UnixPath, path_to_unix_path};
 use once_cell::sync::Lazy;
-use str_win::{UnixPath, path_to_unix_path};
 use winapi::{
     shared::{
         minwindef::{FILETIME, ULONG},

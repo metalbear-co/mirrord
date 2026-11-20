@@ -104,10 +104,10 @@ jobs:
           cd mirrord/layer-tests/tests/apps/outgoing
           cargo build
       - run: |
-          cd mirrord/layer-tests/tests/apps/recv_from
+          cd mirrord/layer-tests/tests/apps/recv-from
           cargo build
       - run: |
-          cd mirrord/layer-tests/tests/apps/dns_resolve
+          cd mirrord/layer-tests/tests/apps/dns-resolve
           cargo build
       - run: |
           cd mirrord/layer-tests/tests/apps/issue1776
@@ -131,10 +131,10 @@ jobs:
           cd mirrord/layer-tests/tests/apps/rebind0
           cargo build
       - run: |
-          cd mirrord/layer-tests/tests/apps/dup_listen
+          cd mirrord/layer-tests/tests/apps/dup-listen
           cargo build
       - run: |
-          cd mirrord/layer-tests/tests/apps/double_listen
+          cd mirrord/layer-tests/tests/apps/double-listen
           cargo build
       - run: ./scripts/build_c_apps.sh
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405

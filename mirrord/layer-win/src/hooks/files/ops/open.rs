@@ -17,8 +17,8 @@
 //!    `sync::Test_SyncFlagRequiresSynchronizeAccess`.
 //! 2. **fs_hooks_enabled config** -- if disabled, jump to fallback.
 //! 3. **path classification** -- only NT disk paths (`is_nt_path_disk_path`) and
-//!    convertible-to-Unix paths (`str_win::path_to_unix_path`) are candidates. Root (`/`) is
-//!    bypassed (frameworks sometimes open the drive root for metadata we don't model).
+//!    convertible-to-Unix paths (`mirrord_str_win::path_to_unix_path`) are candidates. Root (`/`)
+//!    is bypassed (frameworks sometimes open the drive root for metadata we don't model).
 //! 4. **mapping + filter** -- the Unix path, with and without its drive (`C:/app.json` and
 //!    `/app.json`), goes through
 //!    [`FileRemapper::change_pattern_path`](mirrord_layer_lib::file::mapper::FileRemapper::change_pattern_path)
@@ -66,8 +66,8 @@ use mirrord_layer_lib::{
     setup::setup,
 };
 use mirrord_protocol::file::{OpenFileRequest, OpenOptionsInternal};
+use mirrord_str_win::path_to_unix_path;
 use phnt::ffi::{_IO_STATUS_BLOCK, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_NONALERT};
-use str_win::path_to_unix_path;
 use winapi::{
     shared::{
         ntdef::{NTSTATUS, PHANDLE, PLARGE_INTEGER, POBJECT_ATTRIBUTES, PVOID, ULONG},

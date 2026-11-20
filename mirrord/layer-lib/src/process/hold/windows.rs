@@ -5,8 +5,8 @@
 
 use std::os::windows::io::BorrowedHandle;
 
-pub use utils_win::event::EventError as GateError;
-use utils_win::event::{EventAccess, NamedEvent, Wake, wait_any};
+pub use mirrord_utils_win::event::EventError as GateError;
+use mirrord_utils_win::event::{EventAccess, NamedEvent, Wake, wait_any};
 use uuid::Uuid;
 
 use crate::process::hold::{HoldError, HoldOutcome, ReleaseGate};

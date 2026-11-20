@@ -4,7 +4,7 @@ use std::mem::MaybeUninit;
 
 use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{MetadataInternal, SeekFileRequest, SeekFromInternal, XstatRequest};
-use str_win::{GLOBAL_NAMESPACE_PATH, string_to_u16_buffer, u16_buffer_to_string};
+use mirrord_str_win::{GLOBAL_NAMESPACE_PATH, string_to_u16_buffer, u16_buffer_to_string};
 use winapi::{
     shared::{minwindef::FILETIME, ntdef::POBJECT_ATTRIBUTES},
     um::{

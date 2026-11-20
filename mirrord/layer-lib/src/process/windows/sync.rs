@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use utils_win::{
+use mirrord_utils_win::{
     error::WindowsError,
     event::{EventAccess, EventError, NamedEvent, Wake, wait_any},
     process::process_status,
@@ -409,7 +409,7 @@ fn parent_liveness(role: &SessionRole) -> String {
 mod tests {
     use std::sync::Mutex;
 
-    use str_win::string_to_u16_buffer;
+    use mirrord_str_win::string_to_u16_buffer;
     use winapi::{
         shared::minwindef::{DWORD, TRUE},
         um::{
@@ -419,7 +419,7 @@ mod tests {
         },
     };
 
-    use utils_win::security::LowIntegrityLabel;
+    use mirrord_utils_win::security::LowIntegrityLabel;
 
     use super::*;
 

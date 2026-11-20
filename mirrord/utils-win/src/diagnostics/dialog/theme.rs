@@ -3,7 +3,7 @@
 //! These are the knobs that decide how the dialog looks. The window logic in the parent module
 //! draws against them.
 
-use str_win::string_to_u16_buffer;
+use mirrord_str_win::string_to_u16_buffer;
 use winapi::{
     shared::windef::{COLORREF, HFONT},
     um::{

@@ -26,10 +26,12 @@ use mirrord_layer_lib::{
         sync::{ChildInitEvent, InitWaitOutcome, ParentInitEvents},
     },
 };
-use tracing::subscriber::{NoSubscriber, with_default};
 #[cfg(debug_assertions)]
-use utils_win::diagnostics::monitor::{ACK_READY, InitReport, Registration, read_registration};
-use utils_win::diagnostics::{crash_dir, monitor::is_log_name};
+use mirrord_utils_win::diagnostics::monitor::{
+    ACK_READY, InitReport, Registration, read_registration,
+};
+use mirrord_utils_win::diagnostics::{crash_dir, monitor::is_log_name};
+use tracing::subscriber::{NoSubscriber, with_default};
 use winapi::{
     shared::minwindef::FALSE,
     um::{processthreadsapi::OpenProcess, winnt::SYNCHRONIZE},

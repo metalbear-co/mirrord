@@ -59,7 +59,7 @@ use std::{
     },
 };
 
-use str_win::string_to_u16_buffer;
+use mirrord_str_win::string_to_u16_buffer;
 use winapi::{
     ctypes::c_void,
     shared::{

@@ -20,7 +20,7 @@ use mirrord_layer_lib::{
     logging::current_log_file,
     process::windows::diagnostics::{SessionRole, session_role},
 };
-use utils_win::{
+use mirrord_utils_win::{
     diagnostics::{
         crash::{self, InstallOptions},
         crash_dir, crash_reporting_enabled, full_memory_dump,

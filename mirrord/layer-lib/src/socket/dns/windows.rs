@@ -187,7 +187,7 @@ pub fn check_address_reachability(socket: SOCKET, remote_addr: &SocketAddr) -> D
     tracing::debug!(
         "check_address_reachability -> address resolution successful for socket {}: node_buffer: {:?}",
         socket,
-        unsafe { str_win::u16_buffer_to_string(PCWSTR(node_buffer.as_ptr()).as_wide()) }
+        unsafe { mirrord_str_win::u16_buffer_to_string(PCWSTR(node_buffer.as_ptr()).as_wide()) }
     );
 
     Ok(())

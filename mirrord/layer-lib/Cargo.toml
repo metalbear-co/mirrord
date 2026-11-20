@@ -55,8 +55,8 @@ mirrord-sip = { path = "../sip" }
 exec.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-str-win = { path = "../str-win" }
-utils-win = { path = "../utils-win" }
+mirrord-str-win = { path = "../str-win" }
+mirrord-utils-win = { path = "../utils-win" }
 winapi.workspace = true
 stork.workspace = true
 strum.workspace = true
