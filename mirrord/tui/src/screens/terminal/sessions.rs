@@ -360,6 +360,9 @@ mod tests {
     }
 
     /// The parent lookup has to agree with the kernel about a process this test actually owns.
+    ///
+    /// `parent_pid` only asks the kernel on Linux and Apple's systems.
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
     #[test]
     fn a_real_child_reports_this_process_as_its_parent() {
         let mut child = mirrord_command::resolve_command("/bin/sh")
