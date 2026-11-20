@@ -40,7 +40,7 @@ async fn exec_python(
 /// in its runfiles, or, built with `standalone`, extracts the layer that it embeds to a file.
 #[rstest]
 #[tokio::test]
-async fn exec_extracts_layer_without_env() {
+async fn exec_loads_the_clis_own_layer() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let env = get_env(address, vec![("MIRRORD_FILE_MODE", "local")]);
@@ -54,23 +54,12 @@ async fn exec_extracts_layer_without_env() {
     let executable = python();
     let cmdline = vec![executable, "-c".to_owned(), "print('hi')".to_owned()];
 
-    let mut process = run_exec(
-        cmdline,
-        None,
-        None,
-        None,
-        Some(env_refs),
-        Some(&["MIRRORD_LAYER_FILE"]),
-    )
-    .await;
+    let mut process = run_exec(cmdline, None, None, None, Some(env_refs), None).await;
 
     let mut intproxy = TestIntProxy::new(listener, None).await;
 
     process.wait_assert_success().await;
     process.assert_stdout_contains("hi").await;
-    process
-        .assert_stderr_contains("MIRRORD_LAYER_FILE not set, extracting library from binary")
-        .await;
     if let Some(message) = intproxy.try_recv().await {
         panic!("unexpected message from layer: {message:?}");
     }
