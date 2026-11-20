@@ -142,7 +142,7 @@ impl CloudTokenCredentials {
         }
 
         let mut endpoint = Url::parse(cloud_url)?;
-        if !is_secure_cloud_url(&endpoint, cfg!(debug_assertions)) {
+        if !is_secure_cloud_url(&endpoint, cfg!(any(debug_assertions, test))) {
             return Err(SessionsManagerClientError::InsecureCloudUrl(endpoint));
         }
         endpoint
@@ -288,8 +288,10 @@ pub fn cloud_url_from_env() -> Result<String, SessionsManagerClientError> {
 /// so anything but TLS exposes it to the network.
 ///
 /// `allow_http` is set only in debug builds, so a developer can point a locally-built agent at a
-/// test endpoint or an app-server reachable only over plain HTTP. Release builds, the only ones
-/// that ship, require HTTPS without exception, loopback included.
+/// test endpoint or an app-server reachable only over plain HTTP. This crate's unit tests set it
+/// too, because their stand-in token endpoints serve plain HTTP on loopback, and they also run in
+/// optimized builds. `cfg(test)` is never set for a build that links this crate. Release builds,
+/// the only ones that ship, require HTTPS without exception, loopback included.
 fn is_secure_cloud_url(url: &Url, allow_http: bool) -> bool {
     !url.cannot_be_a_base()
         && match url.scheme() {
