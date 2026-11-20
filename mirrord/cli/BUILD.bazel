@@ -3,6 +3,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@crates//mirrord-cli:data.bzl", "crate_data")
 load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
+load("@rules_powershell//powershell:defs.bzl", "pwsh_binary", "pwsh_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY", "WINDOWS_ONLY")
 load("//bazel:image.bzl", "IMAGE_LABELS", "image_targets")
@@ -32,6 +33,10 @@ BUNDLED_FILES = {
         "MIRRORD_BUNDLED_LAYER_MACOS_ARM64": "//mirrord/layer:layer_aarch64",
         # The utilities that the CLI uses to run SIP-protected programs.
         "MIRRORD_BUNDLED_SIP_BINARIES": "@apple_utils//file",
+        "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
+    },
+    "@platforms//os:windows": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer-win:layer_win_dll",
         "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
     },
 }
@@ -66,6 +71,13 @@ run_binary(
     }),
 )
 
+# Gives the CLI's main thread a 4 MiB stack on Windows, which otherwise gives it 1 MiB. The CLI
+# polls its whole async runtime on that thread (see "Stack Usage" in `AGENTS.md`).
+MAIN_THREAD_STACK_FLAGS = select({
+    "@llvm//constraints/windows/abi:msvc": ["-Clink-arg=/STACK:4194304"],
+    "//conditions:default": [],
+})
+
 # The CLI that the tests and `bazel run //mirrord/cli` run.
 crate.binary(
     # Reads the layer and the UI from the runfiles rather than embedding them, so that a change to
@@ -82,6 +94,7 @@ crate.binary(
         }
         for condition, files in BUNDLED_FILES.items()
     }),
+    rustc_flags = MAIN_THREAD_STACK_FLAGS,
     # Public for the modules that depend on mirrord and run the CLI.
     visibility = ["//visibility:public"],
 )
@@ -106,6 +119,7 @@ crate.binary(
         for condition, files in BUNDLED_FILES.items()
     }),
     rustc_env_files = [":bundled_layer_id"],
+    rustc_flags = MAIN_THREAD_STACK_FLAGS,
     # Both binaries build the same crate, so only `:cli` documents it.
     doc = False,
     # Public for the modules that depend on mirrord and put the CLI in an image.
@@ -303,5 +317,45 @@ image_targets(
     config_fragment = ":image_config_fragment",
     labels = IMAGE_LABELS,
     manual = True,
+)
+
+# Windows stack check ------------------------------------------------------------------------------
+
+filegroup(
+    name = "cli_standalone_pdb",
+    srcs = [":cli_standalone"],
+    output_group = "pdb_file",
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+# Windows gives the CLI's main thread only the stack that the binary asks for, so this checks that
+# the CLI fits in it.
+pwsh_test(
+    name = "win_stack_check",
+    srcs = ["scripts/win_stack_check.ps1"],
+    data = [
+        ":cli_standalone",
+        ":cli_standalone_pdb",
+    ],
+    env = {
+        "CLI": "$(rlocationpath :cli_standalone)",
+        "CLI_PDB": "$(rlocationpath :cli_standalone_pdb)",
+        "MIRRORD_TELEMETRY": "false",
+    },
+    # vswhere finds editbin, which changes the stack of the CLI's copies, from these.
+    env_inherit = [
+        "ProgramData",
+        "ProgramFiles(x86)",
+    ],
+    deps = ["@rules_powershell//powershell/runfiles"],
+    # Each run of the CLI ends in seconds, but the test only gives up on one after five minutes.
+    timeout = "long",
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+pwsh_binary(
+    name = "win_stack_report",
+    srcs = ["scripts/win_stack_report.ps1"],
+    target_compatible_with = WINDOWS_ONLY,
 )
 

@@ -1,0 +1,63 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@crates//mirrord-utils-win:data.bzl", "crate_data")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//bazel:compatibility.bzl", "WINDOWS_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+# Only Windows builds use the library, but like every library, it isn't marked Windows-only, because
+# rules_rust analyzes every library for the execution platform too, and the crates that depend on it
+# only take it on Windows anyway.
+crate.library(
+    link_deps = select({
+        "@platforms//os:windows": [":logo"],
+        "//conditions:default": [],
+    }),
+)
+
+run_binary(
+    name = "logo_res",
+    srcs = [
+        "src/diagnostics/logo.bmp",
+        "src/diagnostics/logo.rc",
+    ],
+    outs = ["logo.res"],
+    tool = "@llvm//tools:llvm-windres",
+    args = [
+        "--no-preprocess",
+        # A `.res` file rather than a COFF object, because `lld-link` takes a binary's resources
+        # either from `.res` files or from one object, never from both, so a binary that links
+        # another resource still links the logo.
+        "--output-format=res",
+        "--input=$(execpath src/diagnostics/logo.rc)",
+        "--output=$(execpath logo.res)",
+    ],
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+# Passes the `.res` file to the link of every binary that depends on the library.
+cc_library(
+    name = "logo",
+    additional_linker_inputs = [":logo_res"],
+    # A plain linker input, because `lld-link` recognizes a `.res` file by its contents.
+    linkopts = ["$(execpath :logo_res)"],
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+crate.unit_tests(
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+[
+    crate.binary(
+        name = example,
+        crate_name = example,
+        srcs = ["examples/{}.rs".format(example)],
+        target_compatible_with = WINDOWS_ONLY,
+    )
+    for example in [
+        "preview_dialog",
+        "preview_scenarios",
+    ]
+]

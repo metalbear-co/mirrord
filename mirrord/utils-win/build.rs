@@ -1,4 +1,5 @@
-//! Embeds the crash-dialog logo as a Windows bitmap resource.
+//! Embeds the crash-dialog logo as a Windows bitmap resource under Cargo. Bazel builds ignore this
+//! script, and link the same resource through `BUILD.bazel`.
 //!
 //! `embed-resource` no-ops on non-Windows targets, so this is safe to call unconditionally.
 

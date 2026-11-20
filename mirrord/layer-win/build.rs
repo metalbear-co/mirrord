@@ -1,3 +1,6 @@
+//! Exports the layer's marker at ordinal 1 under Cargo. Bazel builds ignore this script, and link
+//! the same export through `BUILD.bazel`.
+
 // Cargo reads a build script's directives from its stdout, so `println!` is the interface here
 // rather than stray console output.
 #![allow(clippy::disallowed_macros)]

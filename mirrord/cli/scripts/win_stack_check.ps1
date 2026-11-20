@@ -1,11 +1,13 @@
+using module Runfiles
+
 <#
 .SYNOPSIS
-CI guard for the mirrord CLI's stack use on Windows.
+Checks the mirrord CLI's stack use on Windows, as `bazel test //mirrord/cli:win_stack_check`.
 
 .DESCRIPTION
 Windows gives a program's main thread only the stack its PE header asks for, and the CLI polls its
-whole runtime on that thread. This script checks two things, on patched copies of a built
-mirrord.exe (the original is never touched):
+whole runtime on that thread. This test checks two things, on patched copies of the CLI that Bazel
+builds, with its PDB:
 
   1. The overflow report works: with a stack far too small, the CLI must overflow and print its
      report, every frame named and sized (`mirrord_utils_win::diagnostics::stack`). The report is
@@ -13,18 +15,15 @@ mirrord.exe (the original is never touched):
   2. The CLI fits its budget: with the stack cut to -Budget, offline runs must finish without an
      overflow. When one does overflow, the report above the failure names the frames that grew.
 
-The copies sit next to the original, so the report finds the same PDB.
+The copies sit next to a copy of the PDB, so the report finds it.
 
 .EXAMPLE
-.\scripts\win_stack_check.ps1 -Exe target\debug\mirrord.exe
+bazel test //mirrord/cli:win_stack_check
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [string]$Exe,
-
-    # The stack the CLI must fit in. Kept well under what build.rs links, so growth shows up here
-    # before it reaches a user.
+    # The stack the CLI must fit in. It's well under the stack that `MAIN_THREAD_STACK_FLAGS` gives
+    # the CLI, so that growth shows up here before it reaches a user.
     [long]$Budget = 1MB,
 
     # Small enough that any build overflows, to exercise the report.
@@ -37,8 +36,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Exe = (Resolve-Path $Exe).Path
-$dir = Split-Path $Exe -Parent
+# The runfiles may be read-only, so the copies go to the test's own directory.
+$runfiles = [Runfiles]::Create()
+$dir = Join-Path $env:TEST_TMPDIR 'cli'
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+# The test target gives the runfiles paths of `:cli_standalone` and its PDB, which name mirrord's
+# repository whether it's the main one or a dependency of another module.
+Copy-Item $runfiles.Rlocation($env:CLI_PDB) $dir
+$Exe = Join-Path $dir 'mirrord.exe'
+Copy-Item $runfiles.Rlocation($env:CLI) $Exe
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $editbin = & $vswhere -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\editbin.exe' |
@@ -47,7 +53,7 @@ if (-not $editbin) { throw 'editbin not found; it comes with the MSVC build tool
 
 # An empty kubeconfig: the CLI fails at the cluster connection, after its argument parsing,
 # runtime, config and kube client setup have all run.
-$kubeconfig = Join-Path ([IO.Path]::GetTempPath()) 'mirrord-stack-check-kubeconfig.yaml'
+$kubeconfig = Join-Path $env:TEST_TMPDIR 'kubeconfig.yaml'
 Set-Content $kubeconfig "apiVersion: v1`nkind: Config`nclusters: []`ncontexts: []`nusers: []"
 
 # Quotes one argument the way CommandLineToArgvW reads it back.
@@ -65,13 +71,15 @@ function ConvertTo-CommandLineArgument([string]$Argument) {
 function Invoke-WithStack([long]$Stack, [string[]]$Arguments) {
     $copy = Join-Path $dir ("mirrord-stack-{0}k.exe" -f ($Stack / 1KB))
     Copy-Item $Exe $copy -Force
+    # The copy keeps the read-only attribute of Bazel's outputs, which would stop editbin.
+    (Get-Item $copy).IsReadOnly = $false
     & $editbin /nologo "/STACK:$Stack" $copy | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "editbin failed with exit code $LASTEXITCODE" }
 
     $env:KUBECONFIG = $kubeconfig
     $env:MIRRORD_PROGRESS_MODE = 'off'
-    $stdout = [IO.Path]::GetTempFileName()
-    $stderr = [IO.Path]::GetTempFileName()
+    $stdout = Join-Path $env:TEST_TMPDIR "stdout-$($Stack / 1KB)k.txt"
+    $stderr = Join-Path $env:TEST_TMPDIR "stderr-$($Stack / 1KB)k.txt"
     $process = Start-Process -FilePath $copy -NoNewWindow -PassThru `
         -ArgumentList (($Arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' ') `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr

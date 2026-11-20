@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-Measures how much stack a Windows program uses, and which functions use it.
+Measures how much stack a Windows program uses, and which functions use it, as
+`bazel run //mirrord/cli:win_stack_report`.
 
 .DESCRIPTION
 Runs a program under cdb and reports on its stack, in one of three modes:
@@ -15,23 +16,26 @@ Runs a program under cdb and reports on its stack, in one of three modes:
             first. MSVC-target code probes any frame larger than a page through __chkstk, with
             the frame size in rax, so a conditional breakpoint there sees each large frame.
 
-Frame sizes come from the PDB next to the program, so build with debug info (the dev profile has
-it). Only the top-level process is followed, not the processes it spawns.
+Frame sizes come from the PDB next to the program, which Bazel only builds with
+`--output_groups=+pdb_file`.
+
+Only the top-level process is followed, not the processes it spawns.
 
 Needs cdb (Debugging Tools for Windows, or WinDbg from the Store) and, for -Stack, editbin from
 the MSVC build tools.
 
 .EXAMPLE
-# Why does a debug mirrord.exe overflow a 1 MB stack? (offline: the empty kubeconfig keeps it
-# away from any cluster, and the overflow happens before the cluster is contacted)
+# Why does an unoptimized mirrord.exe overflow a 1 MB stack? (offline: the empty kubeconfig keeps
+# it away from any cluster, and the overflow happens before the cluster is contacted)
+bazel build //mirrord/cli:cli_standalone --output_groups=+pdb_file
 $env:KUBECONFIG = "$env:TEMP\empty-kubeconfig.yaml"
 Set-Content $env:KUBECONFIG "apiVersion: v1`nkind: Config`nclusters: []`ncontexts: []`nusers: []"
-.\scripts\win_stack_report.ps1 -Mode Overflow -Stack 1MB `
-    -Exe target\x86_64-pc-windows-msvc\debug\mirrord.exe `
-    -Arguments exec, --target, targetless, --, cmd.exe, /c, 'exit 0'
+bazel run //mirrord/cli:win_stack_report -- -Mode Overflow -Stack 1MB `
+    -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe `
+    -Arguments 'exec --target targetless -- cmd.exe /c "exit 0"'
 
 .EXAMPLE
-.\scripts\win_stack_report.ps1 -Mode Peak -Exe target\x86_64-pc-windows-msvc\debug\mirrord.exe -Arguments verify-config, mirrord.json
+bazel run //mirrord/cli:win_stack_report -- -Mode Peak -Exe bazel-bin\mirrord\cli\standalone\mirrord.exe -Arguments 'verify-config mirrord.json'
 #>
 [CmdletBinding()]
 param(
@@ -43,8 +47,9 @@ param(
     [Parameter(Mandatory)]
     [string]$Exe,
 
-    # Arguments for the program.
-    [string[]]$Arguments = @(),
+    # The program's arguments, as one command line. `bazel run` passes each of its own arguments as
+    # a string, so separate ones couldn't start with `-`.
+    [string]$Arguments = '',
 
     # Main-thread stack reserve to run with, in bytes (1MB works). Runs a patched copy.
     [long]$Stack = 0,
@@ -154,6 +159,8 @@ if ($Stack -gt 0) {
     # The copy keeps the original's PDB signature, so the symbol path below still matches it.
     $target = Join-Path $OutDir $exeName
     Copy-Item $Exe $target -Force
+    # The copy keeps the read-only attribute of Bazel's outputs, which would stop editbin.
+    (Get-Item $target).IsReadOnly = $false
     & (Find-Editbin) /nologo "/STACK:$Stack" $target
     if ($LASTEXITCODE -ne 0) { throw "editbin failed with exit code $LASTEXITCODE" }
     Write-Host "Running a copy with a $(Format-Size $Stack) main-thread stack: $target"
@@ -196,8 +203,8 @@ $commands = switch ($Mode) {
 }
 Set-Content -Path $script -Value ($commands + 'q') -Encoding Ascii
 
-$cdbArguments = @('-y', $symbolPath, '-cf', $script, $target) + $Arguments |
-    ForEach-Object { ConvertTo-CommandLineArgument $_ }
+$cdbArguments = @(@('-y', $symbolPath, '-cf', $script, $target) |
+    ForEach-Object { ConvertTo-CommandLineArgument $_ }) + $Arguments
 Write-Host "Running under cdb ($Mode); the log goes to $log"
 $process = Start-Process -FilePath (Find-Cdb) -ArgumentList ($cdbArguments -join ' ') -NoNewWindow -Wait -PassThru `
     -RedirectStandardOutput $log -RedirectStandardError (Join-Path $OutDir 'cdb.stderr.log')
