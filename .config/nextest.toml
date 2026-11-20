@@ -16,6 +16,8 @@ slow-timeout = { period = "2m", terminate-after = 3 }
 [profile.default.junit]
 path = "junit.xml"
 
+# `.github/scripts/flaky-issue.sh` picks the end-to-end target of a test by the filters of the
+# profiles below, so it needs the same change as they do.
 [profile.operator-install]
 default-filter = "package(mirrord-tests) & test(/^operator_install::/)"
 # Each test installs the cluster-wide operator, so they must not run at the same time.
@@ -24,3 +26,9 @@ test-threads = 1
 [profile.ipv6]
 default-filter = "package(mirrord-tests) & test(/^traffic::ipv6::/)"
 test-threads = 1
+
+# The end-to-end targets that pass a `--profile` ignore this profile, because the `--profile`
+# overrides `NEXTEST_PROFILE`.
+[profile.ci]
+# Makes one CI run report every failing test.
+fail-fast = false

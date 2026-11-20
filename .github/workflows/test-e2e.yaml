@@ -2,40 +2,52 @@ name: Test E2E
 
 on:
   workflow_call:
-    inputs:
-      runner:
-        description: "Runner label to use. Callers pass the one `plan` picked."
-        required: false
-        type: string
-        default: "blacksmith-16vcpu-ubuntu-2404"
-      runner_image_built:
-        description: "Whether the runner image comes from an uploaded artifact rather than the published one."
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
-  # `download image` polls the run's artifacts via `gh run download` while the
-  # agent image build may still be in flight, which needs the actions read scope.
-  actions: read
-  packages: read
 
 env:
   MIRRORD_TELEMETRY: false
-  KIND_CLUSTER_NAME: mirrord-e2e
 
 jobs:
+  # Builds what the `e2e` jobs run, so that they take it from the remote cache rather than each
+  # build it again.
+  build:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+
+      - name: Build the E2E tests
+        run: |
+          bazel build --remote_download_outputs=minimal //mirrord/cli //tests:e2e \
+            //tests:e2e_operator_install //tests:e2e_ipv6
+
   e2e:
-    runs-on: ${{ inputs.runner }}
+    needs: [build]
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 90
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - container-runtime: docker
-            cluster-runtime: kind
-          - container-runtime: containerd
-            cluster-runtime: minikube
-    name: e2e (${{ matrix.container-runtime }}/${{ matrix.cluster-runtime }})
+          - name: kind
+            runtime: kind
+            targets: //tests:e2e //tests:e2e_operator_install
+
+          - name: minikube
+            runtime: minikube
+            targets: //tests:e2e
+
+          - name: ipv6
+            runtime: kind
+            targets: //tests:e2e_ipv6
+
+    name: e2e (${{ matrix.name }})
     env:
       MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
     steps:
@@ -49,171 +61,78 @@ jobs:
           large-packages: false
           docker-images: true
           swap-storage: true
-      # `tool-cache: true` removes /opt/hostedtoolcache; the cluster setup restores tools into it.
+
+      # `tool-cache: true` deletes /opt/hostedtoolcache, which the later setup actions install into.
       - name: Recreate the tool cache directory
         run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$(id -u):$(id -g)" /opt/hostedtoolcache
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: ./.github/actions/e2e-setup
         with:
-          container-runtime: ${{ matrix.container-runtime }}
-          cluster-runtime: ${{ matrix.cluster-runtime }}
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: e2e
-          save-if: ${{ matrix.cluster-runtime == 'kind' }}
-      - uses: ./.github/actions/provide-ci-runner
-        with:
-          built: ${{ inputs.runner_image_built }}
-      - name: Build the mirrord CLI
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: cargo xtask build-cli
-      # The agent image is built by a sibling job that runs concurrently with this one
-      # (e2e no longer `needs` it), so the `test` artifact may not exist yet when we get
-      # here. Poll for it until it's ready, giving the build up to 8 minutes to finish.
-      # If the build job finishes without producing the artifact it has failed (a success
-      # would have uploaded it), so bail out immediately instead of waiting out the timeout.
-      - name: download image
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          deadline=$((SECONDS + 900))
-          until gh run download "$GITHUB_RUN_ID" --name test --dir /tmp; do
-            build_state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
-              --jq '.jobs[] | select(.name | endswith("build-agent-image")) | .status' | head -n1)
-            if [ "$build_state" = "completed" ]; then
-              echo "::error::Agent image build finished without producing the image artifact; failing fast"
-              exit 1
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Timed out after 15 minutes waiting for the agent image artifact"
-              exit 1
-            fi
-            echo "Agent image artifact not ready yet, retrying in 15s..."
-            sleep 15
-          done
-      - name: Load test image into minikube
-        if: ${{ matrix.cluster-runtime == 'minikube' }}
-        run: minikube image load /tmp/test.tar && rm /tmp/test.tar
-      - name: Load test image into kind
-        if: ${{ matrix.cluster-runtime == 'kind' }}
-        run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-bazel
+
+      # Every Bazel command of the job gets the runtime from the user's bazelrc, because a command
+      # with another runtime would discard Bazel's analysis cache.
+      - name: Set the cluster runtime
+        run: echo "common --//tests:cluster_runtime=${{ matrix.runtime }}" >> ~/.bazelrc
+
+      - name: Enable IPv6 forwarding for the kind cluster
+        if: ${{ matrix.name == 'ipv6' }}
+        run: sudo sysctl -w net.ipv6.conf.all.forwarding=1
+
+      # The smoke test uses no cluster, so only one of the jobs runs it.
       - name: Smoke-test mirrord wizard (alias to mirrord ui)
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: >-
-            ./target/debug/mirrord wizard --no-browser &&
-            curl -sf localhost:59281/health &&
-            (./target/debug/mirrord ui stop || true)
-      - name: Deploy ArgoCD Rollouts
+        if: ${{ matrix.name == 'kind' }}
         run: |
-          kubectl create namespace argo-rollouts
-          kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml
-      # The `cli` and `ls` tests only run on kind.
-      - name: Run all E2E tests
-        uses: ./.github/actions/run-in-ci-runner
+          bazel run //mirrord/cli -- wizard --no-browser
+          curl -sf localhost:59281/health
+          bazel run //mirrord/cli -- ui stop || true
+
+      # The tests create their clusters with the kind or minikube that Bazel downloads.
+      - name: Run the E2E tests
+        run: bazel test --test_env=MIRRORD_AGENT_RUST_LOG ${{ matrix.targets }}
+
+      # `ci-success` in `ci.yaml` merges these reports into the `nextest-junit` artifact, which
+      # `flaky-test-report.yaml` reads.
+      - name: Upload the test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          command: >-
-            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --test-threads=6
-            ${{ matrix.cluster-runtime == 'minikube' && '-E "not (test(/^cli::/) | test(/^ls::/))"' || '' }}
-      # Runs after the other tests, which would use the operator that these tests install.
-      - name: Run operator install E2E tests
-        if: ${{ matrix.cluster-runtime == 'kind' }}
-        uses: ./.github/actions/run-in-ci-runner
+          name: nextest-junit-${{ github.job }}-${{ matrix.name }}
+          path: bazel-testlogs/**/test.xml
+          if-no-files-found: ignore
+          # Only `main`'s reports feed the flaky test report.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 30 || 2 }}
+
+      # A failed end-to-end target keeps the logs of mirrord's intproxy and extproxy in its outputs.
+      - name: Upload the proxy logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          command: cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --profile operator-install
+          name: proxy-logs-${{ github.job }}-${{ matrix.name }}
+          path: bazel-testlogs/tests/**/test.outputs/**
+          if-no-files-found: ignore
+
+      # Collects the logs of every cluster that the tests created, with the kind, minikube and
+      # kubectl that Bazel downloads.
       - name: Collect logs
         if: ${{ failure() }}
         run: |
-          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
-          kubectl get all
-          kubectl describe pods
-          if [[ "${{ matrix.cluster-runtime }}" == "minikube" ]]; then
-            docker exec minikube find /var/log/pods -print -exec cat {} \;
+          kind() { bazel run @multitool//tools/kind -- "$@"; }
+          kubectl() { bazel run @multitool//tools/kubectl -- --kubeconfig "$RUNNER_TEMP/kubeconfig" "$@"; }
+          if [ "${{ matrix.runtime }}" = minikube ]; then
+            # `minikube update-context` writes the cluster into the kubeconfig in `KUBECONFIG`.
+            KUBECONFIG="$RUNNER_TEMP/kubeconfig" bazel run @multitool//tools/minikube -- update-context --profile mirrord-e2e
+            kubectl get all
+            kubectl describe pods
+            docker exec mirrord-e2e find /var/log/pods -print -exec cat {} \;
           else
-            kind export logs /tmp/kind-logs --name "$KIND_CLUSTER_NAME"
+            for cluster in $(kind get clusters); do
+              kind get kubeconfig --name "$cluster" > "$RUNNER_TEMP/kubeconfig"
+              kubectl get all
+              kubectl describe pods
+              kind export logs "/tmp/kind-logs/$cluster" --name "$cluster"
+            done
             find /tmp/kind-logs -type f -print -exec cat {} \;
           fi
-
-  # IPv6 is enabled by default, so sessions against IPv6-only clusters must work with no
-  # extra config. This job runs the IPv6-cluster tests (ignored in the regular e2e run) on
-  # a single-stack IPv6 kind cluster. `outgoing_traffic_single_request_ipv6_enabled` stays
-  # out - it needs IPv6 internet egress, which kind on a runner does not have.
-  e2e-ipv6:
-    runs-on: ${{ inputs.runner }}
-    name: e2e (ipv6 kind cluster)
-    env:
-      MIRRORD_AGENT_RUST_LOG: "warn,mirrord=debug"
-    steps:
-      - name: Free disk space
-        uses: metalbear-co/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          docker-images: true
-          swap-storage: true
-      # `tool-cache: true` removes /opt/hostedtoolcache; the cluster setup restores tools into it.
-      - name: Recreate the tool cache directory
-        run: sudo mkdir -p /opt/hostedtoolcache && sudo chown "$(id -u):$(id -g)" /opt/hostedtoolcache
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Enable IPv6 forwarding for the kind cluster
-        run: sudo sysctl -w net.ipv6.conf.all.forwarding=1
-      - uses: ./.github/actions/e2e-setup
-        with:
-          container-runtime: docker
-          cluster-runtime: kind
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          kind-cluster-config: tests/kind-cluster-ipv6-config.yaml
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: e2e
-          save-if: "false"
-      - uses: ./.github/actions/provide-ci-runner
-        with:
-          built: ${{ inputs.runner_image_built }}
-      - name: Build the mirrord CLI
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: cargo xtask build-cli
-      # Same artifact-polling dance as the main e2e job - the agent image is built by a
-      # sibling job running concurrently with this one.
-      - name: download image
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          deadline=$((SECONDS + 900))
-          until gh run download "$GITHUB_RUN_ID" --name test --dir /tmp; do
-            build_state=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
-              --jq '.jobs[] | select(.name | endswith("build-agent-image")) | .status' | head -n1)
-            if [ "$build_state" = "completed" ]; then
-              echo "::error::Agent image build finished without producing the image artifact; failing fast"
-              exit 1
-            fi
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Timed out after 15 minutes waiting for the agent image artifact"
-              exit 1
-            fi
-            echo "Agent image artifact not ready yet, retrying in 15s..."
-            sleep 15
-          done
-      - name: Load test image into kind
-        run: kind load image-archive /tmp/test.tar --name "$KIND_CLUSTER_NAME" && rm /tmp/test.tar
-      - name: Run IPv6 E2E tests
-        uses: ./.github/actions/run-in-ci-runner
-        with:
-          command: >-
-            cargo xtask test-e2e --binary target/debug/mirrord --layer target/debug/libmirrord_layer.so -- --profile ipv6
-      - name: Collect logs
-        if: ${{ failure() }}
-        run: |
-          find /tmp -type f -name 'mirrord-intproxy-*' -print -exec cat {} \;
-          kubectl get all
-          kubectl describe pods
-          kind export logs /tmp/kind-logs --name "$KIND_CLUSTER_NAME"
-          find /tmp/kind-logs -type f -print -exec cat {} \;

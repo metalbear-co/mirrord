@@ -257,7 +257,7 @@ class FlakyReportTests(unittest.TestCase):
         created = self.request("issueCreate")["variables"]
         self.assertEqual(created["title"], "Fix flaky test `pkg`/`fn` in repo")
         self.assertIn(
-            "cargo nextest run -p pkg -E 'binary_id(=pkg::bin) and test(/^fn::/)'",
+            "bazel test //... --test_arg=-E --test_arg='test(/^fn::/)'",
             created["body"],
         )
 
@@ -289,13 +289,27 @@ class FlakyReportTests(unittest.TestCase):
         self.file_issue("pkg", "module::flaky", 1, 1)
 
         self.assertIn(
-            "binary_id(=pkg) and test(=module::flaky)",
+            "bazel test //... --test_arg=-E --test_arg='test(=module::flaky)'",
             self.request("issueCreate")["variables"]["body"],
         )
         self.assertEqual(
             self.request("commentCreate")["variables"]["body"],
             f"Failed in [this run]({RUN_URL}).\n\n[flaky.log]({ASSET_URL})",
         )
+
+    def test_end_to_end_test_is_run_by_its_suite(self):
+        for test, suite in [
+            ("traffic::ipv6::flaky", "e2e_ipv6"),
+            ("operator_install::flaky", "e2e_operator_install"),
+            ("traffic::steal::flaky", "e2e"),
+        ]:
+            with self.subTest(test=test):
+                (self.root / "requests").write_text("")
+                self.file_issue("mirrord-tests", test, 1, 1)
+                self.assertIn(
+                    f"bazel test //tests:{suite} --test_arg=-E --test_arg='test(={test})'",
+                    self.request("issueCreate")["variables"]["body"],
+                )
 
     def test_repeat_is_noted_however_rarely_it_flaked(self):
         self.env["REPEAT"] = "1"
