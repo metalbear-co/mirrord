@@ -24,51 +24,53 @@ the user's local process with the mirrord layer loaded.
 
 ## Command Reference
 
+The project is managed and built by Bazel, so compile and test with Bazel instead of Cargo.
+
 ### Compiling
 
 ```bash
-# check the entire workspace at once
-# always use when a change spans multiple crates instead of checking each crate individually
-# CI appends `-- -Wclippy::indexing_slicing` to every clippy run, so add it to any clippy command here
-CARGO_BUILD_WARNINGS=deny cargo clippy --all-targets --all-features --keep-going -- -Wclippy::indexing_slicing
+# build everything
+bazel build --keep_going //...
 
-# check a specific crate
-# the agent is linux only
-CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-agent --target x86_64-unknown-linux-gnu --keep-going -- -Wclippy::indexing_slicing
+# clippy
+bazel build --config=clippy --keep_going //...
 
-# rustdoc of private items, as `check-rust-docs` builds it
-RUSTDOCFLAGS=-Dwarnings cargo xtask test-doc
+# rustdoc
+bazel build --config=doc //...
 
-# layer and cli bundled with the new layer
-# use only when a fresh mirrord + layer binary is needed for testing
-cargo xtask build-cli
+# run the CLI
+# this will rebuild the layer, ui, and every other dependency of the CLI if necessary
+bazel run //mirrord/cli -- <args>
 ```
-
-Use `--keep-going` to surface all errors at once. Use `clippy` instead of `check` to lint + compile simultaneously.
 
 ### Testing
 
 ```bash
-# integration tests
-# builds the cli and layer, unless given `--binary`/`--layer` or `MIRRORD_TESTS_USE_BINARY`/`MIRRORD_LAYER_FILE`
-cargo xtask test-integration
+# run every unit and integration test
+bazel test //...
 
-# filtered integration tests
-cargo xtask test-integration -- outgoing_udp --nocapture
+# one package's tests, e.g. the CLI's unit tests or the layer (integration) tests
+bazel test //mirrord/cli:unit_tests
+bazel test //mirrord/layer-tests/...
 
-# e2e tests, against the cluster kubectl points at; same artifact options
-cargo xtask test-e2e
-
-# unit tests of the cli, with placeholder layer files
-# other crates: cargo nextest run -p <package>
-cargo xtask test-ut
-
-# filtered unit tests
-cargo xtask test-ut -- resolve_url_happy_path -- --nocapture
-
-# any of these inside the CI runner image, which has every toolchain the suites need
-cargo xtask in-runner -- cargo xtask test-e2e
+# `--test_filter` filters tests by name and `--test_arg` passes an option to nextest
+bazel test //mirrord/layer-tests/... --test_filter=outgoing_udp --test_output=streamed
+bazel test //mirrord/cli:unit_tests --test_arg=-E --test_arg='test(/resolve_url/)'
 ```
+
+#### E2E tests
+
+Note that e2e tests take much longer to setup and run, so prefer running integration/unit tests instead.
+
+```bash
+# runs the e2e tests on a kind cluster, `mirrord-e2e`, which the target creates if it doesn't exist and loads the
+# agent built from the checkout into; `--//tests:cluster_runtime=minikube` uses minikube instead
+bazel test //tests:e2e
+```
+
+`CONTRIBUTING.md` explains the other e2e targets and how to use their clusters.
+
+#### Guidelines
 
 A unit test in a PR is never a review finding for being there. As a coding agent writing a change, add unit tests only
 when explicitly asked to by the developer you work for, the change's requirements, or a review comment you're told to
@@ -78,43 +80,55 @@ Prefer an integration test (`mirrord-layer-tests`, which stands in for the agent
 cluster. Don't add the `#[timeout]` of `rstest`: `.config/nextest.toml` already times out every test and reports it as
 a timeout, where `rstest` panics like any other failure.
 
+Bazel builds each dependency once for the whole workspace, with every feature that any `Cargo.toml` turns on,
+`[dev-dependencies]` included, so a feature that only a test needs ships in the agent, the CLI and the layer too. Don't
+turn on a test-only feature, like tokio's `test-util` for `#[tokio::test(start_paused = true)]`, or add a dev-dependency
+that turns one on, like `tower-test`. Use short real durations, or a duration that the test passes to the code
+(`CONTRIBUTING.md` has more).
+
 #### A test can merge and never run
 
-CI runs only what it names: every job is package-scoped and there is no workspace-wide run. Before relying on
-a new test, pull the job log and grep for its name rather than trusting a green check.
+Bazel only runs the tests that a `BUILD.bazel` declares. `crate.integration_tests()` declares one for each file in the
+package's `tests/`, but a package's first integration test needs that call, and its first `#[test]` needs a
+`crate.unit_tests()`, which also runs the tests of each binary that the package's `crate.binary` calls declare. A test
+target with `target_compatible_with` only builds and runs on those platforms, and a target tagged `manual`, like the
+e2e targets, only runs when a command names it. Before relying on a new test, pull the job log and grep for its name
+rather than trusting a green check.
 
-Grepping the workflows for `-p <package>` is not enough either, since some runs hide behind xtask.
-`mirrord/cli/`, whose package is plain `mirrord`, is tested on Linux by `cargo xtask test-ut` in
-`.github/workflows/test-integration.yaml` and on Windows by `cargo nextest run -p mirrord ...` in
-`test-windows.yaml`. macOS never runs those unit tests: it builds the binary and exercises it only through
-`mirrord-layer-tests`, so a macOS-gated test in `mirrord/cli/` never runs while the PR stays green.
-
-### Styling
+### Formatting
 
 ```bash
-# Formatting
-cargo fmt
+# lint and format the entire project (rust workspace, frontends, python scripts, starlark, etc)
+# pass `-- --help` for more information
+bazel run //:lint
+bazel run //:format
 ```
+
+Both run the tools that Bazel downloads, like Ruff, typos and pnpm, at the versions in `bazel/multitool.lock.json` and
+`package.json`, rather than the machine's. The end-to-end tests run Bazel's kind, minikube, kubectl and Helm too, so
+a machine needs only bazelisk, Git and Docker.
 
 ## CI
 
 `.github/workflows/ci.yaml` runs on pull requests into `main` that aren't drafts, and in the merge queue. A pull
 request into a branch its `pull_request` trigger doesn't list gets it only as part of a GitHub stack, from the first
-push after it joins. Its `plan` job picks the other jobs from the changed paths, and a change under
-`.github/workflows/` runs nearly every one.
+push after it joins. Its `plan` job skips the build when a pull request only changes the Markdown at the root or the
+changelog fragments. A pull request that only changes `docs/`, `guides/` or `skills/` skips the build and the changelog
+check, and the `lint` job runs the tests of the docs and skills instead. A change under `.github/` runs nearly every
+job.
 
-- `ci` (the `ci-success` job) is the only required check. It and `lint-success` only collect the jobs they need, so
-  when either fails, read the job under it that failed.
+- The `build-test (<platform>)` jobs build, lint, document and test, each in a step of its own, so read the step that
+  failed.
+- `test-e2e.yaml` runs the end-to-end tests on a kind, a minikube and an IPv6 kind cluster.
+- `ci` (the `ci-success` job) is the only required check. It only collects the jobs it needs, so when it fails, read
+  the job under it that failed.
 - `main` merges through the merge queue after one approval and with every review thread resolved, and the queue
   squashes each pull request into one commit.
 - nextest retries a failing test twice, so `FLAKY` marks a pass on a retry and `TRY 3 FAIL` a test that never passed.
 - Clippy runs for macOS, Windows, and Linux targets, so code behind a `cfg` can fail on one of them only.
-- `typos` checks the tracked Markdown outside `docs/`, `guides/` and `skills/`, which keep their findings until a
-  cleanup. Vale checks the Markdown at the root and every fragment in `changelog.d`. `CONTRIBUTING.md` says how to clear
-  a false positive from either.
-- The CI runner image (`tests/e2e.Dockerfile`) bakes in the compiled test apps (`scripts/prepare_e2e.sh --apps-only`).
-  A pull request rebuilds it when a path in `plan`'s `changed-runner-image` filter changes, and `main` republishes it
-  when one in `publish-ci-runner.yaml`'s paths does. A new kind of compiled app goes in the script and both lists.
+- `bazel run //:lint` runs `typos` on the tracked Markdown outside `docs/`, `guides/` and `skills/`, which keep their
+  findings until a cleanup, and Vale on the Markdown at the root and every fragment in `changelog.d`. `CONTRIBUTING.md`
+  says how to clear a false positive from either.
 - `no-greptile` skips Greptile's review, and `no-qodo` skips Qodo's only if it's on before the pull request leaves
   draft (`.pr_agent.toml`).
 
@@ -164,8 +178,8 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 ## Generated Files
 
 `mirrord-schema.json` and `mirrord-up-schema.json` are generated, as `mirrord/config/AGENTS.md` and
-`mirrord/up/AGENTS.md` say. A change to either runs `content_check`, which validates the config examples in `skills/`
-against them, so renaming or removing an option they use fails it.
+`mirrord/up/AGENTS.md` say. The `skills-fence-tags` check of `bazel run //:lint` validates the config examples in
+`skills/` against them, so renaming or removing an option they use fails it.
 
 ## Simplicity and Reuse
 
@@ -195,15 +209,16 @@ differs from an otherwise-obvious alternative.
 ## Stack Usage
 
 The CLI polls its whole runtime on the main thread, and on Windows that thread only gets the `/STACK` linked in
-`mirrord/cli/build.rs`. Debug builds are hit hardest: a function's frame keeps a slot for every future it builds
+`mirrord/cli/BUILD.bazel`. Debug builds are hit hardest: a function's frame keeps a slot for every future it builds
 before awaiting it, so one `match` with a large future per arm pays for all of them.
 
 - Put `#[mirrord_macros::boxed_future]` (above `#[tracing::instrument]`) on an `async fn` with a large future, such as
   a subcommand or a connection step: it builds its future on the heap, and callers keep writing `f(..).await`.
-  `Box::pin(f(..))` and `.boxed()` don't help in a debug build, since `f(..)` is still built in the caller's frame first.
-- On a stack overflow, the Windows CLI prints every frame with its size, largest first. Windows CI runs
-  `scripts/win_stack_check.ps1`, which fails when the CLI outgrows its budget and shows that report.
-- `scripts/win_stack_report.ps1` measures peak stack and large frames locally.
+  `Box::pin(f(..))` and `.boxed()` don't help in a debug build, since `f(..)` is still built in the caller's frame
+  first.
+- On a stack overflow, the Windows CLI prints every frame with its size, largest first. `bazel test //...` on Windows
+  runs `//mirrord/cli:win_stack_check`, which fails when the CLI outgrows its budget and shows that report.
+- `bazel run //mirrord/cli:win_stack_report` measures peak stack and large frames locally.
 
 ## Style Guideline
 
@@ -211,4 +226,4 @@ before awaiting it, so one `match` with a large future per arm pays for all of t
 - Prefer `to_owned` for `&str` → `String`.
 - Always use `foo.rs` instead of `foo/mod.rs` for module roots.
 - Run styling commands after every edit.
-- `STYLE.md` has more Rust conventions; follow it too.
+- `STYLE.md` has more conventions, for Rust and Starlark; follow it too.
