@@ -3,7 +3,8 @@
 // the apps image and runs via `kubectl exec` in the consumer pod, inheriting
 // its connection env the way temporal-starter does.
 //
-// SERVICEBUS_CONNECTION_STRING and SERVICEBUS_QUEUE_NAME come from the pod.
+// SERVICEBUS_FULLY_QUALIFIED_NAMESPACE (signing in as the pod's Entra identity) or
+// SERVICEBUS_CONNECTION_STRING, and SERVICEBUS_QUEUE_NAME, come from the pod.
 // SEND_BODY is the message body. SEND_USER, when set, is stamped as the
 // `mirrord-user` application property the split filters match on; leave it
 // unset to send a message with no routing property at all.
@@ -16,14 +17,36 @@ import (
 	"os"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 )
 
-func main() {
+// The same two ways in as the consumer: a namespace host with the ambient Azure credential
+// (workload identity in a pod, `az login` on a machine), else the emulator's connection string.
+func newClient() *azservicebus.Client {
+	if fqns := os.Getenv("SERVICEBUS_FULLY_QUALIFIED_NAMESPACE"); fqns != "" {
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			log.Fatalf("failed to build the Azure credential: %v", err)
+		}
+		client, err := azservicebus.NewClient(fqns, cred, nil)
+		if err != nil {
+			log.Fatalf("failed to create client for %s: %v", fqns, err)
+		}
+		return client
+	}
 	connectionString := os.Getenv("SERVICEBUS_CONNECTION_STRING")
 	if connectionString == "" {
-		log.Fatal("SERVICEBUS_CONNECTION_STRING must be set")
+		log.Fatal("SERVICEBUS_FULLY_QUALIFIED_NAMESPACE or SERVICEBUS_CONNECTION_STRING must be set")
 	}
+	client, err := azservicebus.NewClientFromConnectionString(connectionString, nil)
+	if err != nil {
+		log.Fatalf("failed to create client: %v", err)
+	}
+	return client
+}
+
+func main() {
 	queueName := os.Getenv("SERVICEBUS_QUEUE_NAME")
 	if queueName == "" {
 		log.Fatal("SERVICEBUS_QUEUE_NAME must be set")
@@ -33,11 +56,7 @@ func main() {
 		log.Fatal("SEND_BODY must be set")
 	}
 
-	client, err := azservicebus.NewClientFromConnectionString(connectionString, nil)
-	if err != nil {
-		log.Fatalf("failed to create client: %v", err)
-	}
-	sender, err := client.NewSender(queueName, nil)
+	sender, err := newClient().NewSender(queueName, nil)
 	if err != nil {
 		log.Fatalf("failed to create sender: %v", err)
 	}
