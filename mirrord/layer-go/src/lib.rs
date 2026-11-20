@@ -8,7 +8,6 @@
 //! That trampoline machinery is identical for every layer that wants to interpose on a Go
 //! application; only the table deciding what to do with each syscall differs. This crate owns the
 //! trampolines, the Go runtime version detection, and the symbol hooking, and lets each layer plug
-//! in its own dispatch table through [`init`].
 //!
 //! # Usage
 //!
@@ -27,6 +26,7 @@
 //! mirrord_layer_go::init(Handlers { syscall, syscall6 });
 //! mirrord_layer_go::enable_hooks(hook_manager, true);
 //! ```
+//! in its own dispatch table through `init`.
 #![cfg(all(
     any(target_arch = "x86_64", target_arch = "aarch64"),
     target_os = "linux"

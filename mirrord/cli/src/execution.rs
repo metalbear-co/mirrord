@@ -382,7 +382,7 @@ impl MirrordExecution {
     /// # Returns
     ///
     /// Returned [`MirrordExecution::environment`] contains everything that the user application
-    /// might need, including [`INJECTION_ENV_VAR`] and [`LayerConfig::RESOLVED_CONFIG_ENV`].
+    /// might need, including `INJECTION_ENV_VAR` and [`LayerConfig::RESOLVED_CONFIG_ENV`].
     #[tracing::instrument(level = Level::TRACE, skip_all, ret, err(level = Level::DEBUG))]
     pub(crate) async fn start_internal(
         config: &mut LayerConfig,
