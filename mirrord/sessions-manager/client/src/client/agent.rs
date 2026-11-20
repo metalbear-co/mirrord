@@ -1,6 +1,6 @@
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AssignmentId, ConnectionAssignment, ReplicaId, ServiceScope,
+    AgentIdentity, AgentMetadata, AssignmentId, ConnectionAssignment, ReplicaId, ServiceScope,
 };
 use tokio::{
     sync::mpsc,
@@ -30,9 +30,13 @@ impl AgentClient {
     /// Spawns the control-plane task, so this must be called within a Tokio runtime.
     ///
     /// `cancellation` shuts the control plane down when fired, as does [`Self::shutdown`].
+    /// `metadata` is passed on to every intproxy this agent pairs with. It is fixed for the
+    /// client's lifetime, like the `agent_instance_id` each call generates, so sessions-manager
+    /// never sees one instance change its metadata.
     pub fn start<T: SessionsManagerTransport>(
         scope: ServiceScope,
         replica_id: ReplicaId,
+        metadata: Option<AgentMetadata>,
         transport: T,
         cancellation: impl Into<Option<CancellationToken>>,
     ) -> Result<Self, SessionsManagerClientError> {
@@ -46,6 +50,7 @@ impl AgentClient {
             transport,
             scope,
             identity,
+            metadata,
             queue,
             cancellation.clone(),
         ));
@@ -67,12 +72,13 @@ impl AgentClient {
         transport: T,
         scope: ServiceScope,
         identity: AgentIdentity,
+        metadata: Option<AgentMetadata>,
         queue: QueueSender,
         cancellation: CancellationToken,
     ) -> Result<(), SessionsManagerClientError> {
         tokio::select! {
             _ = cancellation.cancelled() => Ok(()),
-            result = Self::run_loop(transport, scope, identity, queue) => {
+            result = Self::run_loop(transport, scope, identity, metadata, queue) => {
                 result
             }
         }
@@ -82,11 +88,12 @@ impl AgentClient {
         transport: T,
         scope: ServiceScope,
         identity: AgentIdentity,
+        metadata: Option<AgentMetadata>,
         queue: QueueSender,
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
         let mut assignments_subscriber =
-            DeduplicatingAssignmentSubscriber::new(transport.clone(), scope, identity);
+            DeduplicatingAssignmentSubscriber::new(transport.clone(), scope, identity, metadata);
 
         let result = loop {
             tokio::select! {
@@ -336,6 +343,7 @@ mod tests {
         let mut client = AgentClient::start(
             scope,
             "replica-a".to_owned().into(),
+            None,
             MockTransport::default(),
             None,
         )
@@ -367,6 +375,7 @@ mod tests {
         let mut client = AgentClient::start(
             scope,
             "replica-a".to_owned().into(),
+            None,
             transport.clone(),
             None,
         )
