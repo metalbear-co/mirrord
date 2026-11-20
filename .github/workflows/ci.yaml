@@ -1,34 +1,21 @@
 # Hello traveler!
 # This is the CI workflow for mirrord.
-# It is a bit complicated, but it is also very powerful.
-# We try to optimize for speed, but sometimes there are limitations.
-# Please try to document it here so people won't try repeating your errors.
-# 1. GitHub cache is limited to 10GB, so we try to have less jobs to not exceed it, since if we get over 10GB
-#    the cache will be evicted then builds will be slower, so it's better to have less jobs.
-# 2. I (Aviram) tried to use a container to build the Linux stuff, but couldn't get the e2e to work and (minikube in container)
-#    and the benefit seemed little.
-# 3. Please be mindful, we try to target less than 30 minutes for the CI to run. In a perfect world it'd be less than 5m.
-#     If you're adding something, please make sure it doesn't impact too much, and if you're reviewing please have it in mind.
-# 4. Pass `--target` to cargo only when cross-compiling. `cargo build --target X` on an X host and `cargo build`
-#    do not share the cache, because cargo puts the artifacts in different directories:
-#    https://doc.rust-lang.org/cargo/guide/build-cache.html. So all cargo invocations in a job, and in all jobs
-#    with the same rust-cache `shared-key`, must agree on `--target`.
+#
+# Please be mindful, we try to target less than 30 minutes for the CI to run. If you're adding
+# something, please make sure it doesn't impact too much, and if you're reviewing please have it in
+# mind.
 #
 # - Adding a compiled app to e2e:
 #
-# If you want to add a rust/go/[other compiled language] to the list of e2e apps, then you have to check 2 other
-# places.
+# If you want to add a rust/go/[other compiled language] to the list of e2e apps, then you have to
+# check 2 other places.
 #
 # 1. The `test-images` repo, if your e2e wants to use a custom image, that's not already there, and;
-# 2. `scripts/prepare_e2e.sh`, where you should add the compilation call. It builds the apps into the CI runner
-#    image; the CI section of `AGENTS.md` says when that image is rebuilt.
+# 2. `//tests:apps`, which builds the apps that the tests run.
 #
-# Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path of the app,
-# while forgetting (1) nets you a message saying that the service could not be reached/found.
-#
-# Caveats:
-#
-# You cannot use `workspace` dependencies in the test app, it fails to build, must fully specify the dependency.
+# Forgetting (2) will probably net you a message saying that `mirrord exec` could not find the path
+# of the app, while forgetting (1) nets you a message saying that the service could not be
+# reached/found.
 name: CI
 
 on:
@@ -49,9 +36,6 @@ permissions:
   contents: read
 
 env:
-  # Some crates have no tests on some platforms; nextest treats that as an error by default.
-  NEXTEST_NO_TESTS: warn
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   MIRRORD_TELEMETRY: false
   # Line tables keep the file and line numbers in panics and backtraces, but they build and link faster than full
   # debug info. rust-cache hashes this variable into its key, so the jobs that share a cache must all set it.
@@ -65,134 +49,46 @@ jobs:
     # don't run CI on drafts
     if: github.event.pull_request.draft == false
     outputs:
-      rs_changed: ${{ steps.changed-rs.outputs.any_changed }}
-      vale_changed: ${{ steps.changed-vale.outputs.any_changed }}
-      windows_changed: ${{ steps.changed-windows.outputs.any_changed }}
-      markdown_changed: ${{ steps.changed-markdown.outputs.any_changed }}
+      build_changed: ${{ steps.changed-build.outputs.any_changed }}
       ci_changed: ${{ steps.changed-ci.outputs.any_changed }}
-      flaky_report_changed: ${{ steps.changed-flaky-report.outputs.any_changed }}
-      protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
-      config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
-      content_changed: ${{ steps.changed-content.outputs.any_changed }}
       content_only: ${{ steps.changed-content-only.outputs.only_changed }}
-      dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
-      runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
-      frontend_changed: ${{ steps.changed-wizard-frontend.outputs.any_changed }}
-      # There are a couple of (rare) cases where `frontend_changed`, but no other mirrord changes
-      # skips building some of our e2e stuff (like skips building the agent), but it doesn't skip
-      # running some other stuff (`download image`), which, of course, breaks. We have this
-      # here so we can skip unwanted stuff when the changes are frontend exclusive.
-      run_e2e: ${{ steps.changed-frontend-only.outputs.only_changed != 'true' && (steps.changed-rs.outputs.any_changed == 'true' || steps.changed-ci.outputs.any_changed == 'true' || steps.changed-dockerfile.outputs.any_changed == 'true' || steps.changed-runner-image.outputs.any_changed == 'true') }}
       release_branch: ${{ steps.release-branch.outputs.branch }}
-      runner_4: ${{ steps.runners.outputs.runner_4 }}
-      runner_8: ${{ steps.runners.outputs.runner_8 }}
-      runner_8_arm: ${{ steps.runners.outputs.runner_8_arm }}
-      runner_16: ${{ steps.runners.outputs.runner_16 }}
-      blacksmith: ${{ steps.runners.outputs.blacksmith }}
     steps:
-      # Keep runner sizing in one place so every Linux job uses the same Blacksmith runner labels,
-      # including pull requests from forks.
-      - name: Pick runners
-        id: runners
-        run: |
-          {
-            echo "runner_4=blacksmith-4vcpu-ubuntu-2404"
-            echo "runner_8=blacksmith-8vcpu-ubuntu-2404"
-            echo "runner_8_arm=blacksmith-8vcpu-ubuntu-2404-arm"
-            echo "runner_16=blacksmith-16vcpu-ubuntu-2404"
-            echo "blacksmith=true"
-          } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-      - name: get CI changes
+
+      - name: Get CI changes
         id: changed-ci
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             .github/workflows/**
-      - name: get changed flaky report files
-        id: changed-flaky-report
+            .github/actions/**
+
+      # A change that only touches the Markdown files at the root and the changelog fragments skips
+      # the build. `*.md` only matches the files at the root, because Markdown elsewhere can be part
+      # of the build, like the docs that `mirrord mcp` embeds.
+      - name: Get build changes
+        id: changed-build
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            .github/scripts/flaky-*
-            .github/scripts/test_flaky_report.py
-            .github/workflows/check-flaky-report.yaml
-            .github/workflows/flaky-test-report.yaml
-            .github/workflows/ci.yaml
-      - name: get changed rs files
-        id: changed-rs
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            **/*.rs
-            mirrord/**
-            tests/**
-            Cargo.toml
-            Cargo.lock
-            .dockerignore
-            rust-toolchain.toml
-            rustfmt.toml
-            deny.toml
-            .cargo/**
-      - name: get CI runner image changes
-        id: changed-runner-image
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            tests/**
-            scripts/**
-            mirrord/layer-tests/tests/apps/**/*.go
-            mirrord/layer-tests/tests/apps/**/go.mod
-            mirrord/layer-tests/tests/apps/**/go.sum
-            mirrord/layer-tests/tests/apps/**/*.c
-            rust-toolchain.toml
-            Cargo.toml
-            Cargo.lock
-            package.json
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            .github/workflows/build-ci-runner.yaml
+            **
           files_ignore: |
-            tests/src/**
-            tests/README.md
-            tests/AGENTS.md
-      - name: get install script changes
+            *.md
+            changelog.d/**
+
+      - name: Get install script changes
         id: changed-install-script
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             scripts/install.sh
             .github/workflows/test-install-script.yaml
-      - name: get vale changes
-        id: changed-vale
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            *.md
-            changelog.d/*.md
-      - name: get changed windows files
-        id: changed-windows
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            mirrord/layer-win/**
-            mirrord/str-win/**
-            mirrord/**/windows/**
-            mirrord/**/win32/**
-            mirrord/**/win/**
-            scripts/**/*.ps1
-            **/*.ps1
-            .github/workflows/windows-build.yaml
-      - name: get markdown changes
-        id: changed-markdown
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            README.md
-      - name: get protocol changes
+
+      - name: Get protocol changes
         id: changed-protocol
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
@@ -200,57 +96,24 @@ jobs:
             mirrord/protocol/**
           files_ignore: |
             mirrord/protocol/**/*.md
-      - name: get protocol toml changes
+            mirrord/protocol/**/BUILD.bazel
+
+      - name: Get protocol toml changes
         id: changed-protocol-toml
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
             mirrord/protocol/Cargo.toml
-      - name: get dockerfile changes
-        id: changed-dockerfile
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            mirrord/agent/Dockerfile
-            mirrord/cli/Dockerfile
-      - name: get frontend changes
-        id: changed-wizard-frontend
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            packages/**
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            package.json
-      # `run-e2e` uses this to skip running e2e tests when only the frontend changes.
-      # See that step for more info on why we need this.
-      - name: get frontend-only changes
-        id: changed-frontend-only
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            packages/**
-            pnpm-lock.yaml
-            pnpm-workspace.yaml
-            package.json
-            changelog.d/**
-      - name: verify protocol bump
+
+      - name: Verify protocol bump
         run: |
           if [ "${{ steps.changed-protocol.outputs.any_changed }}" == "true" ] && [ "${{ steps.changed-protocol-toml.outputs.any_changed }}" != "true" ]; then
             echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
             exit 1
           fi
-      - name: get docs, guides and skills changes
-        id: changed-content
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            docs/**
-            guides/**
-            skills/**
-      # `towncrier_check` uses this to skip the changelog check when only the docs, guides or
-      # skills change.
-      - name: get docs, guides and skills-only changes
+
+      # A pull request that only changes these needs no changelog fragment and runs no build.
+      - name: Get docs, guides and skills-only changes
         id: changed-content-only
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
@@ -258,154 +121,197 @@ jobs:
             docs/**
             guides/**
             skills/**
-      - name: get config changes
-        id: changed-config-schema
-        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
-        with:
-          files: |
-            mirrord-schema.json
-            mirrord-up-schema.json
-      # `auto-release-pr` names release branches `releases/<version>`, so the
-      # bare-version pattern this used to match stopped matching anything and
-      # the IDE end-to-end jobs below have been silently skipping. Match the
-      # same prefix that `release.yaml` and `auto-release-pr.yaml` use.
+
+      # `auto-release-pr` names release branches `releases/<version>`.
       #
-      # This is false in the merge queue, where the ref is
-      # `gh-readonly-queue/...` and carries a pull request number rather than a
-      # branch name. The pull request run is the one that matters here.
+      # In the merge queue, the ref is `gh-readonly-queue/...`, which carries a pull request number
+      # rather than the branch name, so `branch` is false there. The release branch jobs only need
+      # to run on the pull request.
       - id: release-branch
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           echo "branch=$([[ "$BRANCH" == releases/* ]] && echo "true" || echo "false")" >> "$GITHUB_OUTPUT"
-      - name: output test
-        run: |
-          echo ${{ steps.changed-rs.outputs.any_changed }};
-          echo ${{ steps.changed-rs.outputs.all_changed_files }};
-          echo ${{ steps.changed-vale.outputs.any_changed }};
-          echo ${{ steps.changed-vale.outputs.all_changed_files }};
-          echo ${{ steps.changed-markdown.outputs.any_changed }};
-          echo ${{ steps.changed-markdown.outputs.all_changed_files }};
-          echo ${{ steps.changed-ci.outputs.any_changed }};
-          echo ${{ steps.changed-ci.outputs.all_changed_files }};
-          echo ${{ steps.changed-protocol.outputs.any_changed }};
-          echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
-          echo ${{ steps.changed-windows.outputs.any_changed }};
-          echo ${{ steps.changed-dockerfile.outputs.any_changed }};
-          echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-content.outputs.any_changed }};
-          echo ${{ steps.changed-content-only.outputs.only_changed }};
-          echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
-          echo ${{ steps.changed-frontend-only.outputs.only_changed }};
-          echo ${{ steps.changed-install-script.outputs.any_changed }};
-          echo ${{ steps.release-branch.outputs.branch }};
 
-  # ── checks (no build deps) ─────────────────────────────────────────
-
-  build-ci-runner:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-ci-runner.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
-      blacksmith: ${{ needs.plan.outputs.blacksmith == 'true' }}
-      build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
-    secrets: inherit
-
-  # A change to only `docs/`, `guides/` or `skills/` needs no changelog fragment, since the release
-  # notes describe changes to mirrord, not to its documentation or skills.
-  towncrier_check:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.content_only != 'true' }}
-    uses: ./.github/workflows/check-towncrier.yaml
-
-  lint:
-    needs: plan
-    uses: ./.github/workflows/check-lint.yaml
-    with:
-      run_markdown: ${{ needs.plan.outputs.markdown_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_rust: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_vale: ${{ needs.plan.outputs.vale_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_wizard_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-      run_ui_frontend: ${{ needs.plan.outputs.frontend_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    secrets: inherit
-
-  cargo-deny:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.windows_changed == 'true' }}
-    uses: ./.github/workflows/check-cargo-deny.yaml
-
-  check-flaky-report:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.flaky_report_changed == 'true' }}
-    uses: ./.github/workflows/check-flaky-report.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_4 }}
-
-  check-rust-docs:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/check-rust-docs.yaml
-    secrets: inherit
-
-  # The checks that `docs/` and `skills/` ran in their own repositories. Every docs feature page must
-  # have a plan tag, since `mirrord mcp` reads the tag to tell users which plan a feature needs. Every
-  # config block in the skills must validate against the schemas of this commit, so a schema change
-  # that breaks a skill fails on its own PR. `guides/` has no check yet, but is in `content_changed`
-  # so that a check added for it later runs without a change to the filter.
-  #
-  # `mirrord mcp` embeds `docs/docs` and `skills/skills`, so the job also runs the `mirrord-mcp`
-  # tests, which check that every embedded page and skill loads. The Rust jobs run them too, but
-  # only when Rust changes.
-  content_check:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.content_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    runs-on: ${{ needs.plan.outputs.runner_4 }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-      - name: Check the plan tags of the docs pages
-        run: python3 docs/.github/scripts/check_plan_tags.py
-      - name: Test the fence-tag check
-        run: >-
-          uv run --no-project --python 3.12 --with-requirements skills/.github/scripts/requirements.txt
-          python -m unittest discover -s skills/.github/scripts -p 'test_*.py'
-      - name: Check the fence tags and config blocks of the skills
-        run: >-
-          uv run --no-project --python 3.12 --with-requirements skills/.github/scripts/requirements.txt
-          python skills/.github/scripts/check_fence_tags.py
-          --mirrord-schema mirrord-schema.json --mirrord-up-schema mirrord-up-schema.json
-      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-      # The job has its own cache, since the jobs with the `mirrord` cache key don't build
-      # `mirrord-mcp`'s tests. With it, a docs pull request rebuilds only `mirrord-mcp` and the
-      # workspace crates it depends on, which rust-cache never caches, rather than their whole
-      # dependency tree. It is saved from `main` only, so pull requests don't replace it with their
-      # own builds.
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: content
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
-        with:
-          tool: cargo-nextest
-      - name: Test the embedded docs and skills
-        run: cargo nextest run -p mirrord-mcp
+  # ── checks (no build) ───────────────────────────────────────────────
 
   install_script:
     needs: [plan]
     if: ${{ needs.plan.outputs.install_script_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     uses: ./.github/workflows/test-install-script.yaml
 
-  # ── builds ──────────────────────────────────────────────────────────
+  # ── lint and format ─────────────────────────────────────────────────
+
+  lint:
+    needs: plan
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # `towncrier check` compares the branch with `origin/main`, which a shallow clone lacks.
+          fetch-depth: 0
+          # `release.yaml` releases the head of the release branch rather than its merge with
+          # `main`, so a release pull request checks that head.
+          ref: ${{ needs.plan.outputs.release_branch == 'true' && github.event.pull_request.head.sha || '' }}
+
+      - uses: ./.github/actions/setup-bazel
+
+      # Any other Bazel command would update a stale lockfile in place and hide it, so this step
+      # runs first.
+      - name: Bazel modules
+        run: |
+          # Fails if `MODULE.bazel.lock` doesn't match the modules.
+          bazel mod deps --lockfile_mode=error
+          # `bazel mod tidy` fixes the `use_repo` calls, so `git diff` fails if any didn't match the
+          # extensions' repositories. It also sorts the arguments of the calls by buildifier's
+          # default table, so buildifier sorts them back by `.buildifier-tables.json`.
+          bazel mod tidy
+          bazel run @multitool//tools/buildifier -- MODULE.bazel
+          git diff --exit-code
+
+      # `cargo deny` and `cargo shear` read the workspace through `cargo metadata`, which downloads
+      # every crate of `Cargo.lock`. Only `main` saves the cache, because every branch can read
+      # `main`'s caches.
+      - name: Restore Cargo's downloads
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # A pull request that only changes `docs/`, `guides/` or `skills/` needs no changelog
+      # fragment, since the release notes describe changes to mirrord, not to its documentation or
+      # skills.
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: bazel run //:lint -- ${{ needs.plan.outputs.content_only == 'true' && '--skip towncrier' || '' }}
+
+      - name: Save Cargo's downloads
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: bazel run //:format -- --check
+
+      # A pull request that only changes `docs/`, `guides/` or `skills/` skips `build-test`, so this
+      # runs the tests that read them: the `mirrord-mcp` tests, which check that every page and
+      # skill that `mirrord mcp` embeds loads, and the tests of the scripts that check them.
+      - name: Test the docs and skills
+        if: ${{ !cancelled() && needs.plan.outputs.content_only == 'true' }}
+        run: bazel test //docs/... //skills/... //mirrord/mcp/...
+
+  # ── build and test ──────────────────────────────────────────────────
+
+  # A pull request that only changes `docs/`, `guides/` or `skills/` builds nothing, and the `lint`
+  # job runs the tests that read them.
+  build-test:
+    needs: plan
+    if: ${{ needs.plan.outputs.build_changed == 'true' && needs.plan.outputs.content_only != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: blacksmith-16vcpu-ubuntu-2404
+
+          - name: linux-aarch64
+            runner: blacksmith-8vcpu-ubuntu-2404-arm
+
+          - name: macos
+            runner: blacksmith-6vcpu-macos-latest
+
+          - name: windows
+            runner: blacksmith-16vcpu-windows-2025
+
+    name: build-test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      # Stops Git Bash, the Windows steps' shell, from rewriting `//...` into the Unix path `/...`.
+      MSYS2_ARG_CONV_EXCL: "*"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Of the jobs that run on each platform, this one downloads the most, so it saves the cache.
+      - uses: ./.github/actions/setup-bazel
+        with:
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      # The build only checks that everything builds, so it doesn't download the outputs.
+      - name: Build
+        run: bazel build --remote_download_outputs=minimal //...
+
+      # Clippy also lints the end-to-end tests, which `//...` leaves out because they're `manual`.
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        run: bazel build --config=clippy //... //tests:_e2e
+
+      - name: Docs
+        if: ${{ !cancelled() }}
+        run: bazel build --config=doc //...
+
+      # `main` runs every test again rather than take its result from the remote cache, because a
+      # cached result brings back the `test.xml` of the run that cached it, with that run's retries.
+      # The flaky test report reads `main`'s reports, so it would count those retries again on every
+      # run.
+      #
+      # `bazel test` would build every target of `//...` and download all their outputs.
+      # `--build_tests_only` limits it to the tests and what they need, because the `Build` step
+      # already checked that the rest builds.
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: bazel test --build_tests_only ${{ github.ref == 'refs/heads/main' && '--nocache_test_results' || '' }} //...
+
+      - name: Upload the intproxy logs
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: intproxy_logs_${{ matrix.name }}
+          path: bazel-testlogs/mirrord/layer-tests/**/test.outputs/**
+          if-no-files-found: ignore
+          retention-days: 2
+
+      # `ci-success` merges these reports into the `nextest-junit` artifact, which
+      # `flaky-test-report.yaml` reads.
+      - name: Upload the test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nextest-junit-${{ github.job }}-${{ matrix.name }}
+          path: bazel-testlogs/**/test.xml
+          if-no-files-found: ignore
+          # Only `main`'s reports feed the flaky test report.
+          retention-days: ${{ github.ref == 'refs/heads/main' && 30 || 2 }}
+
+      # After every Bazel command, so that the disk cache holds the results of all of them.
+      - name: Save the disk cache
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/setup-bazel
+        with:
+          save-disk-cache: "true"
+
+  e2e:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.build_changed == 'true' && needs.plan.outputs.content_only != 'true' }}
+    uses: ./.github/workflows/test-e2e.yaml
 
   # we build mirrord to run ide tests, while it can take time for e2e/integration to finish,
   # building concurrently can run faster the release ide tests
@@ -426,93 +332,6 @@ jobs:
     with:
       runner: ${{ needs.plan.outputs.runner_8 }}
 
-  test_cli_image:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.dockerfile_changed == 'true' }}
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/build-cli-image.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_8 }}
-
-  # ── tests ───────────────────────────────────────────────────────────
-
-  test_agent:
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    container:
-      image: ghcr.io/metalbear-co/ci-agent-build:a15f775caaf65c1d08224d51dc51500f826a7405
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      # The image may predate a toolchain bump, so install the one in `rust-toolchain.toml`.
-      - run: rustup toolchain install
-      - uses: metalbear-co/setup-protoc@770e54d44679c8e1d8fdc06d1d9268fa79fbefb4
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Rust cache
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: agent
-      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
-        with:
-          tool: cargo-nextest
-      - name: mirrord-agent UT
-        run: cargo nextest run -p mirrord-agent
-      - name: mirrord-agent-env UT
-        run: cargo nextest run -p mirrord-agent-env
-      - name: mirrord-agent-iptables UT
-        run: cargo nextest run -p mirrord-agent-iptables
-      - name: mirrord-sessions-manager-client UT
-        run: cargo nextest run -p mirrord-sessions-manager-client
-
-  integration_tests:
-    needs: [plan, build-ci-runner]
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    permissions:
-      contents: read
-      packages: read
-    uses: ./.github/workflows/test-integration.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_16 }}
-      runner_arm: ${{ needs.plan.outputs.runner_8_arm }}
-      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
-
-  macos_tests:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/test-macos.yaml
-    secrets: inherit
-
-  # NOTE: e2e intentionally does not `need` test_agent_image so the two run concurrently.
-  # e2e spends its first ~9 min on cluster setup + building the CLI before it actually
-  # needs the agent image, so overlapping that with the ~10 min image build keeps the
-  # build off the critical path. The `download image` step polls for the artifact.
-  e2e:
-    needs: [plan, build-ci-runner]
-    if: ${{ needs.plan.outputs.run_e2e == 'true' }}
-    # A `workflow_call` job only passes down scopes the caller holds.
-    permissions:
-      contents: read
-      actions: read
-      packages: read
-    uses: ./.github/workflows/test-e2e.yaml
-    with:
-      runner: ${{ needs.plan.outputs.runner_16 }}
-      runner_image_built: ${{ needs.build-ci-runner.outputs.built == 'true' }}
-    secrets: inherit
-
-  windows_tests:
-    needs: plan
-    if: ${{ needs.plan.outputs.rs_changed == 'true' || needs.plan.outputs.windows_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
-    uses: ./.github/workflows/test-windows.yaml
-
-  # ── external calls ──────────────────────────────────────────────────
-
-  # depends on `build_mirrord_on_release_branch` which provides the binary on the current tag
-  # `build_mirrord_on_release_branch` depends on `plan`
-  # which checks if the branch is a release branch
   intellij_e2e_on_release_branch:
     needs: [build_mirrord_on_release_branch, test_agent_image]
     uses: metalbear-co/mirrord-intellij/.github/workflows/reusable_e2e.yaml@main
@@ -527,39 +346,26 @@ jobs:
 
   # ── gate ────────────────────────────────────────────────────────────
 
-  # We need some "accumulation" job here because bors fails (timeouts) to
-  # listen on matrix builds.
-  # Hence, we have some kind of dummy here that bors can listen on
+  # The one required check, so that branch protection doesn't have to list every job.
   ci-success:
     name: ci
     # We want this to run even if some of the required jobs got skipped
     if: always()
-    # This job prunes the run's inter-job artifacts, so every job that downloads one has to be
-    # listed here. Dropping a job from this list lets the prune run while that job is still going,
-    # and it then fails on a missing artifact.
     needs:
       [
-        towncrier_check,
         plan,
         intellij_e2e_on_release_branch,
         vscode_e2e_on_release_branch,
         test_agent_image,
-        test_cli_image,
-        macos_tests,
-        integration_tests,
+        build-test,
         e2e,
-        test_agent,
         lint,
-        check-rust-docs,
-        check-flaky-report,
-        cargo-deny,
-        windows_tests,
         install_script,
-        content_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
+      # Merging the test reports deletes each job's reports.
       actions: write
     steps:
       # Both report steps run ahead of the gate below, because a run that failed still retried the
@@ -595,13 +401,3 @@ jobs:
             echo "$failing"
             exit 1
           fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
-      - name: Delete inter-job artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/prune-artifacts.sh run "$GITHUB_RUN_ID"

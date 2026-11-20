@@ -42,7 +42,7 @@ artifact=$(jq -r --arg name "$ARTIFACT" '.artifacts[]? | select(.expired == fals
 # reports as it goes, so any still there mean the merge never happened.
 if [ -n "$artifact" ]; then
   if ! gh api "repos/$repo/actions/artifacts/$artifact/zip" > "$work/artifact.zip" 2> /dev/null ||
-    ! unzip -qo "$work/artifact.zip" -d "$work/reports" 2> /dev/null; then
+    ! python3 -m zipfile -e "$work/artifact.zip" "$work/reports" 2> /dev/null; then
     echo "::error::could not read the $ARTIFACT artifact of run $run_id" >&2
     exit 1
   fi

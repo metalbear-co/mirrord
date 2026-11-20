@@ -154,3 +154,23 @@ run --run_env=JS_BINARY__NO_CD_BINDIR=1
 # `--test_filter` left no test to run. The detailed one lists each test case.
 test --test_summary=detailed
 
+# CI -----------------------------------------------------------------------------------------------
+
+# `.github/actions/setup-bazel` turns this config on for every command in CI.
+common:ci --announce_rc
+common:ci --color=yes
+common:ci --curses=no
+common:ci --show_progress_rate_limit=60
+common:ci --show_timestamps
+build:ci --keep_going
+build:ci --verbose_failures
+test:ci --test_output=errors
+test:ci --test_env=NEXTEST_PROFILE=ci
+
+# Bazel's test environment leaves out the runner's own `CI`. Without it, mirrord's crash monitor on
+# Windows shows a dialog, which blocks the test until someone closes it.
+test:ci --test_env=CI=true
+
+# Bazel's test environment leaves out the workflows' `MIRRORD_TELEMETRY` too, and without it, every
+# mirrord session that a test starts reports its usage.
+test:ci --test_env=MIRRORD_TELEMETRY=false

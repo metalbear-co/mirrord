@@ -65,18 +65,57 @@ api() {
   printf '%s' "$response"
 }
 
-# JUnit's `classname` is nextest's binary id, which together with the test selects it and nothing
-# else: a parametrized test through every case rstest declares under it, a plain one by its name. A
-# binary id leads with the package that owns it, which narrows the build from the whole workspace to
-# the one crate.
+# JUnit's `classname` is nextest's binary id, which `rust_test` makes from the Bazel target that
+# runs the binary: `<crate>::<file>` for the target `<file>`, which runs `tests/<file>.rs`, and
+# `<crate>` or `<crate>::bin/<name>` for `unit_tests`, which runs the crate's own tests. The target
+# is in the crate's directory, because that's where `rust_nextest_test` looks for the crate.
+#
+# A target runs a single binary, so the filter only selects the test: a parametrized test through
+# every case rstest declares under it, a plain one by its name.
 if [ -s "$cases" ]; then
   filter="test(/^$name::/)"
 else
   filter="test(=$name)"
 fi
 
+crate=${package%%::*}
+target=unit_tests
+case $package in
+  *::bin/*) ;;
+  *::*) target=${package#*::} ;;
+esac
+
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+# shellcheck disable=SC2016 # The `$` belong to awk.
+manifest=$(git -C "$root" ls-files -z -- '*Cargo.toml' | (cd "$root" && xargs -0 awk -v crate="$crate" '
+  FNR == 1 { section = "" }
+  /^\[/ { section = $0 }
+  section == "[package]" && $1 == "name" && $3 == "\"" crate "\"" { print FILENAME; exit }'))
+
+# The end-to-end tests run in the `cluster_test` suites of `tests/BUILD.bazel`, each on a
+# cluster that it creates, and each suite runs the tests that the default filter of its nextest
+# profile in `.config/nextest.toml` selects. A suite passes when the filter leaves no test, so the
+# command names the suite whose profile selects the test, as those filters do.
+if [ "$crate" = mirrord-tests ]; then
+  case $name in
+    operator_install::*) target=e2e_operator_install ;;
+    traffic::ipv6::*) target=e2e_ipv6 ;;
+    *) target=e2e ;;
+  esac
+fi
+
+# A crate that moved or went away after the run has no target to name, so every target runs the
+# filter, and a test of the same name in another binary runs too. The filter doesn't pick the binary
+# with `binary_id()`, because the target already picks it.
+if [ -n "$manifest" ]; then
+  label="//$(dirname "$manifest"):$target"
+else
+  label=//...
+fi
+
+# shellcheck disable=SC2016 # The backticks are Markdown's.
 body=$(printf '### Running in isolation\n\n```\n%s\n```' \
-  "cargo nextest run -p ${package%%::*} -E 'binary_id(=$package) and $filter'")
+  "bazel test $label --test_arg=-E --test_arg='$filter'")
 
 upload() {
   local filename size target
