@@ -1,3 +1,9 @@
+//! What the layer tests share: the apps that they run under `mirrord exec`, by
+//! [`Application`], and the environment and the files that each run gets.
+//!
+//! It's part of the library rather than a module of each test, so that it compiles once rather
+//! than once for each of the tests, which are crates of their own.
+
 use std::{
     collections::HashMap,
     fmt::{self, Debug},
@@ -9,12 +15,14 @@ use std::{
 };
 
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
-pub use mirrord_layer_tests::intproxy::TestIntProxy;
 pub use mirrord_test_utils::{TestProcess, node, python, run_command::run_exec};
 use rstest::fixture;
 use tokio::net::TcpListener;
 use tracing::subscriber::DefaultGuard;
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
+
+pub use crate::intproxy::TestIntProxy;
+
 /// Returns the absolute path of the file at `path` in this package, like `configs/fs.json`,
 /// from the test's runfiles.
 ///

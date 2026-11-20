@@ -4,9 +4,7 @@
 use mirrord_protocol::{file::*, *};
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that issue [#1899](https://github.com/metalbear-co/mirrord/issues/1899) is fixed.
 ///

@@ -10,9 +10,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Run a bash script and verify that mirrord is able to load and hook into env, bash and cat.
 #[rstest]

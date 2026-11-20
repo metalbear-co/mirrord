@@ -2,8 +2,7 @@
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verifies that the `sendfile` hook counts only the bytes it actually wrote when the output
 /// accepts fewer bytes than were read.

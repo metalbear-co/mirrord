@@ -21,9 +21,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// How long the test waits for something that must happen.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -44,6 +42,7 @@ async fn start(action: &str, target: &str) -> (TestProcess, FakeIntProxy, FakeLa
             ("MIRRORD_FILE_READ_WRITE_PATTERN", "^/mirrord-test/"),
         ],
     );
+    let app_path = app_script("close-while-blocked/main.py");
     let application = Application::DynamicApp(
         python(),
         vec![

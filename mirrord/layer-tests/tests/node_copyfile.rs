@@ -14,9 +14,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// On Linux, libuv's `copyfile` sizes the copy with `fstat`, which official Node.js builds call
 /// as `__fxstat64`, and closes both files through libc's `syscall`. The config enables the hooks

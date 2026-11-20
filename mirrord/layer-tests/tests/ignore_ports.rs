@@ -6,9 +6,7 @@ use std::path::Path;
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Start an application (and load the layer into it) that listens on a port that is configured to
 /// be ignored, and verify that no messages are sent to the agent.

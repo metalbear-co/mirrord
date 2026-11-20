@@ -4,8 +4,7 @@ use std::vec;
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, DnsLookupError,
     ResolveErrorKindInternal::NoRecordsFound,

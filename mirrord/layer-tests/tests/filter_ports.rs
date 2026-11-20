@@ -1,17 +1,15 @@
 #![cfg(target_family = "unix")]
 #![cfg(target_os = "linux")]
 
-mod common;
-
 use core::assert_matches;
 use std::{io::Write, net::TcpListener, ops::Not, time::Duration};
 
-pub use common::*;
 use mirrord_config::{
     LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
     feature::network::incoming::IncomingConfig,
 };
+use mirrord_layer_tests::*;
 use mirrord_protocol::{
     ClientMessage,
     tcp::{Filter, HttpBodyFilter, HttpFilter, JqQuery, JsonPathQuery, LayerTcpSteal, StealType},

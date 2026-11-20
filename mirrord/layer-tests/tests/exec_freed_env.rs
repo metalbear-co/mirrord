@@ -2,9 +2,7 @@
 
 use std::{fs, process::Command};
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Regression test for `execve` reading an environment that the layer itself freed.
 ///

@@ -4,8 +4,7 @@ use std::path::Path;
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 #[rstest]
 #[tokio::test]
