@@ -164,10 +164,6 @@ Ex2:
 cargo xtask test-e2e --binary <path to mirrord binary> # builds only layer binary from source, takes mirrord binary from arg
 ```
 
-If new tests are added, decorate them with `cfg_attr` attribute macro to define what the tests target.
-For example, a test which only tests sanity of the ephemeral container feature should be decorated with
-`#[cfg_attr(not(feature = "ephemeral"), ignore)]`
-
 On Linux, running tests may exhaust a large amount of RAM and crash the machine. To prevent this, limit the number of concurrent jobs by running the command with e.g. `-j 4`
 If running on a laptop, you might want to pass the `--no-fail-fast` flag, as some tests can timeout. This is applicable to both integration and e2e.
 
@@ -200,12 +196,12 @@ In order to test on EKS, I used this blueprint: https://github.com/aws-ia/terraf
 After creating the cluster, I had to give myself permissions to the K8s objects, I did that via the AWS console (in the browser).
 Feel free to add instructions on how to make that "manual" step unnecessary.
 
-Tests that need such a cluster are gated on the `ipv6` cargo feature (not in the default
-feature set, so they are ignored everywhere else). The `e2e-ipv6` CI job runs them on a
-single-stack IPv6 kind cluster (`tests/kind-cluster-ipv6-config.yaml`); locally:
+Tests that need such a cluster are in `traffic::ipv6`, which only nextest's `ipv6` profile runs
+(see `.config/nextest.toml`), so the other runs leave them out. The `e2e-ipv6` CI job runs them on
+a single-stack IPv6 kind cluster (`tests/kind-cluster-ipv6-config.yaml`); locally:
 
 ```bash
-cargo xtask test-e2e -- --no-default-features --features ipv6 -E 'test(ipv6)'
+cargo xtask test-e2e -- --profile ipv6
 ```
 
 - steal_http_ipv6_traffic

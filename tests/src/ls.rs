@@ -4,11 +4,7 @@ use fancy_regex::Regex;
 use mirrord_test_utils::run_command::run_ls;
 use rstest::rstest;
 
-#[cfg(feature = "operator")]
-use crate::utils::services::operator::service_for_mirrord_ls;
-#[cfg(not(feature = "operator"))]
-use crate::utils::services::service_for_mirrord_ls;
-use crate::utils::{client::kube_client, images::PYTEST_IMAGE};
+use crate::utils::{client::kube_client, images::PYTEST_IMAGE, services::basic_service};
 
 /// Test for the `mirrord ls` command.
 #[cfg_attr(target_os = "windows", ignore)]
@@ -16,9 +12,7 @@ use crate::utils::{client::kube_client, images::PYTEST_IMAGE};
 #[tokio::test]
 pub async fn mirrord_ls() {
     let namespace = format!("test-namespace-{:x}", rand::random::<u32>());
-    // This function is implemented differently when the `operator` feature is enabled and when it
-    // is disabled.
-    let _setup = service_for_mirrord_ls(
+    let _setup = basic_service(
         &namespace,
         "NodePort",
         PYTEST_IMAGE,
@@ -28,7 +22,7 @@ pub async fn mirrord_ls() {
     )
     .await;
 
-    let mut process = run_ls(&namespace, cfg!(feature = "operator")).await;
+    let mut process = run_ls(&namespace).await;
     let res = process.wait().await;
     assert!(res.success(), "mirrord ls command failed");
 
@@ -36,20 +30,7 @@ pub async fn mirrord_ls() {
     let targets: Vec<String> =
         serde_json::from_str(&stdout).expect("mirrord ls output should be a valid JSON");
 
-    let types = [
-        "pod",
-        "deployment",
-        #[cfg(feature = "operator")]
-        "statefulset",
-        #[cfg(feature = "operator")]
-        "cronjob",
-        #[cfg(feature = "operator")]
-        "job",
-        #[cfg(feature = "operator")]
-        "replicaset",
-        #[cfg(feature = "operator")]
-        "service",
-    ];
+    let types = ["pod", "deployment"];
 
     let pattern = format!(r"^({})/.+(/container/.+)?$", types.join("|"));
     let re = Regex::new(&pattern).unwrap();

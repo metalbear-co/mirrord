@@ -31,6 +31,26 @@ pub use client::{KubeClient, kube_client};
 const TEXT: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
 pub const CONTAINER_NAME: &str = "test";
 
+/// How the CLI runs the agent: as a Kubernetes job, or as an ephemeral container in the target's
+/// pod.
+///
+/// A test that covers both takes the mode as an `rstest` value, which puts the mode in the names of
+/// its runs, so that `-E 'test(/Ephemeral/)'` selects the runs with ephemeral agents.
+#[derive(Debug, Clone, Copy)]
+pub enum AgentMode {
+    Job,
+    Ephemeral,
+}
+
+impl AgentMode {
+    pub fn flags(self) -> &'static [&'static str] {
+        match self {
+            Self::Job => &[],
+            Self::Ephemeral => &["-e"],
+        }
+    }
+}
+
 /// Name of the environment variable used to control cleanup after failed tests.
 /// By default, resources from failed tests are deleted.
 /// However, if this variable is set, resources will always be preserved.

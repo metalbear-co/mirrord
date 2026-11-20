@@ -2,12 +2,10 @@
 
 mod argo_rollout;
 mod cleanup;
-#[cfg(feature = "cli")]
 mod cli;
 mod env;
 mod file_ops;
 mod http;
-#[cfg(any(feature = "cli", feature = "operator"))]
 mod ls;
 mod operator_install;
 mod targetless;

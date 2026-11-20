@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![cfg(feature = "job")]
 
 use std::{cmp::Ordering, time::Duration};
 

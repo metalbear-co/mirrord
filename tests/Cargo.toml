@@ -45,19 +45,7 @@ rstest.workspace = true
 mirrord-kube = { path = "../mirrord/kube" }
 
 futures-util.workspace = true
-chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
 
 mirrord-test-utils = { path = "../mirrord/test-utils" }
-
-[features]
-default = ["ephemeral", "job", "cli", "targetless"]
-ephemeral = []
-job = []
-operator = []
-cli = []
-targetless = []
-# Tests that need a single-stack IPv6 cluster (see CONTRIBUTING.md). Not in default
-# features, so they are ignored unless the cluster is actually IPv6.
-ipv6 = []

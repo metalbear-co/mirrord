@@ -26,7 +26,6 @@ mod targetless_tests {
     /// Running this test on a cluster that does not have any pods, also proves that we don't use
     /// any existing pod and the agent pod is completely independent.
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn connect_to_kubernetes_api_service_with_targetless_agent() {
@@ -40,7 +39,6 @@ mod targetless_tests {
 
     /// Test spawning a targetless agent pod with a given priority class.
     #[cfg_attr(target_os = "windows", ignore)]
-    #[cfg_attr(not(feature = "targetless"), ignore)]
     #[rstest]
     #[tokio::test]
     pub async fn targetless_agent_with_priority_class(#[future] kube_client: KubeClient) {
@@ -125,7 +123,7 @@ mod targetless_tests {
         drop(test_process);
     }
 
-    #[cfg_attr(any(not(feature = "targetless"), target_os = "windows"), ignore)]
+    #[cfg_attr(target_os = "windows", ignore)]
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
     pub async fn intproxy_child() {
