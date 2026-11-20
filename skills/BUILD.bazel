@@ -1,0 +1,25 @@
+# The skills that `mirrord mcp` embeds (`//mirrord/mcp:corpus`): their Markdown and the JSON and
+# YAML files bundled with them, such as Helm values, which the skills point the agent at.
+filegroup(
+    name = "skills",
+    srcs = [
+        path
+        for path in glob(
+            ["skills/**"],
+            exclude = [
+                "skills/**/.*",
+                "skills/**/.*/**",
+                # Copies of the config schemas and of the config reference generated from them,
+                # which lag behind the schemas compiled into `mirrord mcp` and served by its config
+                # tools.
+                "skills/mirrord-config/references/configuration.md",
+                "skills/mirrord-config/references/schema.json",
+                "skills/mirrord-ci/references/schema.json",
+                "skills/mirrord-db-branching/references/db-branches-schema.json",
+                "skills/mirrord-up/references/schema.json",
+            ],
+        )
+        if path.endswith((".md", ".json", ".yaml", ".yml"))
+    ],
+    visibility = ["//mirrord/mcp:__pkg__"],
+)

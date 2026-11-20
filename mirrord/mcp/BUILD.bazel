@@ -1,0 +1,23 @@
+load("@crates//mirrord-mcp:data.bzl", "crate_data")
+load("@tar.bzl//tar:tar.bzl", "tar")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+# `mirrord-mcp` embeds this archive, with each file at its path in the repository.
+tar(
+    name = "corpus",
+    srcs = [
+        "//docs:pages",
+        "//skills",
+    ],
+    out = "corpus.tar.gz",
+    compress = "gzip",
+)
+
+crate.library(
+    compile_data = [":corpus"],
+    rustc_env = {"MIRRORD_BUNDLED_MCP_CORPUS": "$(execpath :corpus)"},
+)
+
+crate.unit_tests()
