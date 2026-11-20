@@ -12,9 +12,9 @@ The root of the GitBook docs is `./docs`, as defined in `.gitbook.yaml`. See [th
 
 ### Development
 
-GitBook still publishes the site from [metalbear-co/docs](https://github.com/metalbear-co/docs) until it's switched to the mirrord repository, so merging here doesn't publish yet, and pull requests get no GitBook preview.
+GitBook builds the site from the `docs-published` branch, which every mirrord release updates from this directory, so a merged change reaches the site with the next mirrord release. `AGENTS.md` says how to publish a fix sooner. GitBook doesn't build pull requests to the mirrord repository, so they get no preview.
 
-Changes to **content and basic structure** can be made in this directory, and other changes must be made via the [GitBook platform](https://app.gitbook.com). To do so, you will need access to the MetalBear organisation.
+Changes to **content and basic structure** can be made in this directory. Other changes, such as a space's settings, must be made via the [GitBook platform](https://app.gitbook.com), because GitBook doesn't store them in this directory. To do so, you will need access to the MetalBear organisation.
 
 When **changing the structure** of the docs, like creating a new page, you must update `./docs/SUMMARY.md` to reflect this. New folders should have a `README.md` as their overview page.
 
@@ -22,4 +22,4 @@ When **changing the structure** of the docs, like creating a new page, you must 
 
 ### GitBook
 
-Each tab on the docs site corresponds to a GitBook "space". Adding a space is done through GitBook, and GitHub sync must be set up to sync changes between the space's repo and the website. Note that changes made in GitBook may be live.
+Each tab on the docs site corresponds to a GitBook "space". Adding a space is done through GitBook, and GitHub sync must be set up to sync changes between the space's repo and the website. Note that changes made in GitBook may be live. The next publish replaces the content of the `docs-published` branch, so a page edited and merged in GitBook is lost unless the same change is also made here.
