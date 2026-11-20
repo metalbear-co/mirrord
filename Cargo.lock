@@ -6055,6 +6055,7 @@ dependencies = [
  "mirrord-test-utils",
  "portable-pty",
  "ratatui",
+ "rustls",
  "serde",
  "serde-saphyr",
  "serde_json",
