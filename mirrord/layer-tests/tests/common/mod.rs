@@ -243,12 +243,12 @@ impl Application {
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
             | Application::PythonDontLoad
-            | Application::PythonListen => Self::get_python3_executable().await,
-            Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
             Application::Fork => String::from("tests/apps/fork/out.c_test_app"),
             Application::ReadLink => String::from("tests/apps/readlink/out.c_test_app"),
             Application::StatfsFstatfs => String::from("tests/apps/statfs_fstatfs/out.c_test_app"),
             Application::MkdirRmdir => String::from("tests/apps/mkdir_rmdir/out.c_test_app"),
+            | Application::PythonListen
+            | Application::PythonFastApiHTTP
             Application::Cor1734FileMode => {
                 String::from("tests/apps/cor_1734_file_mode/out.c_test_app")
             }
@@ -456,13 +456,18 @@ impl Application {
                 println!("using script from {app_path:?}");
                 vec![String::from("-u"), app_path.to_string_lossy().to_string()]
             }
+            // Bazel's Python environment has no `uvicorn` program, so uvicorn runs as a module.
             Application::PythonFastApiHTTP => vec![
+                String::from("-m"),
+                String::from("uvicorn"),
                 String::from("--port=9999"),
                 String::from("--host=0.0.0.0"),
                 String::from("--app-dir=tests/apps/"),
                 String::from("app_fastapi:app"),
             ],
             Application::PythonIssue864 => vec![
+                "-m".to_owned(),
+                "uvicorn".to_owned(),
                 "--reload".to_owned(),
                 "--port=18064".to_owned(),
                 "--host=0.0.0.0".to_owned(),
