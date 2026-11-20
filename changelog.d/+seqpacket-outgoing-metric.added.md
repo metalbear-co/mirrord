@@ -1,0 +1,1 @@
+The mirrord agent now exposes `mirrord_agent_seqpacket_outgoing_connection_count` on its `/metrics` endpoint, bringing seqpacket outgoing connections in line with the existing TCP and UDP outgoing-connection metrics.
