@@ -1,24 +1,24 @@
 //! What a standalone intproxy presents to sessions-manager, with the agent's API key configured in
 //! the same environment.
 //!
-//! The environment is process-wide, so this lives in its own test binary instead of next to the
-//! unit tests, which expect the API key to be unset.
+//! The test sets the API key in the environment, which the other unit tests expect to be unset.
+//! nextest runs each test in a process of its own, so they don't see it.
 
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use crate::{
+    DirectTransport, IntproxyClient, LoginToken, LoginTokenSource, ServiceScope,
+    SessionsManagerClientError, SessionsManagerConnectInfo, SessionsManagerEndpoint,
+};
 use axum::{
     Router,
     http::{StatusCode, Uri, header::AUTHORIZATION},
     response::IntoResponse,
 };
 use futures::future::{BoxFuture, FutureExt};
-use mirrord_sessions_manager_client::{
-    DirectTransport, IntproxyClient, LoginToken, LoginTokenSource, ServiceScope,
-    SessionsManagerClientError, SessionsManagerConnectInfo, SessionsManagerEndpoint,
-};
 use tokio::net::TcpListener;
 
 struct FixedLogin;
@@ -53,7 +53,8 @@ async fn intproxy_presents_the_login_token_and_never_the_api_key() {
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-    // SAFETY: this binary's only test sets these before anything reads the environment.
+    // SAFETY: nextest runs each test in a process of its own, and nothing in this one reads the
+    // environment yet.
     unsafe {
         std::env::set_var("MIRRORD_METALBEAR_CLOUD_URL", format!("http://{address}"));
         std::env::set_var("MIRRORD_SESSIONS_MANAGER_API_KEY", "metalbear_key_test");
