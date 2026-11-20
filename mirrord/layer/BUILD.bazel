@@ -1,0 +1,26 @@
+load("@crates//mirrord-layer:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "MACOS_ONLY", "UNIX_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.shared_library(
+    # The layer is loaded into arbitrary programs, so it links the C++ runtime and the unwinder
+    # statically rather than relying on libraries that users' machines may not have.
+    cc_runtime_linkage = "static",
+    # Turns off the run paths, which would make every program that the layer is loaded into search
+    # Bazel's directories for libraries first. The layer needs none: rules_rust adds a run path to
+    # the directory of each C++ runtime library even when it links them statically.
+    features = [
+        "-runtime_library_search_directories",
+        # The llvm toolchain's own feature, which passes the same run paths as the one above.
+        "-runtime_library_search_directories_workaround",
+    ],
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/cli:__pkg__"],
+)
+
+crate.unit_tests(
+    target_compatible_with = UNIX_ONLY,
+)
+

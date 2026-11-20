@@ -1,0 +1,20 @@
+load("@crates//mirrord-operator:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+# Builds the crate with only its `crd` feature and its dependencies, as the operator does to get the
+# CRDs, to check that the code behind `crd` doesn't use anything that only `client` turns on, which
+# `:operator` turns on too.
+#
+# The hub builds each dependency once, with the features of the workspace's build, so the check
+# misses a use of a dependency's feature that only `client` turns on.
+crate.library(
+    name = "operator_crd",
+    cargo_features = ["crd"],
+    doc = False,
+)
+
+crate.unit_tests()

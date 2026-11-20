@@ -1,0 +1,11 @@
+load("@crates//medschool:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.binary(
+    compile_data = ["readme.md"],
+)
+
+crate.unit_tests()
+

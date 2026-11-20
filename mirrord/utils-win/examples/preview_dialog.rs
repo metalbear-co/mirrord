@@ -1,5 +1,6 @@
 //! Preview the crash dialog without a real crash.
 //!
+//! Run: `bazel run //mirrord/utils-win:preview_dialog`
 
 #[cfg(windows)]
 fn main() {

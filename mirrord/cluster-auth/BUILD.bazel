@@ -1,0 +1,20 @@
+load("@crates//mirrord-cluster-auth:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+crate.unit_tests()
+
+crate.integration_tests(
+    tests = {
+        "eks": {
+            # The test waits about a minute for several token refreshes.
+            "size": "medium",
+            # The test needs the `eks` feature, which only the agent turns on, and only on Linux.
+            "target_compatible_with": LINUX_ONLY,
+        },
+    },
+)

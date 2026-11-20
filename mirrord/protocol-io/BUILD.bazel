@@ -1,0 +1,18 @@
+load("@crates//mirrord-protocol-io:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+# Only crates outside the workspace, like the operator's, turn on the `websocket` feature, so this
+# target builds the code behind it, for the compiler and clippy to check.
+crate.library(
+    name = "protocol-io_websocket",
+    crate_features = ["websocket"],
+    # `@crates` gives a package only the optional dependencies that the workspace turns on.
+    deps = ["@crates//tokio-tungstenite"],
+    doc = False,
+)
+
+crate.unit_tests()

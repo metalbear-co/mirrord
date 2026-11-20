@@ -81,6 +81,8 @@ members = [
     "tests/apps/rust-unix-socket-client",
     "tests/apps/rust-websockets",
     "xtask",
+    # A member, so that the runner takes its dependencies from this workspace.
+    "bazel/nextest-runner",
 ]
 
     "xtask",

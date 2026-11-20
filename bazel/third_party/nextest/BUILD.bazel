@@ -1,0 +1,12 @@
+# The release for the target platform rather than the execution platform, because nextest runs on
+# the same machine as the tests.
+alias(
+    name = "nextest",
+    actual = select({
+        "//bazel/platforms:is_linux_aarch64": "@nextest_aarch64_unknown_linux_musl//:nextest",
+        "//bazel/platforms:is_linux_x86_64": "@nextest_x86_64_unknown_linux_musl//:nextest",
+        "@platforms//os:macos": "@nextest_universal_apple_darwin//:nextest",
+        "@platforms//os:windows": "@nextest_x86_64_pc_windows_msvc//:nextest",
+    }),
+    visibility = ["//visibility:public"],
+)
