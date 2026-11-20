@@ -386,12 +386,12 @@ yamlpath = "0.32.0"
 private_intra_doc_links = "allow"
 
 [workspace.lints.clippy]
-"str_to_string" = "warn"
-
 [profile.release]
 strip = "debuginfo"
 # Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
 lto = false
+indexing_slicing = "warn"
+str_to_string = "warn"
 
 [patch.crates-io]
 tree-sitter = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }
