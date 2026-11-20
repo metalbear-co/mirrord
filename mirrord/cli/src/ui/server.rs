@@ -44,8 +44,6 @@ use mirrord_session_monitor_client::{
 };
 use mirrord_session_monitor_protocol::SessionInfo;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-#[cfg(not(debug_assertions))]
-use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
@@ -66,9 +64,11 @@ mod v2;
 /// Alias for the return type of the top-level `mirrord ui` route handlers.
 type UiResult<T> = Result<T, ApiError>;
 
-#[cfg(not(debug_assertions))]
-#[derive(Embed)]
-#[folder = "../../packages/ui/dist/"]
+/// The built UI from `packages/ui`, in the folder at `MIRRORD_BUNDLED_UI`, which debug builds
+/// embed too (see rust-embed's `debug-embed` feature).
+#[cfg(feature = "standalone")]
+#[derive(rust_embed::Embed)]
+#[folder = "$MIRRORD_BUNDLED_UI"]
 struct FrontendAssets;
 
 #[derive(Clone, Debug, Serialize)]
@@ -993,16 +993,26 @@ fn guess_mime(path: &str) -> &'static str {
         .unwrap_or("application/octet-stream")
 }
 
+#[cfg(feature = "standalone")]
 fn get_asset(path: &str) -> Option<Vec<u8>> {
-    #[cfg(debug_assertions)]
+    FrontendAssets::get(path).map(|f| f.data.to_vec())
+}
+
+/// Reads a file of the built UI from its folder in the CLI's runfiles, at the runfiles path that
+/// `MIRRORD_BUNDLED_UI` gives it.
+#[cfg(not(feature = "standalone"))]
+fn get_asset(path: &str) -> Option<Vec<u8>> {
+    // The path comes from the request, so it shouldn't be able to leave the UI's folder, as with
+    // `..`.
+    let path = std::path::Path::new(path);
+    if !path
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
     {
-        let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/ui/dist/");
-        std::fs::read(format!("{base}{path}")).ok()
+        return None;
     }
-    #[cfg(not(debug_assertions))]
-    {
-        FrontendAssets::get(path).map(|f| f.data.to_vec())
-    }
+
+    std::fs::read(mirrord_runfiles::rlocation!(env!("MIRRORD_BUNDLED_UI")).join(path)).ok()
 }
 
 async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {

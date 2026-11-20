@@ -1,36 +1,44 @@
-use std::path::{Path, PathBuf};
+//! Gives the CLI the layer that it loads into the programs that it runs, as a file.
 
-use const_random::const_random;
+use std::path::Path;
+#[cfg(any(feature = "standalone", test))]
+use std::path::PathBuf;
+
+#[cfg(any(feature = "standalone", test))]
 use mirrord_progress::Progress;
 use tracing::debug;
 
 use crate::{CliResult, error::CliError};
 
-/// For some reason loading dylib from $TMPDIR can get the process killed somehow..?
-#[cfg(target_os = "macos")]
-mod mac {
-    use std::str::FromStr;
-
-    use super::*;
-
-    pub fn temp_dir() -> PathBuf {
-        PathBuf::from_str("/tmp/").unwrap()
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-use std::env::temp_dir;
+// The CLI uses the layer's file in its runfiles, unless it's a `standalone` build, which embeds
+// the layer and writes it to a file.
+#[cfg_attr(feature = "standalone", path = "extract/embedded.rs")]
+#[cfg_attr(not(feature = "standalone"), path = "extract/runfiles.rs")]
+mod bundled;
 
 #[cfg(target_os = "macos")]
-use mac::temp_dir;
+pub(crate) use bundled::extract_arm64;
+pub(crate) use bundled::extract_library;
 
-fn default_layer_dir<P: Progress>(temp_dir: &Path, progress: &P) -> CliResult<PathBuf> {
+/// Returns the directory in `temp_dir` that the layer is written to, `mirrord`, and creates it.
+///
+/// When `mirrord` is a file, it returns `mirrord-<layer_id>` instead, so each build of the layer
+/// has one directory, which every invocation reuses.
+///
+/// Only the standalone CLI writes the layer to the temporary directory, but the CLI's tests, which
+/// build it without `standalone`, test this too.
+#[cfg(any(feature = "standalone", test))]
+fn default_layer_dir<P: Progress>(
+    temp_dir: &Path,
+    layer_id: &str,
+    progress: &P,
+) -> CliResult<PathBuf> {
     let dir = temp_dir.join("mirrord");
     match std::fs::create_dir_all(&dir) {
         Ok(()) => Ok(dir),
         Err(_) if dir.is_file() => {
             // Reuse one directory per build while keeping it available to injected descendants.
-            let fallback = temp_dir.join(format!("mirrord-{}", const_random!(u64)));
+            let fallback = temp_dir.join(format!("mirrord-{layer_id}"));
             std::fs::create_dir_all(&fallback)
                 .map_err(|e| CliError::LayerExtractError(fallback.clone(), e))?;
             progress.warning(&format!(
@@ -42,72 +50,6 @@ fn default_layer_dir<P: Progress>(temp_dir: &Path, progress: &P) -> CliResult<Pa
         }
         Err(error) => Err(CliError::LayerExtractError(dir, error)),
     }
-}
-
-/// Extract to given directory, or tmp by default.
-/// If prefix is true, add a random prefix to the file name that identifies the specific build
-/// of the layer. This is useful for debug purposes usually.
-pub(crate) fn extract_library<P>(
-    dest_dir: Option<String>,
-    progress: &P,
-    prefix: bool,
-) -> CliResult<PathBuf>
-where
-    P: Progress,
-{
-    let mut progress = progress.subtask("extracting layer");
-    let extension = Path::new(env!("MIRRORD_LAYER_FILE"))
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
-
-    let file_name = if prefix {
-        format!("{}-libmirrord_layer.{extension}", const_random!(u64))
-    } else {
-        format!("libmirrord_layer.{extension}")
-    };
-
-    let file_path = match dest_dir {
-        Some(dest_dir) => std::path::Path::new(&dest_dir).join(file_name),
-        None => default_layer_dir(&temp_dir(), &progress)?.join(file_name),
-    };
-    write_layer(&file_path, include_bytes!(env!("MIRRORD_LAYER_FILE")))?;
-
-    progress.success(Some("layer extracted"));
-    Ok(file_path)
-}
-
-/// Extract the arm64 compiled layer for the shim to use (MacOS only).
-/// This is done even if on x86 due to the possibility of mirrord being run emulated
-/// If prefix is true, add a random prefix to the file name that identifies the specific build
-/// of the layer. This is useful for debug purposes usually.
-#[cfg(target_os = "macos")]
-pub(crate) fn extract_arm64<P>(progress: &P, prefix: bool) -> CliResult<PathBuf>
-where
-    P: Progress,
-{
-    let mut progress = progress.subtask("extracting arm64 layer library");
-    let extension = Path::new(env!("MIRRORD_LAYER_FILE_MACOS_ARM64"))
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
-
-    let file_name = if prefix {
-        format!("{}-libmirrord_layer_arm64.{extension}", const_random!(u64))
-    } else {
-        format!("libmirrord_layer_arm64.{extension}")
-    };
-
-    let file_path = temp_dir().as_path().join(file_name);
-    write_layer(
-        &file_path,
-        include_bytes!(env!("MIRRORD_LAYER_FILE_MACOS_ARM64")),
-    )?;
-
-    progress.success(Some("arm64 layer library extracted"));
-    Ok(file_path)
 }
 
 /// Writes `bytes` to `path` atomically, so that no program loads a layer that another CLI is still
@@ -149,6 +91,8 @@ mod tests {
 
     use super::*;
 
+    const LAYER_ID: &str = "0123456789abcdef";
+
     #[derive(Default)]
     struct RecordingProgress(Mutex<Vec<String>>);
 
@@ -169,7 +113,7 @@ mod tests {
         fs::write(&occupied, b"existing file").unwrap();
         let progress = RecordingProgress::default();
 
-        let directory = default_layer_dir(root.path(), &progress).unwrap();
+        let directory = default_layer_dir(root.path(), LAYER_ID, &progress).unwrap();
         assert_eq!(directory.parent(), Some(root.path()));
         assert_ne!(directory, occupied);
         fs::write(directory.join("layer"), b"layer contents").unwrap();
@@ -185,12 +129,13 @@ mod tests {
     fn fallback_directory_is_reused_across_invocations() {
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("mirrord"), b"existing file").unwrap();
-        let directory = default_layer_dir(root.path(), &RecordingProgress::default()).unwrap();
+        let directory =
+            default_layer_dir(root.path(), LAYER_ID, &RecordingProgress::default()).unwrap();
         fs::write(directory.join("layer"), b"cached layer").unwrap();
 
         for _ in 0..3 {
             assert_eq!(
-                default_layer_dir(root.path(), &RecordingProgress::default()).unwrap(),
+                default_layer_dir(root.path(), LAYER_ID, &RecordingProgress::default()).unwrap(),
                 directory
             );
         }
@@ -203,12 +148,12 @@ mod tests {
     fn layer_directory_is_created_and_reused_without_warning() {
         let root = tempfile::tempdir().unwrap();
         let progress = RecordingProgress::default();
-        let directory = default_layer_dir(root.path(), &progress).unwrap();
+        let directory = default_layer_dir(root.path(), LAYER_ID, &progress).unwrap();
         assert_eq!(directory, root.path().join("mirrord"));
         fs::write(directory.join("layer"), b"cached layer").unwrap();
 
         assert_eq!(
-            default_layer_dir(root.path(), &progress).unwrap(),
+            default_layer_dir(root.path(), LAYER_ID, &progress).unwrap(),
             directory
         );
         assert_eq!(fs::read(directory.join("layer")).unwrap(), b"cached layer");

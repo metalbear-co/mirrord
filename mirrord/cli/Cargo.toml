@@ -37,6 +37,7 @@ mirrord-protocol-io = { path = "../protocol-io" }
 mirrord-auth = { path = "../auth" }
 mirrord-protocol-api = { path = "../protocol-api" }
 mirrord-operator-websocket = { path = "../operator-websocket" }
+mirrord-runfiles = { path = "../runfiles" }
 
 actix-codec.workspace = true
 atomic-write-file.workspace = true
@@ -55,7 +56,6 @@ secrecy.workspace = true
 semver.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream"] }
-const-random.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "process", "signal", "sync"] }
 tokio-retry.workspace = true
 kube.workspace = true
@@ -125,6 +125,7 @@ name = "mirrord"
 path = "src/main.rs"
 
 [dev-dependencies]
+mirrord-test-utils = { path = "../test-utils" }
 rstest.workspace = true
 hyper-util = { workspace = true, "features" = ["server"] }
 http-body-util.workspace = true
@@ -139,3 +140,5 @@ tar.workspace = true
 tokio-tungstenite.workspace = true
 
 [features]
+# Embeds the layer's files and the UI in the CLI, rather than reading them from its runfiles.
+standalone = []
