@@ -1,17 +1,26 @@
-use std::{sync::LazyLock, time::Instant};
+use std::{ops::Not, sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
 use k8s_openapi::api::core::v1::Namespace;
+use kube::{Api, api::ListParams};
 use mirrord_analytics::NullReporter;
-use mirrord_config::{LayerConfig, config::ConfigContext, target::TargetType};
+use mirrord_config::{
+    LayerConfig,
+    config::ConfigContext,
+    target::{Target, TargetType},
+};
 use mirrord_kube::{api::kubernetes::seeker::KubeResourceSeeker, error::KubeApiError};
-use mirrord_operator::client::OperatorApi;
+use mirrord_operator::{
+    client::{OperatorAccess, OperatorApi},
+    crd::TargetCrd,
+};
 use semver::VersionReq;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
 use tracing::Level;
 
 use crate::{
-    CliError, CliResult, Format, ListTargetArgs, kube::kube_client_from_layer_config, util,
+    CliError, CliResult, Format, ListTargetArgs, kube::kube_client_and_access_from_layer_config,
+    util,
 };
 
 /// Name of the environment variable used to specify which resource types to list with `mirrord ls`.
@@ -73,7 +82,7 @@ impl FoundTargets {
         rich_output: bool,
         target_types: Option<Vec<TargetType>>,
     ) -> CliResult<Self> {
-        let client = kube_client_from_layer_config(&layer_config).await?;
+        let (client, access) = kube_client_and_access_from_layer_config(&layer_config).await?;
 
         let start = Instant::now();
         let mut reporter = NullReporter::default();
@@ -106,72 +115,99 @@ impl FoundTargets {
             copy_target: layer_config.feature.copy_target.enabled,
         };
 
-        let (targets, namespaces) = tokio::try_join!(
-            async {
-                let paths = match (operator_api, target_types) {
-                    (None, _) if layer_config.operator == Some(true) => {
-                        Err(CliError::OperatorNotInstalled)
-                    }
-
-                    (Some(api), None)
-                        if !rich_output
-                            && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
-                                .matches(&api.operator().spec.operator_version) =>
-                    {
-                        seeker.all().await.map_err(|error| {
-                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                        })
-                    }
-
-                    (Some(api), Some(target_types))
-                        if !rich_output
-                            && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
-                                .matches(&api.operator().spec.operator_version) =>
-                    {
-                        seeker.filtered(target_types, true).await.map_err(|error| {
-                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                        })
-                    }
-
-                    (None, Some(target_types)) => {
-                        seeker.filtered(target_types, false).await.map_err(|error| {
-                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                        })
-                    }
-
-                    _ => seeker.all_open_source().await.map_err(|error| {
-                        CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                    }),
-                }?;
-
-                let targets = paths
-                    .into_iter()
-                    .map(|path| FoundTarget {
-                        path,
-                        available: true,
-                    })
-                    .collect::<Vec<_>>();
-
-                Ok::<_, CliError>(targets)
-            },
-            async {
-                let namespaces = if rich_output {
-                    seeker
-                        .list_all_clusterwide::<Namespace>(None)
-                        .try_filter_map(|namespace| std::future::ready(Ok(namespace.metadata.name)))
-                        .try_collect::<Vec<_>>()
-                        .await
-                        .map_err(KubeApiError::KubeError)
-                        .map_err(|error| {
-                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
-                        })?
-                } else {
-                    Default::default()
-                };
-
-                Ok::<_, CliError>(namespaces)
+        let (targets, namespaces) = match &access {
+            // Only the operator's own API answers a logged-in CLI, so it lists what the operator
+            // sees instead of reading the cluster's resources itself.
+            OperatorAccess::Login(_) => {
+                targets_through_operator(
+                    &client,
+                    seeker.namespace,
+                    rich_output,
+                    target_types.as_deref(),
+                )
+                .await?
             }
-        )?;
+            OperatorAccess::Kubeconfig { .. } => tokio::try_join!(
+                async {
+                    let paths = match (operator_api, target_types) {
+                        (None, _) if layer_config.operator == Some(true) => {
+                            Err(CliError::OperatorNotInstalled)
+                        }
+
+                        (Some(api), None)
+                            if !rich_output
+                                && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
+                                    .matches(&api.operator().spec.operator_version) =>
+                        {
+                            seeker.all().await.map_err(|error| {
+                                CliError::friendlier_error_or_else(
+                                    error,
+                                    CliError::ListTargetsFailed,
+                                )
+                            })
+                        }
+
+                        (Some(api), Some(target_types))
+                            if !rich_output
+                                && ALL_TARGETS_SUPPORTED_OPERATOR_VERSION
+                                    .matches(&api.operator().spec.operator_version) =>
+                        {
+                            seeker.filtered(target_types, true).await.map_err(|error| {
+                                CliError::friendlier_error_or_else(
+                                    error,
+                                    CliError::ListTargetsFailed,
+                                )
+                            })
+                        }
+
+                        (None, Some(target_types)) => {
+                            seeker.filtered(target_types, false).await.map_err(|error| {
+                                CliError::friendlier_error_or_else(
+                                    error,
+                                    CliError::ListTargetsFailed,
+                                )
+                            })
+                        }
+
+                        _ => seeker.all_open_source().await.map_err(|error| {
+                            CliError::friendlier_error_or_else(error, CliError::ListTargetsFailed)
+                        }),
+                    }?;
+
+                    let targets = paths
+                        .into_iter()
+                        .map(|path| FoundTarget {
+                            path,
+                            available: true,
+                        })
+                        .collect::<Vec<_>>();
+
+                    Ok::<_, CliError>(targets)
+                },
+                async {
+                    let namespaces = if rich_output {
+                        seeker
+                            .list_all_clusterwide::<Namespace>(None)
+                            .try_filter_map(|namespace| {
+                                std::future::ready(Ok(namespace.metadata.name))
+                            })
+                            .try_collect::<Vec<_>>()
+                            .await
+                            .map_err(KubeApiError::KubeError)
+                            .map_err(|error| {
+                                CliError::friendlier_error_or_else(
+                                    error,
+                                    CliError::ListTargetsFailed,
+                                )
+                            })?
+                    } else {
+                        Default::default()
+                    };
+
+                    Ok::<_, CliError>(namespaces)
+                }
+            )?,
+        };
 
         let current_namespace = layer_config
             .target
@@ -186,6 +222,75 @@ impl FoundTargets {
             namespaces,
         })
     }
+}
+
+/// Target discovery through the operator's `targets` resource, for a CLI logged in through SSO.
+///
+/// The operator lists every workload the seeker would list from the cluster, already filtered to
+/// what the user may target. The rich listing also offers the namespaces the user can switch to,
+/// taken from the cluster-wide target list; when RBAC allows the namespace but not that list, the
+/// current namespace is the only one offered, and the log says why.
+async fn targets_through_operator(
+    client: &kube::Client,
+    namespace: &str,
+    rich_output: bool,
+    target_types: Option<&[TargetType]>,
+) -> CliResult<(Vec<FoundTarget>, Vec<String>)> {
+    let list_failed = |error: kube::Error| {
+        CliError::friendlier_error_or_else(KubeApiError::from(error), CliError::ListTargetsFailed)
+    };
+
+    let targets = Api::<TargetCrd>::namespaced(client.clone(), namespace)
+        .list(&ListParams::default())
+        .await
+        .map_err(list_failed)?
+        .into_iter()
+        .filter_map(|crd| crd.spec.target.as_known().ok().cloned())
+        .filter(|target| {
+            let wanted_type = match target_types {
+                Some(types) => types.contains(&TargetType::from(target)),
+                None => true,
+            };
+            // The rich listing is the IDE's picker, which offers these three kinds only.
+            let rich_kind = matches!(
+                target,
+                Target::Deployment(_) | Target::Rollout(_) | Target::Pod(_)
+            );
+            wanted_type && (rich_output.not() || rich_kind)
+        })
+        .map(|target| FoundTarget {
+            path: target.to_string(),
+            available: true,
+        })
+        .collect();
+
+    let namespaces = if rich_output {
+        match Api::<TargetCrd>::all(client.clone())
+            .list(&ListParams::default())
+            .await
+        {
+            Ok(all_targets) => {
+                let mut namespaces = all_targets
+                    .into_iter()
+                    .filter_map(|crd| crd.metadata.namespace)
+                    .collect::<Vec<_>>();
+                namespaces.sort();
+                namespaces.dedup();
+                namespaces
+            }
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "Listing targets across namespaces failed, offering only the current one"
+                );
+                vec![namespace.to_owned()]
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    Ok((targets, namespaces))
 }
 
 /// Thin wrapper over [`FoundTargets`] that implements [`Serialize`].
