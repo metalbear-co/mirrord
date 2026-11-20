@@ -2,11 +2,11 @@
   "name": "mirrord-node-e2e-test",
   "version": "1.0.0",
   "description": "Node.js npm E2E test application for mirrord",
-  "main": "app.mjs",
+  "main": "app/main.mjs",
   "scripts": {
-    "start": "node app.mjs",
-    "test": "node app.mjs",
-    "test-outgoing": "node test_outgoing_traffic_npm.mjs"
+    "start": "node app/main.mjs",
+    "test": "node app/main.mjs",
+    "test-outgoing": "node test-outgoing-traffic-npm/main.mjs"
   },
   "type": "module"
 }

@@ -19,6 +19,7 @@ use k8s_openapi::api::{
     core::v1::Pod,
 };
 use kube::{
+    Api, Client, Config, ResourceExt,
     api::{DeleteParams, DynamicObject, ListParams, PostParams},
     discovery::{Discovery, verbs},
 };

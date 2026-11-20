@@ -7,6 +7,7 @@ use futures::FutureExt;
 use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
+    Api, Client, Config, Error, Resource,
     api::{ApiResource, DeleteParams, DynamicObject, PostParams},
 };
 use serde::{Serialize, de::DeserializeOwned};

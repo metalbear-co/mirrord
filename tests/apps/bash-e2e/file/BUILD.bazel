@@ -1,0 +1,7 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+sh_binary(
+    name = "file",
+    srcs = ["main.sh"],
+    visibility = ["//tests:__pkg__"],
+)

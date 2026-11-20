@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::Api;
-use mirrord_test_utils::run_command::run_exec_with_target;
+use mirrord_test_utils::{node, run_command::run_exec_with_target};
 use rstest::*;
 
 use crate::utils::{
@@ -120,8 +120,8 @@ async fn connect_to_kubernetes_api_service_over_ipv6() {
 async fn outgoing_traffic_single_request_ipv6_enabled(#[future] ipv6_service: KubeService) {
     let service = ipv6_service.await;
     let node_command = [
-        "node",
-        "node-e2e/outgoing/test_outgoing_traffic_single_request_ipv6.mjs",
+        node().as_str(),
+        "apps/node-e2e/outgoing/test-outgoing-traffic-single-request-ipv6/main.mjs",
     ]
     .map(String::from)
     .to_vec();

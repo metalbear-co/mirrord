@@ -1,0 +1,9 @@
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+
+cc_binary(
+    name = "intproxy-child",
+    srcs = ["main.c"],
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//tests:__pkg__"],
+)

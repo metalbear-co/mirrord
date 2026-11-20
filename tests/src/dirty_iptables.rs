@@ -46,12 +46,8 @@ async fn dirty_iptables_test(#[future] kube_client: KubeClient) -> DirtyIptables
 async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest {
     let namespace = format!("dirty-iptables-{}", random_string());
     let pod_name = format!("{namespace}-pod");
-    // Without `MIRRORD_AGENT_IMAGE` the init container uses the locally built `test` agent image,
-    // which is never pulled. An explicitly set image (e.g. a released agent) may be pulled.
-    let (init_image, init_image_pull_policy) = match std::env::var("MIRRORD_AGENT_IMAGE") {
-        Ok(image) => (image, "IfNotPresent"),
-        Err(_) => ("test".to_owned(), "Never"),
-    };
+    let init_image =
+        std::env::var("MIRRORD_AGENT_IMAGE").expect("the e2e targets set MIRRORD_AGENT_IMAGE");
     let delete_after_fail = std::env::var_os(PRESERVE_FAILED_ENV_NAME).is_none();
 
     // Create a namespace and a pod to target and check for pre-existing mirrord chain names
@@ -96,7 +92,10 @@ async fn dirty_iptables_test_inner(kube_client: KubeClient) -> DirtyIptablesTest
                         {
                             "name": "init-bad-cleanup",
                             "image": init_image,
-                            "imagePullPolicy": init_image_pull_policy,
+                            // The e2e targets load the agent that Bazel built into the nodes, so
+                            // the nodes only pull an image that the developer named, like a
+                            // released agent.
+                            "imagePullPolicy": "IfNotPresent",
                             "command": ["/usr/sbin/iptables-nft", "-t", "nat", "-N", "MIRRORD_INPUT"],
                             "securityContext": {
                                 "capabilities": {
