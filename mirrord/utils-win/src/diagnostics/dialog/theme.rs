@@ -15,7 +15,7 @@ use winapi::{
     },
 };
 
-/// Resource id of the embedded logo bitmap. See `logo.rc` / `build.rs`.
+/// Resource id of the embedded logo bitmap. See `logo.rc`.
 pub(super) const LOGO_RESOURCE_ID: u16 = 100;
 
 /// Control id of the Report-Crash button. Also the one default button.

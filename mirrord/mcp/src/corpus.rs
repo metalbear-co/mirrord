@@ -11,12 +11,21 @@ use flate2::read::GzDecoder;
 use serde_json::Value;
 use thiserror::Error;
 
+/// The docs and skills as a gzipped tar, which Bazel packs (`:corpus` in `BUILD.bazel`), with each
+/// file at its path in the repository, e.g. `skills/skills/mirrord-up/SKILL.md`.
+///
+/// A Cargo build gets an empty placeholder from `.cargo/config.toml`, so that it compiles, and then
+/// has no docs or skills to serve.
 static ARCHIVE: &[u8] = include_bytes!(env!("MIRRORD_BUNDLED_MCP_CORPUS"));
 
 /// Every packed file, keyed by its path in `docs/` or `skills/`, e.g. `skills/mirrord-up/SKILL.md`
 /// for `skills/skills/mirrord-up/SKILL.md`, which is the file's path in the repository it was
 /// imported from, `metalbear-co/docs` or `metalbear-co/skills`.
 pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+    if ARCHIVE.is_empty() {
+        return BTreeMap::new();
+    }
+
     let mut archive = tar::Archive::new(GzDecoder::new(ARCHIVE));
     let entries = archive.entries().expect("the build packs a valid archive");
     entries
