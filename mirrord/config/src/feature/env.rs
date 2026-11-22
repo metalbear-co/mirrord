@@ -127,9 +127,9 @@ pub struct EnvConfig {
     /// Example:
     /// ```json
     /// {
-    ///   ".+_TIMEOUT": "10000"
-    ///   "LOG_.+_VERBOSITY": "debug"
-    ///   "(\w+)_(\d+)": "magic-value"
+    ///   ".+_TIMEOUT": "10000",
+    ///   "LOG_.+_VERBOSITY": "debug",
+    ///   "(\\w+)_(\\d+)": "magic-value"
     /// }
     /// ```
     ///

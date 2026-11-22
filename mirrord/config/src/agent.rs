@@ -62,7 +62,7 @@ impl fmt::Display for LinuxCapability {
 ///     "communication_timeout": 30,
 ///     "startup_timeout": 360,
 ///     "flush_connections": false,
-///     "exclude_from_mesh": false
+///     "exclude_from_mesh": false,
 ///     "inject_headers": false,
 ///     "override_cache_control": true,
 ///     "max_body_buffer_size": 65535,
@@ -377,7 +377,7 @@ pub struct AgentConfig {
     /// {
     ///   "agent": {
     ///     "annotations": {
-    ///       "cats.io/inject": "enabled"
+    ///       "cats.io/inject": "enabled",
     ///       "prometheus.io/scrape": "true",
     ///       "prometheus.io/port": "9000"
     ///     }

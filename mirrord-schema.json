@@ -418,12 +418,12 @@
       "additionalProperties": false
     },
     "AgentFileConfig": {
-      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator.\nAgent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json\n{\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": false,\n    \"exclude_from_mesh\": false\n    \"inject_headers\": false,\n    \"override_cache_control\": true,\n    \"max_body_buffer_size\": 65535,\n    \"max_body_buffer_timeout\": 1000,\n    \"http_detection_timeout\": 2,\n    \"http_detect_inactive_ports\": false\n  }\n}\n```",
+      "description": "Configuration for the mirrord-agent pod that is spawned in the Kubernetes cluster.\n\n**Note:** this configuration is ignored when using the mirrord Operator.\nAgent configuration is done by the cluster admin.\n\nWe provide sane defaults for this option, so you don't have to set up anything here.\n\n```json\n{\n  \"agent\": {\n    \"log_level\": \"info\",\n    \"json_log\": false,\n    \"namespace\": \"default\",\n    \"image\": \"ghcr.io/metalbear-co/mirrord:latest\",\n    \"image_pull_policy\": \"IfNotPresent\",\n    \"image_pull_secrets\": [ { \"name\": \"secret\" } ],\n    \"ttl\": 30,\n    \"ephemeral\": false,\n    \"communication_timeout\": 30,\n    \"startup_timeout\": 360,\n    \"flush_connections\": false,\n    \"exclude_from_mesh\": false,\n    \"inject_headers\": false,\n    \"override_cache_control\": true,\n    \"max_body_buffer_size\": 65535,\n    \"max_body_buffer_timeout\": 1000,\n    \"http_detection_timeout\": 2,\n    \"http_detect_inactive_ports\": false\n  }\n}\n```",
       "type": "object",
       "properties": {
         "annotations": {
           "title": "agent.annotations {#agent-annotations}",
-          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json\n{\n  \"agent\": {\n    \"annotations\": {\n      \"cats.io/inject\": \"enabled\"\n      \"prometheus.io/scrape\": \"true\",\n      \"prometheus.io/port\": \"9000\"\n    }\n  }\n}\n```",
+          "description": "Allows setting up custom annotations for the agent Job and Pod.\n\n```json\n{\n  \"agent\": {\n    \"annotations\": {\n      \"cats.io/inject\": \"enabled\",\n      \"prometheus.io/scrape\": \"true\",\n      \"prometheus.io/port\": \"9000\"\n    }\n  }\n}\n```",
           "type": [
             "object",
             "null"
@@ -832,7 +832,7 @@
       "oneOf": [
         {
           "title": "feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}",
-          "description": "Tries to parse the body as a JSON object and find (a) matching subobjects(s).\n\n`query` should be a valid JSONPath (RFC 9535) query string.\n`matches` should be a regex. Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate\n\nExample:\n```json\n\"http_filter\": {\n  \"body_filter\": {\n    \"body\": \"json\",\n    \"query\": \"$.library.books[*]\",\n    \"matches\": \"^\\\\d{3,5}$\"\n  }\n}\n```\nwill match\n```json\n{\n  \"library\": {\n    \"books\": [\n      34555,\n      1233,\n      234\n      23432\n    ]\n  }\n}\n```\n\nThe filter will match if there is at least one query result.\n\nNon-string matches are stringified before being compared to\nthe regex. To filter query results by type, the `typeof`\n[function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)\nis provided. It takes in a single `NodesType` parameter and\nreturns `\"null\" | \"bool\" | \"number\" | \"string\" | \"array\" | \"object\"`,\ndepending on the type of the argument. If not all nodes in the\nargument have the same type, it returns `nothing`.\n\nExample:\n\n```json\n\"body_filter\": {\n  \"body\": \"json\",\n  \"query\": \"$.books[?(typeof(@) == 'number')]\",\n  \"matches\": \"4$\"\n}\n```\nwill match\n\n```json\n{\n  \"books\": [\n    1111,\n    2222,\n    4444\n  ]\n}\n```\n\nbut not\n\n```json\n{\n  \"books\": [\n    \"1111\",\n    \"2222\",\n    \"4444\"\n  ]\n}\n```\n\n\n\nTo use with `all_of` or `any_of`, use the following syntax:\n```json\n\"http_filter\": {\n  \"all_of\": [\n    {\n      \"path\": \"/buildings\"\n    },\n    {\n      \"body\": \"json\",\n      \"query\": \"$.library.books[*]\",\n      \"matches\": \"^\\\\d{3,5}$\"\n    }\n  ]\n}\n```",
+          "description": "Tries to parse the body as a JSON object and find (a) matching subobjects(s).\n\n`query` should be a valid JSONPath (RFC 9535) query string.\n`matches` should be a regex. Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate\n\nExample:\n```json\n{\n  \"http_filter\": {\n    \"body_filter\": {\n      \"body\": \"json\",\n      \"query\": \"$.library.books[*]\",\n      \"matches\": \"^\\\\d{3,5}$\"\n    }\n  }\n}\n```\nwill match\n```json\n{\n  \"library\": {\n    \"books\": [\n      34555,\n      1233,\n      234,\n      23432\n    ]\n  }\n}\n```\n\nThe filter will match if there is at least one query result.\n\nNon-string matches are stringified before being compared to\nthe regex. To filter query results by type, the `typeof`\n[function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)\nis provided. It takes in a single `NodesType` parameter and\nreturns `\"null\" | \"bool\" | \"number\" | \"string\" | \"array\" | \"object\"`,\ndepending on the type of the argument. If not all nodes in the\nargument have the same type, it returns `nothing`.\n\nExample:\n\n```json\n{\n  \"body_filter\": {\n    \"body\": \"json\",\n    \"query\": \"$.books[?(typeof(@) == 'number')]\",\n    \"matches\": \"4$\"\n  }\n}\n```\nwill match\n\n```json\n{\n  \"books\": [\n    1111,\n    2222,\n    4444\n  ]\n}\n```\n\nbut not\n\n```json\n{\n  \"books\": [\n    \"1111\",\n    \"2222\",\n    \"4444\"\n  ]\n}\n```\n\n\n\nTo use with `all_of` or `any_of`, use the following syntax:\n```json\n{\n  \"http_filter\": {\n    \"all_of\": [\n      {\n        \"path\": \"/buildings\"\n      },\n      {\n        \"body\": \"json\",\n        \"query\": \"$.library.books[*]\",\n        \"matches\": \"^\\\\d{3,5}$\"\n      }\n    ]\n  }\n}\n```",
           "type": "object",
           "properties": {
             "body": {
@@ -878,7 +878,7 @@
       "additionalProperties": false
     },
     "CiFileConfig": {
-      "description": "Configuration for mirrord for CI.\n\n```json\n{\n  \"ci\": {\n    \"output_dir\": \"/tmp/mirrord/\",\n  }\n}\n```",
+      "description": "Configuration for mirrord for CI.\n\n```json\n{\n  \"ci\": {\n    \"output_dir\": \"/tmp/mirrord/\"\n  }\n}\n```",
       "type": "object",
       "properties": {
         "output_dir": {
@@ -3192,7 +3192,7 @@
         },
         "mapping": {
           "title": "feature.env.mapping {#feature-env-mapping}",
-          "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample:\n```json\n{\n  \".+_TIMEOUT\": \"10000\"\n  \"LOG_.+_VERBOSITY\": \"debug\"\n  \"(\\w+)_(\\d+)\": \"magic-value\"\n}\n```\n\nWill do the next replacements for environment variables that match:\n\n* `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`\n\n* `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`\n\n* `DATA_1234: common-value` => `DATA_1234: magic-value`",
+          "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample:\n```json\n{\n  \".+_TIMEOUT\": \"10000\",\n  \"LOG_.+_VERBOSITY\": \"debug\",\n  \"(\\\\w+)_(\\\\d+)\": \"magic-value\"\n}\n```\n\nWill do the next replacements for environment variables that match:\n\n* `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`\n\n* `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`\n\n* `DATA_1234: common-value` => `DATA_1234: magic-value`",
           "type": [
             "object",
             "null"
@@ -5580,7 +5580,7 @@
       ]
     },
     "RedisConnectionConfig": {
-      "description": "Supports either a complete URL or separated connection parameters.\nIf both are provided, `url` takes precedence.\n\nThe following fields can be sourced via remote environment variable:\n- url\n- host\n- password\n- username\n\nExample:\n```json\n\"connection\": {\n    \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" },\n    \"port\": 6379,\n    \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" }\n}\n```",
+      "description": "Supports either a complete URL or separated connection parameters.\nIf both are provided, `url` takes precedence.\n\nThe following fields can be sourced via remote environment variable:\n- url\n- host\n- password\n- username\n\nExample:\n```json\n{\n  \"connection\": {\n    \"host\": { \"type\": \"env\", \"variable\": \"REDIS_HOST\" },\n    \"port\": 6379,\n    \"password\": { \"type\": \"env\", \"variable\": \"REDIS_PASSWORD\" }\n  }\n}\n```",
       "type": "object",
       "properties": {
         "database": {
@@ -6374,7 +6374,7 @@
       ]
     },
     "StartupRetryFileConfig": {
-      "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.\nfor resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing\n[`max_retries`](#startup_retry-max_retries) and changing both\n[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry\nsome of its initial Kubernetes API requests.\n\n```json\n{\n  \"startup_retry\": {\n    \"min_ms\": 500,\n    \"max_ms\": 5000,\n    \"max_retries\": 2,\n  }\n}\n```",
+      "description": "Controls how many times, and how often mirrord retries its initial Kubernetes API requests (e.g.\nfor resolving the target or connecting to the mirrord Operator).\n\nIf you're having cluster connectivity issues when **starting** mirrord, consider increasing\n[`max_retries`](#startup_retry-max_retries) and changing both\n[`min_ms`](#startup_retry-min_ms) and [`max_ms`](#startup_retry-max_ms) to have mirrord retry\nsome of its initial Kubernetes API requests.\n\n```json\n{\n  \"startup_retry\": {\n    \"min_ms\": 500,\n    \"max_ms\": 5000,\n    \"max_retries\": 2\n  }\n}\n```",
       "type": "object",
       "properties": {
         "max_ms": {
