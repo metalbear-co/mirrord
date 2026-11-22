@@ -51,9 +51,13 @@ jobs:
           echo "$CARGO_DENY_SHA256  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
-      # One line per failing advisory: id, code, package, versions, title, solution. Advisories
+      # One line per failing advisory: id, code, package, versions, title, upgrade. Advisories
       # `deny.toml` ignores, and unmaintained crates that are not direct dependencies, are not
-      # errors and so are not listed.
+      # errors and so are not listed. `upgrade` is empty when no patched release exists: cargo-deny
+      # then writes `Solution: No safe upgrade is available!` instead of `Solution: Upgrade to ...`.
+      #
+      # The step itself does not fail on an incomplete scan, so that the advisories it did report
+      # are still filed; the last step fails the run instead.
       - name: Check advisories
         id: deny
         run: |
@@ -71,24 +75,34 @@ jobs:
                 .[0].advisory.package,
                 ([.[].graphs[].Krate.version] | unique | join(", ")),
                 .[0].advisory.title,
-                ([.[0].notes[] | select(startswith("Solution: ")) | ltrimstr("Solution: ")] | first // "")
+                ([.[0].notes[] | select(startswith("Solution: Upgrade ")) | ltrimstr("Solution: ")] | first // "")
               ]
             | @tsv
           ' "$RUNNER_TEMP/deny.jsonl" > "$RUNNER_TEMP/advisories.tsv"
 
-          # A failure with nothing to file means the scan itself broke, for example the advisory
-          # database could not be fetched.
+          # cargo-deny writes its summary record only when the check runs to the end. An error log,
+          # or an error that is not an advisory, means part of the graph or database went unchecked.
+          complete=$(jq -r -s '
+            any(.[]; .type == "summary")
+            and (any(.[]; .type == "log" and .fields.level == "ERROR") | not)
+            and (any(.[]; .type == "diagnostic" and .fields.severity == "error" and .fields.advisory == null) | not)
+          ' "$RUNNER_TEMP/deny.jsonl")
           if [ "$status" -ne 0 ] && [ ! -s "$RUNNER_TEMP/advisories.tsv" ]; then
+            complete=false
+          fi
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+          if [ "$complete" != true ]; then
             cat "$RUNNER_TEMP/deny.jsonl" >&2
-            echo "::error::cargo deny failed without reporting an advisory"
-            exit 1
           fi
 
           count=$(grep -c '' "$RUNNER_TEMP/advisories.tsv" || true)
           echo "count=$count" >> "$GITHUB_OUTPUT"
-          if [ "$count" -eq 0 ]; then
+          if [ "$count" -eq 0 ] && [ "$complete" = true ]; then
             echo "No failing advisories." >> "$GITHUB_STEP_SUMMARY"
           fi
+      # Each issue carries an attachment whose URL names the repository and advisory. That
+      # attachment, not the title, is how a later run finds the issue, so renaming it does not get
+      # the advisory filed again.
       - name: File Linear issues
         if: ${{ steps.deny.outputs.count != '0' }}
         timeout-minutes: 5
@@ -101,6 +115,8 @@ jobs:
           LINEAR_APP_TOKEN=$(.github/scripts/linear-token.sh)
           echo "::add-mask::$LINEAR_APP_TOKEN"
 
+          # Fails on a curl error as well as on GraphQL errors, which Linear reports with HTTP 200.
+          # The explicit `return` matters: `set -e` does not apply inside the `$(...)` callers use.
           linear() {
             local response
             response=$(jq -n --arg query "$1" --argjson variables "$2" '{$query, $variables}' \
@@ -108,8 +124,7 @@ jobs:
                 -X POST https://api.linear.app/graphql \
                 -H "Authorization: Bearer $LINEAR_APP_TOKEN" \
                 -H 'Content-Type: application/json' \
-                --data @-)
-            # Linear reports GraphQL errors with HTTP 200.
+                --data @-) || return 1
             if jq -e '.errors' <<< "$response" > /dev/null; then
               printf 'Linear API error: %s\n' "$(jq -c '.errors' <<< "$response")" >&2
               return 1
@@ -120,18 +135,23 @@ jobs:
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           repo=${GITHUB_REPOSITORY#*/}
 
-          while IFS=$'\t' read -r id code package versions title solution; do
-            issue_title="$repo: $id in $package"
+          while IFS=$'\t' read -r id code package versions title upgrade; do
+            key_url="rustsec-advisory://$GITHUB_REPOSITORY/$id"
 
+            # Open states are listed rather than closed ones, so an issue closed as a duplicate
+            # does not hide the advisory.
             # shellcheck disable=SC2016 # GraphQL variables are not shell expansions
             open=$(linear '
-              query($team: ID!, $title: String!) {
-                issues(first: 1, filter: {
-                  team: { id: { eq: $team } }, title: { eq: $title },
-                  state: { type: { in: ["triage", "backlog", "unstarted", "started"] } }
-                }) { nodes { identifier url } }
-              }' "$(jq -n --arg team "$LINEAR_TEAM_ID" --arg title "$issue_title" '{$team, $title}')" \
-              | jq -r '.data.issues.nodes[0] // empty | "\(.identifier)\t\(.url)"')
+              query($url: String!) {
+                attachmentsForURL(url: $url) { nodes { issue { identifier url state { type } } } }
+              }' "$(jq -n --arg url "$key_url" '{$url}')" \
+              | jq -r '
+                if .data.attachmentsForURL.nodes == null then error("unexpected Linear response") else
+                  [.data.attachmentsForURL.nodes[].issue
+                   | select(.state.type as $type | ["triage", "backlog", "unstarted", "started"] | index($type))][0]
+                  // empty
+                  | "\(.identifier)\t\(.url)"
+                end')
 
             if [ -n "$open" ]; then
               IFS=$'\t' read -r identifier url <<< "$open"
@@ -139,8 +159,8 @@ jobs:
               continue
             fi
 
-            if [ -n "$solution" ]; then
-              fix="**Fix:** $solution, then run \`cargo deny check advisories\`."
+            if [ -n "$upgrade" ]; then
+              fix="**Fix:** $upgrade, then run \`cargo deny check advisories\`."
             else
               fix="**Fix:** no patched release exists. Replace the crate, or add \`$id\` to the \`ignore\` list in \`deny.toml\` with the reason it does not affect us."
             fi
@@ -163,16 +183,42 @@ jobs:
               mutation($team: String!, $label: String!, $title: String!, $description: String!, $priority: Int!) {
                 issueCreate(input: {
                   teamId: $team, labelIds: [$label], title: $title, description: $description, priority: $priority
-                }) { success issue { identifier url } }
-              }' "$(jq -n --arg team "$LINEAR_TEAM_ID" --arg label "$LINEAR_LABEL_ID" --arg title "$issue_title" \
-                --arg description "$description" --argjson priority "$priority" \
-                '{$team, $label, $title, $description, $priority}')")
-
-            if [ "$(jq -r '.data.issueCreate.success' <<< "$created")" != true ]; then
-              echo "::error::Linear did not file $issue_title"
+                }) { success issue { id identifier url } }
+              }' "$(jq -n --arg team "$LINEAR_TEAM_ID" --arg label "$LINEAR_LABEL_ID" \
+                --arg title "$repo: $id in $package" --arg description "$description" \
+                --argjson priority "$priority" '{$team, $label, $title, $description, $priority}')" \
+              | jq -r '.data.issueCreate | select(.success == true) | .issue | "\(.id)\t\(.identifier)\t\(.url)"')
+            if [ -z "$created" ]; then
+              echo "::error::Linear did not file $id"
               exit 1
             fi
-            IFS=$'\t' read -r identifier url \
-              <<< "$(jq -r '.data.issueCreate.issue | "\(.identifier)\t\(.url)"' <<< "$created")"
+            IFS=$'\t' read -r issue_id identifier url <<< "$created"
+
+            # shellcheck disable=SC2016 # GraphQL variables are not shell expansions
+            attached=$(linear '
+              mutation($id: String!, $url: String!, $subtitle: String!) {
+                attachmentCreate(input: { issueId: $id, url: $url, title: "Tracking key", subtitle: $subtitle }) {
+                  success
+                }
+              }' "$(jq -n --arg id "$issue_id" --arg url "$key_url" --arg subtitle "$GITHUB_REPOSITORY $id" \
+                '{$id, $url, $subtitle}')" \
+              | jq -r '.data.attachmentCreate.success') || attached=false
+
+            # Without its key the next run cannot find the issue and would file it again every four
+            # hours, so an issue that did not get one is deleted and the run fails instead.
+            if [ "$attached" != true ]; then
+              echo "::error::Linear did not attach the tracking key to $identifier; deleting it"
+              # shellcheck disable=SC2016 # GraphQL variables are not shell expansions
+              linear 'mutation($id: String!) { issueDelete(id: $id) { success } }' \
+                "$(jq -n --arg id "$issue_id" '{$id}')" > /dev/null \
+                || echo "::error::could not delete $identifier, which the next run will file again"
+              exit 1
+            fi
+
             echo "- \`$id\` (\`$package\` $versions) filed as [$identifier]($url)" >> "$GITHUB_STEP_SUMMARY"
           done < "$RUNNER_TEMP/advisories.tsv"
+      - name: Fail on an incomplete scan
+        if: ${{ steps.deny.outputs.complete != 'true' }}
+        run: |
+          echo "::error::cargo deny did not finish checking advisories; its output is in the Check advisories step"
+          exit 1
