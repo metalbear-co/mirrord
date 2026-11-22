@@ -168,7 +168,7 @@ You can turn off telemetry to MetalBear on these Operators the same way. They ke
 
 Replace the certificate before it expires. The Operator picks up the new one on its own, no restart needed.
 
-If the certificate is in `values.yaml`, replace it there and upgrade:
+If the certificate is in the Operator's `values.yaml`, replace it there and upgrade:
 
 ```bash
 # From your chart repository
@@ -185,4 +185,16 @@ kubectl create secret generic mirrord-operator-license-pem \
   --namespace mirrord \
   --from-file=license.pem=/path/to/new/license.pem \
   --dry-run=client -o yaml | kubectl apply -f -
+```
+
+With a License Server, replace the certificate in the License Server's `values.yaml` and upgrade its release. The License Server reads the certificate only when it starts, so restart it:
+
+```bash
+# From your chart repository
+helm upgrade mirrord-operator-license-server <your-chart-repo>/mirrord-operator-license-server -f ./values.yaml
+
+# Or from the copied .tgz file
+helm upgrade mirrord-operator-license-server ./mirrord-operator-license-server-<version>.tgz -f ./values.yaml
+
+kubectl rollout restart deployment/mirrord-license-server --namespace mirrord
 ```
