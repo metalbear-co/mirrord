@@ -1,0 +1,178 @@
+name: Scan Rust Advisories
+
+# Checks `main`'s `Cargo.lock` against the RustSec advisory database every four hours. CI's
+# `check-cargo-deny` runs only when a dependency changes, and the nightly only once a day, so an
+# advisory published against a crate we already ship would otherwise go unnoticed until the next
+# dependency pull request fails on it, often during a release.
+#
+# Each advisory that fails `cargo deny check advisories` gets one open Linear issue (label
+# `vulnerability`), which later runs leave alone instead of filing again. The run itself stays
+# green when it files: it fails only when the scan or the filing breaks.
+on:
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  # The version metalbear-co/cargo-deny-action runs in `check-cargo-deny`, and its release checksum.
+  CARGO_DENY_VERSION: 0.18.6
+  CARGO_DENY_SHA256: a9c3db6db22288045ad8407bd0febbb13c6339b3d948d666ae8ef634fb3f3853
+  # Engineering team and the workspace `vulnerability` label.
+  LINEAR_TEAM_ID: 07a4680f-463d-4725-b66a-e6d508099565
+  LINEAR_LABEL_ID: 77aa599d-4a17-496e-a071-0f195253538e
+
+jobs:
+  scan:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      # cargo-deny builds the dependency graph with `cargo metadata`, which needs the toolchain
+      # `rust-toolchain.toml` pins. Nothing is compiled, so there is no cache.
+      - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
+        with:
+          components: cargo
+          cache: false
+      - name: Install cargo-deny
+        run: |
+          set -euo pipefail
+          name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location -o "$RUNNER_TEMP/cargo-deny.tar.gz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$name.tar.gz"
+          echo "$CARGO_DENY_SHA256  $RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      # One line per failing advisory: id, code, package, versions, title, solution. Advisories
+      # `deny.toml` ignores, and unmaintained crates that are not direct dependencies, are not
+      # errors and so are not listed.
+      - name: Check advisories
+        id: deny
+        run: |
+          set -euo pipefail
+          status=0
+          cargo deny --format json --log-level warn check advisories 2> "$RUNNER_TEMP/deny.jsonl" \
+            || status=$?
+
+          jq -r -s '
+            [.[] | select(.type == "diagnostic" and .fields.severity == "error" and .fields.advisory != null) | .fields]
+            | group_by(.advisory.id)[]
+            | [
+                .[0].advisory.id,
+                .[0].code,
+                .[0].advisory.package,
+                ([.[].graphs[].Krate.version] | unique | join(", ")),
+                .[0].advisory.title,
+                ([.[0].notes[] | select(startswith("Solution: ")) | ltrimstr("Solution: ")] | first // "")
+              ]
+            | @tsv
+          ' "$RUNNER_TEMP/deny.jsonl" > "$RUNNER_TEMP/advisories.tsv"
+
+          # A failure with nothing to file means the scan itself broke, for example the advisory
+          # database could not be fetched.
+          if [ "$status" -ne 0 ] && [ ! -s "$RUNNER_TEMP/advisories.tsv" ]; then
+            cat "$RUNNER_TEMP/deny.jsonl" >&2
+            echo "::error::cargo deny failed without reporting an advisory"
+            exit 1
+          fi
+
+          count=$(grep -c '' "$RUNNER_TEMP/advisories.tsv" || true)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then
+            echo "No failing advisories." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: File Linear issues
+        if: ${{ steps.deny.outputs.count != '0' }}
+        timeout-minutes: 5
+        env:
+          LINEAR_APP_CLIENT_ID: ${{ secrets.LINEAR_APP_CLIENT_ID }}
+          LINEAR_APP_CLIENT_SECRET: ${{ secrets.LINEAR_APP_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          LINEAR_APP_TOKEN=$(.github/scripts/linear-token.sh)
+          echo "::add-mask::$LINEAR_APP_TOKEN"
+
+          linear() {
+            local response
+            response=$(jq -n --arg query "$1" --argjson variables "$2" '{$query, $variables}' \
+              | curl --fail-with-body --silent --show-error \
+                -X POST https://api.linear.app/graphql \
+                -H "Authorization: Bearer $LINEAR_APP_TOKEN" \
+                -H 'Content-Type: application/json' \
+                --data @-)
+            # Linear reports GraphQL errors with HTTP 200.
+            if jq -e '.errors' <<< "$response" > /dev/null; then
+              printf 'Linear API error: %s\n' "$(jq -c '.errors' <<< "$response")" >&2
+              return 1
+            fi
+            printf '%s' "$response"
+          }
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          repo=${GITHUB_REPOSITORY#*/}
+
+          while IFS=$'\t' read -r id code package versions title solution; do
+            issue_title="$repo: $id in $package"
+
+            # shellcheck disable=SC2016 # GraphQL variables are not shell expansions
+            open=$(linear '
+              query($team: ID!, $title: String!) {
+                issues(first: 1, filter: {
+                  team: { id: { eq: $team } }, title: { eq: $title },
+                  state: { type: { in: ["triage", "backlog", "unstarted", "started"] } }
+                }) { nodes { identifier url } }
+              }' "$(jq -n --arg team "$LINEAR_TEAM_ID" --arg title "$issue_title" '{$team, $title}')" \
+              | jq -r '.data.issues.nodes[0] // empty | "\(.identifier)\t\(.url)"')
+
+            if [ -n "$open" ]; then
+              IFS=$'\t' read -r identifier url <<< "$open"
+              echo "- \`$id\` (\`$package\` $versions) is tracked in [$identifier]($url)" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            if [ -n "$solution" ]; then
+              fix="**Fix:** $solution, then run \`cargo deny check advisories\`."
+            else
+              fix="**Fix:** no patched release exists. Replace the crate, or add \`$id\` to the \`ignore\` list in \`deny.toml\` with the reason it does not affect us."
+            fi
+
+            # A vulnerability is High; unmaintained, unsound and yanked crates are Normal.
+            priority=3
+            if [ "$code" = vulnerability ]; then
+              priority=2
+            fi
+
+            description=$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n' \
+              "\`cargo deny check advisories\` fails on \`main\` of \`$GITHUB_REPOSITORY\`, and so will every pull request that changes a dependency." \
+              "**[$id](https://rustsec.org/advisories/$id.html)** ($code): $title" \
+              "**Affected:** \`$package\` $versions" \
+              "$fix" \
+              "Found by $run_url")
+
+            # shellcheck disable=SC2016 # GraphQL variables are not shell expansions
+            created=$(linear '
+              mutation($team: String!, $label: String!, $title: String!, $description: String!, $priority: Int!) {
+                issueCreate(input: {
+                  teamId: $team, labelIds: [$label], title: $title, description: $description, priority: $priority
+                }) { success issue { identifier url } }
+              }' "$(jq -n --arg team "$LINEAR_TEAM_ID" --arg label "$LINEAR_LABEL_ID" --arg title "$issue_title" \
+                --arg description "$description" --argjson priority "$priority" \
+                '{$team, $label, $title, $description, $priority}')")
+
+            if [ "$(jq -r '.data.issueCreate.success' <<< "$created")" != true ]; then
+              echo "::error::Linear did not file $issue_title"
+              exit 1
+            fi
+            IFS=$'\t' read -r identifier url \
+              <<< "$(jq -r '.data.issueCreate.issue | "\(.identifier)\t\(.url)"' <<< "$created")"
+            echo "- \`$id\` (\`$package\` $versions) filed as [$identifier]($url)" >> "$GITHUB_STEP_SUMMARY"
+          done < "$RUNNER_TEMP/advisories.tsv"
