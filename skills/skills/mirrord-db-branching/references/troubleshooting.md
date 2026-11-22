@@ -116,7 +116,7 @@ DynamoDB has no password-based auth. `"copy": { "mode": "all" }` **requires** `i
 **Solution:**
 
 ```json mirrord=feature.db_branches[]
-{ "type": "dynamodb", "iam_auth": { "type": "aws_rds" }, "copy": { "mode": "all" } }
+{ "type": "dynamodb", "connection": { "url": "AWS_ENDPOINT_URL_DYNAMODB" }, "iam_auth": { "type": "aws_rds" }, "copy": { "mode": "all" } }
 ```
 
 Also note: DynamoDB `filter` strings can't use `ExpressionAttributeValues`/`Names` placeholders; only self-contained expressions work. LSIs are not copied; branch tables use PayPerRequest billing.

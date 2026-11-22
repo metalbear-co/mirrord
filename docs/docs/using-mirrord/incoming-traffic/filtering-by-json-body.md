@@ -34,7 +34,7 @@ This feature is available in mirrord version 3.175.0 and onwards.
           "body_filter": {
             "body": "json",
             "query": "$.data[*].legacyEntityIds.legacyUserIdentityId",
-            "matches": "^identity123$",
+            "matches": "^identity123$"
           }
         }
       }

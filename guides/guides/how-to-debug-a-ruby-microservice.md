@@ -85,21 +85,21 @@ The above minikube service command automatically sets up a port forwarding sessi
 Once we run the minikube service command, we get the below output. 
 
 ```md
-minikube service guestbook                                                        
+minikube service guestbook                                                        
 
 |-----------|-----------|-------------|---------------------------|
-| NAMESPACE |   NAME	| TARGET PORT |        	URL        	|
+| NAMESPACE |   NAME	| TARGET PORT |        	URL        	|
 |-----------|-----------|-------------|---------------------------|
-| default   | ruby-app |    	4567 | http://192.168.49.2:31233 |
+| default   | ruby-app |    	4567 | http://192.168.49.2:31233 |
 |-----------|-----------|-------------|---------------------------|
-🏃  Starting tunnel for service guestbook.
+🏃  Starting tunnel for service guestbook.
 |-----------|-----------|-------------|------------------------|
-| NAMESPACE |   NAME	| TARGET PORT |      	URL       	|
+| NAMESPACE |   NAME	| TARGET PORT |      	URL       	|
 |-----------|-----------|-------------|------------------------|
-| default   | ruby-app |         	| http://127.0.0.1:57485 |
+| default   | ruby-app |         	| http://127.0.0.1:57485 |
 |-----------|-----------|-------------|------------------------|
-🎉  Opening service default/guestbook in default browser...
-❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
+🎉  Opening service default/guestbook in default browser...
+❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
 ```
 
 Now we have access to the Guestbook application on http://localhost:57485 as the above output says.
@@ -149,18 +149,18 @@ Let’s update the new config file created and opened in the editor. The configu
 
 ```json
 {
-   "feature": {
-       "network": {
-           "incoming": "mirror",
-           "outgoing": true
-       },
-       "fs": "read",
-       "env": true
-   },
-   "target": {
-       "path": "deployment/ruby-app",
-       "namespace": "default"
-   }
+   "feature": {
+       "network": {
+           "incoming": "mirror",
+           "outgoing": true
+       },
+       "fs": "read",
+       "env": true
+   },
+   "target": {
+       "path": "deployment/ruby-app",
+       "namespace": "default"
+   }
 }
 ```
 
@@ -261,14 +261,14 @@ You should see the following output which will let you know that the guestbook h
 ⠚ mirrord exec
 	✓ update to 3.127.0 available
 	✓ ready to launch process
-  	✓ layer extracted
-  	✓ operator not found
-  	✓ agent pod created
-  	✓ pod is ready
-  	✓ arm64 layer library extracted
-	✓ config summary                       
+  	✓ layer extracted
+  	✓ operator not found
+  	✓ agent pod created
+  	✓ pod is ready
+  	✓ arm64 layer library extracted
+	✓ config summary                       
     
-                                                                                                                                       	 
+                                                                                                                                       	 
 mirrord guestbook server started at http://0.0.0.0:4567
 ```
 
