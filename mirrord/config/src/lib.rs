@@ -2804,12 +2804,20 @@ mod tests {
             // The line number of the opening fence, and the block read so far.
             let mut block: Option<(usize, String)> = None;
 
+            let not_closed = |start: usize| {
+                format!("{}:{start}: the JSON block is never closed", file.display())
+            };
+
             for (index, line) in source.lines().enumerate() {
                 let line = line.trim_start();
                 let Some(doc) = line
                     .strip_prefix("///")
                     .or_else(|| line.strip_prefix("//!"))
                 else {
+                    // The doc comment ended inside the block.
+                    if let Some((start, _)) = block.take() {
+                        invalid.push(not_closed(start));
+                    }
                     continue;
                 };
                 let doc = doc.strip_prefix(' ').unwrap_or(doc);
@@ -2827,6 +2835,10 @@ mod tests {
                 } else if doc.trim() == "```json" {
                     block = Some((index + 1, String::new()));
                 }
+            }
+
+            if let Some((start, _)) = block {
+                invalid.push(not_closed(start));
             }
         }
 
