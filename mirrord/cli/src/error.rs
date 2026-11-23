@@ -47,6 +47,7 @@ use crate::{
     tui::TuiCliError,
     ui::UiCliError,
     up::UpCliError,
+    verify::error::VerifyError,
 };
 
 pub(crate) type CliResult<T, E = CliError> = core::result::Result<T, E>;
@@ -859,6 +860,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     MirrordForCi(#[from] CiError),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Verify(#[from] VerifyError),
 
     #[error("The '{0}' command is not currently supported on Windows")]
     UnsupportedOnWindows(String),

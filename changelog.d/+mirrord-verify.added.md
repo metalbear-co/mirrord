@@ -1,0 +1,1 @@
+Added `mirrord verify`, which runs a test command and records on the cluster which commit was tested and which sessions the operator served for it. `mirrord verify show` and `mirrord verify check` read the records. It needs an operator that keeps verification records, and runs the command without a record otherwise.
