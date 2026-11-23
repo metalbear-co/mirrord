@@ -1334,28 +1334,11 @@ jobs:
     steps:
       - name: Update WinGet manifest
         env:
-          # Classic PAT of the metalbear-ci bot account. A GitHub App installation
-          # token can't be used here: Komac opens the PR against
-          # microsoft/winget-pkgs, where our app isn't (and can't be) installed.
-          # A fine-grained PAT can't open pull requests on public repositories
-          # outside its resource owner either. A classic PAT can open a
-          # cross-fork PR to a public repo without write access, which is
-          # exactly what WinGet needs.
-          #
-          # The PR is opened from the org fork metalbear-co/winget-pkgs rather
-          # than a personal fork, so the release doesn't depend on one person's
-          # account. CONTRIBUTING.md ("WinGet") says who has access and how the
-          # token is managed. The token needs `public_repo`, and `workflow`
-          # because syncing fast-forwards the fork over upstream changes to
-          # .github/workflows, and GitHub doesn't let a token without
-          # `workflow` change workflow files. Whether creating the PR branch in
-          # the fork also needs `workflow` hasn't been tried.
-          #
-          # The secret lives only in the `winget` environment, whose deployment
-          # branch rule allows only `main`. The token can push to the fork and
-          # open pull requests as metalbear-ci, so a run on any other branch,
-          # whose workflow anyone with write access to this repository can
-          # change, must not be able to read it.
+          # Classic PAT of metalbear-ci, because Komac opens the PR on
+          # microsoft/winget-pkgs, where a GitHub App can't be installed and a
+          # fine-grained PAT can't open PRs. It exists only in the `winget`
+          # environment, limited to `main`, so runs on other branches can't
+          # read it. CONTRIBUTING.md ("WinGet") has the scopes and setup.
           GITHUB_TOKEN: ${{ secrets.WINGET_BOT_TOKEN }}
           # Komac uses the token's login as the fork owner unless this is set.
           KOMAC_FORK_OWNER: metalbear-co

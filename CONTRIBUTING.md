@@ -924,54 +924,42 @@ Open a PR from that branch to `main`, then merge it — the Release workflow wil
 
 ## WinGet
 
-The `release_winget` job opens the pull request that adds the manifests of each release to `microsoft/winget-pkgs`. It
-runs [Komac](https://github.com/russellbanks/Komac) on Linux. Komac opens the pull request as the `metalbear-ci` account
-from the org fork [metalbear-co/winget-pkgs](https://github.com/metalbear-co/winget-pkgs). The fork belongs to the org
-rather than to one person, so org admins control it and anyone with write access can manage it. Komac creates its branch
-at the latest commit of `microsoft/winget-pkgs`, not at the fork's, so the submission doesn't need the fork to be
-synced. The job still tries to sync the fork first, to keep it current for anyone who works in it by hand and to show a
-broken token early. A failed sync only shows a warning.
+The `release_winget` job uses [Komac](https://github.com/russellbanks/Komac) to open the pull request that adds each
+release's manifests to `microsoft/winget-pkgs`. It submits as the `metalbear-ci` account from the org fork
+[metalbear-co/winget-pkgs](https://github.com/metalbear-co/winget-pkgs), so releases don't depend on one person's
+account. Komac branches from the latest upstream commit, so a failed fork sync only shows a warning.
 
 The setup that the job relies on:
 
 - `WINGET_BOT_TOKEN` is a classic personal access token of `metalbear-ci` with the `public_repo` and `workflow` scopes.
-  It needs `workflow` because syncing brings in the changes that `microsoft/winget-pkgs` makes to `.github/workflows`.
-  Without it, the sync fails with a warning on every release. Whether creating the branch also needs `workflow` hasn't
-  been tried. The credentials of `metalbear-ci` are in the team password manager.
-- `WINGET_BOT_TOKEN` is a secret of the `winget` environment (Settings → Environments), never a repository or
-  organization secret. The environment has one deployment branch rule, `main`, so workflow runs on other branches can't
-  read the token. It has no reviewers or wait timer, so the release runs unattended. GitHub uses an environment secret
-  first, then a repository secret, then an organization secret of the same name. A repository or organization copy
-  would be readable from every branch, and the job would quietly use it if the environment secret were missing.
-- `metalbear-ci` is an outside collaborator with write access to the fork only, not an org member, so its
-  `workflow`-scoped token can't change the workflows of other `metalbear-co` repositories.
+  Syncing the fork needs `workflow` because upstream changes `.github/workflows`. The credentials of `metalbear-ci` are
+  in the team password manager.
+- The token is a secret of the `winget` environment only, never a repository or organization secret, because those
+  are readable from every branch. The environment has one deployment branch rule, `main`, and no reviewers, so the
+  release runs unattended.
+- `metalbear-ci` is an outside collaborator with write access to the fork only, so its token can't change the workflows
+  of other `metalbear-co` repositories.
 - Actions are turned off on the fork, so the workflows that syncing brings in never run there.
-- The `metalbear-co` org allows classic personal access tokens. If it enforces SAML SSO, the token is authorized for the
-  org (Configure SSO → Authorize on the token's page).
+- The `metalbear-co` org allows classic personal access tokens. If it enforces SAML SSO, the token must be authorized
+  for the org.
 
 When the job warns or fails:
 
-- When the token expires or is revoked, the job fails. Create a new token with the same scopes, authorize it for
-  `metalbear-co` if the org enforces SAML SSO, and replace the secret in the `winget` environment.
-- If `release_winget` fails with an error that the run is not allowed to deploy to `winget`, GitHub matched the release
-  run against a ref other than `main`, and the job stopped before it submitted anything. Add a deployment branch rule
-  for exactly the ref that the error names, re-run the job, then remove that rule. Never add a pattern such as
-  `releases/*` or `refs/pull/*/merge`. Once GitHub matches a ref other than `main`, a branch rule alone can't keep the
-  token from runs that someone with write access controls, since a pull request run can carry a matching ref while it
-  runs a workflow from another branch. The exact ref limits that to the few minutes of one re-run, and a pattern would
-  leave it open. If the error names `releases/<version>`, GitHub matches the pull request's head branch, so the `main`
-  rule that stays is open the same way to a pull request whose head is `main`: add a required reviewer to the `winget`
-  environment right away. Until the token is protected another way, for example with that required reviewer or with a
-  different release trigger, every release fails like this. Track it in one issue, and open that issue if there isn't
-  one yet.
+- If the token expired or was revoked, create a new one with the same scopes, authorize it if the org enforces SAML
+  SSO, and replace the secret in the `winget` environment.
+- If the run is not allowed to deploy to `winget`, GitHub matched it against a ref other than `main`, and nothing was
+  submitted. Add a deployment branch rule for exactly the ref that the error names, re-run the job, then remove the
+  rule. Never add a pattern such as `releases/*` or `refs/pull/*/merge`, since a pull request run can carry a matching
+  ref and read the token. If the error names `releases/<version>`, the `main` rule is open the same way to a pull
+  request whose head is `main`, so add a required reviewer to the environment right away. Every release fails like
+  this until the token is protected another way, so track it in one issue.
 - If the job only warns that it couldn't sync the fork, the pull request was still submitted, so don't re-run the job.
-  Check the token, which the next release also needs. Use "Sync fork" on the fork's GitHub page (anyone with write
-  access can) if you want the fork to be current.
-- If the job fails to submit, check the token and the access of `metalbear-ci` to the fork, then re-run the job. If the
-  error says that GitHub refused to create the branch, syncing the fork by hand may help.
+  Check the token, which the next release also needs.
+- If the job fails to submit, check the token and the access of `metalbear-ci` to the fork, then re-run the job. If
+  GitHub refused to create the branch, use "Sync fork" on the fork's GitHub page.
 - If a pull request for the version already exists, open, merged or closed, Komac opens none and the job shows a
-  warning. After a re-run, that is expected. If that pull request was closed without merging, the version isn't
-  published until someone submits it by hand from the org fork, with a token that can write to it:
+  warning. After a re-run, that is expected. If that pull request was closed without merging, submit the version by
+  hand from the org fork, with a token that can write to it:
 
   ```bash
   KOMAC_FORK_OWNER=metalbear-co GITHUB_TOKEN=<token> komac update MetalBear.mirrord --version <version> \
