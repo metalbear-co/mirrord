@@ -1,0 +1,52 @@
+{
+  "name": "mirrord",
+  "version": "1.0.0",
+  "description": "Official mirrord skills for Codex, covering real-environment Kubernetes workflows for AI agents and developers.",
+  "skills": "./skills/",
+  "author": {
+    "name": "MetalBear",
+    "email": "support@metalbear.com",
+    "url": "https://metalbear.com"
+  },
+  "homepage": "https://metalbear.com/mirrord/ai/",
+  "repository": "https://github.com/metalbear-co/skills",
+  "license": "MIT",
+  "keywords": [
+    "mirrord",
+    "kubernetes",
+    "k8s",
+    "metalbear",
+    "dev-tools",
+    "ai-agents"
+  ],
+  "interface": {
+    "displayName": "mirrord",
+    "shortDescription": "Guide AI agents through real Kubernetes workflows with mirrord.",
+    "longDescription": "Bundle thirteen official mirrord skills for quickstart setup, config generation, operator rollout, CI integration, database branching, Kafka queue splitting, Temporal task queue splitting, preview environments, multi-service mirrord up sessions, mirrord Beyond setup for Amazon ECS through MetalBear Cloud, chaos testing, baggage header propagation across services and queues, and discovery of a filterable request identifier from live traffic with mirrord dump.",
+    "developerName": "MetalBear",
+    "category": "Development",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://metalbear.com/mirrord/ai/",
+    "privacyPolicyURL": "https://metalbear.com/legal/privacy-policy/",
+    "termsOfServiceURL": "https://metalbear.com/legal/terms/",
+    "defaultPrompt": [
+      "Help me run my first mirrord session against a staging cluster.",
+      "Generate a valid mirrord.json to steal traffic from deployment/api in staging.",
+      "Set up mirrord in GitHub Actions so integration tests run against our shared cluster.",
+      "Create mirrord preview environment instructions for a per-PR workflow.",
+      "Configure mirrord Kafka queue splitting for the orders.created topic.",
+      "Set up Temporal task queue splitting so my local worker only gets test workflows.",
+      "Generate a mirrord-up.yaml to debug several microservices together.",
+      "Add 750ms latency to my service's database connections with a mirrord chaos rule.",
+      "Make the mirrord session baggage header propagate through our Kafka and SQS consumers.",
+      "Scan our staging cluster with mirrord dump and tell me which header or JWT claim I can filter on across every service.",
+      "Set up mirrord Beyond for our ECS service and give my team a mirrord-up.yaml."
+    ],
+    "screenshots": [
+      "./assets/mirrord-agent-skills.png"
+    ]
+  }
+}
