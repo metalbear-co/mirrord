@@ -193,6 +193,36 @@ With `search_path`, nothing is uploaded: the changelogs are already baked into a
 
 `search_path` accepts multiple entries, joined into `LIQUIBASE_SEARCH_PATH`; Liquibase looks for `changelog_file` under each in turn.
 
+## Patching the default migration images
+
+Image scanners flag both default migration runners: `flyway/flyway:13` bundles `databricks-jdbc` and Couchbase `core-io` with a vulnerable jackson-databind, and `liquibase/liquibase:4.33` bundles a Temurin JRE and, inside `liquibase-commercial.jar`, a jackson-databind with critical CVEs. Upstream publishes no tag or variant without them: Flyway 13 is the latest line, Liquibase 4.x ended at 4.33 and 5.x is a different product (no bundled JDBC drivers and a new license). The operator keeps these defaults.
+
+To run patched builds instead, publish your own images under the same tags (`13` for Flyway, `4.33` for Liquibase) and point the chart at their registries. A newer `eclipse-temurin:21-jre` base fixes only the JRE finding: the flagged jars have to go too, so drop `liquibase-commercial.jar` (unused without a Pro license) or swap the jackson-databind inside it, and remove `databricks-jdbc` and Couchbase `core-io` from Flyway's `lib` when you do not use those databases, keeping the drivers your dialects need. The operator pulls `<registry>:<tag>`:
+
+```yaml
+operator:
+  pgBranchConfig:
+    dbPod:
+      migrationImages:
+        flyway:
+          registry: registry.example.com/flyway
+        liquibase:
+          registry: registry.example.com/liquibase
+```
+
+The same `migrationImages` block exists under `mysqlBranchConfig`, `mariadbBranchConfig` and `mssqlBranchConfig`. A single branch can also name the full image itself with `migrations.image`, which wins over the chart:
+
+```json
+{
+  "migrations": {
+    "flavor": "liquibase",
+    "image": "registry.example.com/liquibase:4.33-patched",
+    "path": "./changelog",
+    "changelog_file": "db.changelog-master.xml"
+  }
+}
+```
+
 ## Container migrations
 
 Set `"flavor": "container"` to run your own image as the migration Job. This is the fit when migrations aren't standalone SQL files but part of your application's own tooling - for example an app image whose setup script runs the framework's migration command:
