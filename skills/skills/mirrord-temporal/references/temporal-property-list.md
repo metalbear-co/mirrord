@@ -111,7 +111,7 @@ A second, separate `MirrordPropertyList` can hold Temporal per-queue options, re
 
 | Property | Description | Required | Default |
 | --- | --- | :------: | :-----: |
-| `max_buffered_tasks` | Maximum number of workflow tasks and, separately, activity tasks the operator buffers per virtual task queue. Operator `3.237.0` or later: while any virtual queue is full for a task kind, the operator stops polling that task queue for that kind until the queue is below the cap; nothing is dropped, though a buffered task's Temporal timeouts keep running, a query held past its deadline fails, and a split resumed after an operator restart sends a session's tasks to the main queue until the session re-attaches. Earlier operators: a full session queue overflows to the main queue, and a full main queue drops new tasks. Positive integer to cap; `0` for unlimited. | No | `128` on operator `3.237.0` or later, unlimited before |
+| `max_buffered_tasks` | Maximum number of workflow tasks and, separately, activity tasks the operator buffers per virtual task queue. Operator `3.237.0` or later: while any virtual queue is full for a task kind, the operator stops polling that task queue for that kind until the queue is below the cap; nothing is dropped, though a buffered task's Temporal timeouts keep running. Earlier operators: a full session queue overflows to the main queue, and a full main queue drops new tasks. Positive integer to cap; `0` for unlimited. | No | `128` on operator `3.237.0` or later, unlimited before |
 
 ```yaml crd
 apiVersion: mirrord.metalbear.co/v1

@@ -410,10 +410,9 @@ queue splits stay active even though the preview's pods are gone. When a request
 environment's filter arrives, it is **held** while the pods start and answered by the preview
 once ready - the caller just sees a slower first response. Queue messages don't need holding at
 all: they wait in the environment's split queue/topic until the preview consumes them, so
-nothing is lost either way. Temporal tasks for the preview wait in the operator; on operator
-`3.237.0` or later, a full preview buffer pauses that task queue for every worker on it until
-the preview takes tasks (see
-[`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options)).
+nothing is lost either way. Temporal tasks for the preview wait in the operator, up to the
+[task buffer cap](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options) on
+operator `3.237.0` or later.
 With [Kafka branching](../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching),
 a message waiting on a branch topic the preview consumes starts the preview pods.
 
@@ -446,10 +445,8 @@ temporary queue and are consumed when the service scales back up, whose new pods
 split configuration already applied. For Temporal, unmatched tasks wait in operator memory
 instead, and once 128 of a kind are buffered (operator `3.237.0` or later; see
 [`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options))
-the operator stops polling that task queue until the target is back and takes tasks, so matching
-tasks stop reaching the preview too meanwhile. With `operator.manageKedaScaledObjects` set, the
-split keeps the target at one replica, so that pod drains the main virtual queue and the hold
-ends as soon as it keeps up.
+the operator stops polling that task queue until the target takes tasks. With
+`operator.manageKedaScaledObjects` set, the split keeps the target at one replica.
 
 See [Autoscaled Targets with KEDA](../sharing-the-cluster/queue-splitting.md#autoscaled-targets-with-keda)
 to see how KEDA autoscaling works with queue splitting.
