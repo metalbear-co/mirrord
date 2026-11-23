@@ -136,6 +136,8 @@ macro_rules! string_id {
     };
 }
 
+pub(crate) use string_id;
+
 string_id!(
     /// Identifies one assignment across control-plane reconnects.
     ///

@@ -8,6 +8,9 @@
 //! [`ConnectionAssignment`] containing the data-plane endpoint and authorization
 //! needed to establish the connection.
 //!
+//! A developer can also ask for the tasks of a service by their tags instead of
+//! by replica: see [`task_claims`].
+//!
 //! This crate only describes sessions-manager coordination and connection
 //! establishment. The mirrord protocol carried over the resulting connection is
 //! defined by `mirrord-protocol`.
@@ -22,11 +25,16 @@ pub use data_plane::{
 pub use error::SessionsManagerProtocolError;
 use serde::{Deserialize, Serialize};
 pub use sessions::{SessionList, SessionOwner, SessionSummary};
+pub use task_claims::{
+    AdmissionRequest, AdmissionResponse, AdmissionVerdict, ClaimEventName, ClaimId,
+    ClaimRegistration, MIRRORD_KEY_TAG, MatchId, TaskMatched,
+};
 
 mod control_plane;
 mod data_plane;
 mod error;
 mod sessions;
+pub mod task_claims;
 
 /// Information a control-plane subscription sends to one peer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
