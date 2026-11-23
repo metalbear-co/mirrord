@@ -1,0 +1,69 @@
+root: ./docs/
+
+structure:
+  summary: ./SUMMARY.md
+
+redirects:
+  # Targets are file paths relative to root, with the .md extension, as in GitBook's example:
+  # https://gitbook.com/docs/docs-as-code/git-sync/content-configuration#configure-a-space-with-.gitbook.yaml
+
+  # Old PR #94 redirects
+  using-mirrord/vscode-extension: installing-mirrord/vscode.md
+  using-mirrord/intellij-plugin: installing-mirrord/intellij.md
+  using-mirrord/wsl: installing-mirrord/wsl.md
+
+  # Overview section → new locations
+  overview: getting-started/what-is-mirrord.md
+  overview/introduction: getting-started/what-is-mirrord.md
+  overview/quick-start: getting-started/quick-start.md
+  overview/onboarding-wizard: getting-started/onboarding-wizard.md
+  overview/teams: getting-started/what-is-mirrord.md#mirrord-for-teams
+  overview/contributing: contributing.md
+
+  # Using mirrord → new locations
+  using-mirrord/traffic-filtering: using-mirrord/incoming-traffic/filter-incoming-traffic.md
+  using-mirrord/filtering-by-json-body: using-mirrord/incoming-traffic/filtering-by-json-body.md
+  using-mirrord/browser-extension: using-mirrord/incoming-traffic/debug-from-browser.md
+  using-mirrord/steal-https: using-mirrord/incoming-traffic/steal-https.md
+  using-mirrord/traffic-inspection: using-mirrord/incoming-traffic/inspect-live-traffic.md
+  using-mirrord/outgoing-filter: using-mirrord/outgoing-traffic/filter-outgoing-traffic.md
+  using-mirrord/connecting-external-tools: using-mirrord/connecting-tools/README.md
+  using-mirrord/web-browsing: using-mirrord/connecting-tools/web-browsing.md
+  using-mirrord/postman: using-mirrord/connecting-tools/postman.md
+  using-mirrord/targetless: using-mirrord/targetless.md
+  using-mirrord/sessions: sharing-the-cluster/sessions.md
+  using-mirrord/sharing-the-cluster: sharing-the-cluster/overview.md
+  using-mirrord/queue-splitting: sharing-the-cluster/queue-splitting.md
+  using-mirrord/db-branching: sharing-the-cluster/db-branching.md
+  using-mirrord/db-branch-management: sharing-the-cluster/db-branching/management.md
+  using-mirrord/db-branching-advanced-config: sharing-the-cluster/db-branching.md
+  using-mirrord/mirrord-for-ci: use-cases/mirrord-for-ci.md
+
+  # DB branching restructure → per-database pages
+  sharing-the-cluster/db-branch-management: sharing-the-cluster/db-branching/management.md
+  sharing-the-cluster/db-branching-advanced-config: sharing-the-cluster/db-branching.md
+
+  # Managing mirrord → new locations
+  managing-mirrord/policies: sharing-the-cluster/policies.md
+  managing-mirrord/outgoing-traffic-policies: sharing-the-cluster/outgoing-traffic-policies.md
+  managing-mirrord/profiles: sharing-the-cluster/profiles.md
+
+  # Coming soon / old preview-env locations → new locations
+  coming-soon/preview-env/preview-env: use-cases/preview-environments.md
+  coming-soon/preview-env: use-cases/preview-environments.md
+  using-mirrord/preview-environments: use-cases/preview-environments.md
+  using-mirrord/preview-environments-in-ci: use-cases/preview-environments-in-ci.md
+
+  # Installing mirrord section removed: install pages under Quick Start, IDE pages in IDE Extensions, the rest in Reference
+  installing-mirrord: getting-started/install-mirrord.md
+  getting-started/installing-mirrord: getting-started/install-mirrord.md
+  getting-started/installing-mirrord/cli: installing-mirrord/cli.md
+  getting-started/installing-mirrord/cli/global-configuration: installing-mirrord/global-configuration.md
+  getting-started/installing-mirrord/vscode: installing-mirrord/vscode.md
+  getting-started/installing-mirrord/intellij: installing-mirrord/intellij.md
+  getting-started/installing-mirrord/operator: getting-started/install-the-operator.md
+  installing-mirrord/operator: getting-started/install-the-operator.md
+  getting-started/installing-mirrord/wsl: installing-mirrord/wsl.md
+
+  # Serverless Workloads section renamed to Beyond Kubernetes
+  using-mirrord/serverless: using-mirrord/beyond-kubernetes/README.md

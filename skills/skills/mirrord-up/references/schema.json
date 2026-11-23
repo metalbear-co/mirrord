@@ -1,0 +1,1047 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UpConfig",
+  "description": "Top-level `mirrord-up.yaml` configuration.\n\nThe file is rendered as a template before parsing: `{{ key }}` inserts the session key, and\n`{{ git_branch }}` inserts the current git branch when there is one.",
+  "type": "object",
+  "properties": {
+    "common": {
+      "description": "Settings applied to all services.",
+      "$ref": "#/$defs/CommonConfig",
+      "default": {
+        "accept_invalid_certificates": null,
+        "baggage": null,
+        "context": null,
+        "operator": null,
+        "telemetry": null
+      },
+      "x-mirrord-plan": "oss"
+    },
+    "modes": {
+      "description": "Custom modes keyed by name, selected with a service's `default_mode` or\n`mirrord up --mode`. An entry named after a built-in mode (`split`, `replace`, `mirror`)\nmay set only `db_branching`.",
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ModeConfig"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "x-mirrord-plan": "oss"
+    },
+    "services": {
+      "description": "Per-service configurations keyed by service name.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ServiceConfig"
+      },
+      "x-mirrord-plan": "oss"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "services"
+  ],
+  "$defs": {
+    "BodyFilter": {
+      "description": "Currently only JSON body filtering is supported.",
+      "oneOf": [
+        {
+          "title": "feature.network.incoming.inner_filter.body_filter.json {#feature-network-incoming-inner-body-filter-json}",
+          "description": "Tries to parse the body as a JSON object and find (a) matching subobjects(s).\n\n`query` should be a valid JSONPath (RFC 9535) query string.\n`matches` should be a regex. Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate\n\nExample:\n```json\n\"http_filter\": {\n  \"body_filter\": {\n    \"body\": \"json\",\n    \"query\": \"$.library.books[*]\",\n    \"matches\": \"^\\\\d{3,5}$\"\n  }\n}\n```\nwill match\n```json\n{\n  \"library\": {\n    \"books\": [\n      34555,\n      1233,\n      234\n      23432\n    ]\n  }\n}\n```\n\nThe filter will match if there is at least one query result.\n\nNon-string matches are stringified before being compared to\nthe regex. To filter query results by type, the `typeof`\n[function extension](https://www.rfc-editor.org/rfc/rfc9535.html#name-function-extensions)\nis provided. It takes in a single `NodesType` parameter and\nreturns `\"null\" | \"bool\" | \"number\" | \"string\" | \"array\" | \"object\"`,\ndepending on the type of the argument. If not all nodes in the\nargument have the same type, it returns `nothing`.\n\nExample:\n\n```json\n\"body_filter\": {\n  \"body\": \"json\",\n  \"query\": \"$.books[?(typeof(@) == 'number')]\",\n  \"matches\": \"4$\"\n}\n```\nwill match\n\n```json\n{\n  \"books\": [\n    1111,\n    2222,\n    4444\n  ]\n}\n```\n\nbut not\n\n```json\n{\n  \"books\": [\n    \"1111\",\n    \"2222\",\n    \"4444\"\n  ]\n}\n```\n\n\n\nTo use with `all_of` or `any_of`, use the following syntax:\n```json\n\"http_filter\": {\n  \"all_of\": [\n    {\n      \"path\": \"/buildings\"\n    },\n    {\n      \"body\": \"json\",\n      \"query\": \"$.library.books[*]\",\n      \"matches\": \"^\\\\d{3,5}$\"\n    }\n  ]\n}\n```",
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "string",
+              "const": "json"
+            },
+            "matches": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "body",
+            "query",
+            "matches"
+          ]
+        }
+      ]
+    },
+    "CommonConfig": {
+      "description": "Settings applied to every service.",
+      "type": "object",
+      "properties": {
+        "accept_invalid_certificates": {
+          "description": "Accept invalid TLS certificates (e.g. self-signed) from the Kubernetes API server. When not\nset, the value from the kubeconfig is used.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "baggage": {
+          "description": "Sets the OpenTelemetry baggage value for every service. The `BAGGAGE` environment\nvariable takes precedence.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-mirrord-plan": "team"
+        },
+        "context": {
+          "description": "Kube context to use for all services, from your kubeconfig.\n\nA service's own `context` takes precedence, and `mirrord up --context` takes precedence\nover both. When none is set, the global config's `kube_context` is used, then the\nkubeconfig's current context.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operator": {
+          "description": "Whether to use the mirrord operator. When not set, mirrord tries the operator and continues\nwithout it if that fails.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "telemetry": {
+          "description": "Whether mirrord sends telemetry data to MetalBear cloud.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "CronJobTarget": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cron_job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cron_job"
+      ],
+      "x-mirrord-plan": "team"
+    },
+    "DbBranching": {
+      "description": "Which DB branches a mode requests.",
+      "oneOf": [
+        {
+          "description": "Branches of every database defined on the workload's `MirrordSplitConfig`, created empty.",
+          "type": "string",
+          "const": "empty"
+        },
+        {
+          "description": "Like `empty`, with the source database's schema copied.",
+          "type": "string",
+          "const": "schema"
+        },
+        {
+          "description": "Like `empty`, with the source database's schema and data copied.",
+          "type": "string",
+          "const": "all"
+        },
+        {
+          "description": "Branches of every database defined on the workload's `MirrordSplitConfig`, each copied\nwith its own `copy.mode`.",
+          "type": "string",
+          "const": "inherit"
+        },
+        {
+          "description": "No branches: the service runs against the source databases.",
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    },
+    "DeploymentTarget": {
+      "description": "<!--${internal}-->\nMirror the deployment specified by [`DeploymentTarget::deployment`].",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deployment": {
+          "description": "<!--${internal}-->\nDeployment to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "deployment"
+      ],
+      "x-mirrord-plan": "oss"
+    },
+    "InnerFilter": {
+      "anyOf": [
+        {
+          "title": "feature.network.incoming.inner_filter.header_filter {#feature-network-incoming-inner-header-filter}",
+          "description": "Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,\ncase-insensitive.\n\nPrefer matching W3C `baggage` or `tracestate` entries such as\n`mirrord-session={{ key }}` when you want to isolate one developer session.",
+          "type": "object",
+          "properties": {
+            "header": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "header"
+          ]
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.path_filter {#feature-network-incoming-inner-path-filter}",
+          "description": "Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive. Tries to find match in the path (without query) and path+query.\nIf any of the two matches, the request is stolen.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "method"
+          ]
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.body_filter {#feature-network-incoming-inner-body-filter}",
+          "description": "Matches the request based on the contents of its body. Currently only JSON body filtering is\nsupported.",
+          "$ref": "#/$defs/BodyFilter"
+        },
+        {
+          "title": "feature.network.incoming.inner_filter.header_filter_jq",
+          "description": "##### {#feature-network-incoming-inner-header-filter-jq}\n\nSupports jq expressions, matches when the expression returns\n`true`. The expression is evaluated on each present header in\nthe request, in `HeaderKey: HeaderValue` format.",
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        }
+      ]
+    },
+    "JobTarget": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "job": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "job"
+      ],
+      "x-mirrord-plan": "team"
+    },
+    "LabelTarget": {
+      "description": "Selects every pod in the target namespace that has all configured labels.",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "description": "Exact-match labels used to select pods. All entries must match.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "labels"
+      ],
+      "x-mirrord-plan": "team"
+    },
+    "ModeConfig": {
+      "description": "A custom mode, defined under `modes` and selected by name with `default_mode` or\n`mirrord up --mode`.\n\nAn entry named after a built-in mode (`split`, `replace`, `mirror`) may set only\n`db_branching`, which then applies to that built-in mode for every service.",
+      "type": "object",
+      "properties": {
+        "db_branching": {
+          "description": "Which DB branches the service requests, from the `dbBranches` defined on the workload's\n`MirrordSplitConfig`: `empty`, `schema` or `all` to copy every one with that copy mode,\n`inherit` to copy each with its own, `off` for none. Applies whatever `incoming` is, and\nis ignored with a message when the target isn't a single workload.\n\nWhen not set, a mode whose `incoming` is `split` or `mirror` requests the same branches as\n`inherit` when the target is a single workload, but runs against the source databases\ninstead of failing when the operator can't branch or there is nothing to branch. With\n`incoming: replace` it requests none. A service that sets `db_branches` itself keeps\nthem.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DbBranching"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incoming": {
+          "description": "How incoming traffic is handled, as in the built-in mode of the same name. Defaults to\n`split`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queues": {
+          "description": "How the service's queues are split. When not set, every queue defined in the cluster is\nsplit like `incoming`: mirrored with `incoming: mirror`, stolen (`queue_mode: steal`)\notherwise.\n\nIgnored with `incoming: replace`, which doesn't split queues.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueueSplitMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PodTarget": {
+      "description": "<!--${internal}-->\nMirror the pod specified by [`PodTarget::pod`].",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pod": {
+          "description": "<!--${internal}-->\nPod to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pod"
+      ],
+      "x-mirrord-plan": "oss"
+    },
+    "PrepareConfig": {
+      "description": "The command that prepares a service's synced code in its preview pod.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command to run, as a list of the program and its arguments, e.g. `[\"npm\", \"ci\"]`. It\nruns in the preview's container before the app starts, and again after a sync that\nchanges a file that `triggered_by` matches. The app restarts once it succeeds.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "directory": {
+          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "persist": {
+          "description": "The absolute paths in the container that `command` writes to outside every `sync`\n`remote`, e.g. `/usr/local/lib/python3.12/site-packages`. The preview keeps them on the\nvolume that holds the synced code, so the files that `command` wrote survive a restart of\nthe pod. A path under a `remote` is on that volume already and needs no entry.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "triggered_by": {
+          "description": "The files whose changes run `command` again, as globs relative to the directory that\ncontains `mirrord-up.yaml`, e.g. `frontend/package-lock.json`. Each must lie under the\n`local` of a `sync.files` entry. The preview pod reads every file that a glob matches after\neach sync, including the files that `command` wrote, so a glob with `**` over a\ndirectory such as `node_modules` hashes every match on every sync. Name the files, such\nas `frontend/package-lock.json` or `packages/*/package.json`, to keep that cheap.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    },
+    "QueueSplitMode": {
+      "description": "How a custom mode splits the service's queues.",
+      "oneOf": [
+        {
+          "description": "Messages matching the session are consumed by the local service only\n(`queue_mode: steal`).",
+          "type": "string",
+          "const": "split"
+        },
+        {
+          "description": "Messages matching the session reach both the local and the original service\n(`queue_mode: mirror`).",
+          "type": "string",
+          "const": "mirror"
+        }
+      ]
+    },
+    "ReplicaSetTarget": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replica_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "replica_set"
+      ],
+      "x-mirrord-plan": "team"
+    },
+    "RolloutTarget": {
+      "description": "<!--${internal}-->\nMirror the rollout specified by [`RolloutTarget::rollout`].",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rollout": {
+          "description": "<!--${internal}-->\nRollout to mirror.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rollout"
+      ],
+      "x-mirrord-plan": "oss"
+    },
+    "RunConfig": {
+      "description": "Includes all information necessary to build the `mirrord` command\nfor this session.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command to run, as a list of the program and its arguments, e.g.\n`[\"npm\", \"run\", \"dev\"]`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "directory": {
+          "description": "Working directory for `command`. Relative paths are resolved against the directory that\ncontains `mirrord-up.yaml`, and the directory must exist.\n\nOnly supported with `type` `exec`. When not set, `command` runs in the directory\n`mirrord up` was started from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pre_command": {
+          "description": "A command to run to completion before the service's mirrord session starts, as a list of\nthe program and its arguments, e.g. `[\"npm\", \"run\", \"build\"]`.\n\nRuns locally without mirrord, in the same directory as `command`. The session starts\nonly if it exits successfully; if it fails, this service is not started and the other\nservices keep running.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "type": {
+          "description": "Whether to run `command` with `mirrord exec` or `mirrord container`.\n\nDefaults to `exec`.",
+          "$ref": "#/$defs/RunType",
+          "default": "exec"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    },
+    "RunType": {
+      "description": "Whether the service runs with `mirrord exec` or `mirrord container`.",
+      "oneOf": [
+        {
+          "description": "Run `command` as a local process with `mirrord exec`.",
+          "type": "string",
+          "const": "exec"
+        },
+        {
+          "description": "Run `command` with `mirrord container`. The command must start a container, e.g.\n`[\"docker\", \"run\", \"my-image\"]`.",
+          "type": "string",
+          "const": "container"
+        }
+      ]
+    },
+    "ServerlessTarget": {
+      "description": "Targets a serverless remote workload, i.e. an application running outside Kubernetes with a\n`mirrord-agent` companion in each replica, reached through sessions-manager.\n\n- `serverless/{service-name}[/container/{replica-id}]`;\n\nThe environment part of the sessions-manager service scope is not part of the target; it is\ntaken from `target.namespace`, defaulting to `default`.\n\nThe `container` field:\n\nRestricts the session to the agent on this replica, as its `ReplicaId` (the agent's\n`MIRRORD_REMOTE_SERVICE_REPLICA`, which defaults to the hosting platform's replica id such as\nthe ECS task ARN, and then to the container hostname). When unset, sessions-manager offers the\neligible agent with the lowest replica id.",
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serverless": {
+          "description": "Name of the service in sessions-manager: the logical workload whose replicas\neach run an agent companion. Together with the environment it forms the\n`ServiceScope` that the session's agent pairing is restricted to.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "serverless"
+      ],
+      "x-mirrord-plan": "enterprise"
+    },
+    "ServiceConfig": {
+      "description": "Per-service configuration.",
+      "type": "object",
+      "properties": {
+        "config_patch": {
+          "description": "A JSON merge patch (RFC 7396) applied to the mirrord config generated for this service.\n\nNot to be relied upon, `mirrord up` tries to do the right thing by default, so you should\nonly reach for this when truly needed."
+        },
+        "context": {
+          "description": "Kube context to use for this service, from your kubeconfig.\n\nTakes precedence over `common.context`. `mirrord up --context` takes precedence over both.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "default_mode": {
+          "description": "How incoming traffic and queue messages are shared between the local and the original\nservice: a built-in mode or one defined under `modes`. Defaults to `split`.\n\n`mirrord up --mode` overrides this for every service.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServiceMode"
+            },
+            {
+              "description": "A mode defined under `modes`.",
+              "type": "string"
+            }
+          ],
+          "default": "split"
+        },
+        "env": {
+          "description": "Environment variable settings for the local process.\n\nFor example:\n\n```yaml\nenv:\n  include: \"DATABASE_USER;PUBLIC_*\"\n  override:\n    LOG_LEVEL: debug\n```",
+          "type": "object",
+          "properties": {
+            "env_file": {
+              "description": "Allows for passing environment variables from an env file.\n\nThese variables will override environment fetched from the remote target.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "exclude": {
+              "description": "Include the remote environment variables in the local process that are **NOT** specified by\nthis option.\nVariable names can be matched using `*` and `?` where `?` matches exactly one occurrence of\nany character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nSome of the variables that are excluded by default:\n`PATH`, `HOME`, `HOMEPATH`, `CLASSPATH`, `JAVA_EXE`, `JAVA_HOME`, `PYTHONPATH`, `TMPDIR`,\n`TMP`, `TEMP`.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VecOrSingle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "include": {
+              "description": "Include only these remote environment variables in the local process.\nVariable names can be matched using `*` and `?` where `?` matches exactly one occurrence of\nany character and `*` matches arbitrary many (including zero) occurrences of any character.\n\nCan be passed as a list or as a semicolon-delimited string (e.g. `\"VAR;OTHER_VAR\"`).\n\nSome environment variables are excluded by default (`PATH` for example), including these\nrequires specifying them with `include`",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VecOrSingle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "load_from_process": {
+              "description": "Allows for changing the way mirrord loads remote environment variables.\nIf set, the variables are fetched after the user application is started.\n\nThis setting is meant to resolve issues when using mirrord via the IntelliJ plugin on WSL\nand the remote environment contains a lot of variables.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "mapping": {
+              "description": "Specify map of patterns that if matched will replace the value according to specification.\n\n*Capture groups are allowed.*\n\nExample:\n```json\n{\n  \".+_TIMEOUT\": \"10000\"\n  \"LOG_.+_VERBOSITY\": \"debug\"\n  \"(\\w+)_(\\d+)\": \"magic-value\"\n}\n```\n\nWill do the next replacements for environment variables that match:\n\n* `CONNECTION_TIMEOUT: 500` => `CONNECTION_TIMEOUT: 10000`\n\n* `LOG_FILE_VERBOSITY: info` => `LOG_FILE_VERBOSITY: debug`\n\n* `DATA_1234: common-value` => `DATA_1234: magic-value`",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "override": {
+              "description": "Allows setting or overriding environment variables (locally) with a custom value.\n\nFor example, if the remote pod has an environment variable `REGION=1`, but this is an\nundesirable value, it's possible to use `override` to set `REGION=2` (locally) instead.\n\nEnvironment specified here will also override variables passed via the env file.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "unset": {
+              "description": "Allows unsetting environment variables in the executed process.\n\nThis is useful for when some system/user-defined environment like `AWS_PROFILE` make the\napplication behave as if it's running locally, instead of using the remote settings.\nThe unsetting happens from extension (if possible)/CLI and when process initializes.\nIn some cases, such as Go the env might not be able to be modified from the process itself.\nThis is case insensitive, meaning if you'd put `AWS_PROFILE` it'd unset both `AWS_PROFILE`\nand `Aws_Profile` and other variations.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VecOrSingle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "env_file": null,
+            "exclude": null,
+            "include": null,
+            "load_from_process": null,
+            "mapping": null,
+            "override": null,
+            "unset": null
+          }
+        },
+        "http_filter": {
+          "description": "HTTP filter that selects which requests reach the local service in `split` and `mirror`\nmodes.\n\nWhen not set, requests with a header matching the regex\n`baggage: .*mirrord-session={key}.*` are selected, where `{key}` is the session key.\nIgnored in `replace` mode. For example:\n\n```yaml\nhttp_filter:\n  header_filter: \"^x-debug: true$\"\n```",
+          "type": "object",
+          "properties": {
+            "all_of": {
+              "description": "An array of HTTP filters.\n\nEach inner filter specifies a header, path, method, body, or jq filter.\nRequests must match all of the filters to be stolen.\n\nCannot be an empty list.\n\nExample:\n```json\n{\n  \"all_of\": [\n    { \"header\": \"^baggage: .*mirrord-session={{ key }}.*$\" },\n    { \"path\": \"^/api/v1/my-endpoint$\" },\n    { \"method\": \"POST\" }\n  ]\n}\n```",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/InnerFilter"
+              }
+            },
+            "any_of": {
+              "description": "An array of HTTP filters.\n\nEach inner filter specifies a header, path, method, body, or jq filter.\nRequests must match at least one of the filters to be stolen.\n\nCannot be an empty list.\n\nExample:\n```json\n{\n  \"any_of\": [\n    { \"header\": \"^baggage: .*mirrord-session={{ key }}.*$\" },\n    { \"header\": \"^tracestate: .*mirrord-session={{ key }}.*$\" },\n    { \"path\": \"^/api/v1/my-endpoint$\" }\n  ]\n}\n```",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/InnerFilter"
+              }
+            },
+            "body_filter": {
+              "description": "Matches the request based on the contents of its body.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/BodyFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "header_filter": {
+              "description": "Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nThe HTTP traffic feature converts the HTTP headers to `HeaderKey: HeaderValue`,\ncase-insensitive.\n\nThe recommended pattern is to match a W3C `baggage` or `tracestate` entry such as\n`mirrord-session={{ key }}`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "header_filter_jq": {
+              "description": "Supports jq expressions, matches when the expression returns\n`true`. The expression is evaluated on each present header in\nthe request, in `HeaderKey: HeaderValue` format.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "method_filter": {
+              "description": "Supports standard [HTTP methods](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Methods), and non-standard HTTP methods.\n\nCase-insensitive. If the request method matches the filter, the request is stolen.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path_filter": {
+              "description": "Supports regexes validated by the\n[`fancy-regex`](https://docs.rs/fancy-regex/latest/fancy_regex/) crate.\n\nCase-insensitive. Tries to find match in the path (without query) and path+query.\nIf any of the two matches, the request is stolen.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ports": {
+              "description": "Activate the HTTP traffic filter only for these ports. When\nabsent, filtering will be done for all ports.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/VecOrSingle2"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "all_of": null,
+            "any_of": null,
+            "body_filter": null,
+            "header_filter": null,
+            "header_filter_jq": null,
+            "method_filter": null,
+            "path_filter": null,
+            "ports": null
+          }
+        },
+        "ignore_ports": {
+          "description": "Ports whose incoming traffic is not stolen or mirrored.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "uniqueItems": true
+        },
+        "run": {
+          "description": "How to launch the service's local process.",
+          "$ref": "#/$defs/RunConfig"
+        },
+        "skip": {
+          "description": "Don't launch this service unless it is named on the `mirrord up` command line, and don't\npreview it with `mirrord preview sync` unless `--image` or `MIRRORD_<SERVICE>_IMAGE` gives\nit an image. `mirrord preview up` ignores it: an image alone picks its services. Defaults\nto `false`.",
+          "type": "boolean",
+          "default": false
+        },
+        "sync": {
+          "description": "How `mirrord preview sync` previews the service with local code: the local directories\nthat it syncs into the service's preview pod, and how the pod runs them. The preview runs\nthe image from `--image` or `MIRRORD_<SERVICE>_IMAGE`, or the target's image without one.\nFor example:\n\n```yaml\nsync:\n  files:\n    - local: frontend\n      remote: /app\n  prepare:\n    command: [\"npm\", \"ci\"]\n    directory: /app\n    triggered_by: [\"frontend/package-lock.json\"]\n  run:\n    command: [\"npm\", \"run\", \"dev\"]\n    directory: /app\n```\n\n`mirrord up` and `mirrord preview up` ignore this.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyncConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-mirrord-plan": "enterprise"
+        },
+        "target": {
+          "description": "The remote workload this service runs against.\n\n- `none`: run targetless.\n- A mapping with `path` and/or `namespace`: run against that workload.\n- Not set: `mirrord up` looks for a deployment, statefulset, rollout or pod (in that order)\n  named after the service.",
+          "$ref": "#/$defs/TargetConfig",
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "run"
+      ]
+    },
+    "ServiceMode": {
+      "description": "A built-in mode. Also the `incoming` of a custom mode: how the service handles incoming traffic.",
+      "oneOf": [
+        {
+          "description": "Incoming traffic is split between the local and the original service using HTTP filtering.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` go to the local service, where `{key}` is the\nsession key.",
+          "type": "string",
+          "const": "split"
+        },
+        {
+          "description": "The local service takes over *all* incoming traffic: the target workload is copied and the\noriginal is scaled down to zero.\n\nThe service's `http_filter` is ignored, with a warning. The target must support\n`copy_target` with `scale_down`.",
+          "type": "string",
+          "const": "replace",
+          "x-mirrord-plan": "team"
+        },
+        {
+          "description": "Incoming traffic is mirrored to the local service, leaving traffic to the original service\nunaltered.\n\nUses the service's `http_filter` if set. Otherwise, requests with a header matching the\nregex `baggage: .*mirrord-session={key}.*` are mirrored, where `{key}` is the session key.",
+          "type": "string",
+          "const": "mirror"
+        }
+      ]
+    },
+    "ServiceTarget": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "service"
+      ],
+      "x-mirrord-plan": "team"
+    },
+    "SpecifiedTarget": {
+      "description": "The target workload of a service.",
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "description": "Namespace of the target workload. Defaults to the namespace of the kube context.\n\nFor a serverless target, the environment of its service in sessions-manager, `default`\nwhen not set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "The workload to target, e.g. `deployment/my-app` or `pod/my-pod/container/my-container`.\n\nWhen not set, `mirrord up` looks for a deployment, statefulset, rollout or pod (in that\norder) named after the service.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Target"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "StatefulSetTarget": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stateful_set": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "stateful_set"
+      ],
+      "x-mirrord-plan": "team"
+    },
+    "SyncConfig": {
+      "description": "How `mirrord preview sync` previews a service with local code.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "The local directories to sync into the preview pod.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncEntry"
+          }
+        },
+        "prepare": {
+          "description": "The command that prepares the synced code for the app in the preview pod, such as an\ninstall of its dependencies. Needs `run`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrepareConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "description": "How the preview pod runs the app on the synced code. Without it, the preview's container\nruns its own command, which suits an image that serves the synced files as they change,\nsuch as nginx.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyncRunConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ]
+    },
+    "SyncEntry": {
+      "description": "One local directory that `mirrord preview sync` syncs into a preview pod.",
+      "type": "object",
+      "properties": {
+        "ignore": {
+          "description": "More paths that a sync leaves out, written as the lines of a `.gitignore` in `local`,\ne.g. `coverage/`. They take precedence over git's rules, so a `!` line syncs a file that\na `.gitignore` excludes, e.g. `!.env.preview`. A `!` line can't bring back a file in an\nignored directory, as in git.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "local": {
+          "description": "The local directory to sync. A relative path is resolved against the directory that\ncontains `mirrord-up.yaml`. A sync leaves out `.git`, `.jj`, the paths that git ignores\nand the paths that `ignore` leaves out. Those paths keep what the pod has at them, such as\nthe image's files or what `prepare` wrote, and every other path in `remote` holds the\nlocal tree.",
+          "type": "string"
+        },
+        "remote": {
+          "description": "The absolute path in the preview's container that holds the synced directory. A sync makes\nit a mirror of `local`, so it deletes what the image has there, except at the paths that\nthe sync leaves out (see `local`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "local",
+        "remote"
+      ]
+    },
+    "SyncRestart": {
+      "description": "When the preview pod restarts the app. A successful `prepare` always restarts it, because the\napp must run on what `prepare` wrote.",
+      "oneOf": [
+        {
+          "description": "Only after `prepare` runs.",
+          "type": "string",
+          "const": "on_prepare"
+        },
+        {
+          "description": "After every sync.",
+          "type": "string",
+          "const": "on_sync"
+        }
+      ]
+    },
+    "SyncRunConfig": {
+      "description": "How the preview pod of a service with `sync` runs the app.",
+      "type": "object",
+      "properties": {
+        "command": {
+          "description": "The command that runs the app in the preview's container, as a list of the program and\nits arguments, e.g. `[\"npm\", \"run\", \"dev\"]`. It replaces the container's own command.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "directory": {
+          "description": "The absolute working directory of `command` in the preview's container, e.g. `/app`.\nWhen not set, `command` runs in the working directory of the container, which is `/` for\nan image without a `WORKDIR`.\nA directory that the image doesn't have is created as the app's user, so an app that\ndoesn't run as root needs a parent directory that it can write to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restart": {
+          "description": "When the preview pod restarts the app: `on_prepare` restarts it only after `prepare`\nruns, which suits a dev server that reloads changed files on its own, and `on_sync`\nrestarts it after every sync. Defaults to `on_prepare`.",
+          "$ref": "#/$defs/SyncRestart",
+          "default": "on_prepare"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ]
+    },
+    "Target": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DeploymentTarget"
+        },
+        {
+          "$ref": "#/$defs/PodTarget"
+        },
+        {
+          "$ref": "#/$defs/RolloutTarget"
+        },
+        {
+          "$ref": "#/$defs/JobTarget"
+        },
+        {
+          "$ref": "#/$defs/CronJobTarget"
+        },
+        {
+          "$ref": "#/$defs/StatefulSetTarget"
+        },
+        {
+          "$ref": "#/$defs/ServiceTarget"
+        },
+        {
+          "$ref": "#/$defs/ReplicaSetTarget"
+        },
+        {
+          "$ref": "#/$defs/LabelTarget"
+        },
+        {
+          "$ref": "#/$defs/ServerlessTarget"
+        },
+        {
+          "enum": [
+            "targetless"
+          ],
+          "x-mirrord-plan": "oss"
+        }
+      ]
+    },
+    "TargetConfig": {
+      "anyOf": [
+        {
+          "description": "Run targetless.",
+          "const": "none"
+        },
+        {
+          "$ref": "#/$defs/SpecifiedTarget"
+        },
+        {
+          "description": "An empty `target`, treated as if it were not set.",
+          "type": "null"
+        }
+      ]
+    },
+    "VecOrSingle": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "VecOrSingle2": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          }
+        }
+      ]
+    }
+  }
+}

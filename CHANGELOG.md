@@ -8,6 +8,49 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.291.0](https://github.com/metalbear-co/mirrord/tree/3.291.0) - 2026-11-23
+
+
+### Changed
+
+- `mirrord mcp` links each skill file to `skills/skills` in the mirrord
+  repository, at the tag of the installed version, instead of to
+  `metalbear-co/skills`. The `mirrord://info` resource no longer has the `docs`
+  and `skills` fields, and gives only the mirrord version.
+
+
+### Fixed
+
+- Fixed `mirrord mcp` serving no skills on Windows: the skills were embedded
+  with Windows line endings, which the server couldn't parse.
+
+## [3.290.0](https://github.com/metalbear-co/mirrord/tree/3.290.0) - 2026-11-17
+
+
+### Added
+
+- `mirrord preview start` and `mirrord preview up` can now run without a target
+  to provision branch databases alone: with `feature.db_branches` and no
+  `target`, the operator creates the branches and keeps them for the preview's
+  TTL. A targetless `mirrord exec` with branches the operator provisions
+  creates them the same way and gets their connection values in its
+  environment. Branch connection values must then come from a literal, a
+  Kubernetes Secret, or a ConfigMap named directly, since there is no target
+  pod to read them from. Secret manager sources and `iam_auth` work without a
+  target only for S3 and turbopuffer branches, and Spanner branches still need
+  a target.
+
+
+### Fixed
+
+- The serverless workload companion and the CLI's sessions-manager connection
+  trust the CA certificates bundled into mirrord, alongside the system's when
+  it has any, so application images no longer need `ca-certificates` installed
+  to connect to MetalBear Cloud. The data-plane connection trusts the system's
+  CA certificates too, so a sessions-manager behind a private CA or a
+  transparently intercepting proxy no longer passes registration only to fail
+  every data-plane connection.
+
 ## [3.289.0](https://github.com/metalbear-co/mirrord/tree/3.289.0) - 2026-11-16
 
 

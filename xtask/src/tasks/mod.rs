@@ -1,5 +1,4 @@
 pub mod cli;
-pub mod corpus;
 pub mod doc;
 pub mod in_runner;
 pub mod layer;
