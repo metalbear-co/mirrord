@@ -66,6 +66,10 @@ If the Operator's license drops below Enterprise while you are logged in, the ne
 
 Because only the Operator's API is reachable, mirrord does not read the target workload itself: the Operator resolves it, the way it does for a multi-cluster session. Two things follow from that. The `auto_mount` option is skipped with a warning, since it reads the pod spec locally, and Kafka branching is not available while logged in. A config without a namespace runs in the `default` namespace, not in the kubeconfig's.
 
+A running session keeps its connection when the login expires, but it cannot reconnect after a network cut once the login has expired: it stops with the expiry message, and you log in again before the next run.
+
+`mirrord db-branches` and `mirrord vpn` are not served through the Operator's URL yet. While you are logged in they fail with a not-found error from the Operator, whether or not you have a kubeconfig: log out first, then run them with your kubeconfig.
+
 ### Picking a target
 
 `mirrord ls` and the target pickers of the IDE extensions work while you are logged in, with no kubeconfig on the machine. The Operator lists the targets of the namespace for you, already filtered to what RBAC lets your SSO user and groups list, so the pickers show the targets you may list. A target you may `get` but not `list` does not appear there; name it in the config and the session still runs.
@@ -76,7 +80,7 @@ mirrord ls -n payments
 
 The namespace picker of the IDE asks the Operator which namespaces you may list targets in, and offers those: every namespace the Operator serves where RBAC grants you `list` on targets, nothing else. Without a namespace in the config or on the command line, the listing starts in the `default` namespace, like a session does. When RBAC does not let you list targets there, the picker shows no targets until you switch to one of the namespaces it offers.
 
-The pickers never fail because of the namespace list: when the Operator refuses it, for example because your user's roles predate the chart version that grants `list` on `namespaces` in the Operator's API group, the current namespace is the only one offered and the targets of that namespace are still listed.
+The namespace list needs an Operator of version `3.236.0` or later. With an older one, mirrord falls back to the namespaces that hold targets you may list cluster-wide, which is the current namespace alone when your roles grant you namespaces only. The pickers never fail because of the namespace list: when the Operator refuses it, for example because your user's roles predate the chart version that grants `list` on `namespaces` in the Operator's API group, the current namespace is the only one offered and the targets of that namespace are still listed.
 
 ## Seeing your logins
 
