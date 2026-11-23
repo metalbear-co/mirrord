@@ -922,6 +922,51 @@ Ensure there are no uncommitted changes before running the script. It will:
 
 Open a PR from that branch to `main`, then merge it — the Release workflow will fire automatically.
 
+## WinGet
+
+The `release_winget` job uses [Komac](https://github.com/russellbanks/Komac) to open the pull request that adds each
+release's manifests to `microsoft/winget-pkgs`. It submits as the `metalbear-ci` account from the org fork
+[metalbear-co/winget-pkgs](https://github.com/metalbear-co/winget-pkgs), so releases don't depend on one person's
+account. Komac branches from the latest upstream commit, so a failed fork sync only shows a warning.
+
+The setup that the job relies on:
+
+- `WINGET_BOT_TOKEN` is a classic personal access token of `metalbear-ci` with the `public_repo` and `workflow` scopes.
+  Syncing the fork needs `workflow` because upstream changes `.github/workflows`. The credentials of `metalbear-ci` are
+  in the team password manager.
+- The token is a secret of the `winget` environment only, never a repository or organization secret, because those
+  are readable from every branch. The environment has one deployment branch rule, `main`, and no reviewers, so the
+  release runs unattended.
+- `metalbear-ci` is an outside collaborator with write access to the fork only, so its token can't change the workflows
+  of other `metalbear-co` repositories.
+- Actions are turned off on the fork, so the workflows that syncing brings in never run there.
+- The `metalbear-co` org allows classic personal access tokens. If it enforces SAML SSO, the token must be authorized
+  for the org.
+
+When the job warns or fails:
+
+- If the token expired or was revoked, create a new one with the same scopes, authorize it if the org enforces SAML
+  SSO, and replace the secret in the `winget` environment.
+- If the run is not allowed to deploy to `winget`, GitHub matched it against a ref other than `main`, and nothing was
+  submitted. Add a deployment branch rule for exactly the ref that the error names, re-run the job, then remove the
+  rule. Never add a pattern such as `releases/*` or `refs/pull/*/merge`, since a pull request run can carry a matching
+  ref and read the token. If the error names `releases/<version>`, the `main` rule is open the same way to a pull
+  request whose head is `main`, so add a required reviewer to the environment right away. Every release fails like
+  this until the token is protected another way, so track it in one issue.
+- If the job only warns that it couldn't sync the fork, the pull request was still submitted, so don't re-run the job.
+  Check the token, which the next release also needs.
+- If the job fails to submit, check the token and the access of `metalbear-ci` to the fork, then re-run the job. If
+  GitHub refused to create the branch, use "Sync fork" on the fork's GitHub page.
+- If a pull request for the version already exists, open, merged or closed, Komac opens none and the job shows a
+  warning. After a re-run, that is expected. If that pull request was closed without merging, submit the version by
+  hand from the org fork, with a token that can write to it:
+
+  ```bash
+  KOMAC_FORK_OWNER=metalbear-co GITHUB_TOKEN=<token> komac update MetalBear.mirrord --version <version> \
+    --urls "https://github.com/metalbear-co/mirrord/releases/download/<version>/mirrord.msi|x64" \
+    --skip-pr-check --submit
+  ```
+
 ## Publishing docs between releases
 
 A merged pull request from this repository with the `publish-docs` label publishes `docs/` and `guides/` from `main`, including pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing-a-fix-between-releases) says how to publish without those pages.
