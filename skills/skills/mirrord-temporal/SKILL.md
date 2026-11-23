@@ -46,7 +46,7 @@ Guide DevOps engineers through the full setup of mirrord Operator's Temporal tas
 
 When a Temporal splitting session starts, the operator starts polling the real task queue itself, buffering tasks in memory. It patches the deployed worker to poll a **main virtual task queue** and to talk to an **operator-hosted Temporal proxy** instead of the real frontend. The proxy serves polls for the virtual queues from the buffered tasks and forwards everything else (task completions, heartbeats) to the real frontend unchanged.
 
-Each user session gets its own **session virtual task queue**; the operator routes tasks matching that user's filter to it, and everything else to the main virtual queue read by the deployed worker. Tasks still buffered when a session ends overflow back to the main queue so they are not lost. If two users' filters match the same task, it goes to whichever session started most recently.
+Each user session gets its own **session virtual task queue**; the operator routes tasks matching that user's filter to it, and everything else to the main virtual queue read by the deployed worker. Tasks still buffered when a session ends move to the main queue for the deployed worker. Operator `3.237.0` or later buffers at most 128 workflow and 128 activity tasks per virtual task queue by default (`max_buffered_tasks` in the queue's `queueConfig` property list changes it, `0` turns it off); while any virtual queue is full for a task kind, the operator stops polling that task queue for that kind, so nothing is dropped and a session's tasks never go to the deployed worker while the session runs. Earlier operators buffer without a limit unless `max_buffered_tasks` is set, and then send a full session queue's tasks to the main queue. If two users' filters match the same task, it goes to whichever session started most recently.
 
 ## Critical First Steps
 
@@ -286,7 +286,7 @@ If the user has the mirrord-config skill, point them there for the full mirrord.
 ### Proactive warnings
 - Vault-injected env vars → operator can't read them as env vars; move the task queue name into the pod template or a ConfigMap, or use a `podFile` source (operator 3.201.0+) to read it straight from the injected file.
 - Overlapping filters between teammates → the most recently started session wins a doubly-matched task.
-- Long local debugging pauses → buffered tasks accumulate; suggest capping with `max_buffered_tasks` (overflow goes to the deployed worker's main queue).
+- Long local debugging pauses → buffered tasks accumulate up to the cap (128 of each kind on operator `3.237.0` or later), then the operator stops polling that task queue for that kind until the local worker takes tasks, so the deployed worker waits too; on earlier operators the buffer grows without limit unless `max_buffered_tasks` is set, and then overflow goes to the deployed worker's main queue.
 - Certificate rotation → picked up only by new splits, not running ones.
 - `drainTimeout: 0` / unset → immediate teardown; in-flight work may be lost.
 - Python worker with `grpc compression not supported` → the operator's Temporal proxy doesn't support gRPC compression, but `temporalio`'s Python SDK enables gzip by default. Disable it on the worker client, e.g. `grpc_compression=GrpcCompression.NONE` on `Client.connect`.
@@ -318,7 +318,7 @@ Present results as:
 
 **"Two of us need the same task queue"** → each developer sets their own filter; explain that a task matching both filters goes to the most recently started session.
 
-**"Tasks pile up while I'm on a breakpoint"** → set `max_buffered_tasks` in a `queueConfig` property list; overflow goes back to the deployed worker.
+**"Tasks pile up while I'm on a breakpoint"** → on operator `3.237.0` or later the buffer stops at 128 of each kind and the task queue pauses until the local worker resumes; `max_buffered_tasks` in a `queueConfig` property list raises or lowers that. On earlier operators set `max_buffered_tasks` to cap the buffer; there, overflow goes back to the deployed worker.
 
 ## What NOT to Do
 

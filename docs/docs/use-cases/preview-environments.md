@@ -411,7 +411,7 @@ environment's filter arrives, it is **held** while the pods start and answered b
 once ready - the caller just sees a slower first response. Queue messages don't need holding at
 all: they wait in the environment's split queue/topic until the preview consumes them, so
 nothing is lost either way. Temporal has no queue of its own per environment: the operator
-buffers the preview's tasks in memory. On operator `3.235.0` or later, once the preview's buffer
+buffers the preview's tasks in memory. On operator `3.237.0` or later, once the preview's buffer
 is full (128 workflow and 128 activity tasks by default, set by
 [`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options)),
 the operator stops polling that task queue until the preview brings its buffer below the cap; a
@@ -452,7 +452,7 @@ consumer group are read from the workload's spec, and messages flow through the 
 Matching messages reach the preview pod right away; unmatched ones wait on the target's
 temporary queue and are consumed when the service scales back up, whose new pods start with the
 split configuration already applied. For Temporal, unmatched tasks wait in operator memory
-instead, and once 128 of a kind are buffered (operator `3.235.0` or later; see
+instead, and once 128 of a kind are buffered (operator `3.237.0` or later; see
 [`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options))
 the operator stops polling that task queue until the target is back and takes tasks, so matching
 tasks stop reaching the preview too meanwhile. With `operator.manageKedaScaledObjects` set, the
