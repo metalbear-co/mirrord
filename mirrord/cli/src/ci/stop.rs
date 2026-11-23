@@ -340,10 +340,14 @@ impl CiStopCommandHandler {
                     .map(|session_dir| format!("\n- {}", session_dir.display()))
                     .collect::<String>()
             );
-            // The spinner shows a warning only on a terminal, and prints its print buffer only when
-            // the task succeeds, so a CI log would miss the warning of a stop that also fails.
-            // Every other tracker prints it as it prints its other warnings, which with
-            // `MIRRORD_PROGRESS_MODE=off` means not at all.
+            // `SpinnerProgress::warning` prints through indicatif's `println`, which does nothing
+            // on a hidden draw target, and the draw target is hidden when stderr isn't a terminal.
+            // The spinner also prints its print buffer only when the task succeeds, so a CI log
+            // would miss the warning of a stop that also fails. Every other tracker prints it as
+            // it prints its other warnings, which with `MIRRORD_PROGRESS_MODE=off` means not at
+            // all.
+            // TODO: print warnings on a hidden draw target in `mirrord-progress`, so that this can
+            // call `progress.warning` for every tracker.
             match &progress {
                 ProgressTracker::SpinnerProgress(_) => progress.suspend(|| eprintln!("{warning}")),
                 _ => progress.warning(&warning),
