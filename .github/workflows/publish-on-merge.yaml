@@ -19,24 +19,8 @@ on:
 permissions: {}
 
 jobs:
-  # publish-docs.yaml has no concurrency group, so that a pending release publish can't be cancelled. As a result, the
-  # run that pushes last decides what the site shows. This group makes labeled publishes run one at a time. Each one
-  # checks out `main` after its wait in the group, rather than its own merge commit, so the last push holds every merge.
-  # With the default `queue: single`, GitHub cancels a run that is waiting in the group when a newer one joins, which
-  # loses nothing, because the newer run publishes a later `main`.
-  #
-  # GitHub's documentation doesn't say whether a job skipped by its `if` still joins its group. If a skipped job did
-  # join, closing any other pull request would cancel a waiting publish with no alert. A run that won't publish
-  # therefore gets a group of its own, named after its run ID, so the group expression must repeat the condition of
-  # `if`.
-  #
-  # The group name has spaces because concurrency groups are shared across the repository, and ci.yaml names its group
-  # after the pull request's branch. Git refuses spaces in a branch name, so a CI run can't join this group and cancel a
-  # publish.
-  #
-  # Releases stay outside the group, because with `queue: single` a labeled run could cancel a waiting release. A
-  # release that pushes after this job puts the site back on the released commit until the next publish. docs/AGENTS.md
-  # describes that case and when the removed pages come back.
+  # Publishes `main` rather than the merge commit, so that the last of several close merges publishes all of them. A
+  # release that publishes afterwards puts the site back on the released commit, as docs/AGENTS.md describes.
   publish_docs:
     if: ${{ github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'publish-docs') }}
     concurrency:
