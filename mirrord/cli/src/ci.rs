@@ -220,12 +220,13 @@ impl MirrordCiStore {
     /// locking the state file itself would let another writer lock the replacement.
     const LOCK_FILE_NAME: &str = "session.lock";
 
-    /// Prefix of the temporary file that [`Self::write_locked`] writes the state to before it
-    /// replaces the state file.
+    /// Temporary file in a session's directory that [`Self::write_locked`] writes the state to
+    /// before it replaces the state file.
     ///
-    /// A writer that is killed before the replacement leaves this file behind, so
-    /// [`Self::remove_session`] has to recognize it to remove the session's directory.
-    const TEMPORARY_STATE_FILE_PREFIX: &str = ".session.json.";
+    /// Writers hold the session's lock, so they share this one name. A writer that is killed
+    /// before the replacement leaves this file behind. The next write truncates it, and
+    /// [`Self::remove_session`] removes it so that it can't keep the session's directory.
+    const TEMPORARY_STATE_FILE_NAME: &str = "session.json.tmp";
 
     /// How often [`Self::lock_existing_session`] retries a held lock.
     ///
@@ -381,17 +382,19 @@ impl MirrordCiStore {
     /// the cleanup targets from the previous successful invocation.
     async fn write_locked(&self, session_dir: &Path, _lock: &CiStoreLock) -> CiResult<()> {
         let contents = serde_json::to_vec(self)?;
-        let temporary = tempfile::Builder::new()
-            .prefix(Self::TEMPORARY_STATE_FILE_PREFIX)
-            .tempfile_in(session_dir)?;
-        let mut temporary_file = fs::File::from_std(temporary.reopen()?);
+        let temporary_path = session_dir.join(Self::TEMPORARY_STATE_FILE_NAME);
+        let mut options = fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
+        // The state file takes this file's mode when it is replaced, and the temporary directory
+        // is readable by other users.
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut temporary_file = options.open(&temporary_path).await?;
         temporary_file.write_all(&contents).await?;
         temporary_file.flush().await?;
         temporary_file.sync_all().await?;
         drop(temporary_file);
-        temporary
-            .persist(Self::state_path(session_dir))
-            .map_err(|error| error.error)?;
+        fs::rename(&temporary_path, Self::state_path(session_dir)).await?;
         #[cfg(target_os = "linux")]
         fs::File::open(session_dir).await?.sync_all().await?;
         Ok(())
@@ -408,14 +411,12 @@ impl MirrordCiStore {
         }
     }
 
-    /// Removes the temporary state files of the session in `session_dir`, then its state file,
+    /// Removes the temporary state file of the session in `session_dir`, then its state file,
     /// then its lock file, then the directory itself, and treats each one that is already gone as
     /// removed.
     ///
-    /// A temporary state file is left only by a writer that was killed in [`Self::write_locked`],
-    /// because a writer that finishes replaces the state file with it. While `lock` is held on
-    /// the current lock file, no other process can be in [`Self::write_locked`], so every
-    /// temporary state file found then is such a leftover, and would keep the directory forever.
+    /// While `lock` is held, no other process can be in [`Self::write_locked`], so a temporary
+    /// state file is what a killed writer left behind.
     ///
     /// The state file goes before the lock file because, once the lock file is gone, another
     /// process can create a new lock file and lock it while `lock` is still held on the old one.
@@ -427,16 +428,7 @@ impl MirrordCiStore {
             result => result,
         };
 
-        let mut entries = fs::read_dir(session_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            if entry
-                .file_name()
-                .as_encoded_bytes()
-                .starts_with(Self::TEMPORARY_STATE_FILE_PREFIX.as_bytes())
-            {
-                ignore_not_found(fs::remove_file(entry.path()).await)?;
-            }
-        }
+        ignore_not_found(fs::remove_file(session_dir.join(Self::TEMPORARY_STATE_FILE_NAME)).await)?;
         ignore_not_found(fs::remove_file(Self::state_path(session_dir)).await)?;
         ignore_not_found(fs::remove_file(Self::lock_path(session_dir)).await)?;
         match fs::remove_dir(session_dir).await {

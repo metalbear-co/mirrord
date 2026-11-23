@@ -832,12 +832,12 @@ mod tests {
         MirrordCiStore::update(&session_dir, LOCK_TIMEOUT, |_| {})
             .await
             .unwrap();
-        tempfile::Builder::new()
-            .prefix(MirrordCiStore::TEMPORARY_STATE_FILE_PREFIX)
-            .tempfile_in(&session_dir)
-            .unwrap()
-            .keep()
-            .unwrap();
+        tokio::fs::write(
+            session_dir.join(MirrordCiStore::TEMPORARY_STATE_FILE_NAME),
+            "{",
+        )
+        .await
+        .unwrap();
 
         CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
             .handle_with(runtime_remove_container)
