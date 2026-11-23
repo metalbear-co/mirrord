@@ -137,7 +137,10 @@ impl ConnectionHandoffServer {
         stream: UnixSeqpacket,
         sender: IncomingConnectionSender,
     ) -> Result<()> {
-        let accepted = Handoff { stream }.negotiate().await?;
+        let Some(accepted) = Handoff { stream }.negotiate().await? else {
+            tracing::debug!("connection handoff peer closed without a request");
+            return Ok(());
+        };
 
         accepted.original_stream.set_nonblocking(true)?;
         let original_stream = TokioTcpStream::from_std(accepted.original_stream)?;
@@ -182,7 +185,7 @@ struct AcceptedConnection {
 }
 
 impl Handoff {
-    async fn negotiate(self) -> Result<AcceptedConnection> {
+    async fn negotiate(self) -> Result<Option<AcceptedConnection>> {
         timeout(NEGOTIATION_TIMEOUT, self.negotiate_inner())
             .await
             .map_err(|_| {
@@ -193,8 +196,10 @@ impl Handoff {
             })?
     }
 
-    async fn negotiate_inner(&self) -> Result<AcceptedConnection> {
-        let (request, accepted_fd) = self.receive_request().await?;
+    async fn negotiate_inner(&self) -> Result<Option<AcceptedConnection>> {
+        let Some((request, accepted_fd)) = self.receive_request().await? else {
+            return Ok(None);
+        };
         let original_stream: StdTcpStream = accepted_fd.into();
         let local_address = original_stream.local_addr()?;
         let peer_address = Self::observed_peer_address(&request, &original_stream);
@@ -217,18 +222,22 @@ impl Handoff {
         .await?;
         let (passthrough_stream, _) = listener.accept().await?;
 
-        Ok(AcceptedConnection {
+        Ok(Some(AcceptedConnection {
             original_stream,
             request,
             peer_address,
             passthrough_stream,
-        })
+        }))
     }
 
     /// A seqpacket request always arrives as one complete, self-contained message together with
     /// its ancillary fd, so unlike a stream socket this needs no framing and no possibility of a
     /// request spanning multiple reads.
-    async fn receive_request(&self) -> Result<(ConnectionHandoffRequest, OwnedFd)> {
+    ///
+    /// [`None`] when the peer closes the connection without sending a request. The remote
+    /// bootstrap does that on purpose: it connects to check whether a companion still listens on an
+    /// explicitly configured socket before taking the path over, so this isn't a failed handoff.
+    async fn receive_request(&self) -> Result<Option<(ConnectionHandoffRequest, OwnedFd)>> {
         let mut buffer = vec![0u8; MAX_REQUEST_SIZE];
         let mut iov = [IoSliceMut::new(&mut buffer)];
         let mut ancillary_buffer = [0u8; 128];
@@ -236,6 +245,11 @@ impl Handoff {
             .stream
             .recv_vectored_with_ancillary(&mut iov, &mut ancillary_buffer)
             .await?;
+
+        // The remote layer never sends an empty request, so zero bytes is the peer closing.
+        if bytes == 0 {
+            return Ok(None);
+        }
 
         if ancillary.is_truncated() {
             return Err(
@@ -259,7 +273,7 @@ impl Handoff {
         })?;
         let request = decode_handoff_message(received)?;
 
-        Ok((request, accepted_fd))
+        Ok(Some((request, accepted_fd)))
     }
 
     async fn send_response(
@@ -492,7 +506,12 @@ mod tests {
             panic!("handoff rejected");
         };
         let mut placeholder = TokioTcpStream::connect(placeholder_address).await.unwrap();
-        let accepted = timeout(TEST_TIMEOUT, task).await.unwrap().unwrap().unwrap();
+        let accepted = timeout(TEST_TIMEOUT, task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .unwrap();
         accepted.original_stream.set_nonblocking(true).unwrap();
         let mut original = TokioTcpStream::from_std(accepted.original_stream).unwrap();
         let mut passthrough = accepted.passthrough_stream;
