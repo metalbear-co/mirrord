@@ -27,6 +27,9 @@ DynamoDB branching requires operator `3.179.0`, mirrord CLI `3.228.0`, and opera
         "id": "users-dynamodb",
         "type": "dynamodb",
         "version": "latest",
+        "connection": {
+          "url": "AWS_ENDPOINT_URL_DYNAMODB"
+        },
         "iam_auth": { "type": "aws_rds" },
         "copy": {
           "mode": "all"
@@ -39,7 +42,7 @@ DynamoDB branching requires operator `3.179.0`, mirrord CLI `3.228.0`, and opera
 
 ### Connection
 
-Unlike the other engines, `connection` is optional for DynamoDB. Since there is no user or password, it is only used to point the source client at a custom/VPC endpoint URL (for example `AWS_ENDPOINT_URL_DYNAMODB`); if omitted, the standard regional AWS endpoint is used. See [Connection Modes](connection.md) for the supported source formats.
+`connection` names the env var that holds your application's DynamoDB endpoint, usually `AWS_ENDPOINT_URL_DYNAMODB`, which the AWS SDKs read. mirrord sets it to the branch's endpoint in your local process. The source tables are copied from the endpoint this variable holds on the target, or from the standard regional AWS endpoint if the target doesn't set it. See [Connection Modes](connection.md) for the supported source formats.
 
 ### IAM Authentication
 
