@@ -463,7 +463,7 @@ impl FromStr for Target {
             return Ok(Target::Targetless);
         }
         let mut split = target.split('/');
-        match split.next() {
+        let target = match split.next() {
             Some("deployment") | Some("deploy") => {
                 deployment::DeploymentTarget::from_split(&mut split).map(Target::Deployment)
             }
@@ -478,7 +478,7 @@ impl FromStr for Target {
             Some("replicaset") => {
                 replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet)
             }
-            Some("label") => target.parse::<label::LabelTarget>().map(Target::Label),
+            Some("label") => return target.parse::<label::LabelTarget>().map(Target::Label),
             Some("serverless") => {
                 serverless::ServerlessTarget::from_split(&mut split).map(Target::Serverless)
             }
@@ -486,6 +486,14 @@ impl FromStr for Target {
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{}",
                 *FAIL_PARSE_DEPLOYMENT_OR_POD
             ))),
+        }?;
+
+        if split.next().is_some() {
+            Err(ConfigError::InvalidTargetPath(
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
+            ))
+        } else {
+            Ok(target)
         }
     }
 }
@@ -1035,5 +1043,13 @@ mod tests {
         assert!(target.requires_operator());
         assert_eq!(target.to_string().parse::<Target>().unwrap(), target);
         assert!(TargetType::all().all(|target_type| target_type != TargetType::Label));
+    }
+
+    #[rstest]
+    #[case("pod/foo/container/bar/baz")]
+    #[case("deployment/foo/container/bar/baz")]
+    #[case("serverless/foo/container/bar/baz")]
+    fn target_path_rejects_trailing_segments(#[case] path: &str) {
+        assert!(Target::from_str(path).is_err());
     }
 }
