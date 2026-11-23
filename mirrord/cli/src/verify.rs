@@ -19,6 +19,7 @@ use mirrord_operator::{
             VERIFICATION_KEY_PREFIX, VerificationClientReport, VerificationPhase, verification_key,
         },
     },
+    types::{OPERATOR_OWNERSHIP_LABEL, isolation_marker},
 };
 use mirrord_progress::NullProgress;
 use rand::distr::{Alphanumeric, SampleString};
@@ -186,7 +187,16 @@ async fn create_record(
     let record = MirrordVerification {
         metadata: ObjectMeta {
             name: Some(key.to_owned()),
-            labels: Some([(VERIFICATION_COMMIT_LABEL.to_owned(), spec.commit.clone())].into()),
+            labels: Some(
+                [
+                    (VERIFICATION_COMMIT_LABEL.to_owned(), spec.commit.clone()),
+                    (
+                        OPERATOR_OWNERSHIP_LABEL.to_owned(),
+                        isolation_marker().to_owned(),
+                    ),
+                ]
+                .into(),
+            ),
             ..Default::default()
         },
         spec,
