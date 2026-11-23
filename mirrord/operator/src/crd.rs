@@ -41,6 +41,7 @@ pub mod queue_split;
 pub mod rabbitmq;
 
 pub mod session;
+pub mod verification;
 
 pub use kafka::MirrordKafkaEphemeralTopic;
 pub const LABEL_TARGET_NAME: &str = "label";
@@ -1041,6 +1042,11 @@ pub enum NewOperatorFeature {
     /// session's owner in [`Session::share`].
     LocalShare,
 
+    /// This operator keeps `MirrordVerification` records: it writes the sessions it serves under
+    /// a record's key into the record and decides its verdict. The CLI requires this feature
+    /// before `mirrord verify` creates a record, because an older operator has no such resource.
+    Verification,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1056,6 +1062,7 @@ impl NewOperatorFeature {
     pub fn feature_config_key(self) -> Option<&'static str> {
         match self {
             Self::LocalShare => Some("share"),
+            Self::Verification => Some("verify"),
             Self::CopyTarget
             | Self::CopyTargetExcludeContainers
             | Self::CopyTargetFilterIsolation => Some("feature.copy_target"),
@@ -1256,6 +1263,7 @@ impl Display for NewOperatorFeature {
                 "db_branches copy mode requested for MirrordSplitConfig entries"
             }
             NewOperatorFeature::TargetlessDbBranches => "DB branching without a target",
+            NewOperatorFeature::Verification => "verification records",
             NewOperatorFeature::Unknown => "unknown feature",
         };
         f.write_str(name)
@@ -1339,6 +1347,7 @@ impl NewOperatorFeature {
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
             NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
+            NewOperatorFeature::Verification => &["operator.verification"],
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
