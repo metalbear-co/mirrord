@@ -1,0 +1,53 @@
+name: Publish docs and guides on labeled merge
+
+# The `publish-docs` label publishes the docs and guides without needing a release. When a pull request with the label
+# merges into `main`, this workflow runs publish-docs.yaml for `main`. That publishes the whole `docs/` and `guides/`
+# trees, so it also ships anything merged earlier that hasn't been released yet.
+#
+# The trigger is `pull_request`, because GitHub blocks `pull_request_target` by default in public repositories from
+# December 2, 2026, and a `push` to `main` would have to look up the pull request of each commit to read its labels. A
+# `pull_request` run from a fork gets a read-only token and no secrets, so it can neither push the publish commits nor
+# post to #ci-alerts. The job skips a fork's pull request, because its run could only fail with nobody told, and a
+# maintainer publishes it with the manual steps in docs/AGENTS.md. Only a pull request from a branch of this repository
+# can publish, and creating such a branch takes write access.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  # publish-docs.yaml has no concurrency group, so that a pending release publish can't be cancelled. As a result, the
+  # run that pushes last decides what the site shows. This group makes labeled publishes run one at a time. Each one
+  # checks out `main` after its wait in the group, rather than its own merge commit, so the last push holds every merge.
+  # With the default `queue: single`, GitHub cancels a run that is waiting in the group when a newer one joins, which
+  # loses nothing, because the newer run publishes a later `main`.
+  #
+  # GitHub's documentation doesn't say whether a job skipped by its `if` still joins its group. If a skipped job did
+  # join, closing any other pull request would cancel a waiting publish with no alert. A run that won't publish
+  # therefore gets a group of its own, named after its run ID, so the group expression must repeat the condition of
+  # `if`.
+  #
+  # The group name has spaces because concurrency groups are shared across the repository, and ci.yaml names its group
+  # after the pull request's branch. Git refuses spaces in a branch name, so a CI run can't join this group and cancel a
+  # publish.
+  #
+  # Releases stay outside the group, because with `queue: single` a labeled run could cancel a waiting release. A
+  # release that pushes after this job puts the site back on the released commit until the next publish. docs/AGENTS.md
+  # describes that case and when the removed pages come back.
+  publish_docs:
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'publish-docs') }}
+    concurrency:
+      group: ${{ github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'publish-docs') && 'publish docs on merge' || github.run_id }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      statuses: read
+    uses: ./.github/workflows/publish-docs.yaml
+    with:
+      ref: main
+      dry_run: false
+    secrets:
+      SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}

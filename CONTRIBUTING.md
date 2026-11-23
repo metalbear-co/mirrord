@@ -921,3 +921,7 @@ Ensure there are no uncommitted changes before running the script. It will:
 - Push the branch.
 
 Open a PR from that branch to `main`, then merge it — the Release workflow will fire automatically.
+
+## Publishing docs between releases
+
+A merged pull request from this repository with the `publish-docs` label publishes `docs/` and `guides/` from `main`, including pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing-a-fix-between-releases) says how to publish without those pages.
