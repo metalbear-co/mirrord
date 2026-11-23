@@ -23,15 +23,11 @@ CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. T
 
 A fix that can't wait for the next release goes out through the `Publish docs and guides` workflow (`.github/workflows/publish-docs.yaml` at the repository root), which publishes `docs/` to `docs-published` and `guides/` to `guides-published`.
 
-The `publish-docs` pull request label publishes the docs and guides without needing a release, when the pull request merges (`.github/workflows/publish-docs-on-merge.yaml` at the repository root). It publishes everything merged to `docs/` or `guides/` since the last publish, not only that pull request.
+The `publish-docs` label publishes all of `docs/` and `guides/` from `main` when its pull request merges (`.github/workflows/publish-docs-on-merge.yaml` at the repository root), including anything merged since the last publish. A failed publish posts to `#ci-alerts`, and re-running the failed job publishes the current `main`.
 
-The label publishes nothing if it was added after the merge, or if the pull request came from a fork. A maintainer then publishes the change with the steps below.
+Run the `Publish docs and guides` workflow by hand for a pull request from a fork, for a label added after the merge, to see what would go out first, or to leave out pages that must wait:
 
-A failed labeled publish posts to `#ci-alerts`, and re-running the failed job publishes the current `main`.
-
-Run the `Publish docs and guides` workflow by hand instead to see what would go out before it publishes, to leave out pages that must wait, or to publish a change that has already merged:
-
-1. If the fix hasn't merged, merge it to `main` like any other change, without the `publish-docs` label. The next release then keeps the fix, and this merge publishes nothing. Another pull request that merges with the label would still publish it, along with the rest of `main`.
+1. If the fix hasn't merged, merge it to `main` without the `publish-docs` label. Another labeled merge would still publish it.
 2. From the Actions tab, with "Use workflow from" left on `main`, run the workflow with `ref` set to `main` and `dry_run` on. The step summary names the commit that `main` resolved to and lists the files that differ from the published branches. Everything merged to `docs/` or `guides/` since the last publish goes out with the fix, so check that the list holds only what is ready to publish. If both branches already match, there is nothing to publish.
 3. If the list holds pages that must wait, such as one for a CLI feature that merged but isn't released yet, create a branch from the latest release tag, cherry-pick the fix onto it, push it, and dry-run that branch instead. Any name works except one that starts with `docs/`, which git refuses because the repository has a `docs` branch.
 4. Run the workflow again with `ref` set to the commit SHA from the dry run's summary and `dry_run` off, so it publishes the commit that the dry run checked. The workflow pushes, waits for GitBook to import the commits, and posts to `#ci-alerts` if any of it fails. Delete the branch from step 3 afterwards.
