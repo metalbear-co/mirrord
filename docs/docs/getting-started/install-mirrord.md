@@ -86,6 +86,7 @@ mirrord supports Kubernetes `1.22` or later. This applies to the open-source ver
 
 ## Next steps
 
+- [mirrord MCP Server](../using-mirrord-with-ai/mcp-server.md): let your AI agent validate mirrord configs and read the docs of your installed version.
 - [Onboarding Wizard](onboarding-wizard.md): generate a `mirrord-up.yaml` for your services.
 - [Starting your first session](first-session.md): run your local code in the context of the cluster.
 - [Install the Operator](install-the-operator.md): for teams sharing a cluster, the platform team installs it once per cluster.
