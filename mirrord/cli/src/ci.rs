@@ -93,7 +93,7 @@ pub(crate) async fn ci_command(
         .handle()
         .await?),
         CiCommand::Stop => Ok(stop::CiStopCommandHandler::new(
-            temp_dir().join(MirrordCiStore::SESSIONS_DIR_NAME),
+            MirrordCiStore::sessions_dir(),
             ProgressTracker::from_env("mirrord ci stop"),
         )
         .handle()
@@ -247,11 +247,14 @@ impl MirrordCiStore {
     /// process of that session can fail.
     const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// Directory of the session with `session_id`, under [`Self::SESSIONS_DIR_NAME`].
+    /// Directory that holds the directory of every CI session on this machine.
+    fn sessions_dir() -> PathBuf {
+        temp_dir().join(Self::SESSIONS_DIR_NAME)
+    }
+
+    /// Directory of the session with `session_id`, under [`Self::sessions_dir`].
     fn session_dir(session_id: Uuid) -> PathBuf {
-        temp_dir()
-            .join(Self::SESSIONS_DIR_NAME)
-            .join(session_id.to_string())
+        Self::sessions_dir().join(session_id.to_string())
     }
 
     fn state_path(session_dir: &Path) -> PathBuf {
