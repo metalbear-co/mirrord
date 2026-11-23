@@ -246,24 +246,27 @@ impl Handoff {
             .recv_vectored_with_ancillary(&mut iov, &mut ancillary_buffer)
             .await?;
 
-        // The remote layer never sends an empty request, so zero bytes is the peer closing.
-        if bytes == 0 {
-            return Ok(None);
-        }
-
         if ancillary.is_truncated() {
             return Err(
                 Error::new(ErrorKind::InvalidData, "connection handoff fd truncated").into(),
             );
         }
 
-        let accepted_fd = ancillary
-            .into_messages()
-            .find_map(|message| match message {
-                OwnedAncillaryMessage::FileDescriptors(mut fds) => fds.next(),
-                _ => None,
-            })
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "missing accepted socket fd"))?;
+        let accepted_fd = ancillary.into_messages().find_map(|message| match message {
+            OwnedAncillaryMessage::FileDescriptors(mut fds) => fds.next(),
+            _ => None,
+        });
+        let accepted_fd = match accepted_fd {
+            Some(accepted_fd) => accepted_fd,
+            // Zero bytes and no fd is the peer closing without a request. A zero-length message
+            // that carries an fd is malformed instead, and fails decoding below.
+            None if bytes == 0 => return Ok(None),
+            None => {
+                return Err(
+                    Error::new(ErrorKind::InvalidData, "missing accepted socket fd").into(),
+                );
+            }
+        };
 
         let received = buffer.get(..bytes).ok_or_else(|| {
             Error::new(
