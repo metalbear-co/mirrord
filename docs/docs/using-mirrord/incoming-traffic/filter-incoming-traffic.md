@@ -221,9 +221,7 @@ We can use the following mirrord config to parse out the `user` field and compar
     "network": {
       "incoming": {
         "http_filter": {
-          "header_filter": {
-            "query": "sub(\"^Bearer\\\\s+\"; \"\") | split(\".\") | .[1] | gsub(\"-\"; \"+\") | gsub(\"_\"; \"/\") | . as $s | $s + (\"=\" * ((4 - ($s|length % 4)) % 4)) | @base64d | fromjson | .user | test(\"^liron$\")"
-          }
+          "header_filter_jq": "sub(\"^Bearer\\\\s+\"; \"\") | split(\".\") | .[1] | gsub(\"-\"; \"+\") | gsub(\"_\"; \"/\") | . as $s | $s + (\"=\" * ((4 - ($s|length % 4)) % 4)) | @base64d | fromjson | .user | test(\"^liron$\")"
         }
       }
     }

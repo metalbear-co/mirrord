@@ -72,18 +72,18 @@ Once the above is deployed let’s use the following command to get access to th
 minikube service knote
 
 |-----------|-------|-------------|---------------------------|
-| NAMESPACE | NAME  | TARGET PORT |        	URL        	|
+| NAMESPACE | NAME  | TARGET PORT |        	URL        	|
 |-----------|-------|-------------|---------------------------|
-| default   | knote |      	80 | http://192.168.49.2:30742 |
+| default   | knote |      	80 | http://192.168.49.2:30742 |
 |-----------|-------|-------------|---------------------------|
-🏃  Starting tunnel for service knote.
+🏃  Starting tunnel for service knote.
 |-----------|-------|-------------|------------------------|
-| NAMESPACE | NAME  | TARGET PORT |      	URL       	|
+| NAMESPACE | NAME  | TARGET PORT |      	URL       	|
 |-----------|-------|-------------|------------------------|
-| default   | knote |         	| http://127.0.0.1:52030 |
+| default   | knote |         	| http://127.0.0.1:52030 |
 |-----------|-------|-------------|------------------------|
-🎉  Opening service default/knote in default browser...
-❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
+🎉  Opening service default/knote in default browser...
+❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
 ```
 
 Once the above command runs, we will have access to the knote application on [http://localhost:52030](http://localhost:52030) as you can see above.
@@ -128,18 +128,18 @@ As a new config file is opened up in your editor, you can update the contents of
 
 ```json
 {
-   "feature": {
-       "network": {
-           "incoming": "mirror",
-           "outgoing": true
-       },
-       "fs": "read",
-       "env": true
-   },
-   "target": {
-       "path": "deployment/knote",
-       "namespace": "default"
-   }
+   "feature": {
+       "network": {
+           "incoming": "mirror",
+           "outgoing": true
+       },
+       "fs": "read",
+       "env": true
+   },
+   "target": {
+       "path": "deployment/knote",
+       "namespace": "default"
+   }
 }
 ```
 

@@ -87,21 +87,21 @@ The above minikube service command automatically sets up a port forwarding sessi
 Once we run the minikube service command, we get the below output.
 
 ```md
-minikube service guestbook                                                        
+minikube service guestbook                                                        
 
 |-----------|-----------|-------------|---------------------------|
-| NAMESPACE |   NAME	| TARGET PORT |        	URL        	|
+| NAMESPACE |   NAME	| TARGET PORT |        	URL        	|
 |-----------|-----------|-------------|---------------------------|
-| default   | guestbook |    	3000 | http://192.168.49.2:31233 |
+| default   | guestbook |    	3000 | http://192.168.49.2:31233 |
 |-----------|-----------|-------------|---------------------------|
-🏃  Starting tunnel for service guestbook.
+🏃  Starting tunnel for service guestbook.
 |-----------|-----------|-------------|------------------------|
-| NAMESPACE |   NAME	| TARGET PORT |      	URL       	|
+| NAMESPACE |   NAME	| TARGET PORT |      	URL       	|
 |-----------|-----------|-------------|------------------------|
-| default   | guestbook |         	| http://127.0.0.1:57485 |
+| default   | guestbook |         	| http://127.0.0.1:57485 |
 |-----------|-----------|-------------|------------------------|
-🎉  Opening service default/guestbook in default browser...
-❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
+🎉  Opening service default/guestbook in default browser...
+❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
 ```
 
 Now we have access to the Guestbook application on http://localhost:57485 as the above output says.
@@ -147,18 +147,18 @@ Let’s update the new config file created and opened in the editor. The configu
 
 ```json
 {
-   "feature": {
-       "network": {
-           "incoming": "mirror",
-           "outgoing": true
-       },
-       "fs": "read",
-       "env": true
-   },
-   "target": {
-       "path": "deployment/guestbook",
-       "namespace": "default"
-   }
+   "feature": {
+       "network": {
+           "incoming": "mirror",
+           "outgoing": true
+       },
+       "fs": "read",
+       "env": true
+   },
+   "target": {
+       "path": "deployment/guestbook",
+       "namespace": "default"
+   }
 }
 ```
 
@@ -263,18 +263,18 @@ You should see the following output which will let you know that the guestbook h
 ⠉ mirrord exec
 	✓ update to 3.125.1 available
 	✓ ready to launch process
-  	✓ layer extracted
-  	✓ operator not found
-  	✓ agent pod created
-  	✓ pod is ready
-  	✓ arm64 layer library extracted
-	✓ config summary                                                                   
+  	✓ layer extracted
+  	✓ operator not found
+  	✓ agent pod created
+  	✓ pod is ready
+  	✓ arm64 layer library extracted
+	✓ config summary                                                                   
     
     [negroni] listening on :3000
-[negroni] 2024-11-28T18:06:36+05:30 | 200 |  	18.884042ms | localhost:3000 | GET /lrange/guestbook
-[negroni] 2024-11-28T18:06:38+05:30 | 200 |  	11.609291ms | localhost:3000 | GET /lrange/guestbook
-[negroni] 2024-11-28T18:06:40+05:30 | 200 |  	8.066ms | localhost:3000 | GET /lrange/guestbook
-[negroni] 2024-11-28T18:06:42+05:30 | 200 |  	11.456667ms | localhost:3000 | GET /lrange/guestboo
+[negroni] 2024-11-28T18:06:36+05:30 | 200 |  	18.884042ms | localhost:3000 | GET /lrange/guestbook
+[negroni] 2024-11-28T18:06:38+05:30 | 200 |  	11.609291ms | localhost:3000 | GET /lrange/guestbook
+[negroni] 2024-11-28T18:06:40+05:30 | 200 |  	8.066ms | localhost:3000 | GET /lrange/guestbook
+[negroni] 2024-11-28T18:06:42+05:30 | 200 |  	11.456667ms | localhost:3000 | GET /lrange/guestboo
 ```
 
 After you have run the guestbook program with mirrord you should be able to make your changes and rerun the service as necessary. You can even run the program in debug mode and attach a debugger if required.

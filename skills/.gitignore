@@ -62,8 +62,5 @@ coverage/
 .tessl/memory/
 .tessl-plugin/
 
-# Docs checkout created by .github/workflows/docs-sync.yml
-docs-src/
-
 # Python
 __pycache__/
