@@ -243,8 +243,10 @@ impl MirrordCiStore {
     /// The processes of one session hold the lock for only a few milliseconds each, so this is
     /// generous for them. The long holder is `mirrord ci stop`. It stops every session on the
     /// machine, including one that is still starting, and holds the session's lock while it stops
-    /// the session. Stopping a `mirrord ci container` session can take up to 10 seconds, which is
-    /// longer than this timeout. So when a stop reaches a session that is still starting, a
+    /// the session. For a sidecar container, the stop runs `{runtime} rm -f`. Podman's `rm` waits
+    /// its default stop timeout of 10 seconds before it kills the container, which is longer than
+    /// this timeout, and mirrord sets no limit on the command, so that time is a default of the
+    /// runtime rather than a bound. So when a stop reaches a session that is still starting, a
     /// process of that session can fail.
     const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 

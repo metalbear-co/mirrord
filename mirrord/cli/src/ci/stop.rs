@@ -298,8 +298,8 @@ impl CiStopCommandHandler {
     ///
     /// A session whose lock another process holds is skipped without waiting for the lock. That
     /// process is usually another `mirrord ci stop`, and that stop holds the session's lock while
-    /// it stops the session. Stopping a `mirrord ci container` session can take up to 10 seconds,
-    /// so a wait could hold up this stop for that long per session. When parallel CI jobs on one
+    /// it stops the session, which can take as long as [`MirrordCiStore::LOCK_TIMEOUT`] describes.
+    /// A wait could hold up this stop for that long per session. When parallel CI jobs on one
     /// runner each run `mirrord ci stop` in their teardown, one stop therefore skips the sessions
     /// that the other is stopping, rather than waiting for them. The skipped sessions are named in
     /// a warning, and skipping alone doesn't fail the stop; running it again is up to the user.

@@ -36,11 +36,8 @@ pub(crate) enum CiError {
 
     #[error("another mirrord process held the mirrord ci session's lock for more than {timeout:?}")]
     #[diagnostic(help(
-        "`mirrord ci stop` stops every mirrord ci session on this machine, including sessions \
-         that are still starting, so `mirrord ci stop` in another CI job on the same runner can \
-         reach this session. That stop holds the session's lock while it stops the session, and \
-         stopping a `mirrord ci container` session can take up to 10 seconds, which is longer \
-         than this process waits for the lock. Run this CI job again once that stop is done."
+        "A `mirrord ci stop` in another CI job on this runner was most likely stopping this \
+         session. Run this CI job again once that stop is done."
     ))]
     SessionLocked { timeout: Duration },
 
