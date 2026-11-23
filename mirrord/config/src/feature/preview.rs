@@ -483,7 +483,9 @@ impl PreviewConfig {
         if let Some(autoscale) = &self.autoscale {
             autoscale.verify()?;
 
-            // The default replica count is 1, so only another value shows the user set both.
+            // The default replica count is 1, so only another value shows the user set both. An
+            // explicit `replicas: 1` next to `autoscale` is accepted and means the same as
+            // `autoscale` alone, since 1 is also the autoscaler's default minimum.
             if autoscale.is_enabled() && self.replicas != Self::DEFAULT_REPLICAS {
                 return Err(ConfigError::Conflict(
                     "`feature.preview.replicas` and `feature.preview.autoscale` cannot both be \

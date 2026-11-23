@@ -358,13 +358,16 @@ impl PreviewAutoscaleConfig {
 pub struct PreviewAutoscalingStatus {
     /// The bounds of the target's own autoscaler. `None` when the target has none, or when the
     /// operator couldn't look it up.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// Serialized as `null` rather than skipped, like `preview`, so that a status merge patch
+    /// clears the range a previous task run reported.
+    #[serde(default)]
     pub target: Option<PreviewReplicaRange>,
 
     /// The bounds of the autoscaler the operator created for the preview. `None` when the
     /// session runs a fixed number of pods: without `spec.autoscale`, or with it when the target
     /// has no autoscaler and `spec.autoscale` tolerates that.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub preview: Option<PreviewReplicaRange>,
 }
 

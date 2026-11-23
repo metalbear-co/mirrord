@@ -408,6 +408,14 @@ async fn prepare_service(
         config.feature.preview.creation_timeout_secs = timeout;
     }
 
+    // Only one pod at a time can write the code volume, so a sync service runs one pod even when
+    // `common.preview.autoscale` asks every service to scale; the service's own setting was
+    // already refused by `ServiceSync::of_service`.
+    if sync.is_some() && autoscale_origin == Some(AutoscaleOrigin::Common) {
+        config.feature.preview.autoscale = None;
+        progress.info("`common.preview.autoscale` doesn't apply to a service with `sync`: one pod writes the code volume");
+    }
+
     if let Some(target) = &config.target.path {
         progress.info(&format!("target: {target}"));
     }

@@ -1031,7 +1031,8 @@ pub(crate) enum CliError {
     #[error("A preview environment with `sync` can't autoscale")]
     #[diagnostic(help(
         "Only one pod at a time can write the code volume, and an autoscaler would add pods. \
-        Remove `feature.preview.autoscale`.{GENERAL_HELP}"
+        Remove `feature.preview.autoscale` (mirrord.json) or the service's `preview.autoscale` \
+        (mirrord-up.yaml).{GENERAL_HELP}"
     ))]
     PreviewSyncAutoscale,
 

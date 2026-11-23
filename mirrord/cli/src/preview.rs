@@ -471,6 +471,15 @@ impl PreparedPreview {
                 check_sync(sync, &operator_api.operator().spec)?;
             }
 
+            // An older operator's CRD would drop `spec.autoscale` and run a fixed number of
+            // pods without a word, so refuse before the running preview is replaced.
+            if layer_config.feature.preview.autoscale_range().is_some() {
+                operator_api
+                    .operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::PreviewAutoscale)?;
+            }
+
             if let Some(Target::Label(label_target)) = &layer_config.target.path {
                 operator_api
                     .operator()
@@ -1723,7 +1732,7 @@ async fn preview_status(
                 Some(PreviewSessionPhase::Initializing) => "initializing".to_owned(),
                 Some(PreviewSessionPhase::Waiting) => "waiting".to_owned(),
                 Some(PreviewSessionPhase::Ready) => {
-                    let running = if session.spec.has_infinite_ttl() {
+                    if session.spec.has_infinite_ttl() {
                         "running (infinite)".to_owned()
                     } else {
                         let remaining = session
@@ -1741,19 +1750,6 @@ async fn preview_status(
                             }
                             None => "running".to_owned(),
                         }
-                    };
-                    // The preview's own autoscaler, when the operator created one.
-                    match session
-                        .status
-                        .as_ref()
-                        .and_then(|status| status.autoscaling)
-                        .and_then(|autoscaling| autoscaling.preview)
-                    {
-                        Some(range) => format!(
-                            "{running}, autoscale {}-{}",
-                            range.min_replicas, range.max_replicas
-                        ),
-                        None => running,
                     }
                 }
                 Some(PreviewSessionPhase::Failed) => session
@@ -1766,6 +1762,20 @@ async fn preview_status(
                 Some(PreviewSessionPhase::Paused) => "paused".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
+            };
+            // The preview's own autoscaler, when the operator created one. An idle or paused
+            // session keeps it, dormant, so the bounds show in every phase that has them.
+            let status = match session
+                .status
+                .as_ref()
+                .and_then(|status| status.autoscaling)
+                .and_then(|autoscaling| autoscaling.preview)
+            {
+                Some(range) => format!(
+                    "{status}, autoscale {}-{}",
+                    range.min_replicas, range.max_replicas
+                ),
+                None => status,
             };
 
             // Multicluster detail from the previews view, best-effort (older operators do
