@@ -966,3 +966,7 @@ When the job warns or fails:
     --urls "https://github.com/metalbear-co/mirrord/releases/download/<version>/mirrord.msi|x64" \
     --skip-pr-check --submit
   ```
+
+## Publishing docs between releases
+
+A merged pull request from this repository with the `publish-docs` label publishes `docs/` and `guides/` from `main`, including pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing-a-fix-between-releases) says how to publish without those pages.
