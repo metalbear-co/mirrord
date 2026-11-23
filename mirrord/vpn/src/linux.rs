@@ -108,8 +108,23 @@ async fn agent_fetch_file<const B: u64>(
 
     let ReadFileResponse { bytes, .. } = response?;
 
-    let request = FileRequest::Close(CloseFileRequest { fd });
-    agent.send(ClientMessage::FileRequest(request)).await;
+    let request = ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd }));
+    if agent.close_responses() {
+        // The file was only read, so a failed close doesn't affect what was fetched. The reply
+        // still has to be read here, or the tunnel would get it as its first message.
+        match agent
+            .send_and_get_response(request, get_file_response)
+            .await?
+        {
+            Some(FileResponse::Close(Ok(()))) => {}
+            Some(FileResponse::Close(Err(error))) => {
+                tracing::warn!(%error, "Failed to close a remote file fetched for the VPN");
+            }
+            _ => return Err(VpnError::AgentUnexpectedResponse),
+        }
+    } else {
+        agent.send(request).await;
+    }
 
     Ok(bytes.into())
 }
