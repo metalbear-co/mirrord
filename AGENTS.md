@@ -154,7 +154,7 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
   a config change updates those instead. GitBook builds the site from the `docs-published` and `guides-published`
   branches, which every mirrord release updates from the released commit (`publish-docs.yaml`), so an edit reaches the
   site with the next release. A pull request from this repository with the `publish-docs` label publishes sooner: when
-  it merges, `publish-on-merge.yaml` publishes all of `docs/` and `guides/` from `main`. `mirrord mcp` embeds
+  it merges, `publish-docs-on-merge.yaml` publishes all of `docs/` and `guides/` from `main`. `mirrord mcp` embeds
   `docs/docs` when it's built, so an edit there reaches it only with the next release, whatever the label.
   `docs/AGENTS.md` says how to publish a fix between releases.
 - `skills/` came from `metalbear-co/skills`, which keeps its earlier history. `mirrord mcp` embeds `skills/skills` when

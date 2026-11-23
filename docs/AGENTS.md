@@ -23,7 +23,7 @@ CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. T
 
 A fix that can't wait for the next release goes out through the `Publish docs and guides` workflow (`.github/workflows/publish-docs.yaml` at the repository root), which publishes `docs/` to `docs-published` and `guides/` to `guides-published`.
 
-The `publish-docs` pull request label publishes the docs and guides without needing a release, when the pull request merges (`.github/workflows/publish-on-merge.yaml` at the repository root). It publishes everything merged to `docs/` or `guides/` since the last publish, not only that pull request.
+The `publish-docs` pull request label publishes the docs and guides without needing a release, when the pull request merges (`.github/workflows/publish-docs-on-merge.yaml` at the repository root). It publishes everything merged to `docs/` or `guides/` since the last publish, not only that pull request.
 
 The label publishes nothing if it was added after the merge, or if the pull request came from a fork. A maintainer then publishes the change with the steps below.
 
