@@ -34,7 +34,14 @@ string_id!(
 
 /// Sent by the developer's `mirrord up` to register a claim, as the body of the request whose
 /// response streams the claim's events.
+///
+/// A sessions-manager refuses a registration with a field it does not know, instead of ignoring
+/// the field: every field changes which tasks the claim takes or what happens to them, and a
+/// client has no other way to learn that an older sessions-manager did not honor one. A client
+/// therefore leaves out the fields it does not use, so that it keeps working with a
+/// sessions-manager that predates them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClaimRegistration {
     pub claim_id: ClaimId,
     /// Key of the developer's session. The claim takes every task tagged with it under
