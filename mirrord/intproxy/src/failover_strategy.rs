@@ -8,7 +8,6 @@ use mirrord_intproxy_protocol::{
     IncomingRequest, LayerId, LayerToProxyMessage, LocalMessage, MessageId, ProcessInfo,
     ProxyToLayerMessage,
 };
-use mirrord_protocol::FileRequest;
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -351,8 +350,7 @@ impl FailoverStrategy {
         }: FromLayer,
     ) {
         match message {
-            LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
-            | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => {
+            LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_)) => {
                 tracing::info!(message = ?message, "Proxy in failover mode, ignoring a message");
             }
             _ => self.send_error_to_layer(layer_id, message_id).await,

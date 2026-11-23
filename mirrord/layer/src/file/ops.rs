@@ -22,6 +22,7 @@ use mirrord_layer_lib::{
     detour::{Bypass, Detour, DetourError, DetourExt, OptionExt},
     error::{HookError, HookResult as Result},
     file::filter::FileFilter,
+    proxy_connection::ProxyError,
 };
 use mirrord_protocol::{
     Payload, ResponseError,
@@ -250,8 +251,12 @@ impl Drop for RemoteFile {
         // - A log can need a `write`, and the hooked `write` locks `OPEN_FILES`. If a caller drops
         //   a `RemoteFile` under that guard, the thread deadlocks with itself.
         match remote_close(self.fd) {
-            err @ Err(HookError::CannotGetProxyConnection)
-            | err @ Err(HookError::ProxyError(_)) => {
+            // We got an answer from the proxy so we know the connection works.
+            // Don't panic here because we're about to be killed anyway.
+            Err(HookError::ProxyError(
+                ProxyError::ProxyFailure(..) | ProxyError::AgentReportedError(..),
+            )) => {}
+            err @ Err(HookError::CannotGetProxyConnection | HookError::ProxyError(_)) => {
                 panic!("failed to close fd: {err:?}")
             }
             _ => {}

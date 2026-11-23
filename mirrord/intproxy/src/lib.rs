@@ -676,8 +676,7 @@ impl IntProxy {
             ProxyMessage::FromLayer(msg) => {
                 if !matches!(
                     msg.message,
-                    LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
-                        | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+                    LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
                 ) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
@@ -1087,7 +1086,7 @@ mod test {
         ClientMessage, DaemonMessage, ErrorKindInternal, FileRequest, FileResponse, RemoteIOError,
         ResponseError, VERSION,
         dns::{AddressFamily, GetAddrInfoRequestV2, GetAddrInfoResponse, SockType},
-        file::{OpenFileRequest, StatFsRequestV2},
+        file::{CloseFileRequest, OpenFileRequest, OpenFileResponse, StatFsRequestV2},
         outgoing::{LayerConnectV2, SocketAddress, tcp::LayerTcpOutgoing},
         tcp::{
             ChunkedRequest, ChunkedRequestBodyV1, ChunkedRequestStartV2, DaemonTcp,
@@ -1368,6 +1367,154 @@ mod test {
         match decoder.next().await.unwrap().unwrap() {
             LocalMessage {
                 message_id: 1,
+                inner: ProxyToLayerMessage::ProxyFailed { .. },
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        std::mem::drop((encoder, decoder));
+
+        proxy_handle.await.unwrap().unwrap();
+    }
+
+    /// Verifies that the layer gets an answer to its closes when the [`IntProxy`] fails, both to a
+    /// close the agent got but never answered, and to a close sent after the proxy failed.
+    ///
+    /// From [`CLOSE_RESPONSE_VERSION`](mirrord_protocol::file::CLOSE_RESPONSE_VERSION) on, the
+    /// layer waits for the answer to a close, so a close left unanswered blocks the application.
+    #[tokio::test]
+    async fn failover_answers_closes() {
+        let listener = TcpListener::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap())
+            .await
+            .unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+
+        let (connection, to_proxy, from_proxy) = Connection::dummy();
+
+        let agent_conn = AgentConnection {
+            connection,
+            reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+        };
+
+        let (_, chaos_rx) = watch::channel(Default::default());
+
+        let proxy = IntProxy::new_with_connection(
+            agent_conn,
+            listener,
+            4096,
+            Default::default(),
+            IntProxyIntervals {
+                ping: IntProxy::PING_INTERVAL,
+                process_logging: Duration::from_secs(60),
+            },
+            &ExperimentalFileConfig::default()
+                .generate_config(&mut Default::default())
+                .unwrap(),
+            MonitorTx::disabled(),
+            ChaosWatcherRx::new(chaos_rx),
+        );
+        let proxy_handle = tokio::spawn(proxy.run(Duration::from_secs(60), Duration::ZERO));
+
+        let conn = TcpStream::connect(proxy_addr).await.unwrap();
+        let (mut encoder, mut decoder) = mirrord_intproxy_protocol::codec::make_async_framed::<
+            LocalMessage<LayerToProxyMessage>,
+            LocalMessage<ProxyToLayerMessage>,
+        >(conn);
+
+        encoder
+            .send(LocalMessage {
+                message_id: 0,
+                inner: LayerToProxyMessage::NewSession(NewSessionRequest {
+                    process_info: ProcessInfo {
+                        pid: 1337,
+                        parent_pid: 1336,
+                        name: "hello there".into(),
+                        cmdline: vec!["hello there".into()],
+                        loaded: true,
+                    },
+                    parent_layer: None,
+                }),
+            })
+            .await
+            .unwrap();
+
+        // The proxy holds the requests of the layer until the agent answers this, so the files
+        // proxy knows that the agent answers closes by the time the first request reaches it.
+        switch_protocol_version(&to_proxy, &from_proxy).await;
+
+        match decoder.next().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 0,
+                inner: ProxyToLayerMessage::NewSession(..),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        let open = FileRequest::Open(OpenFileRequest {
+            path: "/some/file".into(),
+            open_options: Default::default(),
+        });
+        encoder
+            .send(LocalMessage {
+                message_id: 1,
+                inner: LayerToProxyMessage::File(open.clone()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::FileRequest(open),
+        );
+        to_proxy
+            .send(DaemonMessage::File(FileResponse::Open(Ok(
+                OpenFileResponse { fd: 0 },
+            ))))
+            .await
+            .unwrap();
+        match decoder.next().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 1,
+                inner: ProxyToLayerMessage::File(FileResponse::Open(Ok(..))),
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        // The agent gets this close, but fails before it answers.
+        let close = FileRequest::Close(CloseFileRequest { fd: 0 });
+        encoder
+            .send(LocalMessage {
+                message_id: 2,
+                inner: LayerToProxyMessage::File(close.clone()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            next_proxy_msg(&to_proxy, &from_proxy).await,
+            ClientMessage::FileRequest(close.clone()),
+        );
+        to_proxy
+            .send(DaemonMessage::Close("no reason".to_owned()))
+            .await
+            .unwrap();
+        match decoder.next().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 2,
+                inner: ProxyToLayerMessage::ProxyFailed { .. },
+            } => {}
+            other => panic!("unexpected local message from the proxy: {other:?}"),
+        }
+
+        // A close that reaches the proxy after it failed.
+        encoder
+            .send(LocalMessage {
+                message_id: 3,
+                inner: LayerToProxyMessage::File(close),
+            })
+            .await
+            .unwrap();
+        match decoder.next().await.unwrap().unwrap() {
+            LocalMessage {
+                message_id: 3,
                 inner: ProxyToLayerMessage::ProxyFailed { .. },
             } => {}
             other => panic!("unexpected local message from the proxy: {other:?}"),
