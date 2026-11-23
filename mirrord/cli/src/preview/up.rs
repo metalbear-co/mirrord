@@ -34,8 +34,8 @@ use mirrord_operator::{
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{
-    PreviewImageSource, PreviewRun, RequestOrigin, SkipReason, SubprocessCfg, UpError,
-    load_preview_up_config, preview_image_env,
+    AutoscaleOrigin, PreviewImageSource, PreviewRun, RequestOrigin, SkipReason, SubprocessCfg,
+    UpError, load_preview_up_config, preview_image_env,
 };
 
 use super::{
@@ -289,6 +289,7 @@ async fn run_preview_up(
             Ok((summary, sync_task)) => {
                 syncs.extend(sync_task.map(|sync_task| (name.clone(), sync_task)));
                 summary.report(&service_progress);
+                summary.report_scaling(&service_progress, "`preview.autoscale` in mirrord-up.yaml");
                 service_progress.success(Some(if summary.idle {
                     "preview environment is idle"
                 } else {
@@ -392,6 +393,7 @@ async fn prepare_service(
         service_name,
         db_branches_origin,
         queues_origin,
+        autoscale_origin,
         ..
     } = service;
     let default_db_branches = db_branches_origin == RequestOrigin::Default;
@@ -543,7 +545,7 @@ async fn prepare_service(
         }
     }
 
-    PreparedPreview::prepare(
+    let mut prepared = PreparedPreview::prepare(
         config,
         operator_api,
         api,
@@ -555,7 +557,16 @@ async fn prepare_service(
         progress,
         analytics,
     )
-    .await
+    .await?;
+
+    // `common.preview.autoscale` speaks for every service, autoscaled targets or not, so a target
+    // without an autoscaler runs a fixed number of pods instead of failing the service.
+    if let Some(autoscale) = prepared.spec.autoscale.as_mut() {
+        autoscale.target_autoscaler_optional =
+            Some(autoscale_origin == Some(AutoscaleOrigin::Common));
+    }
+
+    Ok(prepared)
 }
 
 /// The `mirrord-up.yaml` that `-f` names, `mirrord-up.yaml` by default.

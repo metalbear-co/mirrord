@@ -97,6 +97,9 @@ impl ServiceSync {
         if preview.replicas != 1 {
             return Err(CliError::PreviewSyncReplicas(preview.replicas));
         }
+        if preview.autoscale_range().is_some() {
+            return Err(CliError::PreviewSyncAutoscale);
+        }
 
         // A CronJob creates its pods on a schedule, after the CLI has pushed.
         if matches!(service.config.target.path, Some(Target::CronJob(_))) {

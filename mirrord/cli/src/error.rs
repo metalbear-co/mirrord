@@ -1028,6 +1028,13 @@ pub(crate) enum CliError {
     ))]
     PreviewSyncReplicas(i32),
 
+    #[error("A preview environment with `sync` can't autoscale")]
+    #[diagnostic(help(
+        "Only one pod at a time can write the code volume, and an autoscaler would add pods. \
+        Remove `feature.preview.autoscale`.{GENERAL_HELP}"
+    ))]
+    PreviewSyncAutoscale,
+
     #[error("A preview environment with `sync` can't target a CronJob")]
     #[diagnostic(help(
         "A CronJob creates its pods on a schedule, after the CLI has synced. Preview the CronJob \
