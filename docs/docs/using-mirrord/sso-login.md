@@ -1,6 +1,6 @@
 ---
 title: Logging in with SSO
-description: Log in to the mirrord Operator through your company's identity provider with mirrord login, see your logins with mirrord whoami, and remove one with mirrord logout.
+description: Log in to the mirrord Operator through your company's identity provider with mirrord login, run mirrord sessions and the IDE through that login, see your logins with mirrord whoami, and remove one with mirrord logout.
 tags:
   - enterprise
 ---
@@ -36,6 +36,39 @@ You can be logged in to several Operators at once, for example production and st
 ```text
 Logged in to staging.mirrord.corp.example.com as dev@corp.example.com already, valid until 2026-11-20 09:12. mirrord uses this operator now.
 ```
+
+## Running mirrord while logged in
+
+While a login is in use, every command that talks to the Operator goes to its URL with that login, and mirrord does not read your kubeconfig at all. That covers `mirrord exec` with every Operator feature it reaches (a target, a copied target, a profile, database branching, queue splitting), the IDE extensions, `mirrord operator status`, and listing or ending sessions with `mirrord operator session`. Your identity comes from the login, so RBAC sees your SSO user and groups, and the Operator records the session with `sso` in the `AUTH` column of `mirrord operator status`:
+
+```text
+Session ID  Target               Namespace  User                  Auth  Ports  Session Duration
+8f1c...     deployment/payments  payments   dev@corp.example.com  sso          5m
+```
+
+Sessions opened through a kubeconfig show `kube` there, so an admin can tell the two apart. The local `mirrord ui` daemon is the exception to the rule above: it still watches the Operator through your kubeconfig.
+
+A config that names a kubeconfig or a context is still accepted: mirrord warns that the setting is ignored while you are logged in and runs against the Operator. A config with `operator: false` cannot run, because without the Operator there is nothing to log in to:
+
+```text
+kube_context is ignored while logged in to mirrord.corp.example.com
+```
+
+```text
+operator: false can't be used while logged in to mirrord.corp.example.com. Run mirrord logout --url https://mirrord.corp.example.com first.
+```
+
+A [MetalBear Cloud](beyond-kubernetes/metalbear-cloud.md) config selects Cloud with that same `operator: false`, so log out of the Operator before running one.
+
+Profiles work as before: the Operator reads the `MirrordClusterProfile` or `MirrordProfile` your config names on your behalf, because only the Operator's own API is reachable through its URL. That needs an Operator of version `3.236.0` or later; with an older one, a profile fails with `does not support feature mirrord profiles served by the operator API`.
+
+If the Operator's license drops below Enterprise while you are logged in, the next command fails with the same message every paid feature gives, naming SSO and the Enterprise plan. Log out, or wait for the admin to restore the license.
+
+Because only the Operator's API is reachable, mirrord does not read the target workload itself: the Operator resolves it, the way it does for a multi-cluster session. Two things follow from that. The `auto_mount` option is skipped with a warning, since it reads the pod spec locally, and Kafka branching is not available while logged in. A config without a namespace runs in the `default` namespace, not in the kubeconfig's.
+
+A running session keeps its connection when the login expires, but it cannot reconnect after a network cut once the login has expired: it stops with the expiry message, and you log in again before the next run.
+
+`mirrord db-branches` and `mirrord vpn` are not served through the Operator's URL yet. While you are logged in they fail with a not-found error from the Operator, whether or not you have a kubeconfig: log out first, then run them with your kubeconfig.
 
 ## Seeing your logins
 
@@ -94,4 +127,8 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | `could not reach ...` | The Operator's URL is not reachable from your machine. | Check your network, VPN and the URL. |
 | `the login was not approved in the browser within 5 minutes` | The browser never came back to mirrord. | Run `mirrord login --url` again and finish the sign-in. |
 | The browser shows `mirrord could not complete the login` | The identity provider refused, or the login link was older than ten minutes. | Run `mirrord login --url` again. |
+| `kube_context is ignored while logged in to ...` | Your config names a kubeconfig or a context, and a login is in use. | Nothing, mirrord runs against the Operator. Log out to use the kubeconfig again. |
+| `operator: false can't be used while logged in to ...` | Your config turns the Operator off while a login is in use. | Run `mirrord logout --url` with that URL, or drop `operator: false`. |
+| `Feature sso requires a mirrord Enterprise plan.` while running | The Operator's license dropped below Enterprise after you logged in. | Ask your admin about the license, or log out and use your kubeconfig. |
+| `mirrord operator ... does not support feature mirrord profiles served by the operator API` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.236.0` or later, or drop the profile. |
 | A command fails with `403` after a login | You are logged in, but RBAC grants your user or groups nothing in that namespace. | Ask your admin to bind your group, see [Granting a group access](../managing-mirrord/sso.md#granting-a-group-access-to-a-namespace). |

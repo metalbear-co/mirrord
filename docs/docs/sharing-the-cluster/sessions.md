@@ -31,27 +31,28 @@ We can also see that `Ports` is empty, meaning the user isn't stealing or mirror
 traffic at the moment.
 
 ```
-+------------------+-----------------------------+-----------+---------------------------------------------------------------+-------+------------------+
-| Session ID       | Target                      | Namespace | User                                                          | Ports | Session Duration |
-+------------------+-----------------------------+-----------+---------------------------------------------------------------+-------+------------------+
-| 487F4F2B6D2376AD | deployment/ip-visit-counter | default   | Aviram Hassan/aviram@metalbear.co@avirams-macbook-pro-2.local |       | 4s               |
-+------------------+-----------------------------+-----------+---------------------------------------------------------------+-------+------------------+
++------------------+-----------------------------+-----------+---------------------------------------------------------------+------+-------+------------------+
+| Session ID       | Target                      | Namespace | User                                                          | Auth | Ports | Session Duration |
++------------------+-----------------------------+-----------+---------------------------------------------------------------+------+-------+------------------+
+| 487F4F2B6D2376AD | deployment/ip-visit-counter | default   | Aviram Hassan/aviram@metalbear.co@avirams-macbook-pro-2.local | kube |       | 4s               |
++------------------+-----------------------------+-----------+---------------------------------------------------------------+------+-------+------------------+
 ```
 
 The `User` field is generated in the following format - `whoami/k8s-user@hostname`. 
 `whoami` and `hostname` are from the local machine, while `k8s-user` is the user we see 
-from the operator side.
+from the operator side. `Auth` says how the session reached the Operator: `kube` through a
+kubeconfig, `sso` through an [Operator login](../using-mirrord/sso-login.md).
 
 
 In this example, we can see that the session has an active steal on port 80,
 filtering HTTP traffic with the following filter: `baggage: .*mirrord-session=Avi.+`
 
 ```
-+------------------+-----------------------------+-----------+---------------------------------------------------------------+----------------------------------------------------------+------------------+
-| Session ID       | Target                      | Namespace | User                                                          | Ports                                                    | Session Duration |
-+------------------+-----------------------------+-----------+---------------------------------------------------------------+----------------------------------------------------------+------------------+
-| C527FE7D9C30979E | deployment/ip-visit-counter | default   | Aviram Hassan/aviram@metalbear.co@avirams-macbook-pro-2.local | Port: 80, Type: steal, Filter: header=baggage: .*mirrord-session=Avi.+ | 13s              |
-+------------------+-----------------------------+-----------+---------------------------------------------------------------+----------------------------------------------------------+------------------+
++------------------+-----------------------------+-----------+---------------------------------------------------------------+------+----------------------------------------------------------+------------------+
+| Session ID       | Target                      | Namespace | User                                                          | Auth | Ports                                                    | Session Duration |
++------------------+-----------------------------+-----------+---------------------------------------------------------------+------+----------------------------------------------------------+------------------+
+| C527FE7D9C30979E | deployment/ip-visit-counter | default   | Aviram Hassan/aviram@metalbear.co@avirams-macbook-pro-2.local | kube | Port: 80, Type: steal, Filter: header=baggage: .*mirrord-session=Avi.+ | 13s              |
++------------------+-----------------------------+-----------+---------------------------------------------------------------+------+----------------------------------------------------------+------------------+
 ```
 
 ## How long sessions live
