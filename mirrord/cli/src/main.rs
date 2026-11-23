@@ -1308,8 +1308,8 @@ fn main() -> miette::Result<()> {
                 let shutdown_handler =
                     internal_proxy::install_ci_shutdown_handler(mirrord_for_ci.is_some())?;
 
-                if let Some(session_id) = mirrord_for_ci {
-                    MirrordCi::prepare_intproxy(session_id, &shutdown_handler).await?;
+                if let Some(session_dir) = mirrord_for_ci {
+                    MirrordCi::prepare_intproxy(&session_dir, &shutdown_handler).await?;
                 }
 
                 logging::init_intproxy_tracing_registry(&config).await?;

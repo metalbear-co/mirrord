@@ -252,11 +252,6 @@ impl MirrordCiStore {
         temp_dir().join(Self::SESSIONS_DIR_NAME)
     }
 
-    /// Directory of the session with `session_id`, under [`Self::sessions_dir`].
-    fn session_dir(session_id: Uuid) -> PathBuf {
-        Self::sessions_dir().join(session_id.to_string())
-    }
-
     fn state_path(session_dir: &Path) -> PathBuf {
         session_dir.join(Self::STATE_FILE_NAME)
     }
@@ -494,10 +489,10 @@ pub(super) struct MirrordCi {
     /// Overrides automatic ordinary credentials for operator-backed CI sessions.
     ci_api_key: Option<CiApiKey>,
 
-    /// Id of this CI session, picked by [`MirrordCi::new`]. It names the session's directory under
-    /// [`MirrordCiStore::SESSIONS_DIR_NAME`], and `mirrord ci start` passes it to its intproxy in
-    /// `--mirrord-for-ci`.
-    session_id: Uuid,
+    /// Directory of this CI session under [`MirrordCiStore::sessions_dir`], picked by
+    /// [`MirrordCi::new`]. `mirrord ci start` passes it to its intproxy in `--mirrord-for-ci`, so
+    /// that both processes use the same directory even if their environments differ.
+    session_dir: PathBuf,
 
     /// Arguments for the mirrord for CI operations that involve starting something:
     /// - `mirrord ci start`
@@ -552,7 +547,6 @@ impl MirrordCi {
         command: &mut Command,
         binary: &str,
         binary_args: &[String],
-        session_dir: &Path,
         lock_timeout: Duration,
     ) -> CiResult<Child> {
         let spawn_failed = |fail: io::Error| {
@@ -564,12 +558,12 @@ impl MirrordCi {
             return command.spawn().map_err(spawn_failed);
         }
 
-        let lock = MirrordCiStore::lock_or_create_session(session_dir, lock_timeout).await?;
+        let lock = MirrordCiStore::lock_or_create_session(&self.session_dir, lock_timeout).await?;
         // A background command inherits no descriptor for the lock file, because std opens files
         // with `O_CLOEXEC`, so the lock is released when this session drops it.
         let child = spawn_background_user_command(command).map_err(spawn_failed)?;
         if let Some(process_group) = child.id() {
-            MirrordCiStore::update_locked(session_dir, &lock, |store| {
+            MirrordCiStore::update_locked(&self.session_dir, &lock, |store| {
                 store.user_process_groups.insert(process_group);
             })
             .await?;
@@ -583,29 +577,25 @@ impl MirrordCi {
         self.ci_api_key.as_ref()
     }
 
-    /// Id of this session, which `mirrord ci start` passes to its intproxy in `--mirrord-for-ci`,
-    /// so that the intproxy records its pid in this session's state.
-    pub(super) fn session_id(&self) -> Uuid {
-        self.session_id
+    /// Directory of this session, which `mirrord ci start` passes to its intproxy in
+    /// `--mirrord-for-ci`, so that the intproxy records its pid in this session's state.
+    pub(super) fn session_dir(&self) -> &Path {
+        &self.session_dir
     }
 
     /// When intproxy starts, we need to retrieve its pid and store it in the state of its session
-    /// (`session_id`, from `--mirrord-for-ci`), so we can kill the intproxy later. Requiring the
+    /// (`session_dir`, from `--mirrord-for-ci`), so we can kill the intproxy later. Requiring the
     /// live shutdown owner prevents publishing the pid before its SIGTERM handler is registered.
     /// Waits up to [`MirrordCiStore::LOCK_TIMEOUT`] for the session's lock, and fails if another
     /// process holds it for longer.
     #[tracing::instrument(level = Level::TRACE, skip(_shutdown_handler), err)]
     pub(super) async fn prepare_intproxy(
-        session_id: Uuid,
+        session_dir: &Path,
         _shutdown_handler: &IntProxyShutdown,
     ) -> CiResult<()> {
-        MirrordCiStore::update(
-            &MirrordCiStore::session_dir(session_id),
-            MirrordCiStore::LOCK_TIMEOUT,
-            |store| {
-                store.intproxy_pids.insert(std::process::id());
-            },
-        )
+        MirrordCiStore::update(session_dir, MirrordCiStore::LOCK_TIMEOUT, |store| {
+            store.intproxy_pids.insert(std::process::id());
+        })
         .await
     }
 
@@ -651,7 +641,6 @@ impl MirrordCi {
                 &mut command,
                 &binary,
                 binary_args,
-                &MirrordCiStore::session_dir(self.session_id),
                 MirrordCiStore::LOCK_TIMEOUT,
             )
             .await?;
@@ -715,15 +704,11 @@ impl MirrordCi {
 
         // external proxy and sidecar already have started, so we want to record these and be able
         // to delete them with `mirrord ci stop` even if the following code fails.
-        MirrordCiStore::update(
-            &MirrordCiStore::session_dir(self.session_id),
-            MirrordCiStore::LOCK_TIMEOUT,
-            |store| {
-                store.extproxy_pids.extend(extproxy_pid);
-                store.sidecar_pids.extend(sidecar_pid);
-                store.sidecar_containers.extend(sidecar_container);
-            },
-        )
+        MirrordCiStore::update(&self.session_dir, MirrordCiStore::LOCK_TIMEOUT, |store| {
+            store.extproxy_pids.extend(extproxy_pid);
+            store.sidecar_pids.extend(sidecar_pid);
+            store.sidecar_containers.extend(sidecar_container);
+        })
         .await?;
 
         let mut command = resolve_tokio_command(binary_path);
@@ -751,7 +736,6 @@ impl MirrordCi {
                 &mut command,
                 &binary,
                 binary_args,
-                &MirrordCiStore::session_dir(self.session_id),
                 MirrordCiStore::LOCK_TIMEOUT,
             )
             .await?;
@@ -812,10 +796,10 @@ impl MirrordCi {
         unimplemented!("Not supported on windows.");
     }
 
-    /// Reads the env var [`MIRRORD_CI_API_KEY`], and picks the id of a new CI session, to return
-    /// a valid [`MirrordCi`].
+    /// Reads the env var [`MIRRORD_CI_API_KEY`], and picks the directory of a new CI session, to
+    /// return a valid [`MirrordCi`].
     ///
-    /// The id is picked before any process of the session is spawned, so that each process
+    /// The directory is picked before any process of the session is spawned, so that each process
     /// records itself in the session's own state.
     #[tracing::instrument(level = Level::TRACE, ret, err)]
     pub(super) fn new(ci_common_args: CiCommonArgs) -> CiResult<Self> {
@@ -823,7 +807,7 @@ impl MirrordCi {
 
         Ok(Self {
             ci_api_key,
-            session_id: Uuid::new_v4(),
+            session_dir: MirrordCiStore::sessions_dir().join(Uuid::new_v4().to_string()),
             ci_common_args,
         })
     }
@@ -875,7 +859,6 @@ mod tests {
         io::{AsyncBufReadExt, BufReader},
         time::timeout,
     };
-    use uuid::Uuid;
 
     use super::{CiCommonArgs, CiError, MirrordCi, MirrordCiStore, spawn_background_user_command};
 
@@ -1114,12 +1097,12 @@ mod tests {
         let mut progress = ProgressTracker::null();
         let background = MirrordCi {
             ci_api_key: None,
-            session_id: Uuid::new_v4(),
+            session_dir: session_dir.to_owned(),
             ci_common_args: CiCommonArgs::default(),
         };
         let foreground = MirrordCi {
             ci_api_key: None,
-            session_id: Uuid::new_v4(),
+            session_dir: session_dir.to_owned(),
             ci_common_args: CiCommonArgs {
                 foreground: true,
                 ..Default::default()
@@ -1135,7 +1118,6 @@ mod tests {
                 &mut user_command(),
                 "sh",
                 &[],
-                session_dir,
                 Duration::from_millis(100),
             )
             .await;
@@ -1150,7 +1132,6 @@ mod tests {
                 &mut user_command(),
                 "sh",
                 &[],
-                session_dir,
                 Duration::from_millis(100),
             )
             .await
@@ -1168,14 +1149,7 @@ mod tests {
         drop(lock);
 
         let mut background_child = background
-            .spawn_user_command(
-                &mut progress,
-                &mut user_command(),
-                "sh",
-                &[],
-                session_dir,
-                LOCK_TIMEOUT,
-            )
+            .spawn_user_command(&mut progress, &mut user_command(), "sh", &[], LOCK_TIMEOUT)
             .await
             .unwrap();
         let background_pid = background_child.id().expect("spawned child has a pid");

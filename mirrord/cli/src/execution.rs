@@ -872,7 +872,7 @@ impl MirrordExecution {
         if let Some(mirrord_for_ci) = mirrord_for_ci {
             proxy_command
                 .arg("--mirrord-for-ci")
-                .arg(mirrord_for_ci.session_id().to_string());
+                .arg(mirrord_for_ci.session_dir());
         }
 
         proxy_command
