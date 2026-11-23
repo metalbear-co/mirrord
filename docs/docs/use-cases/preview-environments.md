@@ -410,7 +410,18 @@ queue splits stay active even though the preview's pods are gone. When a request
 environment's filter arrives, it is **held** while the pods start and answered by the preview
 once ready - the caller just sees a slower first response. Queue messages don't need holding at
 all: they wait in the environment's split queue/topic until the preview consumes them, so
-nothing is lost either way. With [Kafka branching](../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching),
+nothing is lost either way. Temporal has no queue of its own per environment: the operator
+buffers the preview's tasks in memory. On operator `3.235.0` or later, once a buffer the preview
+has polled is full (128 workflow and 128 activity tasks by default, set by
+[`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options)),
+the operator stops polling that task queue until the preview brings its buffer below the cap; a
+buffered task's Temporal timeouts keep running, and no other virtual queue of that task queue
+receives tasks of that kind meanwhile. A preview buffer nobody has polled, such as a split-only
+copy on another cluster, drops its oldest task at the cap instead, and Temporal sends it again
+after its task timeout; nothing of the preview's goes to the deployed worker.
+Earlier operators buffer without a limit by default, and with a cap set they send the preview's
+tasks to the deployed worker at a full preview buffer and drop tasks at a full main buffer.
+With [Kafka branching](../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching),
 a message waiting on a branch topic the preview consumes starts the preview pods.
 
 While idle, `mirrord preview status` shows the environment as `idle (waiting for traffic)`,
@@ -439,7 +450,13 @@ queue lag (for example with KEDA) and sit at zero replicas until messages arrive
 consumer group are read from the workload's spec, and messages flow through the queue itself.
 Matching messages reach the preview pod right away; unmatched ones wait on the target's
 temporary queue and are consumed when the service scales back up, whose new pods start with the
-split configuration already applied.
+split configuration already applied. For Temporal, unmatched tasks wait in operator memory
+instead. A target at zero has never polled its main virtual queue, so once 128 of a kind are
+buffered (operator `3.235.0` or later; see
+[`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options))
+the operator drops the oldest and Temporal sends it again after its task timeout, while matching
+tasks keep reaching the preview. A target that polled before it scaled down holds its task queue
+at the cap until it is back, so matching tasks stop reaching the preview too meanwhile.
 
 See [Autoscaled Targets with KEDA](../sharing-the-cluster/queue-splitting.md#autoscaled-targets-with-keda)
 to see how KEDA autoscaling works with queue splitting.
