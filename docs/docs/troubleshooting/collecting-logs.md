@@ -101,6 +101,8 @@ On a workload outside Kubernetes, such as an Amazon ECS task or a Cloudflare con
 
 Both take a level such as `info` or `debug`, following the `RUST_LOG` convention. The containers pick them up when they start, so redeploy after changing them.
 
+The remote layer logs from inside each of the application's processes, to that process's stderr. A server that sends its stderr to a file, such as nginx to its `error_log`, has the remote layer's messages there rather than in the container's output.
+
 ## IDEs
 
 The VS Code extension and the JetBrains plugin start the same CLI, so everything above applies. Log level and file locations for the layer come from the run configuration's environment variables, and the proxy and agent settings come from the mirrord config file the session uses.
