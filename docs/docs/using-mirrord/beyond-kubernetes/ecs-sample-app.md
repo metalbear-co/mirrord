@@ -97,15 +97,17 @@ mirrord login
 
 The sign-in must be to the organization that owns the API key. For more, see [Developer setup](metalbear-cloud.md#developer-setup).
 
-Install the app's dependencies:
+Install the app's dependencies, from the root of the repository:
 
 ```bash
-cd ../app
+cd ..
 python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
+pip install -r app/requirements.txt
 ```
 
-Open `main.py` and change the code. For example:
+Create the virtual environment in the root of the repository, not in `app`, which the app watches for changes.
+
+Open `app/main.py` and change the code. For example:
 
 ```python
 GREETING = "Hello from my laptop"
@@ -115,11 +117,10 @@ VERSION = "v2"
 Run the app with mirrord, from the root of the repository:
 
 ```bash
-cd ..
 mirrord up --key $USER
 ```
 
-`mirrord up` reads `mirrord-up.yaml` and starts the app with `python app/main.py`. For the full configuration, see [The mirrord configuration](#the-mirrord-configuration).
+`mirrord up` reads `mirrord-up.yaml` and starts the app with uvicorn's `--reload` option, on port 8080 as in the ECS task. The app restarts whenever you save a file in `app`, and `mirrord up` keeps running. For the full configuration, see [The mirrord configuration](#the-mirrord-configuration).
 
 When the app starts, it creates the `orders` table in RDS if the table does not exist. So the log line `Application startup complete` also shows that your local process reached the private database.
 
@@ -162,7 +163,7 @@ curl $URL/orders
 
 The ECS task returns the new order, because both processes use the same database.
 
-To try more changes, change the code, stop `mirrord up`, and start it again. You do not build an image or deploy between changes.
+To try more changes, change the code, save it, and send the request again. The app reloads within a second or so, so you do not restart `mirrord up`. You do not build an image or deploy between changes.
 
 ---
 
@@ -179,7 +180,7 @@ services:
       path: serverless/orders
       namespace: staging
     run:
-      command: ["python", "app/main.py"]
+      command: ["python", "-m", "uvicorn", "app.main:app", "--port", "8080", "--reload", "--reload-dir", "app"]
 ```
 
 | Setting | Value | What it does |
@@ -187,7 +188,7 @@ services:
 | `common.operator` | `false` | Connects through MetalBear Cloud. Without it, mirrord connects through the Operator if you've used one on this machine before: after a successful Operator session, mirrord sets `"operator": true` in `~/.mirrord/mirrord.json`, which applies whenever your config doesn't set `operator`. |
 | `services.orders.target.path` | `serverless/orders` | Selects the service. It matches `MIRRORD_REMOTE_SERVICE` on the task. |
 | `services.orders.target.namespace` | `staging` | Selects the environment. It matches `MIRRORD_REMOTE_ENVIRONMENT` on the task. |
-| `services.orders.run.command` | `python app/main.py` | The local process that mirrord runs. |
+| `services.orders.run.command` | `python -m uvicorn app.main:app --port 8080 --reload --reload-dir app` | The local process that mirrord runs. |
 
 The service uses the default `split` mode of `mirrord up`. In this mode, mirrord steals only the HTTP requests whose `baggage` header contains `mirrord-session=<key>`. All other requests stay with the ECS task. For more, see [mirrord up](../multiple-concurrent-sessions.md).
 
