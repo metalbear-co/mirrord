@@ -410,18 +410,10 @@ queue splits stay active even though the preview's pods are gone. When a request
 environment's filter arrives, it is **held** while the pods start and answered by the preview
 once ready - the caller just sees a slower first response. Queue messages don't need holding at
 all: they wait in the environment's split queue/topic until the preview consumes them, so
-nothing is lost either way. Temporal has no queue of its own per environment: the operator
-buffers the preview's tasks in memory. On operator `3.237.0` or later, once the preview's buffer
-is full (128 workflow and 128 activity tasks by default, set by
-[`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options)),
-the operator stops polling that task queue until the preview brings its buffer below the cap; a
-buffered task's Temporal timeouts keep running, and no other virtual queue of that task queue
-receives tasks of that kind meanwhile. That holds for a buffer the preview never polls too, such
-as a split-only copy on another cluster, which stops that cluster's task queue at the cap until
-the preview ends. Nothing of the preview's is dropped or goes to the deployed worker while the
-preview exists.
-Earlier operators buffer without a limit by default, and with a cap set they send the preview's
-tasks to the deployed worker at a full preview buffer and drop tasks at a full main buffer.
+nothing is lost either way. Temporal tasks for the preview wait in the operator; on operator
+`3.237.0` or later, a full preview buffer pauses that task queue for every worker on it until
+the preview takes tasks (see
+[`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options)).
 With [Kafka branching](../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching),
 a message waiting on a branch topic the preview consumes starts the preview pods.
 
