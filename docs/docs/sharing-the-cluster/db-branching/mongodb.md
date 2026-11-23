@@ -111,3 +111,16 @@ Only the `users` collection is created, containing documents for alice and bob. 
 {% hint style="info" %}
 The `dump_args` field is not supported for MongoDB. MongoDB branches use their own internal dump mechanism, so only MySQL, MariaDB, and PostgreSQL branches accept custom dump arguments.
 {% endhint %}
+
+## Server Arguments
+
+`dbServerArgs` is a list of extra command-line flags for the branch's `mongod` server, set per cluster via the `operator.mongodbBranchConfig` value in the operator's Helm chart. The operator passes them as the branch container's args, and the official image's entrypoint hands them to the server. Keep the listener on port 27017: the operator and the copy connect there.
+
+```yaml
+operator:
+  mongodbBranchConfig:
+    dbPod:
+      dbServerArgs:
+        - "--wiredTigerCacheSizeGB"
+        - "0.5"
+```

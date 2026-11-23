@@ -155,6 +155,10 @@ These images are only pulled when the corresponding feature is enabled:
 | MSSQL tools             | `ghcr.io/metalbear-co/mssql-tools`          | Same as operator | Init container and sidecar for MSSQL DB branching (provides `sqlpackage` and `sqlcmd`). Table data is exported with the `bcp` in the branch's SQL Server image. | Env `MSSQL_TOOLS_IMAGE` via `operator.extraEnv`                           |
 | Flyway                  | `flyway/flyway`                             | `13` from operator `3.232.0`; `12` on `3.182.0` through `3.231.0` | Flyway migration runner for DB branching.                                                     | Per-branch `migrations.image`, or `dbPod.migrationImages.flyway.registry` |
 | Liquibase               | `liquibase/liquibase`                       | `4.33`           | Liquibase migration runner for DB branching.                                                  | Per-branch `migrations.image`, or `dbPod.migrationImages.liquibase.registry` |
+| Copy-on-write CSI driver | `ghcr.io/metalbear-co/operator-cow-csi`    | Same as operator | Node driver of copy-on-write DB branching, which also runs the last step of snapshot builds (only when `cowDbBranching.enabled` is true). | `cowDbBranching.image`, `cowDbBranching.imageTag` |
+| CSI provisioner         | `registry.k8s.io/sig-storage/csi-provisioner` | `v6.4.0`       | Sidecar of the copy-on-write CSI driver.                                                      | `cowDbBranching.sidecars.provisioner`                                     |
+| CSI node registrar      | `registry.k8s.io/sig-storage/csi-node-driver-registrar` | `v2.18.0` | Sidecar of the copy-on-write CSI driver.                                                  | `cowDbBranching.sidecars.nodeDriverRegistrar`                             |
+| CSI liveness probe      | `registry.k8s.io/sig-storage/livenessprobe` | `v2.20.0`        | Sidecar of the copy-on-write CSI driver.                                                      | `cowDbBranching.sidecars.livenessProbe`                                   |
 
 ### Code sync
 
