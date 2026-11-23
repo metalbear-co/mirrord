@@ -432,15 +432,14 @@ operator:
 
 ## Autoscaling Like the Target
 
+Requires operator 3.237.0 or later and CLI 3.292.0 or later.
+
 A Preview Environment runs a fixed number of pods by default: 1, or `feature.preview.replicas`.
 When the target is scaled by a `HorizontalPodAutoscaler`, the preview can scale the same way: the
-operator copies the target's autoscaler (its metrics, thresholds and scaling behavior) onto the
-preview's pods, so the preview grows and shrinks with its own load. This is useful when a preview
-takes real load, for example a load test against a PR, and one pod would not be a fair copy of
-the service.
+operator copies the target's autoscaler (its metrics, thresholds, and scaling behavior) onto the
+preview's pods.
 
-Autoscaling is off by default, because most previews see little traffic and extra pods cost
-money. Turn it on in the mirrord configuration:
+Autoscaling is off by default. Turn it on in the mirrord configuration:
 
 ```json
 {
@@ -457,6 +456,12 @@ money. Turn it on in the mirrord configuration:
 * `{ "min": 4, "max": 12 }`, or `{ "max": 12 }`, copies it within these bounds. `min` is 1 when
   unset, `max` is the target's maximum when unset, and `1 <= min <= max` must hold.
 * `autoscale` and `replicas` can't both be set.
+
+The copy keeps the target's `Resource`, `ContainerResource`, and `Pods` metrics, which measure the
+preview's own pods. `Object` and `External` metrics measure something outside the preview and are
+left out; a target whose autoscaler has only those counts as having none. Preview pods are never
+`Ready`, which the autoscaler treats as still starting for CPU utilization, so a CPU-based
+autoscaler doesn't scale the preview yet; memory and custom pod metrics do.
 
 The preview's autoscaler is created with the environment and deleted with it. A target without
 an autoscaler fails the environment, with the error naming the target. `mirrord preview start`

@@ -307,12 +307,20 @@ common:
 
 services:
   apisvc:
+    run:
+      command: ["node", "app.js"]
     preview:
       autoscale: { min: 4, max: 12 } # apisvc overrides common
   worker:
+    run:
+      command: ["python", "worker.py"]
     preview:
       autoscale: false               # worker runs 1 pod
 ```
+
+A service with `sync` runs 1 pod whatever `common` says, and `mirrord preview sync` says so;
+its own `preview.autoscale` is an error. Requires operator 3.237.0 or later and CLI 3.292.0 or
+later.
 
 Under `common`, a service whose target has no autoscaler runs 1 pod, and `mirrord preview up`
 says so. Under a service, such a target fails that service's preview. When a target autoscales
