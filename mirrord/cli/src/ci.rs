@@ -223,9 +223,11 @@ impl MirrordCiStore {
     /// Temporary file in a session's directory that [`Self::write_locked`] writes the state to
     /// before it replaces the state file.
     ///
-    /// Writers hold the session's lock, so they share this one name. A writer that is killed
-    /// before the replacement leaves this file behind. The next write truncates it, and
-    /// [`Self::remove_session`] removes it so that it can't keep the session's directory.
+    /// Writers hold the session's lock, so they share this one name. A writer that is killed or
+    /// fails before the replacement leaves this file behind. The next write removes it and creates
+    /// the file exclusively, so that a leftover or a planted symlink is never followed or
+    /// truncated. [`Self::remove_session`] also removes it, so that it can't keep the session's
+    /// directory.
     const TEMPORARY_STATE_FILE_NAME: &str = "session.json.tmp";
 
     /// How often [`Self::lock_existing_session`] retries a held lock.
@@ -385,8 +387,13 @@ impl MirrordCiStore {
     async fn write_locked(&self, session_dir: &Path, _lock: &CiStoreLock) -> CiResult<()> {
         let contents = serde_json::to_vec(self)?;
         let temporary_path = session_dir.join(Self::TEMPORARY_STATE_FILE_NAME);
+        // `remove_file` removes a symlink itself rather than its target.
+        match fs::remove_file(&temporary_path).await {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
         let mut options = fs::OpenOptions::new();
-        options.create(true).write(true).truncate(true);
+        options.create_new(true).write(true);
         // The state file takes this file's mode when it is replaced, and the temporary directory
         // is readable by other users.
         #[cfg(unix)]
@@ -418,7 +425,7 @@ impl MirrordCiStore {
     /// removed.
     ///
     /// While `lock` is held, no other process can be in [`Self::write_locked`], so a temporary
-    /// state file is what a killed writer left behind.
+    /// state file is what a writer that was killed or failed before the replacement left behind.
     ///
     /// The state file goes before the lock file because, once the lock file is gone, another
     /// process can create a new lock file and lock it while `lock` is still held on the old one.
