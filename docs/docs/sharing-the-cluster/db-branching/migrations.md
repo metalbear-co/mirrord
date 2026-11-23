@@ -197,7 +197,7 @@ With `search_path`, nothing is uploaded: the changelogs are already baked into a
 
 Image scanners flag both default migration runners: `flyway/flyway:13` bundles `databricks-jdbc` and Couchbase `core-io` with a vulnerable jackson-databind, and `liquibase/liquibase:4.33` bundles a Temurin JRE and, inside `liquibase-commercial.jar`, a jackson-databind with critical CVEs. Upstream publishes no tag or variant without them: Flyway 13 is the latest line, Liquibase 4.x ended at 4.33 and 5.x is a different product (no bundled JDBC drivers and a new license). The operator keeps these defaults.
 
-To run patched builds instead, publish your own images under the same tags (`13` for Flyway, `4.33` for Liquibase) and point the chart at their registries. A newer `eclipse-temurin:21-jre` base fixes only the JRE finding: the flagged jars have to go too, so drop `liquibase-commercial.jar` (unused without a Pro license) or swap the jackson-databind inside it, and remove `databricks-jdbc` and Couchbase `core-io` from Flyway's `lib` when you do not use those databases, keeping the drivers your dialects need. The operator pulls `<registry>:<tag>`:
+To run patched builds instead, publish your own images under the tags the operator pulls (`4.33` for Liquibase; `13` for Flyway from operator `3.232.0`, `12` on `3.182.0` through `3.231.0`) and point the chart at their registries. A newer `eclipse-temurin:21-jre` base fixes only the JRE finding: the flagged jars have to go too, so drop `liquibase-commercial.jar` (unused without a Pro license) or swap the jackson-databind inside it, and remove `databricks-jdbc-*.jar` and `couchbase/core-io-*.jar` from Flyway's `/flyway/drivers` when you do not use those databases, keeping the drivers your dialects need. The operator pulls `<registry>:<tag>`:
 
 ```yaml
 operator:
@@ -210,7 +210,7 @@ operator:
           registry: registry.example.com/liquibase
 ```
 
-The same `migrationImages` block exists under `mysqlBranchConfig`, `mariadbBranchConfig` and `mssqlBranchConfig`. A single branch can also name the full image itself with `migrations.image`, which wins over the chart:
+The same `migrationImages` block exists under `mysqlBranchConfig`, `mariadbBranchConfig`, `mssqlBranchConfig` and `cockroachdbBranchConfig`. A [profile](../db-branching.md#branch-config-profiles) is a complete baseline of its own and does not inherit from the default `dbPod`, so repeat the block under each `profiles.<name>.dbPod` that runs migrations. A single branch can also name the full image itself with `migrations.image`, which wins over the chart:
 
 ```json
 {
