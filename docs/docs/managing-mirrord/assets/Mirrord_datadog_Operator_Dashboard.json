@@ -1,0 +1,424 @@
+{
+    "title": "Mirrord Operator Dashboard",
+    "description": "[[suggested_dashboards]]",
+    "widgets": [
+        {
+            "id": 556827580888684,
+            "definition": {
+                "title": "Sessions",
+                "title_size": "16",
+                "title_align": "left",
+                "time": {},
+                "requests": [
+                    {
+                        "response_format": "event_list",
+                        "query": {
+                            "data_source": "logs_transaction_stream",
+                            "query_string": "kube_deployment:mirrord-operator kube_container_name:mirrord-operator $Namespace $Target $TargetType",
+                            "indexes": [],
+                            "group_by": [
+                                {
+                                    "facet": "@fields.session_id"
+                                }
+                            ],
+                            "compute": [
+                                {
+                                    "facet": "@fields.client_id",
+                                    "aggregation": "most_frequent"
+                                },
+                                {
+                                    "facet": "@fields.client_name",
+                                    "aggregation": "most_frequent"
+                                },
+                                {
+                                    "facet": "@fields.client_hostname",
+                                    "aggregation": "most_frequent"
+                                }
+                            ],
+                            "sort": {
+                                "column": "timeline",
+                                "order": "desc"
+                            }
+                        },
+                        "columns": [
+                            {
+                                "field": "@fields.client_id:most_frequent",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_name:most_frequent",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "group_by",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "timeline",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_hostname:most_frequent",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "duration",
+                                "width": "auto"
+                            }
+                        ]
+                    }
+                ],
+                "type": "list_stream"
+            },
+            "layout": {
+                "x": 0,
+                "y": 0,
+                "width": 6,
+                "height": 4
+            }
+        },
+        {
+            "id": 3267499080281826,
+            "definition": {
+                "title": "Targets",
+                "title_size": "16",
+                "title_align": "left",
+                "type": "query_table",
+                "requests": [
+                    {
+                        "queries": [
+                            {
+                                "data_source": "logs",
+                                "name": "query1",
+                                "indexes": [
+                                    "*"
+                                ],
+                                "compute": {
+                                    "aggregation": "cardinality",
+                                    "metric": "@fields.session_id"
+                                },
+                                "group_by": [
+                                    {
+                                        "facet": "@fields.target_namespace",
+                                        "limit": 10,
+                                        "sort": {
+                                            "order": "desc",
+                                            "aggregation": "cardinality",
+                                            "metric": "@fields.session_id"
+                                        }
+                                    },
+                                    {
+                                        "facet": "@fields.target_type",
+                                        "limit": 10,
+                                        "sort": {
+                                            "order": "desc",
+                                            "aggregation": "cardinality",
+                                            "metric": "@fields.session_id"
+                                        }
+                                    },
+                                    {
+                                        "facet": "@fields.target_name",
+                                        "limit": 10,
+                                        "sort": {
+                                            "order": "desc",
+                                            "aggregation": "cardinality",
+                                            "metric": "@fields.session_id"
+                                        }
+                                    }
+                                ],
+                                "search": {
+                                    "query": "kube_deployment:mirrord-operator kube_container_name:mirrord-operator $Namespace $Target"
+                                },
+                                "storage": "hot"
+                            }
+                        ],
+                        "response_format": "scalar",
+                        "sort": {
+                            "count": 1000,
+                            "order_by": [
+                                {
+                                    "type": "formula",
+                                    "index": 0,
+                                    "order": "desc"
+                                }
+                            ]
+                        },
+                        "formulas": [
+                            {
+                                "cell_display_mode": "bar",
+                                "alias": "Sessions",
+                                "formula": "query1"
+                            }
+                        ]
+                    }
+                ],
+                "has_search_bar": "auto"
+            },
+            "layout": {
+                "x": 6,
+                "y": 0,
+                "width": 6,
+                "height": 4
+            }
+        },
+        {
+            "id": 3923444000951324,
+            "definition": {
+                "title": "Copy Target Events",
+                "title_size": "16",
+                "title_align": "left",
+                "requests": [
+                    {
+                        "response_format": "event_list",
+                        "query": {
+                            "data_source": "logs_stream",
+                            "query_string": "kube_deployment:mirrord-operator kube_container_name:mirrord-operator @fields.message:\"Copy Target\" $Namespace $Target $TargetType",
+                            "indexes": [],
+                            "storage": "hot",
+                            "sort": {
+                                "column": "timestamp",
+                                "order": "desc"
+                            }
+                        },
+                        "columns": [
+                            {
+                                "field": "status_line",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "timestamp",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_id",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.target_namespace",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.target_type",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.target_name",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.scale_down",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.message",
+                                "width": "auto"
+                            }
+                        ]
+                    }
+                ],
+                "type": "list_stream"
+            },
+            "layout": {
+                "x": 0,
+                "y": 4,
+                "width": 6,
+                "height": 4
+            }
+        },
+        {
+            "id": 251499864762446,
+            "definition": {
+                "title": "Port Events",
+                "title_size": "16",
+                "title_align": "left",
+                "requests": [
+                    {
+                        "response_format": "event_list",
+                        "query": {
+                            "data_source": "logs_stream",
+                            "query_string": "kube_deployment:mirrord-operator kube_container_name:mirrord-operator @fields.message:(\"Port Mirror\" OR \"Port Steal\" OR \"Port Release\") $Namespace $Target $TargetType",
+                            "indexes": [],
+                            "storage": "hot",
+                            "sort": {
+                                "column": "timestamp",
+                                "order": "desc"
+                            }
+                        },
+                        "columns": [
+                            {
+                                "field": "status_line",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "timestamp",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_id",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.target_namespace",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.target_name",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.message",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.port",
+                                "width": "auto"
+                            }
+                        ]
+                    }
+                ],
+                "type": "list_stream"
+            },
+            "layout": {
+                "x": 6,
+                "y": 4,
+                "width": 6,
+                "height": 4
+            }
+        },
+        {
+            "id": 8545877679263066,
+            "definition": {
+                "title": "Logs",
+                "title_size": "16",
+                "title_align": "left",
+                "requests": [
+                    {
+                        "response_format": "event_list",
+                        "query": {
+                            "data_source": "logs_stream",
+                            "query_string": "kube_deployment:mirrord-operator kube_container_name:mirrord-operator @fields.message:* $Namespace $Target $TargetType",
+                            "indexes": [],
+                            "storage": "hot",
+                            "sort": {
+                                "column": "timestamp",
+                                "order": "desc"
+                            }
+                        },
+                        "columns": [
+                            {
+                                "field": "status_line",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "timestamp",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@level",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.target_name",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.message",
+                                "width": "auto"
+                            }
+                        ]
+                    }
+                ],
+                "type": "list_stream"
+            },
+            "layout": {
+                "x": 0,
+                "y": 8,
+                "width": 7,
+                "height": 4
+            }
+        },
+        {
+            "id": 5076401636022992,
+            "definition": {
+                "title": "Users (last 30 days)",
+                "title_size": "16",
+                "title_align": "left",
+                "time": {
+                    "type": "live",
+                    "unit": "month",
+                    "value": 1
+                },
+                "requests": [
+                    {
+                        "response_format": "event_list",
+                        "query": {
+                            "data_source": "logs_pattern_stream",
+                            "query_string": "kube_deployment:mirrord-operator kube_container_name:mirrord-operator @fields.message:* $Namespace $Target $TargetType",
+                            "indexes": [],
+                            "clustering_pattern_field_path": "@fields.client_id",
+                            "group_by": [
+                                {
+                                    "facet": "@fields.client_name"
+                                },
+                                {
+                                    "facet": "@fields.client_hostname"
+                                },
+                                {
+                                    "facet": "@fields.client_id"
+                                }
+                            ]
+                        },
+                        "columns": [
+                            {
+                                "field": "status_line",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_name",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_id",
+                                "width": "auto"
+                            },
+                            {
+                                "field": "@fields.client_hostname",
+                                "width": "auto"
+                            }
+                        ]
+                    }
+                ],
+                "type": "list_stream"
+            },
+            "layout": {
+                "x": 7,
+                "y": 8,
+                "width": 5,
+                "height": 4
+            }
+        }
+    ],
+    "template_variables": [
+        {
+            "name": "Namespace",
+            "prefix": "@fields.target_namespace",
+            "available_values": [],
+            "default": "*"
+        },
+        {
+            "name": "TargetType",
+            "prefix": "@fields.target_type",
+            "available_values": [],
+            "default": "*"
+        },
+        {
+            "name": "Target",
+            "prefix": "@fields.target_name",
+            "available_values": [],
+            "default": "*"
+        }
+    ],
+    "layout_type": "ordered",
+    "notify_list": [],
+    "reflow_type": "fixed"
+}
