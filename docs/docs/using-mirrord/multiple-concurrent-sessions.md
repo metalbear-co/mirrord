@@ -222,6 +222,7 @@ Common configuration options, applied to all defined services. Currently the fol
 - [`operator`](https://metalbear.com/mirrord/docs/config/options#root-operator)
 - [`telemetry`](https://metalbear.com/mirrord/docs/config/options#root-telemetry)
 - [`context`](https://metalbear.com/mirrord/docs/config/options#root-kube_context)
+- [`preview`](#preview), for `mirrord preview up`
 
 All fields map directly to their `mirrord.json` counterparts.
 
@@ -286,6 +287,37 @@ Only applies in `split` and `mirror` modes. A service in `replace` mode receives
 ##### `services.*.ignore_ports`
 
 List of ports that should be ignored in incoming traffic. Maps directly to [`feature.network.incoming.ignore_ports`](https://metalbear.com/mirrord/docs/config/options#feature-network-incoming)
+
+##### `preview`
+
+Settings of the service's Preview Environment, for `mirrord preview up`. The block exists under
+`common`, for every service, and under a service, which takes precedence setting by setting.
+`mirrord up` ignores it.
+
+- `autoscale`: scale the preview's pods the way the target scales, by copying the target's
+  `HorizontalPodAutoscaler`. Maps to
+  [`feature.preview.autoscale`](https://metalbear.com/mirrord/docs/config/options#feature-preview-autoscale):
+  `false` (the default) runs 1 pod, `true` copies the target's autoscaler from 1 pod up to its
+  maximum, and `{ min: 4, max: 12 }` or `{ max: 12 }` copies it within these bounds.
+
+```yaml
+common:
+  preview:
+    autoscale: true                  # every service copies its target's autoscaler
+
+services:
+  apisvc:
+    preview:
+      autoscale: { min: 4, max: 12 } # apisvc overrides common
+  worker:
+    preview:
+      autoscale: false               # worker runs 1 pod
+```
+
+Under `common`, a service whose target has no autoscaler runs 1 pod, and `mirrord preview up`
+says so. Under a service, such a target fails that service's preview. When a target autoscales
+and its preview doesn't, `mirrord preview up` prints a hint naming the service and the setting.
+See [Autoscaling Like the Target](../use-cases/preview-environments.md#autoscaling-like-the-target).
 
 ##### `services.*.config_patch`
 
