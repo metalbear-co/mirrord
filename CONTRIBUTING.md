@@ -997,11 +997,16 @@ GitBook imported a merge, and what to do when an import fails.
 
 The [Publish skills workflow](/.github/workflows/publish-skills.yaml) copies `skills/` to
 [metalbear-co/skills](https://github.com/metalbear-co/skills) on every merge to `main` that changes it, because the
-Claude Code and Codex marketplaces, `npx skills add` and `install.sh` install the skills from that repository.
-`npx skills add` and `install.sh` clone it, so they get every merge. Claude Code updates an installed plugin only when
-the plugin's `version` changes. Each publish adds one commit to `main` of `metalbear-co/skills`, whose content is
-exactly `skills/` at the tip of `main` when the run starts, so the next publish replaces a change made in that
-repository directly, and the change stays only in its history. A failed run posts to `#ci-alerts`.
+Claude Code and Codex marketplaces, `npx skills add` and `install.sh` install the skills from that repository. Each
+publish adds one commit to `main` of `metalbear-co/skills`, whose content is exactly `skills/` at the tip of `main` when
+the run starts, so the next publish replaces a change made in that repository directly, and the change stays only in
+its history. A failed run posts to `#ci-alerts`.
+
+`npx skills add` and `install.sh` clone `metalbear-co/skills`, so they get every merge, but Claude Code updates an
+installed plugin only when the plugin's `version` changes. A pull request that changes `skills/skills/` must raise
+`version` in `skills/.claude-plugin/plugin.json`, and the `plan` job of `ci.yaml` fails one that doesn't.
+[`skills/CONTRIBUTING.md`](/skills/CONTRIBUTING.md#plugin-version) says what to do when that check fails in the merge
+queue.
 
 To publish again, for example after a failed run, re-run that run, or run the workflow from `main` with `dry_run` off.
 Either one publishes the current tip of `main`, not the commit that started the failed run. The first command below is
