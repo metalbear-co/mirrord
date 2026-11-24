@@ -898,7 +898,9 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Builds all platform binaries (Linux x86\_64 / aarch64, macOS universal, Windows).
    - Publishes the Docker images to GHCR.
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
-   - Publishes to Homebrew, Chocolatey, and WinGet.
+   - Publishes to Homebrew and Chocolatey.
+   - Starts the [Release WinGet workflow](/.github/workflows/release-winget.yaml), which submits the release to WinGet.
+   - Publishes `docs/` and `guides/` to the `docs-published` and `guides-published` branches, which GitBook builds the docs site from.
    - Updates the `latest` git tag and notifies the infra repository.
 
 ## Triggering a release PR manually
@@ -920,3 +922,74 @@ Ensure there are no uncommitted changes before running the script. It will:
 - Push the branch.
 
 Open a PR from that branch to `main`, then merge it — the Release workflow will fire automatically.
+
+## WinGet
+
+The [Release WinGet workflow](/.github/workflows/release-winget.yaml) uses
+[Komac](https://github.com/russellbanks/Komac) to open the pull request that adds each release's manifests to
+`microsoft/winget-pkgs`. It submits as the `metalbear-ci` account from the org fork
+[metalbear-co/winget-pkgs](https://github.com/metalbear-co/winget-pkgs), so releases don't depend on one person's
+account. Komac branches from the latest upstream commit, so a failed fork sync only shows a warning.
+
+The `release_winget` job of the Release workflow starts the Release WinGet workflow on `main` for each release. That job
+only starts the workflow, so a green Release run doesn't mean that the submission succeeded. A failure inside the
+Release WinGet workflow shows in `#ci-alerts` and in
+[its run](https://github.com/metalbear-co/mirrord/actions/workflows/release-winget.yaml). A failure to start it shows
+only as a failed `release_winget` job in the Release run.
+
+The submission can't run in the Release workflow itself, because that workflow's jobs run for
+`refs/pull/<number>/merge`, and the `winget` environment only deploys from `main`. Before the submission, a job outside
+the environment checks the version, so the job that holds the token never runs for an invalid version. The version must
+be a bare `major.minor.patch` value whose published release isn't a prerelease and has a `mirrord.msi` asset.
+
+To start the submission for a release that missed it, run the Release WinGet workflow from `main`. Use "Run workflow" on
+[its page in the Actions tab](https://github.com/metalbear-co/mirrord/actions/workflows/release-winget.yaml), or run:
+
+```bash
+gh workflow run release-winget.yaml --repo metalbear-co/mirrord --ref main --field version=<version>
+```
+
+The setup that the Release WinGet workflow relies on:
+
+- `WINGET_BOT_TOKEN` is a classic personal access token of `metalbear-ci` with the `public_repo` and `workflow` scopes.
+  Syncing the fork needs `workflow` because upstream changes `.github/workflows`. The credentials of `metalbear-ci` are
+  in the team password manager.
+- The token is a secret of the `winget` environment only, never a repository or organization secret, because those
+  are readable from every branch. The environment has one deployment branch rule, `main`, and no reviewers, so the
+  release runs unattended.
+- `metalbear-ci` is an outside collaborator with write access to the fork only, so its token can't change the workflows
+  of other `metalbear-co` repositories.
+- Actions are turned off on the fork, so the workflows that syncing brings in never run there.
+- The `metalbear-co` org allows classic personal access tokens. If it enforces SAML SSO, the token must be authorized
+  for the org.
+
+When a submission warns or fails:
+
+- If the `release_winget` job fails, `#ci-alerts` gets no alert, and the Release WinGet workflow most likely didn't
+  start. Unless its runs show one for the version, start that workflow from `main`.
+- If the `validate_version` job fails, the `submit` job didn't run, so the run submitted nothing, and the alert shows
+  the version as `not validated`. If GitHub returned an error, re-run the job. Otherwise fix what its error names, and
+  start the Release WinGet workflow from `main` with the correct version.
+- If the token expired or was revoked, create a new one with the same scopes, authorize it if the org enforces SAML
+  SSO, and replace the secret in the `winget` environment.
+- If a Release WinGet run is not allowed to deploy to `winget`, it started from a ref other than `main` and submitted
+  nothing. Start the workflow from `main`. Never add a pattern such as `releases/*` or `refs/pull/*/merge` to the
+  environment, because a workflow run for a pull request could then match the rule and read the token.
+- If the `submit` job only warns that it couldn't sync the fork, the pull request was still submitted, so don't re-run
+  the job. Check the token, which the next release also needs.
+- If the `submit` job fails, check the token and the access of `metalbear-ci` to the fork, then re-run the job. If
+  GitHub refused to create the branch, use "Sync fork" on the fork's GitHub page.
+- If a pull request for the version already exists, open, merged or closed, Komac opens none and the `submit` job shows
+  a warning. After a re-run, that is expected. If that pull request was closed without merging, running the Release
+  WinGet workflow again also opens nothing, so submit the version by hand from the org fork, with a token that can write
+  to it. The `--skip-pr-check` flag makes Komac ignore the existing pull request:
+
+  ```bash
+  KOMAC_FORK_OWNER=metalbear-co GITHUB_TOKEN=<token> komac update MetalBear.mirrord --version <version> \
+    --urls "https://github.com/metalbear-co/mirrord/releases/download/<version>/mirrord.msi|x64" \
+    --skip-pr-check --submit
+  ```
+
+## Publishing docs between releases
+
+A merged pull request from this repository with the `publish-docs` label publishes `docs/` and `guides/` from `main`, including pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing-a-fix-between-releases) says how to publish without those pages.

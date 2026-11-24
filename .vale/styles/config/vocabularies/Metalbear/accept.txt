@@ -170,6 +170,7 @@ protoc
 nixpkgs
 WinGet
 wingetcreate
+Komac
 Chocolatey
 choco
 asdf

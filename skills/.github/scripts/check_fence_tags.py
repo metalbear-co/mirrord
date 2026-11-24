@@ -8,9 +8,10 @@ strict JSON or YAML, contain no '...' placeholders, and validate (Draft 7)
 against the mirrord.json or mirrord-up.yaml schema. A fragment validates as the
 subtree at its tag's path.
 
-The schemas default to the synced copies in this repo. Pass others with
---mirrord-schema and --mirrord-up-schema, so the mirrord repo can run this same
-script against the schemas a build generates.
+The schemas default to the copies in skills/*/references/. Nothing updates
+those copies, so mirrord's content_check job passes mirrord-schema.json and
+mirrord-up-schema.json from the root of the mirrord repository with
+--mirrord-schema and --mirrord-up-schema.
 
 Usage:
     python3 .github/scripts/check_fence_tags.py            # check, exit 1 on failure
@@ -37,7 +38,7 @@ from markdown_it import MarkdownIt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Synced verbatim from upstream by .github/workflows/update-references.yml.
+# Verbatim copies of files generated elsewhere, so they carry no tags.
 # Keep in sync with the exempt list in CONTRIBUTING.md.
 EXEMPT = {
     "skills/mirrord-config/references/configuration.md",
@@ -476,8 +477,8 @@ def check_text(text, rel, blocks, failures, schemas, schema_names=SCHEMAS):
 def markdown_files():
     """Tracked and untracked-but-not-ignored *.md files in this repository.
 
-    Asking git keeps nested checkouts (docs-src/ in docs-sync.yml) and ignored
-    folders such as node_modules/ out of the scan.
+    Asking git keeps nested checkouts and ignored folders such as node_modules/
+    out of the scan.
     """
     out = subprocess.run(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
