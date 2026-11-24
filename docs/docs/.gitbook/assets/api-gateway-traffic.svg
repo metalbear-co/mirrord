@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">How a request reaches your local process through an API gateway</title>
+  <desc id="d">A caller outside the cluster sends a request to the API gateway. The gateway authenticates and routes it to the service pod. At the pod, the mirrord agent sends requests that match your filter to your local process, and all other requests to the deployed container.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="420" fill="#ffffff"/>
+
+  <!-- Cluster boundary -->
+  <rect x="230" y="30" width="470" height="300" rx="16" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="250" y="58" font-size="15" font-weight="700" fill="#4a44b8">Kubernetes cluster</text>
+
+  <!-- Caller -->
+  <rect x="20" y="130" width="170" height="96" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="105" y="160" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Caller</text>
+  <text x="105" y="182" font-size="12.5" fill="#333344" text-anchor="middle">browser, mobile app,</text>
+  <text x="105" y="199" font-size="12.5" fill="#333344" text-anchor="middle">CI job, or partner</text>
+  <text x="105" y="216" font-size="12.5" fill="#333344" text-anchor="middle">service</text>
+
+  <!-- Gateway -->
+  <rect x="260" y="130" width="160" height="96" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <text x="340" y="162" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">API gateway</text>
+  <text x="340" y="185" font-size="12.5" fill="#232141" text-anchor="middle">auth, routing,</text>
+  <text x="340" y="202" font-size="12.5" fill="#232141" text-anchor="middle">rate limits, transforms</text>
+
+  <!-- Service pod -->
+  <rect x="470" y="90" width="200" height="216" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="118" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Service pod (target)</text>
+  <rect x="490" y="134" width="160" height="56" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="159" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+  <text x="570" y="177" font-size="12" fill="#ffffff" text-anchor="middle">applies your filter</text>
+  <rect x="490" y="232" width="160" height="56" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
+  <text x="570" y="257" font-size="14" font-weight="700" fill="#232141" text-anchor="middle">Deployed</text>
+  <text x="570" y="275" font-size="14" font-weight="700" fill="#232141" text-anchor="middle">container</text>
+
+  <!-- Local process -->
+  <rect x="780" y="120" width="170" height="84" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="865" y="152" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Your local process</text>
+  <text x="865" y="174" font-size="12.5" fill="#333344" text-anchor="middle">laptop, CI runner,</text>
+  <text x="865" y="191" font-size="12.5" fill="#333344" text-anchor="middle">or AI agent</text>
+
+  <!-- Arrows -->
+  <line x1="190" y1="178" x2="256" y2="178" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="420" y1="170" x2="486" y2="162" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="650" y1="162" x2="776" y2="162" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="740" y="136" font-size="12.5" font-weight="700" fill="#4a44b8" text-anchor="middle">filter</text>
+  <text x="740" y="151" font-size="12.5" font-weight="700" fill="#4a44b8" text-anchor="middle">matches</text>
+  <line x1="570" y1="190" x2="570" y2="228" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="580" y="214" font-size="12.5" fill="#333344">no match</text>
+
+  <!-- Caption -->
+  <text x="480" y="372" font-size="14" fill="#333344" text-anchor="middle">mirrord intercepts at the service pod, after the gateway. A request that reaches your local</text>
+  <text x="480" y="394" font-size="14" fill="#333344" text-anchor="middle">process has already been authenticated, routed, and transformed by the real gateway.</text>
+</svg>

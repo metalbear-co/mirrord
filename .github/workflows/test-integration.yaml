@@ -89,8 +89,8 @@ jobs:
       # Runs after the integration tests, since `test-ut` (which adds `-p mirrord` with placeholder
       # CLI assets) replaces the `target/debug/mirrord` they run.
       #
-      # Also checks the vendored docs and skills, so a release PR whose bumped corpus doesn't hold
-      # up fails here.
+      # Also checks the docs and skills that `mirrord mcp` embeds, which `content_check` in `ci.yaml`
+      # checks when they change.
       - name: mirrord UT
         uses: ./.github/actions/run-in-ci-runner
         with:
