@@ -24,7 +24,7 @@ Get mirrord running against your cluster in a few minutes.
 ## Developers
 
 1. [Install mirrord](install-mirrord.md): the CLI, or the extension for VS Code or a JetBrains IDE.
-2. [mirrord MCP Server](../using-mirrord-with-ai/mcp-server.md) (optional, needs the CLI): let your AI agent validate mirrord configs and read the docs of your installed version.
+2. [mirrord MCP Server](../using-mirrord-with-ai/mcp-server.md) (optional, needs the CLI): your AI agent generates mirrord configs, validates them deterministically, and looks up options and docs, all for the mirrord version you run.
 3. [Onboarding Wizard](onboarding-wizard.md) (optional): generate a `mirrord-up.yaml` for your services.
 4. [Starting your first session](first-session.md): run your local code in the context of the cluster.
 
