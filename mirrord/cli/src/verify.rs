@@ -19,7 +19,7 @@ use mirrord_operator::{
         verification::{
             ATTESTATION_PAYLOAD_TYPE, DsseEnvelope, MirrordVerification, MirrordVerificationSpec,
             VERIFICATION_COMMIT_LABEL, VERIFICATION_KEY_PREFIX, VerificationCheck,
-            VerificationClientReport, VerificationPhase, pae, verification_key,
+            VerificationClientReport, VerificationPhase, WitnessedTraffic, pae, verification_key,
         },
     },
     types::{OPERATOR_OWNERSHIP_LABEL, isolation_marker},
@@ -47,11 +47,11 @@ const COMMIT_LEN: usize = 40;
 /// How long `run` waits for the operator's verdict after the command has exited.
 const VERDICT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long `run` waits for the operator to finish a record's checks.
-const CHECKS_TIMEOUT: Duration = Duration::from_secs(180);
-
 /// Exit code of `check` when no verification of the commit passed.
 const EXIT_NOT_VERIFIED: i32 = 1;
+
+/// How many groups of traffic of each kind a printed record lists.
+const PRINTED_GROUPS: usize = 12;
 
 /// Exit code of `check` when the records can't be read.
 const EXIT_NO_RECORDS: i32 = 2;
@@ -105,7 +105,7 @@ async fn run(args: VerifyRunArgs) -> CliResult<()> {
 
     let api = match create_record(args.config_file, &key, spec).await {
         Ok(api) => Some(api),
-        // The operator runs the checks, so without a record there is nothing to wait for.
+        // Only the operator can say that it saw the checks' traffic, so they need a record.
         Err(error) if has_checks => return Err(error),
         Err(error) => {
             eprintln!("mirrord verify: running without a verification record: {error}");
@@ -127,41 +127,13 @@ async fn run(args: VerifyRunArgs) -> CliResult<()> {
             error,
         })?;
 
-    let exit_code = match &api {
-        Some(api) if has_checks => {
-            let deadline = Instant::now() + CHECKS_TIMEOUT;
-            loop {
-                if let Some(status) = child.try_wait().map_err(VerifyError::Wait)? {
-                    eprintln!(
-                        "mirrord verify: the command exited before the operator finished its checks"
-                    );
-                    // A command killed by a signal has no exit code.
-                    break status.code().filter(|code| *code != 0).unwrap_or(1);
-                }
-                if checks_finished(&api.records, &key).await {
-                    // The command only had to stay up for the checks, so stopping it is a
-                    // success.
-                    let _ = child.kill().await;
-                    break 0;
-                }
-                if Instant::now() >= deadline {
-                    eprintln!(
-                        "mirrord verify: the operator did not finish its checks in {} seconds",
-                        CHECKS_TIMEOUT.as_secs()
-                    );
-                    let _ = child.kill().await;
-                    break 1;
-                }
-                sleep(Duration::from_secs(1)).await;
-            }
-        }
-        _ => child
-            .wait()
-            .await
-            .map_err(VerifyError::Wait)?
-            .code()
-            .unwrap_or(1),
-    };
+    // A command killed by a signal has no exit code.
+    let exit_code = child
+        .wait()
+        .await
+        .map_err(VerifyError::Wait)?
+        .code()
+        .unwrap_or(1);
 
     let mut verified = has_checks.not();
     if let Some(api) = api {
@@ -177,7 +149,7 @@ async fn run(args: VerifyRunArgs) -> CliResult<()> {
         }
     }
 
-    // With checks the operator's verdict is the result, since the command was only stopped.
+    // With checks, a command that succeeded still fails when the operator did not see them.
     let exit_code = if exit_code == 0 && verified.not() {
         EXIT_NOT_VERIFIED
     } else {
@@ -325,15 +297,6 @@ fn read_checks(path: &PathBuf) -> Result<Vec<VerificationCheck>, VerifyError> {
     serde_yaml::from_str(&content).map_err(|error| VerifyError::ChecksFile {
         path: path.clone(),
         reason: error.to_string(),
-    })
-}
-
-/// Whether the operator has a result for every check of the record.
-async fn checks_finished(api: &Api<MirrordVerification>, key: &str) -> bool {
-    api.get(key).await.is_ok_and(|record| {
-        record
-            .status
-            .is_some_and(|status| status.checks.len() >= record.spec.checks.len())
     })
 }
 
@@ -507,23 +470,54 @@ fn print_record(record: &MirrordVerification) {
             session.ended_at.as_deref().unwrap_or("still running"),
         );
     }
+    if let Some(traffic) = &status.traffic {
+        print_traffic(traffic);
+    }
     if spec.checks.is_empty().not() {
         println!(
-            "  checks    {} of {} passed, sent and judged by the operator",
+            "  checks    {} of {} seen by the operator",
             status.checks.iter().filter(|check| check.passed).count(),
             spec.checks.len()
         );
     }
     for check in &status.checks {
         let mark = if check.passed { "pass" } else { "FAIL" };
-        let deployed = match (&check.body_sha256, &check.deployed_body_sha256) {
-            (Some(keyed), Some(deployed)) if keyed == deployed => {
-                "same answer as the deployed workload"
-            }
-            (Some(_), Some(_)) => "differs from the deployed workload's answer",
-            _ => "no answer from the deployed workload to compare",
+        println!("    {mark}  {}: {}", check.name, check.detail);
+    }
+}
+
+fn print_traffic(traffic: &WitnessedTraffic) {
+    println!(
+        "  traffic   routed to the sessions and counted by the operator: {}",
+        traffic.total()
+    );
+    for group in traffic.http.iter().take(PRINTED_GROUPS) {
+        let routed = if group.stolen { "stolen" } else { "mirrored" };
+        let answer = match group.status {
+            Some(status) => format!("answered {status}"),
+            None => "no answer seen".to_owned(),
         };
-        println!("    {mark}  {}: {}, {deployed}", check.name, check.detail);
+        println!(
+            "    {} {} on {}: {} {routed}, {answer}",
+            group.method, group.path, group.service, group.count
+        );
+    }
+    for group in traffic.queues.iter().take(PRINTED_GROUPS) {
+        println!(
+            "    {} {} on {}: {} received",
+            group.kind, group.name, group.service, group.count
+        );
+    }
+    let unlisted = traffic.http.len().saturating_sub(PRINTED_GROUPS)
+        + traffic.queues.len().saturating_sub(PRINTED_GROUPS);
+    if unlisted > 0 || traffic.truncated {
+        println!("    more groups of traffic are not listed");
+    }
+    if traffic.dropped_events > 0 {
+        println!(
+            "    the operator dropped {} events, so the counts are a lower bound",
+            traffic.dropped_events
+        );
     }
 }
 
@@ -550,14 +544,15 @@ async fn print_signature(api: &VerifyApi, record: &MirrordVerification) {
     }
 }
 
-/// Whether the record's verdict and check results are the ones in its signed statement.
+/// Whether the record's verdict, traffic and check results are the ones in its signed statement.
 fn matches_statement(record: &MirrordVerification, statement: &Value) -> bool {
     let status = record.status.clone().unwrap_or_default();
     let signed_phase = statement
         .pointer("/predicate/phase")
         .and_then(Value::as_str);
-    let signed_checks = statement.pointer("/predicate/checks");
+    let signed = |field: &str| statement.pointer(field).cloned().unwrap_or(Value::Null);
 
     signed_phase == Some(status.phase.to_string().as_str())
-        && signed_checks == serde_json::to_value(&status.checks).ok().as_ref()
+        && signed("/predicate/checks") == json!(status.checks)
+        && signed("/predicate/traffic") == json!(status.traffic)
 }

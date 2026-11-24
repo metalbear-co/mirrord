@@ -2,8 +2,8 @@
 //!
 //! `mirrord verify run` creates a [`MirrordVerification`] before it runs a test command, and runs
 //! the command with the record's name as the session key. The operator writes every session it
-//! observes under that key into the record's status, and decides the record's
-//! [`VerificationPhase`] once the CLI has reported how the command ended.
+//! observes under that key, and the traffic it routes to those sessions, into the record's status,
+//! and decides the record's [`VerificationPhase`] once the CLI has reported how the command ended.
 
 use std::{fmt, ops::Not};
 
@@ -77,49 +77,61 @@ pub struct MirrordVerificationSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_report: Option<VerificationClientReport>,
 
-    /// Requests the operator sends itself while the command's sessions run, and what it must
-    /// get back. With checks, the operator's own results decide the verdict.
+    /// Traffic the operator must have routed to a session of the run. A record with checks
+    /// passes only when the operator saw every one of them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<VerificationCheck>,
 }
 
-/// A request the operator sends to a Service, marked with the verification's key so that a
-/// session filtering on the key receives it, and what the answer must be.
+/// Traffic that the operator must have routed to a session of the run, in the terms of the
+/// events it reports to `mirrord subscribe`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationCheck {
     /// Name shown in the record.
     pub name: String,
 
-    /// Namespace of the Service.
-    pub namespace: String,
-
-    /// Name of the Service.
-    pub service: String,
-
-    /// Port of the Service.
-    pub port: u16,
-
-    /// HTTP method. `GET` when left out.
-    #[serde(default = "VerificationCheck::default_method")]
-    pub method: String,
-
-    /// Path and query of the request, starting with `/`.
-    pub path: String,
-
-    /// Status the answer must have.
+    /// The workload the traffic was addressed to. Any workload when left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expect_status: Option<u16>,
+    pub service: Option<String>,
 
-    /// Text the answer's body must contain.
+    /// An HTTP request that a session stole, and the session's answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expect_body_contains: Option<String>,
+    pub http: Option<HttpCheck>,
+
+    /// Queue messages that a session received.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue: Option<QueueCheck>,
 }
 
-impl VerificationCheck {
-    fn default_method() -> String {
-        "GET".to_owned()
-    }
+/// An HTTP request that a session must have stolen and answered.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpCheck {
+    /// Method of the request. Any method when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+
+    /// Path of the request, without the query. Any path when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+
+    /// Status the session's answer must have. Any status when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+}
+
+/// Queue messages that a session must have received.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueCheck {
+    /// Name of the queue, topic or channel. Any when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// How many messages a session must have received. 1 when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_least: Option<u64>,
 }
 
 /// How the test command ended, as reported by the CLI that ran it.
@@ -145,7 +157,12 @@ pub struct MirrordVerificationStatus {
     #[serde(default)]
     pub phase: VerificationPhase,
 
-    /// What the operator got back for each check in the spec, in the same order.
+    /// Traffic the operator routed to the sessions of the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic: Option<WitnessedTraffic>,
+
+    /// Whether the operator saw each check of the spec, in the same order. Set once the command
+    /// has ended.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<CheckResult>,
 
@@ -155,38 +172,92 @@ pub struct MirrordVerificationStatus {
     pub attestation: Option<String>,
 }
 
-/// What the operator got back for one [`VerificationCheck`].
+/// Traffic the operator routed to the sessions of a verification, counted from the events it
+/// reports to `mirrord subscribe`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WitnessedTraffic {
+    /// HTTP requests, grouped by workload, method, path and answer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http: Vec<WitnessedHttp>,
+
+    /// Queue messages, grouped by workload and queue.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queues: Vec<WitnessedQueue>,
+
+    /// Events the operator dropped before it counted them, which makes the counts a lower bound.
+    #[serde(default)]
+    pub dropped_events: u64,
+
+    /// Whether the operator saw more groups of traffic than it keeps, and left the rest out.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl WitnessedTraffic {
+    /// Number of requests and messages in all groups.
+    pub fn total(&self) -> u64 {
+        let http = self.http.iter().map(|group| group.count).sum::<u64>();
+        let queues = self.queues.iter().map(|group| group.count).sum::<u64>();
+        http + queues
+    }
+}
+
+/// HTTP requests that the operator routed to a session and that had the same answer.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WitnessedHttp {
+    /// The workload the requests were addressed to.
+    pub service: String,
+
+    pub method: String,
+
+    /// Path of the requests, without the query.
+    pub path: String,
+
+    /// Whether only the session received the requests. Otherwise the workload received them
+    /// too, and the answer was the workload's.
+    pub stolen: bool,
+
+    /// Status of the answer. Absent when the operator saw no answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+
+    pub count: u64,
+}
+
+/// Messages of one queue that the operator routed to a session.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WitnessedQueue {
+    /// The workload that consumes the queue.
+    pub service: String,
+
+    /// The kind of queue, for example `sqs` or `kafka`.
+    pub kind: String,
+
+    /// Name of the queue, topic or channel.
+    pub name: String,
+
+    pub count: u64,
+}
+
+/// Whether the operator saw the traffic of one [`VerificationCheck`].
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
     /// Name of the check.
     pub name: String,
 
-    /// Whether the answer met the check's expectations.
+    /// Whether the operator saw the traffic the check asks for.
     pub passed: bool,
 
-    /// Status of the answer to the request that carried the key. Absent when no answer came.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<u16>,
+    /// How many requests or messages matched the check.
+    #[serde(default)]
+    pub seen: u64,
 
-    /// SHA-256 of that answer's body, in hex.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_sha256: Option<String>,
-
-    /// Status of the answer to the same request without the key, which the deployed workload
-    /// serves.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deployed_status: Option<u16>,
-
-    /// SHA-256 of the deployed workload's answer body, in hex.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub deployed_body_sha256: Option<String>,
-
-    /// Why the check failed, or what was compared.
+    /// What the operator saw, in words.
     pub detail: String,
-
-    /// When the operator ran the check, in RFC 3339 format.
-    pub checked_at: String,
 }
 
 /// A session the operator served under a verification's key.
@@ -326,6 +397,7 @@ pub fn statement(
             "command": spec.command,
             "clientReport": spec.client_report,
             "sessions": status.sessions,
+            "traffic": status.traffic,
             "checks": status.checks,
         },
     })

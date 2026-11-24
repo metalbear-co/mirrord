@@ -8,8 +8,9 @@ pub(crate) enum VerifyCommand {
     /// Runs a test command and records the run on the cluster (requires operator).
     ///
     /// The record holds the commit that is checked out, and the operator adds every mirrord
-    /// session that the command starts. Exits with the command's exit code. When the operator
-    /// keeps no verification records, the command still runs and no record is made.
+    /// session that the command starts and the traffic it routes to them. Exits with the
+    /// command's exit code. When the operator keeps no verification records, the command still
+    /// runs and no record is made.
     Run(VerifyRunArgs),
 
     /// Shows the verification records of a commit, or the record with the given key.
@@ -33,10 +34,9 @@ pub(crate) struct VerifyRunArgs {
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
 
-    /// A YAML or JSON file with checks for the operator: requests it sends itself while the
-    /// command runs, marked so that the command's sessions receive them, and what the answers
-    /// must be. With checks, the command is one that stays up, such as the application under
-    /// `mirrord exec`, and it is stopped once the operator has finished.
+    /// A YAML or JSON file with checks: traffic that the operator must have routed to a session
+    /// of the command, such as an HTTP request that a session stole and answered with a given
+    /// status, or messages of a queue. The run passes only when the operator saw all of it.
     #[arg(long, value_hint = ValueHint::FilePath)]
     pub checks: Option<PathBuf>,
 
