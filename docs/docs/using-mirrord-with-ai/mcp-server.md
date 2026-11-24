@@ -26,7 +26,7 @@ The server works offline, from the docs and schema built into your mirrord binar
 
 ## Register the server
 
-Use the absolute path to the `mirrord` binary. Clients that start from a desktop launcher don't inherit your shell's `PATH`. To find the path, run:
+If the client doesn't find `mirrord` on its `PATH`, use the absolute path to the binary. Clients started from a desktop launcher often don't see your shell's `PATH`. To find the path, run:
 
 ```sh
 which mirrord
@@ -66,7 +66,7 @@ To register the server by hand, add the entry under `"mcpServers"` in the client
 {% endtab %}
 {% tab title="VS Code" %}
 
-You can [install the server with one click](vscode:mcp/install?%7B%22name%22%3A%22mirrord%22%2C%22command%22%3A%22mirrord%22%2C%22args%22%3A%5B%22mcp%22%5D%7D). VS Code shows the entry before it installs it: replace `mirrord` in `command` with the absolute path.
+You can [install the server with one click](vscode:mcp/install?%7B%22name%22%3A%22mirrord%22%2C%22command%22%3A%22mirrord%22%2C%22args%22%3A%5B%22mcp%22%5D%7D). The link registers the command `mirrord` without a path, so VS Code has to find `mirrord` on its `PATH`. If VS Code lists no `mirrord` tools, replace `mirrord` in `command` with the absolute path.
 
 To register the server by hand, add the entry under `"servers"` in `.vscode/mcp.json`:
 
