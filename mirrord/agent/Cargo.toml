@@ -68,7 +68,6 @@ hyper = { workspace = true, features = ["full"] }
 hyper-util = { workspace = true, features = ["client", "client-legacy", "http1", "tokio"] }
 httparse.workspace = true
 fancy-regex = { workspace = true }
-oci-spec.workspace = true
 tonic.workspace = true
 tower.workspace = true
 http.workspace = true
