@@ -47,6 +47,17 @@ pub(crate) async fn kube_client_from_layer_config(
         .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))
 }
 
+/// Namespace to query when not spanning all namespaces, first match wins:
+/// - `target.namespace` from the mirrord config (set by the `-n` flag)
+/// - kubeconfig default namespace
+pub(crate) fn resolve_namespace(layer_config: &LayerConfig, client: &kube::Client) -> String {
+    layer_config
+        .target
+        .namespace
+        .clone()
+        .unwrap_or_else(|| client.default_namespace().to_owned())
+}
+
 /// Get a vector of `T`s if T is defined on the cluster. If the list request returns a 404, assume
 /// `T` is not defined on this cluster and return `Ok(None)`. Any other error gets converted to a
 /// `CliError`.

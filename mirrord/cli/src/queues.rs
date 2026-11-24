@@ -17,7 +17,10 @@ use strum_macros::{Display, EnumIter};
 use crate::{
     CliResult,
     config::{QueuesArgs, QueuesCommand},
-    kube::{get_resource_if_defined, kube_client_from_layer_config, list_resource_if_defined},
+    kube::{
+        get_resource_if_defined, kube_client_from_layer_config, list_resource_if_defined,
+        resolve_namespace,
+    },
 };
 
 /// Columns of the `mirrord queues` status table. Keeping them in one enum means
@@ -165,17 +168,6 @@ async fn status_command(args: QueuesArgs) -> CliResult<()> {
     fetch_progress.success(None);
 
     print_table(progress, &splits, temp_queues)
-}
-
-/// Namespace to query when not spanning all namespaces, first match wins:
-/// - `target.namespace` from the mirrord config (set by the `-n` flag)
-/// - kubeconfig default namespace
-fn resolve_namespace(layer_config: &LayerConfig, client: &kube::Client) -> String {
-    layer_config
-        .target
-        .namespace
-        .clone()
-        .unwrap_or_else(|| client.default_namespace().to_owned())
 }
 
 /// Prints the one-row-per-session summary table used when no name is given.
