@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 370" width="1200" height="370" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Header propagation across two services</title>
+  <desc id="d">A client sends a request with the header baggage: mirrord-session=alice to frontend, which calls billing-api. Without propagation, frontend drops the header, the mirrord filter on billing-api does not match, and the deployed container handles the request. With propagation, frontend forwards the header, the filter matches, and the request reaches billing-api running on your machine with mirrord.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    </marker>
+    <marker id="arrow-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#ACACAC"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1200" height="370" fill="#ffffff"/>
+
+  <!-- Without propagation -->
+  <text x="20" y="48" font-size="15" font-weight="700" fill="#4a44b8">Without propagation</text>
+  <rect x="20" y="70" width="140" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="90" y="115" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">client</text>
+  <line x1="160" y1="110" x2="336" y2="110" stroke="#232141" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="250" y="82" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">baggage:</text>
+  <text x="250" y="98" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">mirrord-session=alice</text>
+  <rect x="340" y="70" width="160" height="80" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <text x="420" y="115" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">frontend</text>
+  <line x1="500" y1="110" x2="676" y2="110" stroke="#ACACAC" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-grey)"/>
+  <text x="590" y="98" font-size="12.5" fill="#8a8a99" text-anchor="middle">header dropped</text>
+  <rect x="680" y="70" width="180" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="770" y="94" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">billing-api</text>
+  <rect x="694" y="106" width="152" height="32" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="770" y="127" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+  <line x1="860" y1="110" x2="976" y2="110" stroke="#232141" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="920" y="98" font-size="12.5" fill="#4a44b8" text-anchor="middle">no match</text>
+  <rect x="980" y="70" width="200" height="80" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
+  <text x="1080" y="108" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Deployed container</text>
+  <text x="1080" y="128" font-size="12.5" fill="#232141" text-anchor="middle">handles the request</text>
+
+  <!-- With propagation -->
+  <text x="20" y="228" font-size="15" font-weight="700" fill="#4a44b8">With propagation</text>
+  <rect x="20" y="250" width="140" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="90" y="295" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">client</text>
+  <line x1="160" y1="290" x2="336" y2="290" stroke="#232141" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="250" y="262" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">baggage:</text>
+  <text x="250" y="278" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">mirrord-session=alice</text>
+  <rect x="340" y="250" width="160" height="80" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <text x="420" y="295" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">frontend</text>
+  <line x1="500" y1="290" x2="676" y2="290" stroke="#232141" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="590" y="262" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">baggage:</text>
+  <text x="590" y="278" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">mirrord-session=alice</text>
+  <rect x="680" y="250" width="180" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="770" y="274" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">billing-api</text>
+  <rect x="694" y="286" width="152" height="32" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="770" y="307" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+  <line x1="860" y1="290" x2="976" y2="290" stroke="#232141" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="920" y="278" font-size="12.5" fill="#4a44b8" text-anchor="middle">match</text>
+  <rect x="980" y="250" width="200" height="80" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="1080" y="288" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Your machine</text>
+  <text x="1080" y="308" font-size="12.5" fill="#ffffff" text-anchor="middle">runs billing-api with mirrord</text>
+</svg>

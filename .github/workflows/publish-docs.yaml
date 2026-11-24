@@ -1,0 +1,321 @@
+name: Publish docs and guides
+
+# GitBook's Documentation and Guides spaces sync the `docs-published` and `guides-published` branches, not `main`, so
+# a page merged to `docs/` or `guides/` reaches the site only when this workflow publishes it. The release calls it for
+# the released commit, so the site describes what users can install. A dispatch publishes a fix between releases: run
+# it with `dry_run` first to list the files that differ from the published branches.
+#
+# Each publish appends one commit whose tree is exactly `<ref>:docs` or `<ref>:guides`, on top of the branch tip. The
+# branch is never force-pushed, because GitBook also pushes to it when a change request merges, and so can another run
+# of this workflow. A push that races one of them fails as non-fast-forward, and the job then fetches the new tip and
+# builds on top of it. That build replaces the other commit's content too, but the commit stays in the branch history,
+# so a change merged in GitBook can still be found and ported to `main`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to publish. Empty selects the latest published release tag.'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Build the publish commits and list the files they change, without pushing.'
+        required: false
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to publish. Empty selects the latest published release tag.'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Build the publish commits and list the files they change, without pushing.'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      SLACK_CI_ALERTS_WEBHOOK_URL:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  # No concurrency group: GitHub cancels a pending run when another one joins its group, which could drop a release's
+  # publish without an alert. Without one, runs can overlap: each push only fast-forwards, so no run drops another's
+  # commit, and the run that pushes last decides what the site shows.
+  publish:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: write
+      # Reads GitBook's commit statuses on the published branches.
+      statuses: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GIT_AUTHOR_NAME: github-actions[bot]
+      GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: github-actions[bot]
+      GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    # Each step has its own timeout, because a stalled API call or git transfer would otherwise hold the runner for the
+    # job's default 6 hours. The timeouts are on the steps, because a step timeout fails the step, so the notify step
+    # still runs, while a job timeout would cancel the job and skip the notify step.
+    steps:
+      - name: Resolve the ref to publish
+        id: resolve
+        timeout-minutes: 5
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "ref=${INPUT_REF:-$latest_tag}" >> "$GITHUB_OUTPUT"
+
+      # Most of the repository's size is the images under docs/ and guides/, and the job mostly reads trees, so the
+      # checkout fetches no blobs up front (`filter`). Git fetches a blob when a command needs it, such as the Publish
+      # step's `git diff` of `.github/workflows`. Writing the full working tree would fetch every blob, so the checkout
+      # is sparse. The `sparse-checkout` input needs at least one path to turn sparse checkout on, so it names
+      # .github/workflows, a small directory that no step reads, and cone mode adds the root files. actions/checkout
+      # v6.0.2 already fetches with blob:none when `sparse-checkout` is set; `filter` states it so that the job doesn't
+      # depend on that default. The checkout still fetches `ref` and sets up the credentials that the push uses.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        timeout-minutes: 10
+        with:
+          ref: ${{ steps.resolve.outputs.ref }}
+          filter: blob:none
+          sparse-checkout: .github/workflows
+
+      - name: Publish
+        id: publish
+        timeout-minutes: 10
+        env:
+          REF: ${{ steps.resolve.outputs.ref }}
+          LATEST_TAG: ${{ steps.resolve.outputs.latest_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          label=$REF
+          [ "$REF" = "$sha" ] || label="$REF ($sha)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+          # Publishing a commit older than the latest release would roll the site back to older pages. A release tag
+          # points at the head of its `releases/*` branch. The release pull request is squash-merged into a new
+          # commit, so `main` doesn't contain the tagged commit. release.yaml's precheck requires that commit to be at
+          # most one commit ahead of `main`, so its parent is on `main`. The guard checks for that parent, which
+          # `main`, the tag and a branch made from the tag all contain, and which an older tag doesn't.
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$LATEST_TAG~1...$sha" --jq .status)
+          if [ "$status" != identical ] && [ "$status" != ahead ]; then
+            echo "::error::$label doesn't contain $LATEST_TAG~1, the main commit that the release branch of $LATEST_TAG starts from (compare status: $status), so it is older than the latest release. Publish main or a branch made from $LATEST_TAG."
+            exit 1
+          fi
+
+          # Fetches the published branches and builds a commit for each one whose tree differs from `$sha`'s `docs/` or
+          # `guides/`. Sets `refspecs` (the commits to push), `new_tips` and `unchanged_tips` (`<branch>=<commit>`, the
+          # commit that each branch ends at once the push lands) and `summary`.
+          build() {
+            git fetch --no-tags --depth=1 origin \
+              +refs/heads/docs-published:refs/remotes/origin/docs-published \
+              +refs/heads/guides-published:refs/remotes/origin/guides-published
+            refspecs=() new_tips=() unchanged_tips=() summary=""
+            for dir in docs guides; do
+              branch=$dir-published
+              tip=$(git rev-parse "refs/remotes/origin/$branch")
+              if ! tree=$(git rev-parse --verify --quiet "$sha:$dir"); then
+                echo "::error::$label has no $dir/ directory, because it predates the move of docs/ and guides/ into this repository. Publish main or a later release."
+                exit 1
+              fi
+              if [ "$tree" = "$(git rev-parse "$tip^{tree}")" ]; then
+                summary+="$branch already matches $dir/, nothing to publish"$'\n\n'
+                unchanged_tips+=("$branch=$tip")
+                continue
+              fi
+
+              message="Publish $dir from mirrord $label"
+              # GitHub rejects a push from GITHUB_TOKEN that creates, changes or deletes a file under
+              # .github/workflows/, so such a publish has to be pushed by someone whose token has the workflow scope.
+              # The printed command fetches into an explicit remote-tracking ref, because a shallow or single-branch
+              # clone wouldn't update origin/$branch otherwise. It stops at the first failure, because pushing the empty
+              # source that a failed commit-tree leaves would delete the branch. It braces `${commit}`, the one
+              # variable that the shell running the command expands, because zsh, macOS's default shell, reads
+              # `$commit:r…` as the `:r` modifier; this step fills in the others before printing. The message names the
+              # ref, and a ref name can hold a `'`, so each one is printed as `'\''`, which ends the single-quoted
+              # string, adds the quote and starts the string again.
+              if ! git diff --quiet "$tip" "$tree" -- .github/workflows; then
+                quoted_message=${message//\'/\'\\\'\'}
+                echo "::error::$dir/.github/workflows at $sha differs from $branch, and GITHUB_TOKEN can't push workflow files. Push this publish by hand with a token that has the workflow scope, using the command at the end of this message in bash or zsh, then run this workflow again to publish the other directory. The command ends by printing the parent of the commit that it pushed: if that commit turns out wrong, force-push the parent to $branch to restore it. The command: git fetch origin $sha +refs/heads/$branch:refs/remotes/origin/$branch && commit=\$(git commit-tree $sha:$dir -p origin/$branch -m '$quoted_message') && git push origin \"\${commit}:refs/heads/$branch\" && echo \"Pushed \${commit} on top of \$(git rev-parse \"\${commit}^\")\""
+                exit 1
+              fi
+
+              commit=$(git commit-tree "$tree" -p "$tip" -m "$message")
+              # Listing names and statuses compares object IDs only, so it fetches none of the blobs, unlike --stat.
+              summary+="### Files that change on $branch"$'\n\n```\n'"$(git diff --name-status --no-renames "$tip" "$commit")"$'\n```\n\n'
+              refspecs+=("$commit:refs/heads/$branch")
+              new_tips+=("$branch=$commit")
+            done
+          }
+
+          # A push loses a race when GitBook or another run pushed after the fetch. Each attempt starts from the new
+          # tips, so the content stays exactly `$sha`'s. A push rejected for another reason fails the same way on every
+          # attempt, and git prints the reason each time.
+          attempts=3
+          for attempt in $(seq "$attempts"); do
+            build
+            if [ "$DRY_RUN" = true ] || [ "${#refspecs[@]}" -eq 0 ]; then
+              break
+            fi
+            branches="${refspecs[*]##*/}"
+            branches=${branches// /, }
+            # Without a leading `+`, each refspec only fast-forwards the branch; --atomic publishes both or neither.
+            if git push --atomic origin "${refspecs[@]}"; then
+              break
+            fi
+            if [ "$attempt" -eq "$attempts" ]; then
+              echo "::error::git rejected the push to $branches on all $attempts attempts, for the reason it gives above each rejection. If GitBook or another run kept pushing to the branches, run this workflow again."
+              exit 1
+            fi
+            echo "::warning::git rejected the push to $branches for the reason above, so the job fetches the published branches again and retries."
+          done
+
+          {
+            echo "## Publish of $label$([ "$DRY_RUN" = true ] && echo ', dry run')"
+            echo
+            if [ "$DRY_RUN" = true ] && [ "${#refspecs[@]}" -gt 0 ]; then
+              echo "Run the real publish with \`ref\` set to \`$sha\`, so it publishes the commit that this dry run checked."
+              echo
+            fi
+            echo -n "$summary"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "new_tips=${new_tips[*]}" >> "$GITHUB_OUTPUT"
+          echo "unchanged_tips=${unchanged_tips[*]}" >> "$GITHUB_OUTPUT"
+
+      # GitBook reports each import as commit statuses whose context starts with `GitBook`. A failed import leaves the
+      # site at the previous publish, and nobody would notice without this check. The step waits for the commits that
+      # this run pushed. For an unchanged tip, which this run didn't push, it reads the status once and doesn't wait. A
+      # failure there fails the step, so a re-run after a failed import still fails. A missing or pending status only
+      # warns, because GitBook sometimes posts no status for a commit at all, and the tip stays the same until the
+      # directory changes again, so failing on it could fail every run until then. When the import of an unchanged tip
+      # failed, the step fails only after it has checked the commits that this run pushed, so their result is in the
+      # log too.
+      - name: Wait for GitBook to import the published branches
+        if: ${{ inputs.dry_run != true }}
+        # Ten minutes, above TIMEOUT_SECONDS plus one poll, so that the wait's own deadline ends the step with its
+        # error, which names the commit and the branch, and this timeout only stops a stalled API call.
+        timeout-minutes: 10
+        env:
+          NEW_TIPS: ${{ steps.publish.outputs.new_tips }}
+          UNCHANGED_TIPS: ${{ steps.publish.outputs.unchanged_tips }}
+          # Imports took under a minute when GitBook was switched to these branches. Both spaces import in parallel,
+          # so one budget covers both commits.
+          TIMEOUT_SECONDS: 300
+          POLL_SECONDS: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -ra pending <<< "$NEW_TIPS"
+          read -ra unchanged <<< "$UNCHANGED_TIPS"
+
+          # Sets `statuses` to the GitBook statuses of a commit, and `state` to their distinct states, such as `success`
+          # or `pending,success`, or to nothing when GitBook posted none. A failed API call sets `state` to `unknown`,
+          # which the wait loop treats like a pending import, so a transient GitHub error doesn't fail a publish whose
+          # push already landed. An error that lasts still fails the wait at its deadline. gh prints its own error.
+          read_statuses() {
+            if statuses=$(gh api "repos/$GITHUB_REPOSITORY/commits/$1/status" \
+              --jq '[.statuses[] | select(.context | startswith("GitBook"))]'); then
+              state=$(jq -r '[.[].state] | unique | join(",")' <<< "$statuses")
+            else
+              statuses='[]' state=unknown
+            fi
+          }
+          import_failed() {
+            jq -r '.[] | "\(.context): \(.state): \(.description) \(.target_url // "")"' <<< "$statuses"
+            echo "::error::GitBook failed to import $2 on $1. Check the Git Sync of the GitBook space that syncs $1; a re-run checks the status again."
+          }
+
+          unchanged_failed=false
+          for entry in "${unchanged[@]}"; do
+            branch=${entry%%=*} commit=${entry#*=}
+            read_statuses "$commit"
+            case "$state" in
+              success) echo "$branch: GitBook imported $commit" ;;
+              *failure* | *error*) import_failed "$branch" "$commit"; unchanged_failed=true ;;
+              # Not GitBook's doing, so this gets no Git Sync advice.
+              unknown) echo "::warning::GitHub didn't return the statuses of $commit on $branch, so this run didn't check GitBook's import of it." ;;
+              *) echo "::warning::GitBook hasn't reported a successful import of $commit on $branch (statuses: ${state:-none}). This run didn't push that commit, so it doesn't wait for it. If the site doesn't match ${branch%-published}/, check the Git Sync of the GitBook space that syncs $branch." ;;
+            esac
+          done
+
+          declare -A states
+          deadline=$((SECONDS + TIMEOUT_SECONDS))
+          while [ "${#pending[@]}" -gt 0 ]; do
+            waiting=()
+            for entry in "${pending[@]}"; do
+              branch=${entry%%=*} commit=${entry#*=}
+              read_statuses "$commit"
+              # Keep the state that GitHub last returned, so a failed last poll doesn't hide it from the timeout error.
+              # `unknown` is stored only while no state is stored yet, even an empty one, so that error can tell that
+              # GitHub never answered.
+              if [ "$state" != unknown ] || [ -z "${states[$entry]+set}" ]; then
+                states[$entry]=$state
+              fi
+              case "$state" in
+                success) echo "$branch: GitBook imported $commit" ;;
+                *failure* | *error*) import_failed "$branch" "$commit"; exit 1 ;;
+                unknown)
+                  echo "::warning::GitHub didn't return the statuses of $commit on $branch, so the step treats the import as still pending."
+                  waiting+=("$entry")
+                  ;;
+                *) waiting+=("$entry") ;;
+              esac
+            done
+            [ "${#waiting[@]}" -eq 0 ] && break
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              for entry in "${waiting[@]}"; do
+                branch=${entry%%=*} commit=${entry#*=}
+                if [ "${states[$entry]}" = unknown ]; then
+                  echo "::error::GitHub didn't return the statuses of $commit on $branch within ${TIMEOUT_SECONDS}s, so the step can't tell whether GitBook imported it. Check the commit's statuses on GitHub once GitHub's API answers again."
+                  continue
+                fi
+                echo "::error::GitBook reported no successful import of $commit on $branch within ${TIMEOUT_SECONDS}s (statuses: ${states[$entry]:-none}). Check the Git Sync of the GitBook space that syncs $branch. A re-run only warns about $commit until GitBook reports a result for it, so a passing re-run doesn't mean that the import worked. The next publish that changes ${branch%-published}/ gives GitBook a new commit to import."
+              done
+              exit 1
+            fi
+            pending=("${waiting[@]}")
+            sleep "$POLL_SECONDS"
+          done
+          if [ "$unchanged_failed" = true ]; then
+            exit 1
+          fi
+
+      - name: 'Notify #ci-alerts'
+        if: ${{ failure() && inputs.dry_run != true }}
+        timeout-minutes: 2
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+          REF: ${{ steps.resolve.outputs.ref || inputs.ref }}
+          SHA: ${{ steps.publish.outputs.sha }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          text=$(printf '%s\n' \
+            ":rotating_light: *Docs and guides publish failed for \`$GITHUB_REPOSITORY\`*" \
+            "• *Ref:* \`${REF:-latest release}\`" \
+            "• *Commit:* \`${SHA:-unresolved}\`" \
+            "• *Run:* <$run_url|Open GitHub Actions>")
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"

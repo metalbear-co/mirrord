@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Which process serves each request</title>
+  <desc id="d">Two requests go to the load balancer, one with the header baggage: mirrord-session=$USER and one without it. The load balancer sends both to the ECS task, where the mirrord agent, started by the remote bootstrap, checks the baggage header. A request with the header goes through MetalBear Cloud to the orders app on your machine, which answers with version v2. A request without the header goes to the orders app in the task, which answers with version v1.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#756DF3"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1200" height="420" fill="#ffffff"/>
+
+  <!-- The two requests -->
+  <rect x="20" y="60" width="310" height="90" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="175" y="98" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Request with your header</text>
+  <text x="175" y="122" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">baggage: mirrord-session=$USER</text>
+  <rect x="20" y="270" width="310" height="90" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="175" y="321" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Request without the header</text>
+
+  <!-- Load balancer -->
+  <rect x="390" y="165" width="130" height="90" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <text x="455" y="206" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Load</text>
+  <text x="455" y="228" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">balancer</text>
+
+  <!-- ECS task -->
+  <rect x="570" y="50" width="290" height="330" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
+  <text x="715" y="80" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">ECS task</text>
+  <rect x="590" y="105" width="250" height="90" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="715" y="136" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+  <text x="715" y="158" font-size="12.5" fill="#ffffff" text-anchor="middle">started by the remote bootstrap</text>
+  <text x="715" y="178" font-size="12.5" fill="#ffffff" text-anchor="middle">checks the baggage header</text>
+  <rect x="590" y="275" width="250" height="85" rx="8" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="715" y="311" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">orders app</text>
+  <text x="715" y="335" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">"version": "v1"</text>
+  <text x="727" y="240" font-size="12.5" fill="#333344">no header</text>
+
+  <!-- Your machine -->
+  <rect x="990" y="50" width="190" height="190" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="1006" y="78" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
+  <rect x="1005" y="105" width="160" height="115" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="1085" y="153" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">orders app</text>
+  <text x="1085" y="177" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">"version": "v2"</text>
+
+  <!-- Labels on the mirrord route -->
+  <text x="925" y="130" font-size="12.5" fill="#4a44b8" text-anchor="middle">header matches</text>
+  <text x="925" y="172" font-size="12.5" fill="#4a44b8" text-anchor="middle">through</text>
+  <text x="925" y="188" font-size="12.5" fill="#4a44b8" text-anchor="middle">MetalBear Cloud</text>
+
+  <!-- Arrows, drawn last so that no box covers them -->
+  <polyline points="330,105 360,105 360,195 386,195" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <polyline points="330,315 360,315 360,225 386,225" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <polyline points="520,210 545,210 545,150 586,150" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="715" y1="195" x2="715" y2="271" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="840" y1="150" x2="1001" y2="150" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+</svg>
