@@ -229,7 +229,7 @@ protox = "0.9"
 quote = "1"
 rand = "0.10"
 ratatui = "0.30.2"
-rcgen = { version = "0.14", features = ["x509-parser"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
 rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e84de5dcb5d3cbe2b7036b21f016581445e445c", features = [
     "cmake-build",
     "ssl-vendored",
