@@ -51,7 +51,9 @@ codex mcp add mirrord -- /absolute/path/to/mirrord mcp
 {% endtab %}
 {% tab title="Cursor, Windsurf, Claude Desktop" %}
 
-Add the entry under `"mcpServers"` in the client's config file:
+In Cursor, you can [add the server with one click](cursor://anysphere.cursor-deeplink/mcp/install?name=mirrord&config=eyJjb21tYW5kIjoibWlycm9yZCIsImFyZ3MiOlsibWNwIl19). The link registers the command `mirrord` without a path, so Cursor has to find `mirrord` on its `PATH`. If Cursor lists no `mirrord` tools, replace `mirrord` in the entry's `command` with the absolute path.
+
+To register the server by hand, add the entry under `"mcpServers"` in the client's config file:
 
 - Cursor: `~/.cursor/mcp.json`, or `.cursor/mcp.json` in the project.
 - Windsurf: `~/.codeium/windsurf/mcp_config.json`.
@@ -64,7 +66,9 @@ Add the entry under `"mcpServers"` in the client's config file:
 {% endtab %}
 {% tab title="VS Code" %}
 
-Add the entry under `"servers"` in `.vscode/mcp.json`:
+You can [install the server with one click](vscode:mcp/install?%7B%22name%22%3A%22mirrord%22%2C%22command%22%3A%22mirrord%22%2C%22args%22%3A%5B%22mcp%22%5D%7D). VS Code shows the entry before it installs it: replace `mirrord` in `command` with the absolute path.
+
+To register the server by hand, add the entry under `"servers"` in `.vscode/mcp.json`:
 
 ```json
 "mirrord": { "type": "stdio", "command": "/absolute/path/to/mirrord", "args": ["mcp"] }
