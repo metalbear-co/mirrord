@@ -14,13 +14,13 @@ description: "Use mirrord subscribe to stream the events of a mirrord session as
 going green.
 
 {% hint style="info" %}
-For centrally collected records that do not require a running subscriber, see [message processing functional logs](../managing-mirrord/monitoring.md#message-processing). Functional logs use the Operator's normal logging pipeline, while `mirrord subscribe` provides a live event stream filtered by session key.
+For centrally collected records that do not require a running subscriber, see [message processing functional logs](../managing-mirrord/monitoring.md#message-processing). Functional logs use the Operator's normal logging pipeline, while `mirrord subscribe` provides a live event stream filtered by session key, namespace and your access to each target (see [Who sees which events](#who-sees-which-events)).
 {% endhint %}
 
 **When do you receive events?**
 
-* HTTP - you receive an event for each request/response that was routed to or from a target workload by mirrord and matches your subscribed key.
-* Queue - while queue splitting is active, you receive an event for each message that matches your subscribed key. If no splitting session is active, no events are received.
+* HTTP - you receive an event for each request/response that was routed to or from a target workload by mirrord and matches your subscribed key, namespace and access.
+* Queue - while queue splitting is active, you receive an event for each message that matches your subscribed key, namespace and access. If no splitting session is active, no events are received.
 
 Queue events support Amazon SQS, Azure Service Bus, GCP Pub/Sub, RabbitMQ, BullMQ, Kafka, NATS, NATS Pub/Sub, and Redis Pub/Sub.
 
@@ -57,7 +57,7 @@ mirrord subscribe --key my-key
 
 The key can also come from the `key` field in your mirrord config (e.g. `mirrord subscribe -f mirrord.json`)
 
-To watch every session on the cluster at once, leave the key out (CLI `3.272.0` and operator `3.210.0` or newer; an older CLI insists on a key). Each event then carries a `session_key` field naming the session it belongs to:
+To watch every session in one namespace at once (see [Namespaces](#namespaces)), leave the key out (CLI `3.272.0` and operator `3.210.0` or newer; an older CLI insists on a key). Each event then carries a `session_key` field naming the session it belongs to:
 
 ```sh
 mirrord subscribe
@@ -70,6 +70,27 @@ mirrord subscribe --key my-key | jq 'select(.data.http_request)'
 ```
 
 You may also pass `--pretty` to pretty-print each event.
+
+## Namespaces
+
+With CLI `3.292.0` or newer, `mirrord subscribe` streams the events of one namespace, with or without a key. Unless you pass a flag, it's the namespace that `mirrord exec` targets by default: `target.namespace` from your mirrord config, then the namespace of your kubeconfig context, which is `default` when the context names none. The status line on stderr names it:
+
+```text
+Subscribed to events for every session in namespace `my-ns` (use -A for every namespace).
+```
+
+* `-n/--namespace <NAMESPACE>` streams the events of that namespace.
+* `-A/--all-namespaces` streams the events of every namespace, as an older CLI does.
+
+A keyed subscription only receives its session's events if the session's target is in the namespace, so for a session in another namespace, pass that namespace with `-n`, or pass `-A`. An operator older than `3.237.0` ignores the namespace and streams the events of every namespace, even though the status line names one.
+
+## Who sees which events
+
+With operator `3.237.0` or newer, you only receive the events of targets that you could run `mirrord exec` against. The operator checks that your Kubernetes user may `get` each event's target workload, the same check that it makes when a session starts. For a `targetless` session it checks `get` on the namespace, and for a label target it checks `list` on the namespace's pods. Subscribing also needs `watch` on `events.operator.metalbear.co`.
+
+A user who may `create` `mirrordclustersessions` in the whole cluster, such as a cluster administrator, receives the events of every target.
+
+The operator checks each target once per subscription, on its first event, so a permission granted or revoked while you're subscribed applies from your next subscription. If a check fails, for example because the Kubernetes API is unavailable or an authorization webhook fails, the operator waits briefly (1 second at first, growing to 30 seconds) before it makes another check. In the meantime it drops the events of every target that it has no answer for yet. A [`lagged`](#lagged) event's `count` includes dropped events of targets that you can't see.
 
 ## Options
 
@@ -96,14 +117,26 @@ This covers queue messages only. An HTTP request that matches no filter never re
 
 ## Events
 
-Every event has the same envelope — `service_name` (the intercepted workload), `timestamp`, and a `data` payload. On a [multi-cluster](multi-cluster.md) Primary the envelope also has `cluster`, see [Multi-cluster](#multi-cluster) below:
+Every event has the same envelope — `service_name` (the intercepted workload), `timestamp`, and a `data` payload. On a [multi-cluster](multi-cluster.md) Primary the envelope also has `cluster`, see [Multi-cluster](#multi-cluster) below.
+
+With operator `3.237.0` or newer, the envelope also names the intercepted workload in full:
+
+* `namespace` is the namespace of the target.
+* `target` is the target as mirrord names it: `kind` is the target type that `--target` takes (`deployment`, `rollout`, `pod`, `statefulset`, `job`, `cronjob`, `service`, `replicaset`, `label` or `targetless`), and `name` is the workload's name, the label selector for a label target, or empty for `targetless`. For example, `"target": {"kind": "deployment", "name": "my-app"}` is the `deployment/my-app` that you would pass to `mirrord exec --target`.
+
+Events that aren't about a workload, such as `lagged`, have neither field.
 
 {% hint style="info" %}
-The Operator's header and property redaction, and `operator.hideHeadersAndProperties`, apply only to the [Operator's logs](../managing-mirrord/monitoring.md). The `subscribe` stream carries header and property values as they are, so restrict who can subscribe accordingly.
+The Operator's header and property redaction, and `operator.hideHeadersAndProperties`, apply only to the [Operator's logs](../managing-mirrord/monitoring.md). The `subscribe` stream carries header and property values as they are. The operator only streams the events of targets that the subscriber may `get` (see [Who sees which events](#who-sees-which-events)), so anyone you allow to `get` a workload can also read the headers and properties of its intercepted traffic.
 {% endhint %}
 
 ```json
 {
+  "namespace": "my-ns",
+  "target": {
+    "kind": "deployment",
+    "name": "my-app"
+  },
   "service_name": "my-app",
   "timestamp": "2026-06-17T12:00:00Z",
   "data": {
@@ -311,6 +344,11 @@ Every event names the cluster that intercepted it in `cluster`, using the cluste
 ```json
 {
   "cluster": "eu-west-1",
+  "namespace": "my-ns",
+  "target": {
+    "kind": "deployment",
+    "name": "my-app"
+  },
   "service_name": "my-app",
   "timestamp": "2026-06-17T12:00:00Z",
   "data": {
@@ -344,6 +382,10 @@ If the Primary cannot reach a Workload cluster's operator, the stream keeps goin
 
 This needs operator `3.219.0` or newer on the Primary. Each Workload cluster's operator must let the Primary watch `events`: the chart grants this through the `mirrord-operator-envoy-remote` role as of the same version, so a Workload cluster on an older chart shows up as `cluster_unavailable` with a message naming the missing permission until its chart is upgraded. Subscribing directly to a Workload cluster still works and streams that cluster alone, without a `cluster` field.
 
+The Primary makes the [access check](#who-sees-which-events) for the events of every cluster, against its own RBAC. A Workload cluster's operator older than `3.237.0` doesn't name the `namespace` and `target` of its events, so a Primary on `3.237.0` or newer can't check them and leaves them out of the stream. Upgrade the Workload clusters' operators along with the Primary to keep seeing their events.
+
+A copy-target session on a Primary names its copy pod as the target of its HTTP events when it steals from the copy pod, which it does for a `Job` or `CronJob` target, with `scale_down`, or with a queue split. So seeing those events needs `get` on the copy pod, for example `get` on pods in the namespace. On a single cluster, the same events name the original target, so `get` on that target is enough. The session's queue events name the original target in both cases.
+
 ## Direct Kube API access (no mirrord CLI required)
 
 `mirrord subscribe` is a thin wrapper over an operator endpoint that emits [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (`text/event-stream`). You can access it directly through the Kubernetes API, without requiring the mirrord CLI:
@@ -356,6 +398,8 @@ kubectl get --raw \
 The `subscribe` arguments `--session-key-field` and `--unmatched` correspond to the query parameters `include_session_key=true` and `include_unmatched=true`.
 
 Omit `session_key` to receive every session's events on one stream. Such a stream always names the session each event belongs to, regardless of the value of `include_session_key`. This is what `mirrord subscribe` without `--key` and the [local UI](local-ui.md) do.
+
+Add `namespace=<namespace>` to receive only the events of targets in that namespace, and omit it for every namespace. `mirrord subscribe` sends it unless you pass `-A`, and the local UI sends the namespace picked in its Events tab. An operator older than `3.237.0` ignores it.
 
 On a multi-cluster Primary, `local_only=true` limits the stream to events the Primary intercepted itself, leaving out the Workload clusters. The Primary sets it on the streams it relays, so you normally never need it.
 
