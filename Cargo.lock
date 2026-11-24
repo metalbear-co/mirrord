@@ -5041,6 +5041,7 @@ dependencies = [
  "uuid",
  "which",
  "whoami",
+ "winapi",
  "xmas-elf",
  "yamlpatch",
  "yamlpath",
