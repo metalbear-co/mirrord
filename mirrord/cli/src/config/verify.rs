@@ -33,6 +33,13 @@ pub(crate) struct VerifyRunArgs {
     #[arg(short = 'f', long, value_hint = ValueHint::FilePath)]
     pub config_file: Option<PathBuf>,
 
+    /// A YAML or JSON file with checks for the operator: requests it sends itself while the
+    /// command runs, marked so that the command's sessions receive them, and what the answers
+    /// must be. With checks, the command is one that stays up, such as the application under
+    /// `mirrord exec`, and it is stopped once the operator has finished.
+    #[arg(long, value_hint = ValueHint::FilePath)]
+    pub checks: Option<PathBuf>,
+
     /// The test command and its arguments, after `--`.
     #[arg(last = true, required = true, num_args = 1..)]
     pub command: Vec<String>,

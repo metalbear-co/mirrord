@@ -24,6 +24,21 @@ pub(crate) enum VerifyError {
         error: std::io::Error,
     },
 
+    #[error("Failed to wait for the command: {0}")]
+    Wait(std::io::Error),
+
+    #[error("Failed to read the checks in `{}`: {reason}", path.display())]
+    #[diagnostic(help(
+        "The file is a YAML or JSON list. Each check has `name`, `namespace`, `service`, `port` and `path`, and optionally `method`, `expectStatus` and `expectBodyContains`."
+    ))]
+    ChecksFile {
+        path: std::path::PathBuf,
+        reason: String,
+    },
+
+    #[error("{0}")]
+    Signature(&'static str),
+
     #[error("`{0}` is not a full commit hash")]
     #[diagnostic(help(
         "`mirrord verify check` takes the full 40-character hash, so that a short one can't match another commit."

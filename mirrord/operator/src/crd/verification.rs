@@ -5,11 +5,12 @@
 //! observes under that key into the record's status, and decides the record's
 //! [`VerificationPhase`] once the CLI has reported how the command ended.
 
-use std::fmt;
+use std::{fmt, ops::Not};
 
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use super::session::SessionOwner;
 
@@ -18,6 +19,12 @@ pub const VERIFICATION_KEY_PREFIX: &str = "verify-";
 
 /// Label holding the full commit hash a record is about.
 pub const VERIFICATION_COMMIT_LABEL: &str = "verification.mirrord.metalbear.co/commit";
+
+/// `payloadType` of the envelope that carries a record's signed statement.
+pub const ATTESTATION_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
+
+/// `predicateType` of a record's signed statement.
+pub const ATTESTATION_PREDICATE_TYPE: &str = "https://mirrord.dev/attestation/verification/v0.1";
 
 /// Number of leading commit hash characters in a verification key.
 const KEY_COMMIT_LEN: usize = 12;
@@ -69,6 +76,50 @@ pub struct MirrordVerificationSpec {
     /// How the command ended. The CLI adds it when the command exits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_report: Option<VerificationClientReport>,
+
+    /// Requests the operator sends itself while the command's sessions run, and what it must
+    /// get back. With checks, the operator's own results decide the verdict.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<VerificationCheck>,
+}
+
+/// A request the operator sends to a Service, marked with the verification's key so that a
+/// session filtering on the key receives it, and what the answer must be.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationCheck {
+    /// Name shown in the record.
+    pub name: String,
+
+    /// Namespace of the Service.
+    pub namespace: String,
+
+    /// Name of the Service.
+    pub service: String,
+
+    /// Port of the Service.
+    pub port: u16,
+
+    /// HTTP method. `GET` when left out.
+    #[serde(default = "VerificationCheck::default_method")]
+    pub method: String,
+
+    /// Path and query of the request, starting with `/`.
+    pub path: String,
+
+    /// Status the answer must have.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_status: Option<u16>,
+
+    /// Text the answer's body must contain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expect_body_contains: Option<String>,
+}
+
+impl VerificationCheck {
+    fn default_method() -> String {
+        "GET".to_owned()
+    }
 }
 
 /// How the test command ended, as reported by the CLI that ran it.
@@ -93,6 +144,49 @@ pub struct MirrordVerificationStatus {
     /// The operator's verdict.
     #[serde(default)]
     pub phase: VerificationPhase,
+
+    /// What the operator got back for each check in the spec, in the same order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<CheckResult>,
+
+    /// The record as a signed statement: a DSSE envelope, as JSON, signed by the operator once
+    /// the verdict is final.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation: Option<String>,
+}
+
+/// What the operator got back for one [`VerificationCheck`].
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckResult {
+    /// Name of the check.
+    pub name: String,
+
+    /// Whether the answer met the check's expectations.
+    pub passed: bool,
+
+    /// Status of the answer to the request that carried the key. Absent when no answer came.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+
+    /// SHA-256 of that answer's body, in hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_sha256: Option<String>,
+
+    /// Status of the answer to the same request without the key, which the deployed workload
+    /// serves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_status: Option<u16>,
+
+    /// SHA-256 of the deployed workload's answer body, in hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_body_sha256: Option<String>,
+
+    /// Why the check failed, or what was compared.
+    pub detail: String,
+
+    /// When the operator ran the check, in RFC 3339 format.
+    pub checked_at: String,
 }
 
 /// A session the operator served under a verification's key.
@@ -154,15 +248,85 @@ impl fmt::Display for VerificationPhase {
     }
 }
 
-/// The verdict for a record with this spec and these observed sessions.
+/// The verdict for a record with this spec, these observed sessions and these check results.
+///
+/// A record passes only when the command exited with 0 on a clean checkout, the operator observed
+/// a session, and every check in the spec has a passing result.
 pub fn decide_phase(
     spec: &MirrordVerificationSpec,
     sessions: &[VerifiedSession],
+    checks: &[CheckResult],
 ) -> VerificationPhase {
-    match &spec.client_report {
-        None => VerificationPhase::Running,
-        Some(report) if report.exit_code != 0 => VerificationPhase::Failed,
-        Some(_) if spec.dirty || sessions.is_empty() => VerificationPhase::Unwitnessed,
-        Some(_) => VerificationPhase::Passed,
+    let Some(report) = &spec.client_report else {
+        return VerificationPhase::Running;
+    };
+
+    if report.exit_code != 0 || checks.iter().any(|check| check.passed.not()) {
+        VerificationPhase::Failed
+    } else if spec.dirty || sessions.is_empty() || checks.len() < spec.checks.len() {
+        VerificationPhase::Unwitnessed
+    } else {
+        VerificationPhase::Passed
     }
+}
+
+/// A DSSE envelope: a payload and signatures over its pre-authentication encoding ([`pae`]).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DsseEnvelope {
+    pub payload_type: String,
+
+    /// The payload, in standard base64.
+    pub payload: String,
+
+    pub signatures: Vec<DsseSignature>,
+}
+
+/// One signature of a [`DsseEnvelope`].
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct DsseSignature {
+    /// SHA-256 of the signer's public key, in hex.
+    pub keyid: String,
+
+    /// The signature, in standard base64.
+    pub sig: String,
+}
+
+/// The bytes a DSSE signature covers, for a payload of the given type.
+pub fn pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
+    let mut encoded = format!(
+        "DSSEv1 {} {payload_type} {} ",
+        payload_type.len(),
+        payload.len()
+    )
+    .into_bytes();
+    encoded.extend_from_slice(payload);
+    encoded
+}
+
+/// The in-toto statement the operator signs for a record: the commit as the subject, and the
+/// record's spec and status as the predicate.
+pub fn statement(
+    name: &str,
+    spec: &MirrordVerificationSpec,
+    status: &MirrordVerificationStatus,
+) -> Value {
+    json!({
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [{
+            "name": spec.repository,
+            "digest": { "gitCommit": spec.commit },
+        }],
+        "predicateType": ATTESTATION_PREDICATE_TYPE,
+        "predicate": {
+            "record": name,
+            "phase": status.phase,
+            "tree": spec.tree,
+            "dirty": spec.dirty,
+            "command": spec.command,
+            "clientReport": spec.client_report,
+            "sessions": status.sessions,
+            "checks": status.checks,
+        },
+    })
 }
