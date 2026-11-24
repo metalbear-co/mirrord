@@ -90,7 +90,7 @@ mirrord exec --target pod/backend-abc123 -- python main.py
 
 If `mirrord ls` returns no targets, check that the kubeconfig context points at the right cluster (`kubectl config current-context`) and list pods in the expected namespace (`kubectl get pods -n <namespace>`).
 
-To keep the session's settings in a file, write a `mirrord-up.yaml` with the **mirrord-up** skill and run it with `mirrord up`, even for one service. A `mirrord.json` is for the IDE extensions below, which don't run `mirrord up`.
+To keep the session's settings in a file, write a `mirrord-up.yaml` with the **mirrord-up** skill and run it with `mirrord up`, even for one service. If the user wants to keep running `mirrord exec`, write a `mirrord.json` with the **mirrord-config** skill instead and pass it with `mirrord exec -f`. The IDE extensions below don't run `mirrord up`, so they take a `mirrord.json` too.
 
 ### IDE approach
 
