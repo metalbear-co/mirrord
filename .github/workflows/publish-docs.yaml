@@ -2,8 +2,9 @@ name: Publish docs and guides
 
 # GitBook's Documentation and Guides spaces sync the `docs-published` and `guides-published` branches, not `main`, so
 # a page merged to `docs/` or `guides/` reaches the site only when this workflow publishes it. The release calls it for
-# the released commit, so the site describes what users can install. A dispatch publishes a fix between releases: run
-# it with `dry_run` first to list the files that differ from the published branches.
+# the released commit, so the site describes what users can install. publish-docs-on-merge.yaml calls it for `main`
+# when a pull request with the `publish-docs` label merges. A dispatch publishes a fix between releases: run it with
+# `dry_run` first to list the files that differ from the published branches.
 #
 # Each publish appends one commit whose tree is exactly `<ref>:docs` or `<ref>:guides`, on top of the branch tip. The
 # branch is never force-pushed, because GitBook also pushes to it when a change request merges, and so can another run

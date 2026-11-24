@@ -1,0 +1,37 @@
+name: Publish docs and guides on labeled merge
+
+# The `publish-docs` label publishes the docs and guides without needing a release. When a pull request with the label
+# merges into `main`, this workflow runs publish-docs.yaml for `main`. That publishes the whole `docs/` and `guides/`
+# trees, so it also ships anything merged earlier that hasn't been released yet.
+#
+# The trigger is `pull_request`, because GitHub blocks `pull_request_target` by default in public repositories from
+# December 2, 2026, and a `push` to `main` would have to look up the pull request of each commit to read its labels. A
+# `pull_request` run from a fork gets a read-only token and no secrets, so it can neither push the publish commits nor
+# post to #ci-alerts. The job skips a fork's pull request, because its run could only fail with nobody told, and a
+# maintainer publishes it with the manual steps in docs/AGENTS.md. Only a pull request from a branch of this repository
+# can publish, and creating such a branch takes write access.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  # Publishes `main` rather than the merge commit, so that the last of several close merges publishes all of them. A
+  # release that publishes afterwards puts the site back on the released commit, as docs/AGENTS.md describes.
+  publish_docs:
+    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'publish-docs') }}
+    concurrency:
+      group: ${{ github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'publish-docs') && 'publish docs on merge' || github.run_id }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      statuses: read
+    uses: ./.github/workflows/publish-docs.yaml
+    with:
+      ref: main
+      dry_run: false
+    secrets:
+      SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
