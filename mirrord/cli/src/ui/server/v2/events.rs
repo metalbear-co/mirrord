@@ -135,7 +135,7 @@ async fn stream_events(state: &AppState, context: Option<&str>, unmatched: bool,
         session_key_field: true,
         unmatched,
     };
-    let events = match operator_event_stream(&client, None, options).await {
+    let events = match operator_event_stream(&client, None, None, options).await {
         Ok(events) => events,
         Err(error) => {
             warn!(?context, %error, "failed to open the operator event stream");
