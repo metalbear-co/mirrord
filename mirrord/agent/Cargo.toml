@@ -45,7 +45,7 @@ pin-project-lite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 bincode.workspace = true
-nix = { workspace = true, features = ["mount", "sched", "user", "socket", "uio"] }
+nix = { workspace = true, features = ["fs", "mount", "sched", "user", "socket", "uio"] }
 clap = { workspace = true, features = ["env"] }
 actix-codec.workspace = true
 futures.workspace = true
