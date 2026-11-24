@@ -1,0 +1,207 @@
+# Submits a published mirrord release to WinGet. This is a separate workflow because the
+# `winget` environment, which holds the submission token, only deploys from `main`, and
+# the jobs of the Release workflow run for `refs/pull/<number>/merge`. The Release
+# workflow starts this one on `main` for each release. A person can also start it from
+# `main` for a release that missed its submission. CONTRIBUTING.md ("WinGet") has the
+# setup and the recovery steps.
+name: Release WinGet
+run-name: Release WinGet ${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published mirrord release to submit, such as 3.291.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs outside the `winget` environment, so an invalid input fails before any job can
+  # read the submission token.
+  validate_version:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - name: Check that the version is a published release with an MSI
+        id: validate
+        # Shorter than the job's timeout, because a job timeout concludes as cancelled,
+        # which would skip the failure alert.
+        timeout-minutes: 4
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          # The rejected value isn't printed, because a line of it could be read as a
+          # workflow command.
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version must be a bare major.minor.patch value, such as 3.291.0."
+            exit 1
+          fi
+
+          if ! release_state=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" \
+            --jq '[.prerelease, any(.assets[]; .name == "mirrord.msi")] | @tsv'); then
+            echo "::error::Couldn't read a published release with the tag ${VERSION}; the error from gh is above."
+            exit 1
+          fi
+          read -r is_prerelease has_msi <<<"${release_state}"
+
+          if [[ "${is_prerelease}" != "false" ]]; then
+            echo "::error::Release ${VERSION} is a prerelease, so it can't be submitted to WinGet."
+            exit 1
+          fi
+          if [[ "${has_msi}" != "true" ]]; then
+            echo "::error::Release ${VERSION} has no mirrord.msi asset, which is the installer that WinGet needs."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+  submit:
+    needs: validate_version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    environment: winget
+    # Two runs for one version could both pass Komac's check for an existing pull request
+    # and open duplicates, so they run one at a time. The group is per version, because
+    # GitHub cancels a pending job when another job joins its group, and a shared group
+    # could cancel the submission of a different release.
+    concurrency:
+      group: release-winget-${{ needs.validate_version.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Update WinGet manifest
+        # Shorter than the job's timeout, because a job timeout concludes as cancelled,
+        # which would skip the failure alert.
+        timeout-minutes: 14
+        env:
+          # Classic PAT of metalbear-ci, because Komac opens the PR on
+          # microsoft/winget-pkgs, where a GitHub App can't be installed and a
+          # fine-grained PAT can't open PRs. It exists only in the `winget`
+          # environment, limited to `main`, so runs on other branches can't
+          # read it. CONTRIBUTING.md ("WinGet") has the scopes and setup.
+          GITHUB_TOKEN: ${{ secrets.WINGET_BOT_TOKEN }}
+          # Komac uses the token's login as the fork owner unless this is set.
+          KOMAC_FORK_OWNER: metalbear-co
+          # Komac is pinned by version and SHA-256, so a replaced release asset
+          # fails the job. To upgrade, change the version and take the hash from
+          # the komac-<version>-x86_64-unknown-linux-gnu.tar.gz line of the
+          # release's SHA256SUMS.
+          KOMAC_VERSION: "2.17.2"
+          KOMAC_SHA256: b03b020eec98acfb0b53e284a6e21815b884be33de6785b97e7a120f0e748966
+          MIRRORD_VERSION: ${{ needs.validate_version.outputs.version }}
+          # Komac drops colors from most of its output with this set. The
+          # script removes the rest before it matches the output.
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+
+          package_id="MetalBear.mirrord"
+          fork="${KOMAC_FORK_OWNER}/winget-pkgs"
+          installer_url="https://github.com/metalbear-co/mirrord/releases/download/${MIRRORD_VERSION}/mirrord.msi"
+
+          echo "Updating WinGet manifest for package '${package_id}' version '${MIRRORD_VERSION}'"
+          echo "Installer URL: ${installer_url}"
+
+          if [[ -z "${GITHUB_TOKEN}" ]]; then
+            echo "::error::WINGET_BOT_TOKEN is not set. Cannot publish to WinGet."
+            exit 1
+          fi
+
+          # The archive holds the `komac` executable at its root, with its
+          # executable mode, which tar keeps.
+          archive="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl --fail --silent --show-error --location --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/${archive}"
+          echo "${KOMAC_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${RUNNER_TEMP}/${archive}" --directory "${RUNNER_TEMP}" komac
+          komac="${RUNNER_TEMP}/komac"
+
+          # `komac update` creates its branch at the latest commit of
+          # microsoft/winget-pkgs, not at the fork's, so the submission doesn't
+          # need the fork to be synced. The sync keeps the org fork current for
+          # anyone who works in it by hand, and shows a broken token as a
+          # warning before `komac update` fails on it.
+          if ! "${komac}" sync-fork; then
+            echo "::warning::Komac couldn't sync ${fork} with microsoft/winget-pkgs; its error is above. The submission goes on, since Komac doesn't branch from the fork's commit. The token may lack the workflow scope, may have expired or been revoked, or GitHub returned an error."
+          fi
+
+          # `|x64` overrides the architecture Komac reads from the MSI, which
+          # reports x86. Komac has no scope suffix; it takes the scope (machine)
+          # from the MSI's ALLUSERS property.
+          update_log="${RUNNER_TEMP}/komac-update.log"
+          update_exit=0
+          "${komac}" update "${package_id}" \
+            --version "${MIRRORD_VERSION}" \
+            --urls "${installer_url}|x64" \
+            --submit 2>&1 | tee "${update_log}" || update_exit=$?
+          # Komac's error reports are colored even with NO_COLOR, and the PR
+          # number can be wrapped in an OSC 8 hyperlink, so color and hyperlink
+          # escape sequences are removed before matching.
+          update_output=$(sed --regexp-extended \
+            's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\x1b\]8;[^\x1b\x07]*(\x1b\\|\x07)//g' "${update_log}")
+
+          if (( update_exit != 0 )); then
+            # Komac reports a package as missing whenever it can't read the
+            # package's manifests, which includes GitHub API errors.
+            if grep --quiet "does not exist in microsoft/winget-pkgs" <<<"${update_output}"; then
+              echo "::error::Komac couldn't read ${package_id} from microsoft/winget-pkgs. Re-run the job; if it fails again, check that the package exists there."
+            else
+              echo "::error::komac update failed with exit code ${update_exit}; its error is above. Check that WINGET_BOT_TOKEN is valid and that its account can write to ${fork}, then re-run the job. If GitHub refused to create the branch, syncing https://github.com/${fork} by hand ('Sync fork') may help."
+            fi
+            exit 1
+          fi
+
+          # In CI Komac exits 0 without a PR when a PR titled with this package
+          # and version already exists in any state, as on a re-run.
+          if grep --quiet --extended-regexp 'Successfully created microsoft/winget-pkgs#[0-9]+' <<<"${update_output}"; then
+            echo "Successfully updated WinGet manifest"
+          else
+            echo "::warning::Komac created no pull request, most likely because one for ${package_id} ${MIRRORD_VERSION} already exists (open, merged or closed). Check https://github.com/microsoft/winget-pkgs/pulls?q=is%3Apr+${package_id}+${MIRRORD_VERSION}; if it was closed without merging, submit the version by hand as CONTRIBUTING.md (WinGet) describes."
+          fi
+
+          # Removes the fork's branches whose PRs were merged, so the fork
+          # doesn't keep one branch per release. Best effort, since the
+          # submission is already done.
+          "${komac}" cleanup --only-merged --all || echo "::warning::komac cleanup failed; the fork keeps its merged branches until a later release removes them."
+
+  # The Release run stays green whatever happens in this workflow, so this alert is what
+  # shows a failed submission. It runs outside the `winget` environment, so it can't read
+  # the submission token.
+  notify_failure:
+    name: "Notify #ci-alerts"
+    needs: [validate_version, submit]
+    if: failure()
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+          # Empty when validation failed. The raw input stays out of the alert, because
+          # it can hold any text.
+          VERSION: ${{ needs.validate_version.outputs.version }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          text=$(printf '%s\n' \
+            ":rotating_light: *WinGet submission failed for \`$GITHUB_REPOSITORY\`*" \
+            "• *Version:* \`${VERSION:-not validated}\`" \
+            "• *Run:* <$run_url|Open GitHub Actions>")
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"
