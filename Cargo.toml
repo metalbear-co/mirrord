@@ -223,7 +223,7 @@ process-wrap = { version = "10.0.0", default-features = false, features = ["toki
 proc-macro2 = "1"
 proc-macro2-diagnostics = "0.10"
 procfs = "0.17.0"
-prometheus = { version = "0.14", features = ["process"] }
+prometheus = { version = "0.14", default-features = false, features = ["process"] }
 prost = "0.14"
 prost-reflect = "0.16"
 slug = "0.1.6"
