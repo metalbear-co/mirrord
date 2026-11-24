@@ -1,6 +1,11 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::{collections::HashMap, io::ErrorKind, ops::Not, sync::Arc};
+use std::{
+    collections::HashMap,
+    io::{ErrorKind, IsTerminal},
+    ops::Not,
+    sync::Arc,
+};
 
 use miette::Diagnostic;
 use mirrord_analytics::{
@@ -305,8 +310,17 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         });
     }
 
-    let mut services =
-        mirrord_up::resolve_services(up_config, &args.config_file, args.context, &key).await?;
+    // IDEs run `up` without a terminal on stdin. A prompt then waits on a console no one sees, or
+    // fails as "not a TTY" when there's none, so a missing target fails at once instead.
+    let interactive = std::io::stdin().is_terminal();
+    let mut services = mirrord_up::resolve_services(
+        up_config,
+        &args.config_file,
+        args.context,
+        &key,
+        interactive,
+    )
+    .await?;
     let mut operators = checks::usable_operators(&services).await?;
     checks::check_queue_splits(&services, &operators)?;
     let requesting = checks::check_db_branches(&mut services, &mut operators).await?;
