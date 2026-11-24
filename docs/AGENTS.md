@@ -2,9 +2,9 @@
 
 ## Overview
 
-Paths in this file are relative to this directory of the mirrord repository, which holds the Documentation tab of the [mirrord docs](https://metalbear.com/mirrord/docs), built by GitBook from the Markdown under `docs/`. GitBook builds the site from the `docs-published` branch, which every mirrord release updates to the `docs/` of the released commit, so a merged page reaches the site with the next mirrord release, or sooner if a publish runs between releases (see [Publishing a Fix Between Releases](#publishing-a-fix-between-releases)). `mirrord mcp` embeds the pages, so it gets them only with the next release. Each publish replaces the branch's content, so a page change merged in the GitBook editor is lost at the next publish: make page changes here.
+Paths in this file are relative to this directory of the mirrord repository, which holds the Documentation tab of the [mirrord docs](https://metalbear.com/mirrord/docs), built by GitBook from the Markdown under `docs/`. GitBook's Documentation space syncs this directory on `main` (Git Sync with the project directory `docs`), so a merged page reaches the site once GitBook imports its merge commit (see [Publishing](#publishing)). `mirrord mcp` embeds the pages, so it gets them only with the next release. GitBook can't push to `main`, which only takes pull requests, so a change request merged in the GitBook editor doesn't reach `main` directly. The export fails, or GitBook opens a pull request for it, and the next import from `main` replaces the edit on the site. Make page changes here.
 
-A page for an unreleased change names the versions expected to ship it. Every mirrord release publishes the merged pages and ships them in `mirrord mcp`, so a page for a CLI feature can merge with the feature. The operator ships on its own schedule, so a page for an unreleased operator feature merges only once the operator version that ships it is out. Otherwise a mirrord release would document a feature that users can't get yet.
+A page goes live when it merges, which can be before the release that ships its change, so a page for an unreleased change must name the versions expected to ship it. Pages for operator features follow the same rule: merge them with the feature. The operator ships on its own schedule, so the site, and the next `mirrord mcp`, can show such a page before that operator version is out.
 
 The Configuration tab is generated from the doc comments in `mirrord/config/src` at the repository root, and the Changelog tab from each product's `CHANGELOG.md`. Fix them there.
 
@@ -17,26 +17,17 @@ The Configuration tab is generated from the doc comments in `mirrord/config/src`
 python3 .github/scripts/check_plan_tags.py
 ```
 
-CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. There is no local build, and GitBook doesn't build pull requests to the mirrord repository, so they get no preview.
+CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. There is no local build. Instead, a pull request into `main` from a branch of the mirrord repository gets a `GitBook - metalbear.com/mirrord/docs/` status whose Details link opens a preview of the site. Only people with a GitBook account can view the preview. A pull request from a fork gets no preview: GitBook serves previews from the docs site's domain, so a fork's preview would put content that anyone can write under `metalbear.com`, and the spaces' Git Sync settings keep fork previews off for that reason.
 
-## Publishing a Fix Between Releases
+## Publishing
 
-A fix that can't wait for the next release goes out through the `Publish docs and guides` workflow (`.github/workflows/publish-docs.yaml` at the repository root), which publishes `docs/` to `docs-published` and `guides/` to `guides-published`.
+GitBook imports each commit on `main` that changes this directory, and reports the result as a commit status whose context starts with `GitBook`, such as `GitBook - metalbear.com/mirrord/docs/`. The Guides space syncs the root `guides/` directory the same way, with the project directory `guides` and the status `GitBook - metalbear.com/mirrord/docs/guides/`. No CI job waits for these statuses, so a failed import shows only as a failed GitBook status on the merge commit.
 
-The `publish-docs` label publishes all of `docs/` and `guides/` from `main` when its pull request merges (`.github/workflows/publish-docs-on-merge.yaml` at the repository root), including anything merged since the last publish. A failed publish posts to `#ci-alerts`, and re-running the failed job publishes the current `main`.
+A commit that GitBook never imports leaves the site at the previous import. Check the space's Git Sync in GitBook, and try syncing it again from there. GitBook's Git Sync troubleshooting guide also says that GitBook imports all the content again when a new commit reaches the branch, so the next merge that changes `docs/` (or `guides/`) also brings in the changes of the failed import.
 
-Run the `Publish docs and guides` workflow by hand for a pull request from a fork, for a label added after the merge, to see what would go out first, or to leave out pages that must wait:
+To take a page off the site, merge a revert of its pull request.
 
-1. If the fix hasn't merged, merge it to `main` without the `publish-docs` label. Another labeled merge would still publish it.
-2. From the Actions tab, with "Use workflow from" left on `main`, run the workflow with `ref` set to `main` and `dry_run` on. The step summary names the commit that `main` resolved to and lists the files that differ from the published branches. Everything merged to `docs/` or `guides/` since the last publish goes out with the fix, so check that the list holds only what is ready to publish. If both branches already match, there is nothing to publish.
-3. If the list holds pages that must wait, such as one for a CLI feature that merged but isn't released yet, create a branch from the latest release tag, cherry-pick the fix onto it, push it, and dry-run that branch instead. Any name works except one that starts with `docs/`, which git refuses because the repository has a `docs` branch.
-4. Run the workflow again with `ref` set to the commit SHA from the dry run's summary and `dry_run` off, so it publishes the commit that the dry run checked. The workflow pushes, waits for GitBook to import the commits, and posts to `#ci-alerts` if any of it fails. Delete the branch from step 3 afterwards.
-
-A release publishes the head of its release branch, so a fix that merged to `main` after the branch was cut disappears from the site when that release publishes, whichever way the fix was published. The fix comes back with the next publish that contains it: the next labeled merge, the next release, or a run of steps 2 to 4.
-
-The workflow waits up to five minutes in all for GitBook to import the commits that it pushed, and fails if GitBook reports a failed import, or no successful one in that time. For a branch that it didn't change, it reads the status once, without waiting: a failed import there fails the run, so a re-run after a failure still fails, while a missing or pending status only warns. A commit that GitBook never imports leaves the site at the previous publish. Check the space's Git Sync in GitBook, and try syncing it again from there. GitBook's Git Sync troubleshooting guide also says that a new commit on the branch makes GitBook import all the content again, and the next publish that changes `docs/` (or `guides/`, for `guides-published`) pushes one.
-
-The workflow refuses a `ref` that is older than the latest release. It also can't push a change to `docs/.github/workflows/`, because GitHub doesn't let the workflow token change workflow files. That publish fails, and its error prints a `git` command that fetches the published branch, builds the publish commit on top of it and pushes it. Run the command in bash or zsh with a token that has the `workflow` scope, then run the workflow again to publish `guides/`. The command ends by printing the parent of the commit that it pushed, so if that commit turns out wrong, force-pushing the parent to the branch restores it.
+If GitBook can't sync `main`, point a space's Git Sync back at `docs-published` or `guides-published`, with no project directory, and choose GitHub → GitBook as the initial sync direction. The site then returns to how it was before the spaces synced `main`, without the pages merged since. The other direction would export the space's content, `main`'s pages included, onto that branch.
 
 ## Pages
 

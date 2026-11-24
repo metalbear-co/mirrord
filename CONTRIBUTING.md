@@ -900,7 +900,6 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
    - Publishes to Homebrew and Chocolatey.
    - Starts the [Release WinGet workflow](/.github/workflows/release-winget.yaml), which submits the release to WinGet.
-   - Publishes `docs/` and `guides/` to the `docs-published` and `guides-published` branches, which GitBook builds the docs site from.
    - Updates the `latest` git tag and notifies the infra repository.
 
 ## Triggering a release PR manually
@@ -990,6 +989,8 @@ When a submission warns or fails:
     --skip-pr-check --submit
   ```
 
-## Publishing docs between releases
+## Publishing docs and guides
 
-A merged pull request from this repository with the `publish-docs` label publishes `docs/` and `guides/` from `main`, including pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing-a-fix-between-releases) says how to publish without those pages.
+GitBook's Documentation and Guides spaces sync `docs/` and `guides/` on `main`, so every merge publishes them, including
+pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing) says how to check that
+GitBook imported a merge, and what to do when an import fails.
