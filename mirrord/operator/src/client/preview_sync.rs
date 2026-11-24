@@ -517,13 +517,13 @@ impl TreeListing {
                     }
                 } else {
                     let mut file = File::open(&source).map_err(at(&source))?;
-                    let mut hasher = Sha256::new();
+                    let mut hasher = HashWriter(Sha256::new());
                     let size = io::copy(&mut file, &mut hasher).map_err(at(&source))?;
 
                     ManifestKind::File {
                         mode: tar_mode(&listed.permissions, false) & 0o777,
                         size,
-                        hash: hasher.finalize().into(),
+                        hash: hasher.0.finalize().into(),
                     }
                 };
 
@@ -711,6 +711,21 @@ fn pack_paths<'a>(
         archive: builder.into_inner()?.finish()?,
         deleted,
     })
+}
+
+/// Feeds what is written to it into the hasher, so a file can be hashed with [`io::copy`]
+/// without holding it in memory whole.
+struct HashWriter(Sha256);
+
+impl io::Write for HashWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The bytes of a symlink's `target` as it is written, which, unlike the paths of a tree, may be

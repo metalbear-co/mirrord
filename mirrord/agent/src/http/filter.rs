@@ -3,10 +3,7 @@ use std::{fmt::Debug, io::Read, ops::Not, sync::LazyLock, time::Duration};
 use fancy_regex::Regex;
 use http::HeaderMap;
 use hyper::http::request::Parts;
-use jaq_core::{
-    Ctx, RcIter,
-    load::{Arena, File, Loader},
-};
+use jaq_core::{Ctx, RcIter};
 use jaq_json::Val;
 use mirrord_agent_env::envs::JAQ_TIME_LIMIT;
 use mirrord_protocol::tcp::{HttpMethodFilter, JqQuery};
@@ -228,22 +225,7 @@ async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     let span = tracing::warn_span!("jaq eval", ?query);
 
     let mut handle = tokio::task::spawn_blocking(move || {
-        let program = File {
-            code: query.as_str(),
-            path: (),
-        };
-        let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
-        let arena = Arena::default();
-        let modules = loader
-            .load(&arena, program)
-            .map_err(|errors| format!("failed to parse the filter: {errors:?}"))?;
-
-        let filter =
-            jaq_core::Compiler::default().with_funs(jaq_std::funs().chain(jaq_json::funs()));
-
-        let filter = filter
-            .compile(modules)
-            .map_err(|errors| format!("failed to compile the filter: {errors:?}"))?;
+        let filter = mirrord_jaq::compile_jq(query.as_str()).map_err(|error| error.to_string())?;
 
         let inputs = RcIter::new(core::iter::empty());
         let mut out = filter.run((Ctx::new([], &inputs), Val::from(payload)));
