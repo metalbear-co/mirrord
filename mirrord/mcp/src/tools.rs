@@ -70,7 +70,7 @@ impl McpServer {
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 
-    /// List the vendored skills, or get one of them or a file bundled with it.
+    /// List the embedded skills, or get one of them or a file bundled with it.
     #[tool(
         name = "get_skill",
         description = "Get the mirrord skills: step-by-step guides for mirrord tasks such as \
@@ -89,7 +89,7 @@ impl McpServer {
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 
-    /// Keyword search over the vendored docs and skills.
+    /// Keyword search over the embedded docs and skills.
     #[tool(
         name = "search_docs",
         description = "Search the mirrord docs, skills and config options of the installed \
@@ -108,7 +108,7 @@ impl McpServer {
             .map_err(|error| CallToolResult::error(vec![ContentBlock::text(error.to_string())]))
     }
 
-    /// Serve one page of the vendored docs and skills, or list them.
+    /// Serve one page of the embedded docs and skills, or list them.
     #[tool(
         name = "read_doc",
         description = "Read one page of the mirrord docs or skills, or one config option, of the \

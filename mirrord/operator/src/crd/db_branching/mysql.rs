@@ -41,7 +41,7 @@ pub struct MysqlBranchDatabaseSpec {
     pub target: Target,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
-    /// MySQL server image version, e.g. "8.0".
+    /// MySQL server image version, e.g. "8.4".
     pub mysql_version: Option<String>,
     /// Options for copying data from source database to the branch.
     #[serde(default)]

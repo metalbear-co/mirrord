@@ -75,7 +75,7 @@ describe('Wizard', () => {
     next()
 
     fireEvent.click(
-      screen.getByLabelText('Configure traffic filtering and ports?'),
+      screen.getByLabelText('Customize the header filter and ports?'),
     )
     typeInto(/HTTP header filter/, 'x-user: me')
     fireEvent.click(await screen.findByLabelText('intercept port 9090'))
@@ -135,6 +135,27 @@ describe('Wizard', () => {
     ).toBeInTheDocument()
   })
 
+  it('says what the traffic defaults are until the user customizes them', async () => {
+    render(<Wizard open={true} onClose={onClose} />)
+
+    await pickMode('Split')
+    await pickOption(/server-echo deployment/)
+    next()
+
+    const toggle = screen.getByLabelText(
+      'Customize the header filter and ports?',
+    )
+    expect(toggle).toHaveAccessibleDescription(/header filter on every port/)
+    expect(screen.getByRole('link', { name: 'Learn more' })).toHaveAttribute(
+      'href',
+      'https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions/#service-modes',
+    )
+    fireEvent.click(toggle)
+    expect(
+      screen.queryByText(/header filter on every port/),
+    ).not.toBeInTheDocument()
+  })
+
   it('offers no targetless option and no header filter in replace mode', async () => {
     render(<Wizard open={true} onClose={onClose} />)
 
@@ -145,7 +166,7 @@ describe('Wizard', () => {
     ).not.toBeInTheDocument()
     next()
 
-    fireEvent.click(screen.getByLabelText('Configure ports?'))
+    fireEvent.click(screen.getByLabelText('Customize ports?'))
     expect(
       screen.queryByLabelText(/HTTP header filter/),
     ).not.toBeInTheDocument()
@@ -158,7 +179,7 @@ describe('Wizard', () => {
     await pickOption(/server-echo deployment/)
     next()
     fireEvent.click(
-      screen.getByLabelText('Configure traffic filtering and ports?'),
+      screen.getByLabelText('Customize the header filter and ports?'),
     )
     await screen.findByLabelText('intercept port 80')
     typeInto(/Other ports to ignore/, 'http')

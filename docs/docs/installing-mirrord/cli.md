@@ -1,0 +1,70 @@
+---
+title: CLI
+description: "How to install the mirrord CLI on your machine and run your first session from the terminal."
+---
+
+# CLI
+
+The mirrord CLI is the core tool for running mirrord from the command line.
+
+## Installation
+
+To install the CLI, see [Install mirrord](../getting-started/install-mirrord.md).
+
+## Usage
+
+To use mirrord to plug a local process into a pod/deployment in the cluster configured with kubectl, run:
+
+```bash
+mirrord exec --target <target-path> <command used to run the local process>
+```
+
+For example:
+
+```bash
+mirrord exec --target pod/app-pod-01 python main.py
+```
+
+Use `mirrord --help` to see all available commands.
+
+## Configuration
+
+mirrord is configured using a JSON or YAML configuration file. The CLI reads its configuration from this file — by default, it looks for `.mirrord/mirrord.json` in the current directory. You can specify a different configuration file with the `-f` flag:
+
+```bash
+mirrord exec -f my-config.json --target pod/app-pod python main.py
+```
+
+Configuration options are documented in the [configuration reference](https://metalbear.com/mirrord/docs/config). For a user-wide Operator preference or default Kubernetes context, see [Global Configuration](global-configuration.md). Other settings in the global file are not yet applied.
+
+## Interactive Setup
+
+You can use `mirrord wizard` to generate a `mirrord-up.yaml` interactively, then run it with `mirrord up -f mirrord-up.yaml`. See the [Onboarding Wizard](../getting-started/onboarding-wizard.md) for more information.
+
+## Listing Targets
+
+To see available targets in your cluster:
+
+```bash
+mirrord ls
+```
+
+This will list all pods, deployments, and other resources that mirrord can target.
+
+## Verifying Installation
+
+To verify mirrord is installed correctly:
+
+```bash
+mirrord --version
+```
+
+To check connectivity to your cluster and the mirrord Operator (if using [mirrord for Teams](../managing-mirrord/operator.md)):
+
+```bash
+mirrord operator status
+```
+
+{% hint style="info" %}
+**Got it working? Stuck?** Either way, [come say hi in Slack](https://metalbear.com/slack)
+{% endhint %}

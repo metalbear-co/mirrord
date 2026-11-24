@@ -8,6 +8,130 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.291.0](https://github.com/metalbear-co/mirrord/tree/3.291.0) - 2026-11-23
+
+
+### Changed
+
+- `mirrord mcp` links each skill file to `skills/skills` in the mirrord
+  repository, at the tag of the installed version, instead of to
+  `metalbear-co/skills`. The `mirrord://info` resource no longer has the `docs`
+  and `skills` fields, and gives only the mirrord version.
+
+
+### Fixed
+
+- Fixed `mirrord mcp` serving no skills on Windows: the skills were embedded
+  with Windows line endings, which the server couldn't parse.
+
+## [3.290.0](https://github.com/metalbear-co/mirrord/tree/3.290.0) - 2026-11-17
+
+
+### Added
+
+- `mirrord preview start` and `mirrord preview up` can now run without a target
+  to provision branch databases alone: with `feature.db_branches` and no
+  `target`, the operator creates the branches and keeps them for the preview's
+  TTL. A targetless `mirrord exec` with branches the operator provisions
+  creates them the same way and gets their connection values in its
+  environment. Branch connection values must then come from a literal, a
+  Kubernetes Secret, or a ConfigMap named directly, since there is no target
+  pod to read them from. Secret manager sources and `iam_auth` work without a
+  target only for S3 and turbopuffer branches, and Spanner branches still need
+  a target.
+
+
+### Fixed
+
+- The serverless workload companion and the CLI's sessions-manager connection
+  trust the CA certificates bundled into mirrord, alongside the system's when
+  it has any, so application images no longer need `ca-certificates` installed
+  to connect to MetalBear Cloud. The data-plane connection trusts the system's
+  CA certificates too, so a sessions-manager behind a private CA or a
+  transparently intercepting proxy no longer passes registration only to fail
+  every data-plane connection.
+
+## [3.289.0](https://github.com/metalbear-co/mirrord/tree/3.289.0) - 2026-11-16
+
+
+### Security
+
+- The internal proxy no longer writes the values of credential headers, such as
+  `Authorization`, `Cookie` and API key headers, to its log when it receives an
+  HTTP request.
+
+
+### Added
+
+- `mirrord ui` shows the sessions of your organization on MetalBear Cloud after
+  `mirrord login`, and while you're logged in, no longer reports an error when
+  the cluster has no mirrord operator or there is no Kubernetes context.
+
+## [3.288.0](https://github.com/metalbear-co/mirrord/tree/3.288.0) - 2026-11-15
+
+
+### Added
+
+- `mirrord up` runs services with a serverless target. In `split` and `mirror`
+  modes they run without queue splitting or DB branching, and `mirrord up` says
+  so; `replace` mode fails, since a serverless target can't be copied.
+
+
+### Changed
+
+- `mirrord wizard` and `mirrord up init` now say what `mirrord up` does with
+  traffic when you skip customizing the header filter and ports.
+
+## [3.287.0](https://github.com/metalbear-co/mirrord/tree/3.287.0) - 2026-11-12
+
+
+### Added
+
+- Added `mirrord exec --share` and the `share` option, which print a temporary
+  HTTPS link to the service running on your machine, through the share-ingress
+  of a Team or Enterprise operator. Requests that don't reach your machine,
+  such as those sent before your application listens, reach the target's
+  service running in the cluster instead. A shared session steals only the
+  requests that carry its session key in `baggage`, or that match its
+  `http_filter`. Sharing needs permission to get `sessions` in the
+  `operator.metalbear.co` API group, which the operator's chart grants to
+  mirrord users.
+- Added the `agent.http_detect_inactive_ports` option, off by default. It makes
+  the agent run HTTP detection on connections that arrive while their port has
+  no subscriber, so a later subscription's HTTP filters apply to them.
+- The agent reports the bytes of mirrord-protocol messages it holds in memory,
+  in `mirrord_agent_buffered_messages_bytes`, and the bytes held by its
+  outgoing traffic throttles, in `mirrord_agent_outgoing_throttle_permits`.
+
+
+### Changed
+
+- The agent logs a warning when a connection on a port stolen with an HTTP
+  filter is passed to the target unfiltered, with the reason: HTTP detection
+  timed out, the traffic isn't HTTP, or TLS negotiated a protocol other than
+  HTTP.
+- `mirrord wizard` now generates a `mirrord-up.yaml` instead of a
+  `mirrord.json`, asking the same questions as `mirrord up init`. `mirrord
+  wizard --tui` asks them in the terminal.
+
+
+### Fixed
+
+- Fixed concurrent `mirrord ci start` and `mirrord ci container` sessions
+  failing with "CI state file is locked by another writer". Sessions now wait
+  up to 5 seconds for each other, and `mirrord ci stop` can find the processes
+  of every session.
+- The install script stops with a clear message when it cannot look up the
+  latest version on GitHub, instead of failing with a 404 that looks like a
+  missing release.
+- `mirrord exec` with a serverless target shows its progress while it waits for
+  the target's agent, and fails with an error that names the cause instead of
+  appearing to hang.
+- jq filter time limits no longer count the wait for a thread
+- mirrord correctly refuses to start a session with a serverless target when
+  `feature.db_branches`, `feature.split_queues`, or `feature.copy_target` is
+  set.
+
 ## [3.286.0](https://github.com/metalbear-co/mirrord/tree/3.286.0) - 2026-11-10
 
 

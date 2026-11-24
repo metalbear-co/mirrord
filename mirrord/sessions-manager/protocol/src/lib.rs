@@ -21,10 +21,12 @@ pub use data_plane::{
 };
 pub use error::SessionsManagerProtocolError;
 use serde::{Deserialize, Serialize};
+pub use sessions::{SessionList, SessionOwner, SessionSummary};
 
 mod control_plane;
 mod data_plane;
 mod error;
+mod sessions;
 
 /// Information a control-plane subscription sends to one peer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

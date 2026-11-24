@@ -67,6 +67,10 @@ export const strings = {
     ignorePorts: 'Ports to ignore (comma-separated, blank for none):',
     otherIgnorePorts:
       'Other ports to ignore (comma-separated, blank for none):',
+    // Also linked from `mirrord up init` (`MODES_DOCS_URL` in `mirrord/up/src/init/modes.rs`).
+    modesDocs: 'Learn more',
+    modesDocsUrl:
+      'https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions/#service-modes',
   },
   runStep: {
     title: 'Local Command',

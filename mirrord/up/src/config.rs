@@ -355,6 +355,9 @@ pub struct SpecifiedTarget {
     pub(crate) path: Option<Target>,
 
     /// Namespace of the target workload. Defaults to the namespace of the kube context.
+    ///
+    /// For a serverless target, the environment of its service in sessions-manager, `default`
+    /// when not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) namespace: Option<Arc<str>>,
 }
@@ -477,6 +480,16 @@ impl TargetConfig {
         match self {
             TargetConfig::Specified(specified_target) => specified_target,
             _ => panic!("did not parse as TargetConfig::Specified, parsed as {self:?}"),
+        }
+    }
+
+    /// `true` for `target: none` and for `path: targetless`: the service runs without a target.
+    pub(crate) fn is_targetless(&self) -> bool {
+        match self {
+            Self::Targetless => true,
+            Self::Specified(SpecifiedTarget { path, .. }) => {
+                matches!(path, Some(Target::Targetless))
+            }
         }
     }
 
@@ -968,6 +981,10 @@ impl ServiceConfig {
             .config_patch
             .as_ref()
             .is_some_and(|patch| patch.pointer("/feature/split_queues").is_some());
+        let patch_sets_incoming = self
+            .config_patch
+            .as_ref()
+            .is_some_and(|patch| patch.pointer("/feature/network/incoming").is_some());
 
         if let Some(patch) = self.config_patch {
             if preview && patch.pointer("/feature/preview/image").is_some() {
@@ -984,10 +1001,22 @@ impl ServiceConfig {
             cfg = apply_config_patch(cfg, patch, &key, invocation_directory)?;
         }
 
-        // `incoming: replace` splits no queues.
+        // A preview without a target runs no pod to receive traffic. The mode comes from the
+        // `split` mode every preview session runs as, not from the service, so it goes back to
+        // the default and the targetless check doesn't report it as ignored. A `http_filter`,
+        // `ignore_ports` or `config_patch` the service did set stays, and is reported.
+        if preview && patch_sets_incoming.not() && cfg.target.is_targetless() {
+            cfg.feature.network.incoming.mode = IncomingMode::default();
+        }
+
+        // `incoming: replace` splits no queues, and serverless sessions can't split any.
         let splits_queues = matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
             && patch_sets_split_queues.not()
-            && matches!(cfg.target.path, Some(Target::Label(_))).not()
+            && matches!(
+                cfg.target.path,
+                Some(Target::Label(_) | Target::Serverless(_))
+            )
+            .not()
             && (preview.not()
                 || matches!(
                     cfg.target.path,
@@ -1060,6 +1089,28 @@ impl ServiceConfig {
             }
             .into()
         })
+    }
+
+    /// `true` when this service's `config_patch` sets `feature.db_branches` to something the
+    /// operator provisions: inline branches other than local Redis ones, or a `"*"` / ids request
+    /// for it to look up. The patch is the only place a service without a target gets branches
+    /// from, since the shared config has none and `mirrord up` adds its defaults only to services
+    /// with a single workload. A patch that doesn't parse counts as asking, so [`Self::assemble`]
+    /// reports what is wrong with it instead of this skipping the service.
+    fn asks_operator_branches(&self) -> bool {
+        let Some(patch) = self
+            .config_patch
+            .as_ref()
+            .and_then(|patch| patch.pointer("/feature/db_branches"))
+        else {
+            return false;
+        };
+        match serde_json::from_value::<DatabaseBranchesConfig>(patch.clone()) {
+            Ok(branches) => {
+                branches.any_provisioned_by_operator() || branches.split_config_request().is_some()
+            }
+            Err(_) => true,
+        }
     }
 
     /// The mirrord config of this service before its target is set and its `config_patch` is
@@ -1288,7 +1339,19 @@ pub(crate) fn validate_targets(cfgs: &[SubprocessCfg]) -> Result<(), Vec<TargetV
             })
         }
 
-        if target_type.compatible_with(&cfg.config.feature).not() {
+        // `TargetType::compatible_with` never accepts serverless, since it also decides the
+        // target types IDEs offer to pick from, and they can't list serverless targets.
+        //
+        // A serverless target can't be copied, so `incoming: replace` is rejected outright, even
+        // when a `config_patch` turns off the `copy_target` it implies. Otherwise the service
+        // would run, replacing nothing, and with its mode's `db_branching` silently dropped.
+        // Enabling `copy_target` on any other mode fails the merged config's verification.
+        let compatible = match target_type {
+            TargetType::Serverless => cfg.incoming != ServiceMode::Replace,
+            other => other.compatible_with(&cfg.config.feature),
+        };
+
+        if compatible.not() {
             incompatible.push(IncompatibleTarget {
                 service: cfg.service_name.clone(),
                 mode: cfg.mode.clone(),
@@ -1655,9 +1718,13 @@ impl UpConfig {
     /// Picks the image of every service for a `run` of `mirrord preview up` or `mirrord preview
     /// sync`, and drops the services that get no preview.
     ///
-    /// [`PreviewRun::Up`] previews every service with an image. [`PreviewRun::Sync`] previews only
-    /// the services with `sync`, except those with `skip` and no image, and a service without an
-    /// image runs the target's image.
+    /// [`PreviewRun::Up`] previews every service with an image, and every service without a
+    /// target whose `config_patch` asks the operator for branch databases: such a preview is its
+    /// branch databases and runs no pod, so it has no image by design. A service without a target
+    /// and without such branches has nothing to preview, so it is skipped for lack of an image
+    /// like a service with a target. [`PreviewRun::Sync`] previews only the services with `sync`,
+    /// except those with `skip` and no image, and a service without an image runs the target's
+    /// image.
     ///
     /// `flags` are the `--image <service>=<ref>` values. A service's image comes from its flag,
     /// then its `MIRRORD_<SERVICE>_IMAGE` environment variable (see [`preview_image_env`]; empty
@@ -1736,8 +1803,11 @@ impl UpConfig {
                     .map(|image| (image, PreviewImageSource::Env)),
             };
 
+            let branch_only = service.target.is_targetless() && service.asks_operator_branches();
             let skipped = match run {
-                PreviewRun::Up if picked.is_none() => Some(SkipReason::NoImage),
+                PreviewRun::Up if picked.is_none() && branch_only.not() => {
+                    Some(SkipReason::NoImage)
+                }
                 PreviewRun::Sync if service.sync.is_none() => Some(SkipReason::NoSync),
                 PreviewRun::Sync if service.skip && picked.is_none() => Some(SkipReason::Skip),
                 PreviewRun::Up | PreviewRun::Sync => None,
@@ -1837,10 +1907,22 @@ impl UpConfig {
                         service: service_name.clone(),
                         source,
                     })?;
+                let serverless =
+                    matches!(service.config.target.path, Some(Target::Serverless(_)));
+                if kind == SessionKind::Up
+                    && serverless
+                    && matches!(mode.incoming(), ServiceMode::Split | ServiceMode::Mirror)
+                {
+                    eprintln!(
+                        "{service_name}: serverless targets can't split queues or branch \
+                         databases, so `{mode_name}` mode runs without either",
+                    );
+                }
                 let asks_for_branches = mode
                     .db_branching
                     .is_some_and(|branching| branching != DbBranching::Off);
                 if kind == SessionKind::Up
+                    && serverless.not()
                     && asks_for_branches
                     && is_single_workload(service.config.target.path.as_ref()).not()
                     && service.config.feature.db_branches.is_empty()
@@ -1983,7 +2065,7 @@ pub enum PreviewRun {
 /// Why [`UpConfig::select_preview_images`] gives a service no preview.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SkipReason {
-    /// [`PreviewRun::Up`]: the service has no image.
+    /// [`PreviewRun::Up`]: the service has a target and no image.
     NoImage,
     /// [`PreviewRun::Sync`]: the service has `skip: true` and no image.
     Skip,
@@ -3730,6 +3812,112 @@ mod tests {
         ));
     }
 
+    // -- Preview without a target --
+
+    /// The config `mirrord preview up` generates for the one service of `yaml`.
+    fn preview_service(yaml: &str) -> LayerConfig {
+        parse(yaml)
+            .assemble_services(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+                SessionKind::Preview,
+            )
+            .unwrap()
+            .remove(0)
+            .config
+    }
+
+    /// Whether the targetless check reports `feature.network.incoming` as ignored for `config`.
+    fn warns_about_incoming(config: &LayerConfig) -> bool {
+        let mut context = ConfigContext::default().strict_env(true);
+        config.verify_for_targetless_preview(&mut context).unwrap();
+        context
+            .into_warnings()
+            .iter()
+            .any(|warning| warning.contains("`feature.network.incoming` is ignored"))
+    }
+
+    /// A service under `mirrord preview up`, with `extra` as more settings of the service. Its
+    /// branch comes from `config_patch`, as `mirrord up` adds none to a service without a target.
+    fn preview_yaml(target: &str, extra: &str) -> String {
+        format!(
+            r#"
+            services:
+              svc:
+                target: {target}
+                run:
+                  command: ["echo"]
+                {extra}
+                config_patch:
+                  feature:
+                    db_branches:
+                      - type: pg
+                        connection:
+                          url:
+                            type: secret
+                            name: pg
+                            key: url
+            "#
+        )
+    }
+
+    /// Every preview session runs as the `split` mode, which sets the incoming mode to steal. A
+    /// service without a target has nothing to steal for, and the targetless check compares
+    /// incoming against the default, so a service that set no incoming must not be told
+    /// `feature.network.incoming` is ignored.
+    #[test]
+    fn targetless_preview_does_not_report_incoming_nobody_set() {
+        let config = preview_service(&preview_yaml("none", ""));
+
+        assert!(!warns_about_incoming(&config));
+    }
+
+    /// Incoming the service did set is still reported, and a patch keeps the mode it asked for.
+    #[test]
+    fn targetless_preview_reports_incoming_the_service_set() {
+        let filter = preview_service(&preview_yaml(
+            "none",
+            r#"http_filter: { header_filter: "x-user: me" }"#,
+        ));
+        assert!(warns_about_incoming(&filter));
+
+        let ignore_ports = preview_service(&preview_yaml("none", "ignore_ports: [8080]"));
+        assert!(warns_about_incoming(&ignore_ports));
+
+        let patched = preview_service(
+            r#"
+            services:
+              svc:
+                target: none
+                run:
+                  command: ["echo"]
+                config_patch:
+                  feature:
+                    network:
+                      incoming: off
+                    db_branches:
+                      - type: pg
+                        connection:
+                          url:
+                            type: secret
+                            name: pg
+                            key: url
+            "#,
+        );
+        assert_eq!(patched.feature.network.incoming.mode, IncomingMode::Off);
+        assert!(warns_about_incoming(&patched));
+    }
+
+    /// A preview with a target keeps the mode its pods need to get traffic.
+    #[test]
+    fn targeted_preview_keeps_the_split_incoming_mode() {
+        let config = preview_service(&preview_yaml("{ path: \"deployment/web\" }", ""));
+
+        assert_eq!(config.feature.network.incoming.mode, IncomingMode::Steal);
+    }
+
     // -- Preview image selection --
 
     fn preview_fixture() -> UpConfig {
@@ -3779,6 +3967,67 @@ mod tests {
                 (Arc::from("built"), SkipReason::NoImage),
                 (Arc::from("plain"), SkipReason::NoImage),
                 (Arc::from("skipped-sync"), SkipReason::NoImage),
+            ]
+        );
+    }
+
+    /// A service with `target: none` whose patch has the operator provision branch databases is
+    /// those databases: no pod runs, so there is no image to wait for, and `mirrord preview up`
+    /// previews it as it is. A service without a target and without such branches (none, or
+    /// only a local Redis one) has nothing to preview, so it is skipped for lack of an image like
+    /// a service with a target.
+    #[test]
+    fn preview_up_keeps_a_service_without_a_target_only_with_operator_branches() {
+        let mut config = parse(
+            r#"
+            services:
+              orders-db:
+                target: none
+                config_patch:
+                  feature:
+                    db_branches:
+                      - type: pg
+                        connection:
+                          url: { type: secret, name: pg, key: url }
+                run:
+                  command: ["echo"]
+              cache:
+                target: none
+                config_patch:
+                  feature:
+                    db_branches:
+                      - id: scratch
+                        type: redis
+                        location: local
+                        connection:
+                          url: { type: env, variable: REDIS_URL }
+                run:
+                  command: ["echo"]
+              worker:
+                target: none
+                run:
+                  command: ["echo"]
+              web:
+                run:
+                  command: ["echo"]
+            "#,
+        );
+
+        let images = config
+            .select_preview_images(&[], &ConfigContext::default(), PreviewRun::Up)
+            .unwrap();
+
+        assert_eq!(
+            service_names(&config),
+            HashSet::from(["orders-db".to_owned()])
+        );
+        assert!(images.picked.is_empty());
+        assert_eq!(
+            images.skipped,
+            vec![
+                (Arc::from("cache"), SkipReason::NoImage),
+                (Arc::from("web"), SkipReason::NoImage),
+                (Arc::from("worker"), SkipReason::NoImage),
             ]
         );
     }
