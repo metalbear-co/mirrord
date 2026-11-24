@@ -13,6 +13,7 @@ use super::{
     error::RedirectorTaskError,
     task::{RedirectRequest, TaskError},
 };
+use crate::http::RawTcpReason;
 
 /// Handle to a running [`RedirectorTask`](super::task::RedirectorTask).
 ///
@@ -102,6 +103,8 @@ pub enum StolenTraffic {
         join_handle_tx: oneshot::Sender<JoinHandle<()>>,
         /// Used for gracefully shutting down the IO task.
         shutdown: CancellationToken,
+        /// Why the connection is handled as raw TCP rather than HTTP.
+        reason: RawTcpReason,
     },
     Http(RedirectedHttp),
 }

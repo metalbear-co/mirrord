@@ -129,7 +129,7 @@ mod test {
 
     /// A connection accepted before any subscription that stays idle past
     /// `http_detection_timeout` is a documented limitation of
-    /// [`RedirectorTaskConfig::handle_unsubscribed_connections`]: detection
+    /// [`RedirectorTaskConfig::http_detect_inactive_ports`]: detection
     /// gives up, the connection is committed to raw TCP passthrough for its lifetime, and a
     /// subscription arriving afterwards cannot steal its requests, even though the client only
     /// sends its HTTP request after that point.
@@ -142,7 +142,7 @@ mod test {
         let RemoteLayerIncoming { redirector, sender } = RemoteLayerIncoming::new();
         let config = RedirectorTaskConfig {
             http_detection_timeout: Duration::from_millis(20),
-            handle_unsubscribed_connections: true,
+            http_detect_inactive_ports: true,
             ..RedirectorTaskConfig::from_env()
         };
         let (task, mut steal_handle, _) =
@@ -219,7 +219,7 @@ mod test {
             Default::default(),
             Default::default(),
             RedirectorTaskConfig {
-                handle_unsubscribed_connections: true,
+                http_detect_inactive_ports: true,
                 ..RedirectorTaskConfig::from_env()
             },
         );

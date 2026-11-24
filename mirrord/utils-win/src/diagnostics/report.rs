@@ -1012,7 +1012,10 @@ mod tests {
         );
 
         let mut archive = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
-        let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+        let names: Vec<String> = archive
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect();
 
         // Root focus report, every incident's own folder, and the shared log exactly once.
         assert!(names.iter().any(|n| n == "crash-report.txt"));

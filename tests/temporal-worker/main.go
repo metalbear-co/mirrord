@@ -215,15 +215,17 @@ func probeAlreadyStarted(c client.Client, taskQueue, workflowID string) {
 }
 
 // dialWithRetry keeps dialing until a connection succeeds or `timeout` passes, the same
-// loop the starter app uses.
+// loop the starter app uses. The deadline bounds each dial too, so one that hangs instead of
+// failing cannot hold the worker past it; it only covers connecting, not the client's lifetime.
 func dialWithRetry(options client.Options, timeout time.Duration) (client.Client, error) {
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	for {
-		c, err := client.Dial(options)
+		c, err := client.DialContext(ctx, options)
 		if err == nil {
 			return c, nil
 		}
-		if time.Now().After(deadline) {
+		if ctx.Err() != nil {
 			return nil, err
 		}
 		log.Printf("Temporal dial failed, retrying: %v", err)

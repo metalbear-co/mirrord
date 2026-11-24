@@ -42,6 +42,7 @@ use feature::{
         },
         outgoing::OutgoingFilterConfig,
     },
+    preview::PreviewTtl,
     split_queues::QueueKind,
 };
 use k8s_openapi::api::core::v1::PodSpec;
@@ -621,6 +622,22 @@ pub struct LayerConfig {
     /// }
     /// ```
     ///
+    /// A session started with [`share`](#root-share) doesn't need that `header_filter`, because
+    /// it filters on its key on its own: it steals the HTTP requests whose W3C `baggage` header is
+    /// exactly `mirrord-session=<key>`, because share-ingress sets that header on every request
+    /// it forwards, replacing any `baggage` the request had. A custom `http_filter` still applies,
+    /// so a shared session steals a request that matches the filter or that carries the key.
+    /// Without a custom filter, a shared session steals only the requests that carry the key, not
+    /// the whole port. `http_filter.ports` still limits the ports. A session without `share`
+    /// keeps its configured filter, so a service that the shared service calls, such as
+    /// `payments` behind a shared `web`, runs without `share` and with the `header_filter` above,
+    /// which also matches a `baggage` header that carries other members.
+    ///
+    /// The key of a shared session may hold only printable ASCII characters other than a space,
+    /// `"`, `%`, `,`, `;` and `\`, because share-ingress sends it as it is in `baggage`, where
+    /// the others would end the value or change its meaning: receivers percent-decode a value
+    /// with `%`. A service that forwards the member must keep its value as it is.
+    ///
     /// The key itself is [templated](#root-templating-key), so instead of a literal it can be
     /// derived from another variable. Using `git_branch` gives each branch its own session
     /// without passing a key per run:
@@ -638,6 +655,34 @@ pub struct LayerConfig {
     /// 4. Fallback: A unique key is randomly generated if no other option is provided
     #[config(nested, plan = Oss)]
     pub key: EnvKey,
+
+    /// ## share {#root-share}
+    ///
+    /// Prints a temporary HTTPS link to this session. People who open the link reach the service
+    /// on your machine, and the target's own service in the cluster whenever a request doesn't
+    /// reach your machine, so the cluster's access rules for share links protect both. Needs the
+    /// Team or Enterprise mirrord operator, share-ingress in the cluster, and
+    /// `feature.network.incoming.mode` set to `"steal"`. Share links don't work with
+    /// `feature.copy_target` yet.
+    ///
+    /// The link reaches the target through the Kubernetes Service named after it, so the namespace
+    /// must have a Service with the target's name, such as Service `web` for target
+    /// `deployment/web`. The link opens the first port in `feature.network.incoming.ports` that
+    /// this Service exposes: with `ports = [3000, 9000]` and a Service that exposes only 9000, the
+    /// link opens 9000. Without that list, the link opens one of the ports that the target
+    /// container declares, that mirrord steals and that the Service leads to: the one behind the
+    /// Service's port 80, or else behind the Service's first such port. mirrord prints the link
+    /// before your application starts. Requests through the link reach your application while it
+    /// listens on that port, and the service running in the cluster otherwise: before your
+    /// application listens, after it stops listening, until the session ends after mirrord exits,
+    /// and on target pods that the session's agent doesn't run on. The link lasts as long as the
+    /// session; starting the session again creates a different link.
+    ///
+    /// `mirrord exec --share` turns it on, and so does the environment variable
+    /// `MIRRORD_SHARE=true`. Other commands, such as `mirrord dump` and `mirrord port-forward`,
+    /// refuse to run with it.
+    #[config(env = "MIRRORD_SHARE", default = false, plan = Team)]
+    pub share: bool,
 
     /// ## traceparent {#root-traceparent}
     ///
@@ -699,6 +744,33 @@ impl LayerConfig {
         let encoded = BASE64_STANDARD.encode(serialized);
 
         Ok(encoded)
+    }
+
+    /// Serializes the resolved config in the shape [`LayerFileConfig`] can parse.
+    ///
+    /// `verify-config --resolved` is also a way to run mirrord's config generation from the
+    /// outside: users can inspect the final `resolved_config`, save it to a file, and then use it
+    /// with `mirrord exec -f <file>`. `mirrord up` also merges its services' patches into this
+    /// shape before it parses the result as a config file again.
+    ///
+    /// The file schema has `deny_unknown_fields`, and it doesn't accept one thing that the resolved
+    /// config holds, so this patches just the JSON instead of the config types:
+    /// - `key`: [`LayerConfig`] stores it as an [`EnvKey`], so normal serialization keeps whether
+    ///   it was generated or provided. Config files only accept `key` as a plain string, so it is
+    ///   replaced by its string. A `key_generated` field wouldn't work either: once the user saves
+    ///   the output to a file, `mirrord exec` parses it as [`LayerFileConfig`], which rejects the
+    ///   unknown field.
+    ///
+    /// [`Self::encode`] doesn't use this: the layer and the proxies need `key` as it is.
+    pub fn as_file_config(&self) -> Result<serde_json::Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "key".to_owned(),
+                serde_json::Value::String(self.key.as_str().to_owned()),
+            );
+        }
+        Ok(value)
     }
 
     /// Resolves the config from the environment variables.
@@ -946,10 +1018,98 @@ impl LayerConfig {
         Ok(())
     }
 
+    /// The session key that this session's HTTP filter matches in addition to its own filter, set
+    /// only for a [`share`](Self::share)d session in mode `steal` (see
+    /// [`HttpFilterConfig::for_shared_session`](feature::network::incoming::http_filter::HttpFilterConfig::for_shared_session)).
+    ///
+    /// share-ingress tags each request it forwards with this key, so a shared session must steal
+    /// those requests while other cluster traffic keeps reaching the target. Sessions that are not
+    /// shared keep their configured filter, or steal the whole port when none is set.
+    ///
+    /// It is computed from the final config instead of stored, so a profile that changes
+    /// `incoming.mode`, or a later `--share`, can't leave a stale value.
+    pub fn shared_session_key(&self) -> Option<&str> {
+        (self.share && self.feature.network.incoming.is_steal()).then(|| self.key.as_str())
+    }
+
+    /// Verifies the settings of a session started with [`share`](Self::share), as part of
+    /// [`Self::verify`].
+    ///
+    /// Its errors are [`ConfigError::Share`], whose messages are written for the user, so the CLI
+    /// shows them as they are.
+    fn verify_share(&self) -> Result<(), ConfigError> {
+        if self.share.not() {
+            return Ok(());
+        }
+        let incoming = &self.feature.network.incoming;
+        if incoming
+            .ports
+            .as_ref()
+            .is_some_and(|ports| ports.is_empty())
+        {
+            return Err(ConfigError::Share("The share link has no port to open, because feature.network.incoming.ports is empty. Add the port that the link should open to feature.network.incoming.ports.".to_owned()));
+        }
+        if incoming.is_steal().not() {
+            return Err(ConfigError::Share("Can't share this session yet: share links need incoming mode 'steal'. Support for mirror and incoming - off is planned, contact us in case you need it sooner.".to_owned()));
+        }
+        if self.operator == Some(false) {
+            return Err(ConfigError::Share("Share links need a Team or Enterprise mirrord operator, and `operator` is `false` in your configuration. Set it to `true` to share this session.".to_owned()));
+        }
+        if self.feature.copy_target.enabled {
+            return Err(ConfigError::Share(
+                "Share links aren't supported with copy_target yet.".to_owned(),
+            ));
+        }
+        // share-ingress sends the key as it is in `baggage`, and the shared session's filter
+        // matches it as it is, so the key must be a valid baggage value that no receiver decodes.
+        if let Some(invalid) = self
+            .key
+            .as_str()
+            .chars()
+            .find(|c| c.is_ascii_graphic().not() || matches!(c, '"' | '%' | ',' | ';' | '\\'))
+        {
+            return Err(ConfigError::Share(format!(
+                "The session key can't be shared, because it contains {invalid:?}. A shared session's key may hold only printable ASCII characters other than a space, '\"', '%', ',', ';' and '\\'."
+            )));
+        }
+        if let Some(ports) = &incoming.ports {
+            let reasons: Vec<_> = ports
+                .iter()
+                .filter_map(|&port| {
+                    let reason = if port == 0 {
+                        "it is 0"
+                    } else if incoming.ignore_ports.contains(&port) {
+                        "feature.network.incoming.ignore_ports contains it"
+                    } else if incoming
+                        .http_filter
+                        .ports
+                        .as_ref()
+                        .is_some_and(|filter_ports| filter_ports.contains(&port).not())
+                    {
+                        "feature.network.incoming.http_filter.ports doesn't contain it"
+                    } else {
+                        return None;
+                    };
+                    Some(format!("port {port}, because {reason}"))
+                })
+                .collect();
+            if reasons.len() == ports.len() {
+                return Err(ConfigError::Share(format!(
+                    "The share link can't open any port in feature.network.incoming.ports: {}. Add a port that the link can open to feature.network.incoming.ports.",
+                    reasons.join("; ")
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
     pub fn verify(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+        self.verify_share()?;
+
         if let Some(Target::Label(target)) = &self.target.path {
             target.verify()?;
 
@@ -1295,13 +1455,34 @@ impl LayerConfig {
 
         self.feature.network.dns.verify(context)?;
         self.feature.network.outgoing.verify(context)?;
-        self.feature.split_queues.verify(context)?;
 
-        if self.feature.kafka_branch && matches!(self.target.path, Some(Target::Serverless(_))) {
-            return Err(ConfigError::Conflict(
-                "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
-            ));
+        if matches!(self.target.path, Some(Target::Serverless(_))) {
+            if self.feature.kafka_branch {
+                return Err(ConfigError::Conflict(
+                    "`feature.kafka_branch` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.split_queues.is_set() {
+                return Err(ConfigError::Conflict(
+                    "`feature.split_queues` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.db_branches.is_empty().not() {
+                return Err(ConfigError::Conflict(
+                    "`feature.db_branches` is not supported with serverless targets.".to_owned(),
+                ));
+            }
+
+            if self.feature.copy_target.enabled {
+                return Err(ConfigError::Conflict(
+                    "`feature.copy_target` is not supported with serverless targets.".to_owned(),
+                ));
+            }
         }
+
+        self.feature.split_queues.verify(context)?;
 
         if self.feature.kafka_branch
             && self
@@ -1410,7 +1591,14 @@ impl LayerConfig {
     ///
     /// This is used to notify the user about settings that don't make sense in the context of
     /// preview environments, since it's already running in the cluster.
-    pub fn verify_for_preview_env(&self, context: &mut ConfigContext) -> Result<(), ConfigError> {
+    ///
+    /// Clears `share`, so a config file written for `mirrord exec --share` also starts a preview:
+    /// a preview gets its link from its `PreviewSession`, and the checks and operator features
+    /// of a shared `mirrord exec` session don't apply to it.
+    pub fn verify_for_preview_env(
+        &mut self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
         let ignored = |field: &str| {
             format!("`{field}` is ignored in preview environments and will not be used.")
         };
@@ -1456,8 +1644,18 @@ impl LayerConfig {
             context.add_warning(ignored("feature.network.incoming.http_filter.ports"));
         }
 
+        // A branch-only preview (branches the operator provisions, no target) sends no incoming,
+        // so its steal check runs on the config as it is sent, below, and no filter is ever used.
+        // Decided the way `preview start` decides it: a local Redis branch alone makes no preview
+        // without a target. The pod-bound settings themselves are checked in
+        // `verify_for_targetless_preview`, by the commands that start such a preview: a missing
+        // `-t` on `preview stop` or `status` is not a preview without a target.
+        let branch_only =
+            self.target.is_targetless() && self.feature.db_branches.any_provisioned_by_operator();
+
         if matches!(self.feature.network.incoming.mode, IncomingMode::Steal)
             && !self.feature.network.incoming.http_filter.is_filter_set()
+            && !branch_only
         {
             context.add_warning(format!(
                 "using default http header filter: '^baggage: .*mirrord-session={}.*$'.",
@@ -1493,6 +1691,13 @@ impl LayerConfig {
 
         if self.feature.hostname != default.feature.hostname {
             context.add_warning(ignored("feature.hostname"));
+        }
+
+        // share - unsupported
+
+        if self.share {
+            context.add_warning(ignored("share"));
+            self.share = false;
         }
 
         // cronjob targets - the preview is a CronJob, not a long-running pod, so nothing can
@@ -1544,7 +1749,140 @@ impl LayerConfig {
             ));
         }
 
+        // The general checks refuse steal for a targetless agent, but a branch-only preview
+        // sends no incoming at all (the CLI drops it, and `verify_for_targetless_preview`
+        // reports it as ignored), so check the config as it is sent: with the default incoming.
+        // This keeps `target: "targetless"` and no `target` behaving the same.
+        if branch_only {
+            let mut as_sent = self.clone();
+            as_sent.feature.network.incoming = default.feature.network.incoming;
+            return as_sent.verify(context);
+        }
+
         self.verify(context)
+    }
+
+    /// Checks the settings only a preview pod could use, for a preview that `start` or `up`
+    /// decided runs without a target: it provisions its branch databases and nothing else, so
+    /// nothing can receive traffic, consume queues, mount files, scale, or idle. Idle and an
+    /// infinite TTL are refused, the rest is reported as ignored.
+    ///
+    /// Separate from [`Self::verify_for_preview_env`] because that one also runs for `stop`,
+    /// `status`, `logs` and `diff`, which take no target at all: a config that started a
+    /// targeted preview with `idle` must still stop it when `-t` is left out.
+    pub fn verify_for_targetless_preview(
+        &self,
+        context: &mut ConfigContext,
+    ) -> Result<(), ConfigError> {
+        let default = Self::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("default config must be valid");
+
+        if self.feature.preview.idle.is_enabled() {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.idle` cannot be used in a preview without a target: it \
+                 only provisions branch databases and has no pods to scale."
+                    .to_owned(),
+            ));
+        }
+
+        // The TTL is the only thing that ends a preview without a target: it has no pod to
+        // watch, nothing idles or pauses it, so with no TTL its branch databases would stay
+        // up until someone deletes the session by hand. The operator refuses it as well.
+        if self.feature.preview.resolved_ttl_secs() >= PreviewTtl::INFINITE_TTL_SECS {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.ttl_secs` (or `ttl_mins`) cannot be infinite in a preview without a \
+                 target: the TTL is what ends it and frees its branch databases, as it runs \
+                 no pod that could be stopped instead. Set a finite TTL, or set a `target`."
+                    .to_owned(),
+            ));
+        }
+
+        let ignored_without_target = |field: &str, because: &str| {
+            format!(
+                "`{field}` is ignored in a preview without a target: it only provisions \
+                 branch databases and runs no pod {because}."
+            )
+        };
+
+        if self.feature.env != default.feature.env {
+            context.add_warning(ignored_without_target(
+                "feature.env",
+                "to set the variables in",
+            ));
+        }
+
+        if self.feature.network.incoming != default.feature.network.incoming {
+            context.add_warning(ignored_without_target(
+                "feature.network.incoming",
+                "to receive traffic",
+            ));
+        }
+
+        if self.feature.split_queues.is_set() {
+            context.add_warning(ignored_without_target(
+                "feature.split_queues",
+                "to route messages to",
+            ));
+        }
+
+        if self.feature.kafka_branch {
+            context.add_warning(ignored_without_target(
+                "feature.kafka_branch",
+                "to point at the branch broker",
+            ));
+        }
+
+        if self.feature.preview.replicas != default.feature.preview.replicas {
+            context.add_warning(ignored_without_target(
+                "feature.preview.replicas",
+                "to scale",
+            ));
+        }
+
+        if self.feature.preview.labels != default.feature.preview.labels {
+            context.add_warning(ignored_without_target(
+                "feature.preview.labels",
+                "to copy the target's labels to",
+            ));
+        }
+
+        if self.feature.preview.image.is_some() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.image",
+                "to run the image in",
+            ));
+        }
+
+        if !self.feature.preview.config_mounts.is_empty() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.config_mounts",
+                "to mount them in",
+            ));
+        }
+
+        if !self.feature.preview.secret_mounts.is_empty() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.secret_mounts",
+                "to mount them in",
+            ));
+        }
+
+        // The CLI cannot see the branch profile, so this is the earliest word the user gets: the
+        // operator refuses the branch only after `start` has created it, when a targeted sibling
+        // of a `mirrord up` run may already have replaced its preview.
+        for (position, branch) in self.feature.db_branches.iter().enumerate() {
+            if branch.relies_on_profile_source_config_map() {
+                context.add_warning(format!(
+                    "`feature.db_branches[{position}]` reads a `configmap` param without naming \
+                     the ConfigMap, so it falls back to the branch profile's `sourceConfigMap`; in \
+                     a preview without a target the operator refuses the branch if that one is a \
+                     pod volume, once the session is created. Name the ConfigMap in the param \
+                     (`\"configmap\": \"<name>\"`), or set a `target`."
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1961,6 +2299,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            share: None,
             feature: Some(FeatureFileConfig {
                 network: Some(ToggleableConfig::Config(NetworkFileConfig {
                     incoming: Some(ToggleableConfig::Config(IncomingFileConfig::Simple(Some(
@@ -1990,6 +2329,7 @@ mod tests {
         let config = config_type.parse(input);
 
         let expect = LayerFileConfig {
+            share: None,
             key: None,
             accept_invalid_certificates: Some(false),
             kubeconfig: None,
@@ -2268,6 +2608,46 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(&error, ConfigError::ConflictAt { setting, .. } if setting == "feature.network.incoming.http_filter"),
+            "{error}"
+        );
+    }
+
+    /// Serverless sessions can't split queues, branch databases, or copy the target, so asking for either must fail
+    /// rather than leave the local process on the shared queues and databases. The docs quote
+    /// these messages.
+    #[rstest]
+    #[case::kafka_branch(
+        json!({ "kafka_branch": true }),
+        "`feature.kafka_branch` is not supported with serverless targets."
+    )]
+    #[case::split_queues(
+        json!({ "split_queues": { "queue": { "queue_type": "SQS", "filter": { "metadata": "^a$" } } } }),
+        "`feature.split_queues` is not supported with serverless targets."
+    )]
+    #[case::db_branches(
+        json!({ "db_branches": [{ "type": "pg", "connection": { "url": { "type": "env", "variable": "DB_URL" } } }] }),
+        "`feature.db_branches` is not supported with serverless targets."
+    )]
+    #[case::copy_target(
+        json!({ "copy_target": true }),
+        "`feature.copy_target` is not supported with serverless targets."
+    )]
+    fn verify_rejects_unsupported_serverless_features(
+        #[case] feature: serde_json::Value,
+        #[case] expected: &str,
+    ) {
+        let config: LayerFileConfig = serde_json::from_value(json!({
+            "target": "serverless/service",
+            "feature": feature,
+        }))
+        .unwrap();
+        let mut context = ConfigContext::default().strict_env(true);
+        let error = config
+            .generate_config(&mut context)
+            .and_then(|config| config.verify(&mut context))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ConfigError::Conflict(message) if message == expected),
             "{error}"
         );
     }
@@ -2974,13 +3354,247 @@ mod tests {
         );
 
         let mut context = ConfigContext::default();
-        let resolved = config
+        let mut resolved = config
             .generate_config(&mut context)
             .expect("config generation should succeed before verification");
 
         resolved
             .verify_for_preview_env(&mut context)
             .expect("a label target should be accepted for preview environments");
+    }
+
+    /// A preview without a target only provisions its branch databases, so the pod-bound
+    /// settings are reported as ignored and idle, which needs a pod to scale, is refused.
+    #[test]
+    fn targetless_preview_with_branches_warns_about_pod_settings() {
+        // Written both ways: `target` left out and `target: "targetless"`. Steal would be
+        // refused for a targetless agent, but a branch-only preview never sends incoming, which
+        // the general preview check knows; the pod-bound settings are the start check's.
+        for target in ["", r#""target": "targetless","#] {
+            let config = ConfigType::Json.parse(&format!(
+                r#"{{
+                    {target}
+                    "feature": {{
+                        "preview": {{
+                            "replicas": 2,
+                            "config_mounts": [{{ "from_file": "./app.yaml", "mount_at": "/etc/app.yaml" }}]
+                        }},
+                        "network": {{ "incoming": "steal" }},
+                        "kafka_branch": true,
+                        "db_branches": [{{
+                            "type": "pg",
+                            "connection": {{ "url": {{ "type": "secret", "name": "pg", "key": "url" }} }}
+                        }}]
+                    }}
+                }}"#,
+            ));
+
+            let mut context = ConfigContext::default();
+            let mut resolved = config
+                .generate_config(&mut context)
+                .expect("config generation should succeed before verification");
+            resolved
+                .verify_for_preview_env(&mut context)
+                .expect("branches with self-contained sources need no target");
+            resolved
+                .verify_for_targetless_preview(&mut context)
+                .expect("pod-bound settings are only ignored, not refused");
+
+            let warnings = context.into_warnings();
+            for field in [
+                "feature.preview.replicas",
+                "feature.network.incoming",
+                "feature.kafka_branch",
+                "feature.preview.config_mounts",
+            ] {
+                assert!(
+                    warnings
+                        .iter()
+                        .any(|warning| warning.contains(&format!("`{field}` is ignored"))),
+                    "no warning for {field} with target {target:?}: {warnings:?}"
+                );
+            }
+        }
+
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "idle": { "sleep_after_secs": 60 } },
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect_err("idle has no pod to scale without a target");
+        assert!(
+            matches!(&error, ConfigError::Conflict(message) if message.contains("without a target")),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A preview without a target sends no `env`, `replicas` or `labels` to the operator, so the
+    /// start check reports each of them as ignored like every other pod-only setting, and a
+    /// `feature.env.override` never goes unmentioned. A `configmap` param without a locator
+    /// passes the target pod check, but the operator refuses it after the session exists when
+    /// the profile's `sourceConfigMap` is a pod volume, so the check warns that it depends on the
+    /// profile.
+    #[test]
+    fn targetless_preview_warns_about_env_labels_and_profile_configmaps() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "env": { "override": { "DATABASE_URL": "postgres://branch/app" } },
+                    "preview": { "labels": { "include": ["app"] } },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "params": {
+                            "host": { "key": "host" },
+                            "password": { "secret": "pg", "key": "password" }
+                        } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect("env, labels and a profile ConfigMap are only warned about");
+
+        let warnings = context.into_warnings();
+        for field in ["feature.env", "feature.preview.labels"] {
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.contains(&format!("`{field}` is ignored"))),
+                "no warning for {field}: {warnings:?}"
+            );
+        }
+        assert!(
+            warnings.iter().any(|warning| {
+                warning.contains("`feature.db_branches[0]`")
+                    && warning.contains("branch profile's `sourceConfigMap`")
+            }),
+            "no warning for the profile ConfigMap: {warnings:?}"
+        );
+    }
+
+    /// A branch-only preview with `incoming: steal` and no filter sends no incoming at all, so
+    /// the "using default http header filter" warning would contradict the "`feature.network.incoming`
+    /// is ignored" one the start check adds right after it.
+    #[test]
+    fn branch_only_preview_does_not_warn_about_the_default_header_filter() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "network": { "incoming": "steal" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let mut resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("a branch-only preview never sends incoming, so steal is not refused");
+
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("default http header filter")),
+            "a filter nothing uses was warned about: {warnings:?}"
+        );
+    }
+
+    /// A preview without a target has only its TTL to end it: no pod, no idle, no pause. An
+    /// infinite TTL would keep its branch databases up until someone deletes the session by
+    /// hand, so the config check refuses it before anything is created.
+    #[test]
+    fn targetless_preview_with_branches_refuses_an_infinite_ttl() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "ttl_secs": "infinite" },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        let error = resolved
+            .verify_for_targetless_preview(&mut context)
+            .expect_err("an infinite TTL must be refused without a target");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be infinite in a preview without a target"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// `preview stop`, `status`, `logs` and `diff` load the config through the same preview check
+    /// as `start`, and take no target: `preview stop -f cfg.json` with no `-t` deletes every
+    /// session under the key. A config that started a targeted preview with `idle` and an
+    /// infinite TTL is valid, so the same config with `-t` left out must still load for the stop;
+    /// only the start check, run once a preview is known to have no target, refuses it.
+    #[test]
+    fn stop_without_a_target_does_not_run_the_targetless_start_checks() {
+        let config = ConfigType::Json.parse(
+            r#"{
+                "feature": {
+                    "preview": { "ttl_secs": "infinite", "idle": { "sleep_after_secs": 60 } },
+                    "db_branches": [{
+                        "type": "pg",
+                        "connection": { "url": { "type": "secret", "name": "pg", "key": "url" } }
+                    }]
+                }
+            }"#,
+        );
+
+        let mut context = ConfigContext::default();
+        let mut resolved = config
+            .generate_config(&mut context)
+            .expect("config generation should succeed before verification");
+        resolved
+            .verify_for_preview_env(&mut context)
+            .expect("the config of a running targeted preview must load for its stop");
+        let warnings = context.into_warnings();
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| !warning.contains("without a target")),
+            "the stop flow is not a preview without a target: {warnings:?}"
+        );
+
+        resolved
+            .verify_for_targetless_preview(&mut ConfigContext::default())
+            .expect_err("the start check still refuses idle and an infinite TTL");
     }
 
     /// Serializes the magic.aws tests that mutate the global `HOME` /

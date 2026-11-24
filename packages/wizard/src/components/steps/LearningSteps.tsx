@@ -3,11 +3,30 @@ import { ChevronLeft, ChevronRight, CheckCircle } from 'lucide-react'
 import { Button, Card, CardContent, CardFooter } from '@metalbear/ui'
 import mirrordArchitecture from '../../assets/mirrord-architecture.svg'
 import flowDiagram from '../../assets/flow-diagram.png'
+import { useModes } from '../../lib/queries'
 import { strings } from '../../strings'
 
 interface LearningStepsProps {
   onComplete: () => void
   onSkip: () => void
+}
+
+/** The modes, with the descriptions `mirrord up init` shows. */
+const ModeList = () => {
+  const modes = useModes()
+  return (
+    <ul className="space-y-3">
+      {(modes.data ?? []).map((mode) => (
+        <li key={mode.id} className="flex gap-3 text-sm">
+          <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
+          <div>
+            <strong className="text-foreground">{mode.label}</strong>
+            <span className="text-muted-foreground"> — {mode.description}</span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 interface Step {
@@ -55,44 +74,7 @@ const steps: Step[] = [
         <p className="text-foreground text-sm leading-relaxed">
           {strings.learningSteps.modesBody}
         </p>
-        <ul className="space-y-3">
-          <li className="flex gap-3 text-sm">
-            <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
-            <div>
-              <strong className="text-foreground">
-                {strings.learningSteps.modeMirror}
-              </strong>
-              <span className="text-muted-foreground">
-                {' '}
-                {strings.learningSteps.modeMirrorDesc}
-              </span>
-            </div>
-          </li>
-          <li className="flex gap-3 text-sm">
-            <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
-            <div>
-              <strong className="text-foreground">
-                {strings.learningSteps.modeSteal}
-              </strong>
-              <span className="text-muted-foreground">
-                {' '}
-                {strings.learningSteps.modeStealDesc}
-              </span>
-            </div>
-          </li>
-          <li className="flex gap-3 text-sm">
-            <span className="bg-primary mt-1.5 h-2 w-2 flex-shrink-0 rounded-full" />
-            <div>
-              <strong className="text-foreground">
-                {strings.learningSteps.modeReplace}
-              </strong>
-              <span className="text-muted-foreground">
-                {' '}
-                {strings.learningSteps.modeReplaceDesc}
-              </span>
-            </div>
-          </li>
-        </ul>
+        <ModeList />
       </div>
     ),
   },

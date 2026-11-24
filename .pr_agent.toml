@@ -11,8 +11,19 @@
 # `gh pr create --label no-qodo` alone is not safe: gh creates the PR before
 # adding labels, so an automatic review can start before the label is applied.
 ignore_pr_labels = ["no-qodo"]
+# Regular expressions matched against the PR author's username. These bots open
+# release and dependency PRs, which are not worth a metered review. They are
+# listed by name so that PRs opened by coding agents (the Linear agent, Copilot)
+# still get reviewed. Each pattern is anchored at both ends, with the `[bot]`
+# suffix optional, so that it cannot match another account sharing the prefix.
+ignore_pr_authors = [
+  '^cubby-mb(\[bot\])?$',
+  '^dependabot(\[bot\])?$',
+  '^github-actions(\[bot\])?$',
+]
 
 [github_app]
-# Skip PRs opened by GitHub bot accounts (release and dependency bots). This is
-# Qodo's default, stated explicitly so the intent is visible.
-ignore_bot_pr = true
+# Qodo's default is to skip every PR opened by a bot account, coding agents
+# included. `ignore_pr_authors` above names the bots to skip instead. For GitHub
+# this key is only read from `[github_app]`.
+ignore_bot_pr = false

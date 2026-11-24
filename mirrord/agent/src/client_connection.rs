@@ -6,7 +6,7 @@ use std::{
 
 use actix_codec::Framed;
 use futures::{SinkExt, TryStreamExt};
-use mirrord_protocol::{ClientMessage, DaemonCodec, DaemonMessage};
+use mirrord_protocol::{ClientMessage, DaemonMessage, MeasuredDaemonCodec};
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_tls_util::{GetSanError, HasSubjectAlternateNames};
 use thiserror::Error;
@@ -19,7 +19,7 @@ use tokio_rustls::{
 use tracing::Level;
 use x509_parser::{error::PEMError, nom, pem};
 
-use crate::util::ClientId;
+use crate::{metrics::Buffered, util::ClientId};
 
 /// Wrapper over [`TlsConnector`] that can make successful TLS connections only to the server using
 /// a predefined certificate.
@@ -113,9 +113,12 @@ impl ClientConnection {
                     .connect(connector.server_name.clone(), stream)
                     .await?;
 
-                ConnectionFramed::Tls(Box::new(Framed::new(tls_stream, DaemonCodec::default())))
+                ConnectionFramed::Tls(Box::new(Framed::new(
+                    tls_stream,
+                    MeasuredDaemonCodec::default(),
+                )))
             }
-            None => ConnectionFramed::Tcp(Framed::new(stream, DaemonCodec::default())),
+            None => ConnectionFramed::Tcp(Framed::new(stream, MeasuredDaemonCodec::default())),
         };
 
         Ok(Self { framed, client_id })
@@ -131,13 +134,19 @@ impl ClientConnection {
     }
 
     /// Sends a [`DaemonMessage`] to the client.
+    ///
+    /// The message's bytes stay counted until this returns. On the [`Framed`] connections that is
+    /// when they have been flushed to the client. A protocol-io [`Connection`] returns once the
+    /// message is queued for its I/O task, so the bytes it holds in that queue are not counted.
     #[tracing::instrument(level = "trace", err)]
-    pub async fn send(&mut self, message: DaemonMessage) -> io::Result<()> {
+    pub async fn send(&mut self, message: Buffered<DaemonMessage>) -> io::Result<()> {
+        let (message, _buffered_bytes) = message.into_parts();
+
         match &mut self.framed {
             ConnectionFramed::Tcp(framed) => framed.send(message).await?,
             ConnectionFramed::Tls(framed) => framed.send(message).await?,
             ConnectionFramed::ProtocolConnection(connection) => {
-                connection.send(message).await;
+                connection.send(message.into_inner()).await;
 
                 if connection.is_closed() {
                     return Err(io::Error::new(
@@ -152,13 +161,22 @@ impl ClientConnection {
     }
 
     /// Receives a [`ClientMessage`] from the client.
+    ///
+    /// The message's bytes stay counted in the buffered bytes metric until the returned
+    /// [`Buffered`] is dropped, so the caller should keep its guard (see [`Buffered::into_parts`])
+    /// while it handles the message. A protocol-io [`Connection`] decodes messages ahead into its
+    /// own receive channel, and they are counted only once this returns them.
     #[tracing::instrument(level = "trace", err)]
-    pub async fn receive(&mut self) -> io::Result<Option<ClientMessage>> {
-        match &mut self.framed {
-            ConnectionFramed::Tcp(framed) => framed.try_next().await,
-            ConnectionFramed::Tls(framed) => framed.try_next().await,
-            ConnectionFramed::ProtocolConnection(connection) => Ok(connection.recv().await),
-        }
+    pub async fn receive(&mut self) -> io::Result<Option<Buffered<ClientMessage>>> {
+        let message = match &mut self.framed {
+            ConnectionFramed::Tcp(framed) => framed.try_next().await?.map(Buffered::from_measured),
+            ConnectionFramed::Tls(framed) => framed.try_next().await?.map(Buffered::from_measured),
+            ConnectionFramed::ProtocolConnection(connection) => {
+                connection.recv().await.map(Buffered::new)
+            }
+        };
+
+        Ok(message)
     }
 }
 
@@ -178,17 +196,22 @@ impl fmt::Debug for ClientConnection {
 /// implement [`AsyncRead`](actix_codec::AsyncRead) and [`AsyncWrite`](actix_codec::AsyncWrite).
 /// It also carries protocol-io `Connection<Agent>`
 enum ConnectionFramed {
-    Tcp(Framed<TcpStream, DaemonCodec>),
-    Tls(Box<Framed<TlsStream<TcpStream>, DaemonCodec>>),
+    Tcp(Framed<TcpStream, MeasuredDaemonCodec>),
+    Tls(Box<Framed<TlsStream<TcpStream>, MeasuredDaemonCodec>>),
     ProtocolConnection(Connection<Agent>),
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
+    use std::{ops::Not, sync::Arc, time::Duration};
 
+    use actix_codec::Encoder;
+    use bytes::BytesMut;
     use futures::StreamExt;
-    use mirrord_protocol::ClientCodec;
+    use mirrord_protocol::{
+        ClientCodec, FileRequest, FileResponse, Measured,
+        file::{ReadFileRequest, ReadFileResponse},
+    };
     use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::{
         TlsAcceptor,
@@ -196,6 +219,7 @@ mod test {
     };
 
     use super::*;
+    use crate::metrics::BUFFERED_MESSAGES_BYTES;
 
     /// Verifies that [`AgentTlsConnector`] correctly accepts a
     /// connection from a server using the provided certificate.
@@ -230,7 +254,7 @@ mod test {
                     .await
                     .unwrap();
                 connection
-                    .send(DaemonMessage::Close("it works".into()))
+                    .send(Buffered::new(DaemonMessage::Close("it works".into())))
                     .await
                     .unwrap();
             },
@@ -290,5 +314,73 @@ mod test {
                 acceptor.accept(stream).await.unwrap_err();
             },
         );
+    }
+
+    /// Verifies that a message's bytes are counted in `mirrord_agent_buffered_messages_bytes`
+    /// for as long as the agent holds them: an outgoing message until it has been flushed to the
+    /// client, and an incoming message until its [`Buffered`] value is dropped.
+    ///
+    /// The gauges are process-wide, so the test uses file messages, which no other test in this
+    /// crate counts, and compares against the values read at the start.
+    #[tokio::test]
+    async fn buffered_message_bytes_counted_until_sent_or_dropped() {
+        let daemon_file_bytes = BUFFERED_MESSAGES_BYTES.with_label_values(&["daemon", "file"]);
+        let client_file_bytes = BUFFERED_MESSAGES_BYTES.with_label_values(&["client", "file"]);
+        let daemon_baseline = daemon_file_bytes.get();
+        let client_baseline = client_file_bytes.get();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let stream = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let mut connection = ClientConnection::new(stream, 0, None).await.unwrap();
+        let (client_stream, _) = listener.accept().await.unwrap();
+        let mut client = Framed::new(client_stream, ClientCodec::default());
+
+        // Larger than the socket buffers, so `send` cannot finish until the client reads.
+        let outgoing = DaemonMessage::File(FileResponse::Read(Ok(ReadFileResponse {
+            bytes: vec![7; 32 * 1024 * 1024].into(),
+            read_amount: 32 * 1024 * 1024,
+        })));
+        let outgoing_len = Measured::new(outgoing.clone()).encoded_len();
+        let outgoing_buffered = Buffered::new(outgoing.clone());
+        let send = tokio::spawn(async move {
+            connection.send(outgoing_buffered).await.unwrap();
+            connection
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            send.is_finished().not(),
+            "send finished before the client read"
+        );
+        assert_eq!(
+            daemon_file_bytes.get() - daemon_baseline,
+            i64::try_from(outgoing_len).unwrap()
+        );
+
+        assert_eq!(client.next().await.unwrap().unwrap(), outgoing);
+        let mut connection = send.await.unwrap();
+        assert_eq!(daemon_file_bytes.get(), daemon_baseline);
+
+        let incoming = ClientMessage::FileRequest(FileRequest::Read(ReadFileRequest {
+            remote_fd: 3,
+            buffer_size: 4096,
+        }));
+        let mut incoming_frame = BytesMut::new();
+        ClientCodec::default()
+            .encode(incoming.clone(), &mut incoming_frame)
+            .unwrap();
+        client.send(incoming.clone()).await.unwrap();
+
+        let received = connection.receive().await.unwrap().unwrap();
+        assert_eq!(*received, incoming);
+        assert_eq!(
+            client_file_bytes.get() - client_baseline,
+            i64::try_from(incoming_frame.len()).unwrap()
+        );
+
+        drop(received);
+        assert_eq!(client_file_bytes.get(), client_baseline);
     }
 }

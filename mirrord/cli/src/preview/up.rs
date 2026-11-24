@@ -389,6 +389,7 @@ async fn prepare_service(
     };
     let SubprocessCfg {
         mut config,
+        service_name,
         db_branches_origin,
         queues_origin,
         ..
@@ -550,6 +551,7 @@ async fn prepare_service(
         supplied_objects,
         auto_queue_splitting,
         sync,
+        Some(&service_name),
         progress,
         analytics,
     )

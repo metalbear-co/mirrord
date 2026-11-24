@@ -5,13 +5,13 @@ use mirrord_protocol::{
     ConnectionId, DaemonMessage, LogMessage, outgoing::SocketAddress, uid::Uid,
 };
 use thiserror::Error;
-use tokio::{sync::OwnedSemaphorePermit, task::JoinError};
+use tokio::task::JoinError;
 
 use crate::{
     error::AgentError,
     outgoing::router::{ConnEvent, ConnectionKind, OutgoingRouter, RouterUpdate},
     task::BgTaskRuntime,
-    util::io::throttle::Throttle,
+    util::io::throttle::{Throttle, ThrottlePermit},
 };
 
 pub mod router;
@@ -87,7 +87,7 @@ impl<O: OutgoingKind> OutgoingApi<O> {
 
     /// Receives the next [`DaemonMessage`] produced by this API.
     ///
-    /// The [`OwnedSemaphorePermit`] comes from one of the inbound [`Throttle`] instances,
+    /// The [`ThrottlePermit`] comes from one of the inbound [`Throttle`] instances,
     /// and should be dropped **only** after the message is removed from the memory.
     ///
     /// # Cancellation safety
@@ -95,7 +95,7 @@ impl<O: OutgoingKind> OutgoingApi<O> {
     /// This method is cancel safe, and can be used in a [`tokio::select`] branch.
     pub async fn recv(
         &mut self,
-    ) -> Option<Result<(DaemonMessage, Option<OwnedSemaphorePermit>), OutgoingError>> {
+    ) -> Option<Result<(DaemonMessage, Option<ThrottlePermit>), OutgoingError>> {
         let update = match self.router.recv().await? {
             Ok(update) => update,
             Err(error) => return Some(Err(error)),

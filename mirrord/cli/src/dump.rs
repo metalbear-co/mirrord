@@ -25,7 +25,7 @@ use crate::{
     CliError,
     connection::{ConnectData, create_and_connect},
     data::UserData,
-    error::CliResult,
+    error::{CliResult, LocalShareError},
 };
 
 /// Implements the `mirrord dump` command.
@@ -44,6 +44,9 @@ pub async fn dump_command(
     let mut cfg_context = ConfigContext::default().override_envs(args.params.as_env_vars());
 
     let mut config = crate::util::resolve_layer_config(&mut cfg_context).await?;
+    if config.share {
+        return Err(LocalShareError::UnsupportedCommand("dump").into());
+    }
 
     let mut progress = ProgressTracker::from_env("mirrord dump");
     let mut analytics = AnalyticsReporter::new(

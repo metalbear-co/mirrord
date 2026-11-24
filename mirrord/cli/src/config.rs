@@ -38,6 +38,7 @@ use url::Url;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
+    preview::split_targetless_service,
     subscribe::EventStreamOptions,
 };
 
@@ -336,17 +337,19 @@ pub(super) enum Commands {
         args: Box<UiCommonArgs>,
     },
 
-    /// Launch the config wizard.
+    /// Launch the onboarding wizard, which generates a `mirrord-up.yaml`.
     ///
-    /// The config wizard is a web app that allows the user to create a mirrord config file by
-    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
-    /// config, finding targets in the cluster and using exposed target ports to create network
-    /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
+    /// A web app that asks the same questions as `mirrord up init` and writes the same file, which
+    /// you run with `mirrord up -f <file>`. Requires a connection to the cluster. Also starts the
     /// local mirrord daemon and opens its Web UI.
     Wizard {
         /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
         #[arg(long)]
         no_telemetry: bool,
+
+        /// Ask the questions in the terminal instead, with `mirrord up init`.
+        #[arg(long, conflicts_with_all = ["port", "no_browser", "config_file"])]
+        tui: bool,
 
         #[clap(flatten)]
         args: UiCommonArgs,
@@ -645,6 +648,11 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Print a temporary link that reaches this session (Team or Enterprise, needs
+    /// `incoming.mode = "steal"`).
+    #[arg(long)]
+    pub share: bool,
+
     /// Windows DLL injection method.
     ///
     /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
@@ -2007,6 +2015,8 @@ pub(super) struct PreviewStopArgs {
     ///
     /// If provided, only the preview session matching both the key and this target will be
     /// deleted. If not provided, all preview sessions with the given key will be deleted.
+    /// `targetless` deletes every session without a target, `targetless/<service>` only the one
+    /// of that `mirrord preview up` service.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
@@ -2032,7 +2042,8 @@ pub(super) struct PreviewLogsArgs {
     /// Only read the environment running against this target.
     ///
     /// Without it, every environment matching the key is read. Can also be set via
-    /// `target.path` in the mirrord config.
+    /// `target.path` in the mirrord config. `targetless` reads every environment without a
+    /// target, `targetless/<service>` only the one of that `mirrord preview up` service.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
@@ -2059,7 +2070,7 @@ impl PreviewLogsArgs {
         if let Some(target) = &self.target {
             envs.insert(
                 "MIRRORD_IMPERSONATED_TARGET".as_ref(),
-                Cow::Borrowed(target.as_ref()),
+                Cow::Borrowed(split_targetless_service(target).0.as_ref()),
             );
         }
 
@@ -2085,7 +2096,7 @@ impl PreviewStopArgs {
         if let Some(target) = &self.target {
             envs.insert(
                 "MIRRORD_IMPERSONATED_TARGET".as_ref(),
-                Cow::Borrowed(target.as_ref()),
+                Cow::Borrowed(split_targetless_service(target).0.as_ref()),
             );
         }
         if let Some(namespace) = &self.namespace {
@@ -2186,12 +2197,15 @@ pub(super) enum UpListFormat {
     Json,
 }
 
+/// The default output of `mirrord up init` and `mirrord wizard --tui`.
+pub(super) const UP_INIT_DEFAULT_OUTPUT: &str = "mirrord-up.yaml";
+
 #[derive(Subcommand, Debug)]
 pub(super) enum UpSubcommand {
     /// Launch an interactive wizard that generates a skeleton mirrord-up.yaml.
     Init {
         /// Default path for the generated config (overrideable in the wizard).
-        #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+        #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = UP_INIT_DEFAULT_OUTPUT)]
         output: PathBuf,
     },
 

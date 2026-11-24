@@ -1,5 +1,5 @@
 use k8s_openapi::api::core::v1::ConfigMap;
-use mirrord_analytics::{AnalyticsError, NullReporter, Reporter};
+use mirrord_analytics::{NullReporter, Reporter};
 use mirrord_config::{LayerConfig, config::ConfigContext, util::GIT_BRANCH};
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_protocol_api::client::ProtocolConnector;
@@ -8,7 +8,10 @@ use mirrord_vpn::{agent::VpnAgent, config::VpnConfig, tunnel::VpnTunnel};
 use tokio::signal;
 
 use crate::{
-    CliError, config::VpnArgs, connection::create_and_connect, error::CliResult,
+    CliError,
+    config::VpnArgs,
+    connection::create_and_connect,
+    error::{CliResult, LocalShareError},
     kube::kube_client_from_layer_config,
 };
 
@@ -22,6 +25,9 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         .override_env_opt("MIRRORD_TARGET_NAMESPACE", args.namespace);
 
     let mut layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
+    if layer_config.share {
+        return Err(LocalShareError::UnsupportedCommand("vpn").into());
+    }
     layer_config.agent.privileged = true;
 
     let client = kube_client_from_layer_config(&layer_config).await?;
@@ -52,7 +58,7 @@ pub async fn vpn_command(args: VpnArgs) -> CliResult<()> {
         None,
     )
     .await
-    .inspect_err(|_| analytics.set_error(AnalyticsError::AgentConnection))?
+    .inspect_err(|error| analytics.set_error(error.connect_analytics_error()))?
     .connector;
 
     let connection = Connection::from_channel(

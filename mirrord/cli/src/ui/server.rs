@@ -22,14 +22,11 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use futures::stream::StreamExt as _;
 use itertools::Itertools as _;
-use k8s_openapi::{
-    api::{authentication::v1::SelfSubjectReview, core::v1::Namespace},
-    jiff::Timestamp,
-};
+use k8s_openapi::{api::authentication::v1::SelfSubjectReview, jiff::Timestamp};
 use kube::{
     Api, Client,
-    api::{ListParams, PostParams},
-    config::{Config, KubeConfigOptions, Kubeconfig},
+    api::PostParams,
+    config::{Config, KubeConfigOptions},
 };
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_intproxy::session_monitor::MonitorEvent;
@@ -782,44 +779,6 @@ async fn current_user() -> axum::Json<CurrentUserResponse> {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ContextsResponse {
-    contexts: Vec<String>,
-    current_context: Option<String>,
-}
-
-/// Lists the kube contexts available in the user's kubeconfig, along with the one currently
-/// selected. Read straight from the merged kubeconfig files (honouring `KUBECONFIG`) — this touches
-/// no cluster, so it works even when no cluster is reachable.
-async fn list_contexts() -> UiResult<axum::Json<ContextsResponse>> {
-    let kubeconfig = Kubeconfig::read().map_err(ApiError::ReadKubeconfig)?;
-    Ok(axum::Json(ContextsResponse {
-        contexts: kubeconfig
-            .contexts
-            .iter()
-            .map(|context| context.name.clone())
-            .collect(),
-        current_context: GlobalConfig::fresh_kube_context()
-            .await
-            .or(kubeconfig.current_context),
-    }))
-}
-
-#[derive(Deserialize)]
-struct NamespacesQuery {
-    /// Context to list namespaces from. When absent, the global default is used, else the
-    /// kubeconfig's current context.
-    context: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NamespacesResponse {
-    namespaces: Vec<String>,
-    context: Option<String>,
-}
-
 /// How long building a kube client may take before the context counts as unreachable. Bounds an
 /// auth-exec plugin that blocks on an expired credential.
 const CLIENT_BUILD_TIMEOUT: Duration = Duration::from_secs(15);
@@ -835,9 +794,16 @@ pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client
         })?
 }
 
-async fn build_client(context: Option<&str>) -> UiResult<Client> {
+/// The default namespace of `context` (see [`kube_config`]), read without building a client, which
+/// would run the auth-exec plugin.
+pub(super) async fn default_namespace(context: Option<&str>) -> UiResult<String> {
+    Ok(kube_config(context).await?.default_namespace)
+}
+
+/// The kube config of `context`, else of the global `kube_context`, else inferred.
+async fn kube_config(context: Option<&str>) -> UiResult<Config> {
     let global_context = GlobalConfig::fresh_kube_context().await;
-    let mut config = match context.or(global_context.as_deref()) {
+    let config = match context.or(global_context.as_deref()) {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),
@@ -852,6 +818,11 @@ async fn build_client(context: Option<&str>) -> UiResult<Client> {
         }
         None => Config::infer().await.map_err(ApiError::InferKubeconfig)?,
     };
+    Ok(config)
+}
+
+async fn build_client(context: Option<&str>) -> UiResult<Client> {
+    let mut config = kube_config(context).await?;
     add_baggage_header(&mut config, baggage_from_env().as_deref())
         .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
     // Without a client version, the operator returns legacy ports without hit counts.
@@ -875,28 +846,6 @@ fn baggage_from_env() -> Option<String> {
     std::env::var("MIRRORD_BAGGAGE")
         .ok()
         .filter(|baggage| !baggage.is_empty())
-}
-
-/// Lists the namespaces visible to the user in the requested context (or the current context when
-/// none is supplied). Unlike [`list_contexts`], this queries the cluster's API server, so it
-/// requires the context to be reachable and the user authorized to list namespaces.
-async fn list_namespaces(
-    Query(query): Query<NamespacesQuery>,
-) -> UiResult<axum::Json<NamespacesResponse>> {
-    let client = client_for_context(query.context.as_deref()).await?;
-    let api: Api<Namespace> = Api::all(client);
-    let namespaces = api
-        .list(&ListParams::default())
-        .await
-        .map_err(ApiError::KubeApi)?;
-
-    Ok(axum::Json(NamespacesResponse {
-        namespaces: namespaces
-            .iter()
-            .filter_map(|namespace| namespace.metadata.name.clone())
-            .collect(),
-        context: query.context,
-    }))
 }
 
 pub(crate) async fn list_operator_sessions(
@@ -1329,8 +1278,6 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/sessions/{id}/kill", post(kill_session))
         .route("/operator-sessions", get(list_operator_sessions))
         .route("/operator-previews", get(list_operator_previews))
-        .route("/contexts", get(list_contexts))
-        .route("/namespaces", get(list_namespaces))
         .route("/me", get(current_user))
         .route("/token", get(auth_token))
         .nest("/chaos/rules", chaos_router(state.clone()));
@@ -1946,6 +1893,7 @@ mod tests {
                 key: Some(key.to_owned()),
                 http_filter: None,
                 created_at: None,
+                share: None,
             }
         }
 

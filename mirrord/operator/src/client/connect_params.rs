@@ -14,10 +14,13 @@ use mirrord_config::{
 };
 use serde::Serialize;
 
-use crate::crd::{
-    db_branching::core::ConnectionSource,
-    queue_filter::{MessageFilter, QueueType},
-    session::{SessionCiInfo, UpSessionInfo},
+use crate::{
+    crd::{
+        db_branching::core::ConnectionSource,
+        queue_filter::{MessageFilter, QueueType},
+        session::{SessionCiInfo, UpSessionInfo},
+    },
+    share::LocalShareRequest,
 };
 
 /// Query params for the operator connect request.
@@ -27,6 +30,9 @@ use crate::crd::{
 pub struct ConnectParams<'a> {
     /// Should always be true.
     pub connect: bool,
+    /// What a session started with `share` asks the operator to share.
+    #[serde(with = "force_json_ser", skip_serializing_if = "Option::is_none")]
+    pub local_share: Option<LocalShareRequest>,
     /// Desired behavior on steal subscription conflict.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_concurrent_steal: Option<ConcurrentSteal>,
@@ -460,6 +466,7 @@ impl<'a> ConnectParams<'a> {
 
         Self {
             connect: true,
+            local_share: LocalShareRequest::from_config(config),
             on_concurrent_steal: config.feature.network.incoming.on_concurrent_steal.into(),
             profile: config.profile.as_deref(),
             label_target: config.target.path.as_ref().and_then(|target| match target {
