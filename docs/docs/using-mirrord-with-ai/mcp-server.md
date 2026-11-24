@@ -94,7 +94,7 @@ To check the connection, ask the agent to validate your `.mirrord/mirrord.json` 
 
 | Tool | What it does |
 | --- | --- |
-| `validate_config` | Checks the content of a `mirrord.json` or `mirrord-up.yaml` against the schema of the installed version. Returns each issue with the path of the value, a message, and the allowed values. An empty `issues` list means the config is valid. Takes the directory you run mirrord from, to resolve a relative protobuf `schema_file`. |
+| `validate_config` | Checks the content of a `mirrord.json` or `mirrord-up.yaml` against the schema of the installed version. Returns each issue with the path of the value, a message, and the allowed values. An empty `issues` list means the config is valid. |
 | `explain_config_option` | Explains one option by its dotted path, such as `feature.network.incoming.mode`: what it does, the values it takes, its default, and the mirrord plan it needs. |
 | `get_skill` | Lists the mirrord skills, or returns one skill and the files it bundles. |
 | `search_docs` | Searches the docs, skills, and config options by keywords, and returns the best matching pages. |
