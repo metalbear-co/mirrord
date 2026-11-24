@@ -1,6 +1,6 @@
 ---
 name: mirrord-config
-description: Helps users generate, edit, and validate mirrord.json configuration files for mirrord (MetalBear). Use when the user wants to connect their local process to a Kubernetes environment, configure features (env/fs/network), or needs feedback on an existing mirrord.json. Always ensures output JSON is valid and schema-conformant.
+description: Helps users generate, edit, and validate mirrord.json configuration files for mirrord (MetalBear). Use when the user runs mirrord from the VS Code or IntelliJ extension or with `mirrord exec`, needs feedback on or changes to an existing mirrord.json, or needs mirrord.json options (env/fs/network) for a mirrord-up.yaml `config_patch`. For a new config to run a local process against a Kubernetes cluster from the CLI, use the mirrord-up skill instead. Always ensures output JSON is valid and schema-conformant.
 metadata:
   author: MetalBear
   version: "1.32"
@@ -10,7 +10,7 @@ metadata:
 
 ## Purpose
 
-Generate and validate `mirrord.json` configuration files:
+Generate and validate `mirrord.json` configuration files. A new config is a `mirrord-up.yaml` (the **mirrord-up** skill), even for one service. Write a new `mirrord.json` only when the user runs mirrord from the VS Code or IntelliJ extension, which don't run `mirrord up`, or with `mirrord exec`.
 - **Generate** valid configs from natural language descriptions
 - **Validate** user-provided configs against schema
 - **Fix** invalid configurations with explanations

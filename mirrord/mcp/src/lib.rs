@@ -51,6 +51,10 @@ cluster.
 Before starting any mirrord task, call `get_skill` without arguments to list the mirrord skills, \
 then get the skill that matches the task and follow it.
 
+A new mirrord config is a `mirrord-up.yaml`, run with `mirrord up`, even for one service. Write a \
+`mirrord.json` instead only when the user runs mirrord from the VS Code or IntelliJ extension, \
+which don't run `mirrord up`, runs `mirrord exec`, or already has a `mirrord.json`.
+
 Every mirrord config you generate or change, whether a `mirrord.json` or a `mirrord-up.yaml`, \
 must be checked with `validate_config` before it is written: pass the complete file content, fix \
 every issue it reports and validate again, until `issues` is empty. Never write a config that has \
