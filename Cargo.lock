@@ -5195,12 +5195,12 @@ dependencies = [
  "hyper-util",
  "jaq-core",
  "jaq-json",
- "jaq-std",
  "k8s-cri",
  "libc",
  "mirrord-agent-env",
  "mirrord-agent-iptables",
  "mirrord-cluster-auth",
+ "mirrord-jaq",
  "mirrord-nightly-polyfill",
  "mirrord-protocol",
  "mirrord-protocol-io",
@@ -5827,7 +5827,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-protocol"
-version = "1.30.2"
+version = "1.30.3"
 dependencies = [
  "actix-codec",
  "bincode",
@@ -5838,10 +5838,8 @@ dependencies = [
  "http-body-util",
  "http-serde",
  "hyper",
- "jaq-core",
- "jaq-json",
- "jaq-std",
  "libc",
+ "mirrord-jaq",
  "mirrord-macros",
  "nix 0.31.3",
  "semver 1.0.28",
