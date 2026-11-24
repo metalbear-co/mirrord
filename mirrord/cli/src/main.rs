@@ -379,6 +379,7 @@ mod tui;
 mod ui;
 mod up;
 mod util;
+mod verify;
 mod verify_config;
 mod vpn;
 mod wsl;
@@ -1377,6 +1378,7 @@ fn main() -> miette::Result<()> {
             Commands::GlobalConfig(args) => global_config_command(*args).await?,
             Commands::Preview(args) => preview::preview_command(*args, watch, &user_data).await?,
             Commands::Subscribe(args) => subscribe::subscribe_command(*args).await?,
+            Commands::Verify(args) => verify::verify_command(*args).await?,
             Commands::Up(args) => up::up_command(*args, watch, &user_data).await?,
             Commands::DbBranches(args) => db_branches_command(*args).await?,
             Commands::Queues(args) => queues::queues_command(*args).await?,

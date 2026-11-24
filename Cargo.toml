@@ -237,6 +237,7 @@ rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e8
     "ssl-vendored",
 ] }
 regex = { version = "1", features = ["unicode-case"] }
+ring = "0.17"
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
     "rustls",

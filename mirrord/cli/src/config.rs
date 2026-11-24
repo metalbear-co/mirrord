@@ -44,6 +44,7 @@ use crate::{
 
 pub(crate) mod ci;
 pub(crate) mod global_config;
+pub(crate) mod verify;
 
 /// Macro to automatically handle Windows unsupported commands.
 /// Usage: `windows_unsupported!(args, "command_name", { command_execution })`
@@ -272,6 +273,10 @@ pub(super) enum Commands {
 
     /// Stream operator interception events for a session as JSON (requires operator).
     Subscribe(Box<SubscribeArgs>),
+
+    /// Run a test command and record the run on the cluster, or read such records (requires
+    /// operator).
+    Verify(Box<verify::VerifyArgs>),
 
     /// Run mirrord sessions for services defined in `mirrord-up.yaml`.
     Up(Box<UpArgs>),
