@@ -412,7 +412,7 @@ once ready - the caller just sees a slower first response. Queue messages don't 
 all: they wait in the environment's split queue/topic until the preview consumes them, so
 nothing is lost either way. Temporal tasks for the preview wait in the operator, up to the
 [task buffer cap](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options) on
-operator `3.237.0` or later.
+operator `3.237.0` or later, and their Temporal timeouts keep running while the preview is idle.
 With [Kafka branching](../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching),
 a message waiting on a branch topic the preview consumes starts the preview pods.
 
@@ -443,9 +443,10 @@ consumer group are read from the workload's spec, and messages flow through the 
 Matching messages reach the preview pod right away; unmatched ones wait on the target's
 temporary queue and are consumed when the service scales back up, whose new pods start with the
 split configuration already applied. For Temporal, unmatched tasks wait in operator memory
-instead, and once 128 of a kind are buffered (operator `3.237.0` or later; see
-[`max_buffered_tasks`](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options))
-the operator stops polling that task queue until the target takes tasks. With
+instead, and once they reach the
+[task buffer cap](../sharing-the-cluster/queue-splitting/temporal.md#per-queue-options)
+(operator `3.237.0` or later) the operator stops polling that task queue until the target
+takes tasks. With
 `operator.manageKedaScaledObjects` set, the split keeps the target at one replica.
 
 See [Autoscaled Targets with KEDA](../sharing-the-cluster/queue-splitting.md#autoscaled-targets-with-keda)
