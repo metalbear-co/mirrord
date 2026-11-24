@@ -189,7 +189,6 @@ kube = { git = "https://github.com/metalbear-co/kube.git", rev = "2f2b38d13e9a09
     "http-proxy",
 ] }
 libc = "0.2"
-local-ip-address = "0.6"
 log = { version = "0.4", features = ["std"] }
 mid = "3.0.0"
 miette = "7"
