@@ -24,7 +24,7 @@ use crate::{
         GenericInMessage, GenericOutMessage, OutgoingKind,
         router::{ConnectionKind, NewConnection},
     },
-    util::io::throttle::Throttled,
+    util::{io::throttle::Throttled, target_root::TargetRoot},
 };
 
 pub struct UdpConnection;
@@ -35,7 +35,7 @@ impl ConnectionKind for UdpConnection {
 
     const DISPLAY_NAME: &'static str = "UDP";
 
-    async fn connect(addr: &SocketAddress, _: Option<u64>) -> io::Result<NewConnection<Self>> {
+    async fn connect(addr: &SocketAddress, _: &TargetRoot) -> io::Result<NewConnection<Self>> {
         let addr = match addr {
             SocketAddress::Ip(addr) => *addr,
             SocketAddress::Unix(..) => {
