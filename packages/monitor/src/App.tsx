@@ -25,6 +25,7 @@ import {
 import { api } from './api'
 import { selectKubeContext, useKubeContexts } from './contextStore'
 import { collectEvents } from './eventsStore'
+import { useNamespaces } from './hooks/useNamespaces'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
 import { strings } from './strings'
 import {
@@ -94,17 +95,17 @@ export default function App({
     current: currentContext,
     selected: selectedContext,
   } = selection
-  const [namespaces, setNamespaces] = useState<string[]>([])
-  const [namespacesLoading, setNamespacesLoading] = useState(false)
-  // Set when listing namespaces fails — e.g. an RBAC policy that denies `list namespaces` (common on
-  // strict multi-tenant clusters). The picker then lets the user type a namespace by hand instead.
-  const [namespacesError, setNamespacesError] = useState(false)
   // `null` = all namespaces. Applied server-side (the operator-sessions request carries it); local
   // sessions are never filtered by it.
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(
     null,
   )
   const effectiveContext = selectedContext ?? currentContext
+  const {
+    namespaces,
+    loading: namespacesLoading,
+    error: namespacesError,
+  } = useNamespaces(effectiveContext)
 
   useEffect(() => {
     collectEvents(selection)
@@ -205,33 +206,6 @@ export default function App({
       selectedKindRef.current === 'operator' ? null : prev,
     )
   }, [contexts, effectiveContext, defaultNamespaceFor])
-
-  // Populate the namespace dropdown for the active context. Listing can be denied by RBAC, in which
-  // case we flag the error so the picker offers free-text entry instead.
-  useEffect(() => {
-    if (!effectiveContext) return
-    let cancelled = false
-    setNamespacesLoading(true)
-    api
-      .listNamespaces(effectiveContext)
-      .then(({ namespaces: nextNamespaces }) => {
-        if (cancelled) return
-        setNamespaces(nextNamespaces)
-        setNamespacesError(false)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        console.error(err)
-        setNamespaces([])
-        setNamespacesError(true)
-      })
-      .finally(() => {
-        if (!cancelled) setNamespacesLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [effectiveContext])
 
   // The operator license identifies the licensed organization; fetch it once per context so ui
   // usage is attributed to that org in analytics, rather than on every session poll.
