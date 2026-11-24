@@ -87,9 +87,25 @@ fn compiler_error_to_string(error: CompileError) -> String {
     compile_error
 }
 
+/// Builtins of `jaq_std` that reach outside the program.
+///
+/// * `env` reads the environment of the process that runs it,
+/// * `halt` and `halt_error` exit that process.
+///
+/// Filters are written by user, and a user-defined program should not be able to call these
+/// in a shared environment. Such program should fail to compile.
+const DENIED_BUILTINS: &[&str] = &["env", "halt", "halt_error"];
+
+/// Compiles a user-supplied jq program with the standard library, minus [`DENIED_BUILTINS`].
+///
+/// Every place that runs a user's jq program should be compiled here, so that no caller can grant the
+/// program access to its environment or the power to exit.
 pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_json::Val>>> {
     let file = jaq_core::load::File { code, path: () };
-    let loader = jaq_core::load::Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+    let defs = jaq_std::defs()
+        .chain(jaq_json::defs())
+        .filter(|def| !DENIED_BUILTINS.contains(&def.name));
+    let loader = jaq_core::load::Loader::new(defs);
     let arena = jaq_core::load::Arena::default();
     let modules = loader.load(&arena, file).map_err(|errors| {
         // Since we only load 1 file, there should only be 1 error, take first.
@@ -99,7 +115,10 @@ pub fn compile_jq(code: &str) -> Result<jaq_core::Filter<jaq_core::Native<jaq_js
         }
     })?;
 
-    let filter = jaq_core::Compiler::default().with_funs(jaq_std::funs().chain(jaq_json::funs()));
+    let funs = jaq_std::funs()
+        .chain(jaq_json::funs())
+        .filter(|(name, ..)| !DENIED_BUILTINS.contains(name));
+    let filter = jaq_core::Compiler::default().with_funs(funs);
 
     // Convert the compile errors into a human-readable string using our helper.
     filter.compile(modules).map_err(|errors| JqError::Compile {
