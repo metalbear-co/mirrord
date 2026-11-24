@@ -58,7 +58,7 @@ pub struct BranchDatabaseSpec {
     pub target: KubeResourceTarget,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
-    /// Database server image version (e.g. "16" for PostgreSQL, "8.0" for MySQL).
+    /// Database server image version (e.g. "16" for PostgreSQL, "8.4" for MySQL).
     /// Mutually exclusive with `image`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,

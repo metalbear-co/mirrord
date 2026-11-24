@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { CloudOff } from 'lucide-react'
+import { CloudCog, CloudOff } from 'lucide-react'
 import type {
+  CloudSessionsResponse,
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
@@ -32,7 +33,7 @@ import {
   leaveViaExtension,
   type ExtensionState,
 } from './extensionBridge'
-import { withPreviewSessions } from './utils'
+import { usesCloud, withPreviewSessions } from './utils'
 
 const LOCAL_POLL_INTERVAL = 2000
 const OPERATOR_POLL_INTERVAL = 5000
@@ -62,6 +63,7 @@ export default function App({
   const [operatorSessions, setOperatorSessions] = useState<
     OperatorSessionSummary[]
   >([])
+  const [cloud, setCloud] = useState<CloudSessionsResponse | null>(null)
   const [watchStatus, setWatchStatus] = useState<OperatorWatchStatus | null>(
     null,
   )
@@ -247,6 +249,43 @@ export default function App({
     }
   }, [effectiveContext])
 
+  // Not tied to the kube context: the sessions-manager lists the sessions of the organization
+  // the developer's `mirrord login` names.
+  useEffect(() => {
+    let cancelled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
+    const poll = async () => {
+      try {
+        const resp = await api.listCloudSessions()
+        if (!cancelled) setCloud(resp)
+      } catch (err: unknown) {
+        if (cancelled) return
+        console.error(err)
+        // Keep the login the last response read: the request failing doesn't change it.
+        setCloud(
+          (prev) =>
+            prev && {
+              ...prev,
+              status: 'unavailable',
+              reason: String(err),
+              sessions: [],
+            },
+        )
+      } finally {
+        if (!cancelled) {
+          timeout = setTimeout(() => void poll(), OPERATOR_POLL_INTERVAL)
+        }
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timeout !== undefined) clearTimeout(timeout)
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     let timeout: ReturnType<typeof setTimeout> | undefined
@@ -417,8 +456,18 @@ export default function App({
     [selectedKind, selectedId, operatorSessions],
   )
 
+  const cloudUser = usesCloud(cloud)
   const showFunnelHero =
-    !selectedLocal && !selectedOperator && watchStatus?.status === 'unavailable'
+    !cloudUser &&
+    !selectedLocal &&
+    !selectedOperator &&
+    watchStatus?.status === 'unavailable'
+  // Only in place of the operator and Kubernetes guidance it replaces: with an operator to watch,
+  // a Cloud user gets the same overview as anyone else.
+  const showCloudOverview =
+    cloudUser &&
+    (watchStatus?.status === 'unavailable' ||
+      watchStatus?.status === 'kubernetes_unavailable')
 
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -455,6 +504,7 @@ export default function App({
           yoursOperatorSessions={yoursOperatorSessions}
           allOperatorSessions={operatorSessions}
           watchStatus={watchStatus}
+          cloud={cloud}
           selectedOperatorId={selectedKind === 'operator' ? selectedId : null}
           onSelectOperator={handleSelectOperator}
           onConnectOperator={() => setConnectModalOpen(true)}
@@ -488,6 +538,18 @@ export default function App({
             />
           ) : showFunnelHero ? (
             <FunnelHero onConnect={() => setConnectModalOpen(true)} />
+          ) : showCloudOverview ? (
+            <div className="flex h-full items-center justify-center p-8">
+              <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+                <CloudCog className="text-muted-foreground/40 h-7 w-7" />
+                <h2 className="text-foreground text-base font-semibold">
+                  {strings.cloudOverview.title}
+                </h2>
+                <p className="text-muted-foreground text-xs">
+                  {strings.cloudOverview.body}
+                </p>
+              </div>
+            </div>
           ) : watchStatus?.status === 'kubernetes_unavailable' ? (
             <div className="flex h-full items-center justify-center p-8">
               <div className="border-destructive/40 bg-destructive/5 flex max-w-xl gap-4 rounded-lg border p-5">

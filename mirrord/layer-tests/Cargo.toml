@@ -27,6 +27,7 @@ futures.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "macros", "fs", "rt-multi-thread"] }
 
 [dev-dependencies]
+fancy-regex.workspace = true
 actix-codec.workspace = true
 futures.workspace = true
 rstest.workspace = true

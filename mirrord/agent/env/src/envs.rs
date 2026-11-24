@@ -162,6 +162,13 @@ pub const OVERRIDE_CACHE_CONTROL: CheckedEnv<bool> =
 pub const HTTP_DETECTION_TIMEOUT: CheckedEnv<u64> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECTION_TIMEOUT");
 
+/// Sets whether the agent runs HTTP detection on redirected connections that arrive while their
+/// port has no steal or mirror subscriber, instead of passing them through as raw TCP.
+///
+/// Defaults to `false` when unset.
+pub const HTTP_DETECT_INACTIVE_PORTS: CheckedEnv<bool> =
+    CheckedEnv::new("MIRRORD_AGENT_HTTP_DETECT_INACTIVE_PORTS");
+
 /// Sets the max size (in bytes) of the HTTP/2 header list accepted by the agent.
 pub const HTTP2_MAX_HEADER_LIST_SIZE: CheckedEnv<u32> =
     CheckedEnv::new("MIRRORD_AGENT_HTTP2_MAX_HEADER_LIST_SIZE");

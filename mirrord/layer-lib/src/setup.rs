@@ -196,7 +196,11 @@ impl LayerSetup {
             }
         })?;
 
-        let incoming_mode = IncomingMode::new(&mut config.feature.network.incoming)?;
+        let shared_session_key = config.shared_session_key().map(str::to_owned);
+        let incoming_mode = IncomingMode::new(
+            &mut config.feature.network.incoming,
+            shared_session_key.as_deref(),
+        )?;
         // The configuration holds the values of `feature.env.override`, which can be secrets, and
         // the layer's log file goes into crash bundles, so it is only logged at trace.
         tracing::info!(?incoming_mode, "incoming has changed");
@@ -410,10 +414,13 @@ impl IncomingMode {
     /// # Params
     ///
     /// * `config` - [`IncomingConfig`] is taken as `&mut` due to `add_probe_ports_to_http_ports`.
-    pub fn new(config: &mut IncomingConfig) -> Result<Self, SetupError> {
-        let http_settings = config
-            .http_filter
-            .is_filter_set()
+    /// * `shared_session_key` - [`LayerConfig::shared_session_key`], which the filter matches in
+    ///   addition to the configured one.
+    pub fn new(
+        config: &mut IncomingConfig,
+        shared_session_key: Option<&str>,
+    ) -> Result<Self, SetupError> {
+        let http_settings = (config.http_filter.is_filter_set() || shared_session_key.is_some())
             .then(|| {
                 let ports = config
                     .http_filter
@@ -422,10 +429,11 @@ impl IncomingMode {
                     .cloned()
                     .map(HashSet::from);
 
-                let filter = config
-                    .http_filter
-                    .as_protocol_http_filter()
-                    .map_err(SetupError::HttpFilter)?;
+                let filter = match shared_session_key {
+                    Some(key) => config.http_filter.for_shared_session(key),
+                    None => config.http_filter.as_protocol_http_filter(),
+                }
+                .map_err(SetupError::HttpFilter)?;
 
                 Ok::<_, SetupError>(HttpSettings { filter, ports })
             })

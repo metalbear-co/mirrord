@@ -1,6 +1,7 @@
 import type {
   ChaosRule,
   ChaosRuleRequest,
+  CloudSessionsResponse,
   ContextsResponse,
   NamespacesResponse,
   OperatorLicense,
@@ -250,6 +251,18 @@ export const api = {
     }
     const data = (await r.json()) as OperatorSessionsResponse
     return data
+  },
+
+  listCloudSessions: async (): Promise<CloudSessionsResponse> => {
+    const r = await fetch(withToken('/api/v2/cloud/sessions'), {
+      credentials: 'include',
+    })
+    if (!r.ok) {
+      throw new Error(
+        `Failed to fetch cloud sessions: ${r.status} ${r.statusText}`,
+      )
+    }
+    return (await r.json()) as CloudSessionsResponse
   },
 
   // Why one preview is in its current phase.

@@ -334,7 +334,7 @@ async fn run_preview_up(
                 Ok(CliError::PreviewSessionDeleted) => {
                     sync_progress.success(Some(
                         "the preview session was deleted, so `mirrord preview sync` stopped \
-                         pushing into it",
+                         syncing into it",
                     ));
                     Ok(())
                 }
@@ -354,7 +354,7 @@ async fn run_preview_up(
                 Ok(())
             }
             Err(error) => {
-                progress.failure(Some("stopped pushing changes"));
+                progress.failure(Some("stopped syncing changes"));
                 Err(error)
             }
         },
@@ -389,6 +389,7 @@ async fn prepare_service(
     };
     let SubprocessCfg {
         mut config,
+        service_name,
         db_branches_origin,
         queues_origin,
         ..
@@ -550,6 +551,7 @@ async fn prepare_service(
         supplied_objects,
         auto_queue_splitting,
         sync,
+        Some(&service_name),
         progress,
         analytics,
     )

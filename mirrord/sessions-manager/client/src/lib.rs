@@ -23,6 +23,7 @@ mod control_plane;
 mod credentials;
 mod error;
 mod retry;
+mod tls;
 mod transport;
 
 pub use client::{AgentClient, IntproxyClient, SessionsManagerConnectInfo};
@@ -31,7 +32,9 @@ pub use credentials::{
     SESSIONS_MANAGER_URL_DEFAULT, SharedSecretCredentials, cloud_url_from_env,
 };
 pub use error::{Result, SessionsManagerClientError};
-pub use mirrord_sessions_manager_protocol::{IntproxyIdentity, ReplicaId, ServiceScope};
+pub use mirrord_sessions_manager_protocol::{
+    IntproxyIdentity, ReplicaId, ServiceScope, SessionList, SessionOwner, SessionSummary,
+};
 pub use transport::{
     DirectTransport, EndpointSource, OperatorTransport, SESSIONS_MANAGER_URL_ENV,
     SessionsManagerEndpoint, SessionsManagerTransport,

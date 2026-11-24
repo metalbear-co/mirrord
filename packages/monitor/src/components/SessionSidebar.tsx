@@ -22,6 +22,7 @@ import {
 import {
   Activity,
   Cloud,
+  CloudCog,
   Key as KeyIcon,
   Laptop,
   PanelLeftClose,
@@ -29,13 +30,16 @@ import {
   Trash2,
 } from 'lucide-react'
 import type {
+  CloudSessionsResponse,
   OperatorSessionSummary,
   OperatorWatchStatus,
   SessionInfo,
 } from '../types'
 import { strings } from '../strings'
+import { usesCloud } from '../utils'
 import SessionCard from './SessionCard'
 import OperatorList from './OperatorList'
+import CloudSessionList from './CloudSessionList'
 
 const SIDEBAR_MIN = 240
 const SIDEBAR_MAX = 600
@@ -73,6 +77,7 @@ interface SessionSidebarProps {
   yoursOperatorSessions: OperatorSessionSummary[]
   allOperatorSessions: OperatorSessionSummary[]
   watchStatus: OperatorWatchStatus | null
+  cloud: CloudSessionsResponse | null
   selectedOperatorId: string | null
   onSelectOperator: (id: string) => void
   onConnectOperator: () => void
@@ -96,6 +101,7 @@ export default function SessionSidebar({
   yoursOperatorSessions,
   allOperatorSessions,
   watchStatus,
+  cloud,
   selectedOperatorId,
   onSelectOperator,
   onConnectOperator,
@@ -202,6 +208,12 @@ export default function SessionSidebar({
       watchStatus?.status === 'kubernetes_unavailable') &&
     !teamReconnecting
   const teamConnecting = watchStatus?.status === 'not_started'
+  // Logged in to MetalBear Cloud, serverless targets run without an operator or even a kube
+  // context, so not finding either is expected rather than something to fix.
+  const cloudUser = usesCloud(cloud)
+  const hideTeam =
+    cloudUser &&
+    (teamUnavailable || watchStatus?.status === 'kubernetes_unavailable')
 
   return (
     <>
@@ -331,15 +343,43 @@ export default function SessionSidebar({
           )}
         </div>
 
-        <SectionHeader
-          icon={<Cloud className="h-3.5 w-3.5" />}
-          label="Team"
-          count={
-            watchStatus?.status === 'watching' ? operatorSessions.length : null
-          }
-        />
+        {cloudUser && (
+          <>
+            <SectionHeader
+              icon={<CloudCog className="h-3.5 w-3.5" />}
+              label={strings.sidebar.cloud}
+              count={
+                cloud.status === 'available' ? cloud.sessions.length : null
+              }
+            />
+            {cloud.status === 'unavailable' ? (
+              <div className="bg-destructive/10 border-destructive/40 rounded-lg border px-3 py-2">
+                <div className="text-destructive text-xs font-semibold">
+                  {strings.sidebar.cloudError}
+                </div>
+                <div className="text-meta text-destructive/80 mt-0.5 break-words">
+                  {cloud.reason}
+                </div>
+              </div>
+            ) : (
+              <CloudSessionList sessions={cloud.sessions} query={query} />
+            )}
+          </>
+        )}
 
-        {teamUnavailable ? (
+        {!hideTeam && (
+          <SectionHeader
+            icon={<Cloud className="h-3.5 w-3.5" />}
+            label="Team"
+            count={
+              watchStatus?.status === 'watching'
+                ? operatorSessions.length
+                : null
+            }
+          />
+        )}
+
+        {hideTeam ? null : teamUnavailable ? (
           <FunnelInline onConnect={onConnectOperator} />
         ) : teamError ? (
           <div className="bg-destructive/10 border-destructive/40 rounded-lg border px-3 py-2">

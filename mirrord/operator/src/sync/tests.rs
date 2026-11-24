@@ -1,6 +1,6 @@
 use super::{
-    AppReport, AppState, EntryCounts, EntryPlan, InstallReport, InstallState, ManifestKind,
-    ManifestPath, PushMode, RejectReason, SidecarState, SupervisorReport, SyncFrame, UnpairReason,
+    AppReport, AppState, EntryCounts, EntryPlan, ManifestKind, ManifestPath, PrepareReport,
+    PrepareState, PushMode, RejectReason, SidecarState, SupervisorReport, SyncFrame, UnpairReason,
     chunked,
     rules::{IgnoreSnapshot, IgnoreSource},
     wanted_path_frame_cost,
@@ -140,8 +140,8 @@ fn frames_keep_their_encoding() {
         (
             // Signed integers are zigzag varints, so the exit code 1 is `2`.
             SyncFrame::Supervisor(SupervisorReport {
-                install: InstallReport {
-                    state: InstallState::Failed,
+                prepare: PrepareReport {
+                    state: PrepareState::Failed,
                     error: Some("x".to_owned()),
                 },
                 app: AppReport {

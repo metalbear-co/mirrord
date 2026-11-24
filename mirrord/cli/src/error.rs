@@ -1,7 +1,8 @@
-use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf};
+use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf, process::ExitStatus};
 
 use kube::{self, Error, client::AuthError};
 use miette::Diagnostic;
+use mirrord_analytics::AnalyticsError;
 use mirrord_auth::error::{ApiKeyError, CredentialStoreError};
 use mirrord_config::config::ConfigError;
 use mirrord_console::error::ConsoleError;
@@ -20,6 +21,7 @@ use mirrord_operator::{
         NewOperatorFeature,
         preview::{PreviewPodLogs, PreviewSyncConfigError},
     },
+    share::LOCAL_SHARE_REJECTED_REASON,
     types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
@@ -260,8 +262,55 @@ pub(crate) enum OperatorSetupError {
     Deleted,
 }
 
+/// Why a session started with `share` can't run. Each message is written for the user, so it is
+/// shown as it is.
+#[derive(Debug, Error, Diagnostic)]
+pub(crate) enum LocalShareError {
+    /// The config has a setting that a shared session can't use.
+    #[error(transparent)]
+    Config(ConfigError),
+
+    #[error(
+        "Share links need a Kubernetes target, and a serverless sessions-manager target can't be shared."
+    )]
+    UnsupportedSessionsManagerTarget,
+
+    #[error("Share links work only with `mirrord exec`, not with `mirrord container`.")]
+    UnsupportedContainer,
+
+    #[error(
+        "`mirrord port-forward` can't create a share link, because no local application listens in it. Use `mirrord exec --share`."
+    )]
+    UnsupportedPortForward,
+
+    /// `mirrord dump`, `mirrord vpn` and `mirrord diagnose` connect to the target with the config
+    /// file, but run no local application whose port the link could share.
+    #[error(
+        "`mirrord {0}` can't create a share link, because it runs no local application. Use `mirrord exec --share`."
+    )]
+    UnsupportedCommand(&'static str),
+
+    #[error(
+        "The internal proxy of the shared session stopped ({0}), so the share link no longer reaches your application."
+    )]
+    ProxyExit(ExitStatus),
+
+    /// The CLI couldn't read the link from the session's `sessions` view, for example because
+    /// the user's roles don't allow `get` on `sessions`. Its text is written for the user.
+    #[error(transparent)]
+    ReadLink(mirrord_operator::client::SessionShareReadError),
+
+    /// The operator, or the target that the client resolved through it, can't serve a shared
+    /// session.
+    #[error("{0}")]
+    Operator(String),
+}
+
 #[derive(Debug, Error, Diagnostic)]
 pub(crate) enum CliError {
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    LocalShare(#[from] LocalShareError),
     /// Do not construct this variant directly, use [`CliError::friendlier_error_or_else`] to allow
     /// for more granular error detection.
     #[error("Failed to create Kubernetes API client: {0}")]
@@ -341,7 +390,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to verify mirrord config: {0}")]
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
-    ConfigError(#[from] mirrord_config::config::ConfigError),
+    ConfigError(mirrord_config::config::ConfigError),
 
     #[cfg(unix)]
     #[error("Failed to set up the local directory for prefetched files: {0}")]
@@ -513,6 +562,21 @@ pub(crate) enum CliError {
         {GENERAL_HELP}"
     ))]
     SessionsManagerUrl(#[source] mirrord_sessions_manager_client::SessionsManagerClientError),
+
+    #[error("failed to connect to the serverless target's agent through sessions-manager: {0}")]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    SessionsManagerConnect(mirrord_sessions_manager_client::SessionsManagerClientError),
+
+    /// Kept apart from [`CliError::SessionsManagerConnect`] because the timeout's message alone
+    /// doesn't say what to fix, while the other errors name it themselves.
+    #[error("timed out connecting to the serverless target's agent through sessions-manager")]
+    #[diagnostic(help(
+        "Either sessions-manager didn't answer, or no workload of the target registered with it. \
+        Check that the target's workload runs the mirrord remote bootstrap, and that it reaches \
+        the same sessions-manager as this session. Its logs show whether it registered.\
+        {GENERAL_HELP}"
+    ))]
+    SessionsManagerConnectTimeout,
 
     #[error("mirrord operator {0} failed: {1}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -760,7 +824,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to setup mirrord startup retry config with `{0}`")]
     #[diagnostic(help(
-        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not teh case in your config, then this might be a bug!"
+        "This may happen when `startup_retry.min_ms > startup_retry.max_ms` or when `startup_retry.max_ms == 0`. If this is not the case in your config, then this might be a bug!"
     ))]
     InvalidBackoff(String),
 
@@ -869,11 +933,17 @@ pub(crate) enum CliError {
     ))]
     PreviewTargetRequired,
 
-    #[error("Failed to resolve target for preview environment: {0}")]
+    #[error("No target specified for preview environment")]
     #[diagnostic(help(
-        "Targetless mode is not supported for preview environments. \
-         Please check that the target exists and has running pods.{GENERAL_HELP}"
+        "Specify the target using `-t <target>` or set `target.path` in your mirrord config \
+         file. A preview may run without a target only to have the operator provision branch \
+         databases: set `feature.db_branches` to do that. A local Redis branch runs on your \
+         machine, so it does not count."
     ))]
+    PreviewTargetOrDbBranchesRequired,
+
+    #[error("Failed to resolve target for preview environment: {0}")]
+    #[diagnostic(help("Please check that the target exists and has running pods.{GENERAL_HELP}"))]
     PreviewTargetResolutionFailed(String),
 
     #[error("Failed to create preview session resource: {0}")]
@@ -890,18 +960,18 @@ pub(crate) enum CliError {
     ))]
     PreviewSecretMountFailed(String),
 
-    #[error("Failed to push the local code into the preview environment")]
+    #[error("Failed to sync the local code into the preview environment")]
     #[diagnostic(help(
-        "The operator relays the push to a sidecar in the preview pod. Check that the operator \
+        "The operator relays the sync to a sidecar in the preview pod. Check that the operator \
         is running and healthy, and see its logs and the logs of the pod's `mirrord-sync` \
         container for details.{GENERAL_HELP}"
     ))]
     PreviewSyncFailed(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    #[error("Failed to read `{}` to push it into the preview environment", path.display())]
+    #[error("Failed to read `{}` to sync it into the preview environment", path.display())]
     #[diagnostic(help(
         "Check that you can read the files under the `sync` directory. A file that a tool removes \
-        while the CLI reads it fails the read too, and running the command again pushes the \
+        while the CLI reads it fails the read too, and running the command again syncs the \
         files.{GENERAL_HELP}"
     ))]
     PreviewSyncReadFailed {
@@ -912,7 +982,7 @@ pub(crate) enum CliError {
 
     #[error("Failed to watch `{}` for changes", path.display())]
     #[diagnostic(help(
-        "The CLI watches each directory under `sync` that it pushes. When the cause says that the \
+        "The CLI watches each directory under `sync` that it syncs. When the cause says that the \
         system allows too few watches, raise `fs.inotify.max_user_watches`, or leave large \
         directories out with `ignore` or `.gitignore`.{GENERAL_HELP}"
     ))]
@@ -922,16 +992,16 @@ pub(crate) enum CliError {
         error: notify::Error,
     },
 
-    #[error("The install command failed in the preview pod")]
+    #[error("The `sync.prepare` command failed in the preview pod")]
     #[diagnostic(help(
-        "The end of its output is above. Fix the install command, or the files that it installs \
-        from, and run `mirrord preview sync` again.{GENERAL_HELP}"
+        "The end of its output is above. Fix `sync.prepare.command`, or the files that it reads, \
+        and run `mirrord preview sync` again.{GENERAL_HELP}"
     ))]
-    PreviewSyncInstallFailed,
+    PreviewSyncPrepareFailed,
 
     #[error("{}", mirrord_operator::sync::UnpairReason::Replaced)]
     #[diagnostic(help(
-        "Only one CLI pushes into a preview environment at a time, and a newer CLI takes over \
+        "Only one CLI syncs into a preview environment at a time, and a newer CLI takes over \
         from an earlier one. This CLI stopped, and left the preview environment as it is.\
         {GENERAL_HELP}"
     ))]
@@ -946,8 +1016,8 @@ pub(crate) enum CliError {
 
     #[error("A preview environment with `sync` can't start idle")]
     #[diagnostic(help(
-        "The preview pod waits for the CLI to push the local code, and an idle preview has no \
-        pod to push into. Remove `feature.preview.idle.start_idle`.{GENERAL_HELP}"
+        "The preview pod waits for the CLI to sync the local code, and an idle preview has no \
+        pod to sync into. Remove `feature.preview.idle.start_idle`.{GENERAL_HELP}"
     ))]
     PreviewSyncStartIdle,
 
@@ -960,7 +1030,7 @@ pub(crate) enum CliError {
 
     #[error("A preview environment with `sync` can't target a CronJob")]
     #[diagnostic(help(
-        "A CronJob creates its pods on a schedule, after the CLI has pushed. Preview the CronJob \
+        "A CronJob creates its pods on a schedule, after the CLI has synced. Preview the CronJob \
         with `mirrord preview up` instead.{GENERAL_HELP}"
     ))]
     PreviewSyncCronJobTarget,
@@ -968,7 +1038,7 @@ pub(crate) enum CliError {
     #[error("A preview environment with `sync` can't run on a multicluster operator")]
     #[diagnostic(help(
         "A multicluster operator runs the preview's pods in its workload clusters, and only one \
-        pod can hold the pushed code. Preview the service with \
+        pod can hold the synced code. Preview the service with \
         `mirrord preview up` instead.{GENERAL_HELP}"
     ))]
     PreviewSyncMultiCluster,
@@ -980,35 +1050,18 @@ pub(crate) enum CliError {
     ))]
     PreviewSyncOnWindows,
 
-    #[error("A preview environment with `sync` can't run a `run.command` of `run.type: container`")]
-    #[diagnostic(help(
-        "`run.type: container` runs `run.command` locally with `mirrord container`, but a preview \
-        with `sync` runs its command in the target's container in the preview pod. Set \
-        `sync.run.command` to the command that runs the app in that container.{GENERAL_HELP}"
-    ))]
-    PreviewSyncContainerRun,
-
-    #[error("A preview environment with `sync` doesn't run `run.pre_command`")]
-    #[diagnostic(help(
-        "`run.pre_command` runs on your machine before the local process starts, and a preview \
-        with `sync` starts no local process. Set `sync.run.command`, which the preview runs \
-        instead of `run.command` and without `run.pre_command`, or remove \
-        `run.pre_command`.{GENERAL_HELP}"
-    ))]
-    PreviewSyncPreCommand,
-
     #[error(
-        "The `sync.install.on_change` glob `{}` doesn't lie under the `local` of a `sync.files` \
+        "The `sync.prepare.triggered_by` glob `{}` doesn't lie under the `local` of a `sync.files` \
          entry",
         .0.display()
     )]
     #[diagnostic(help(
-        "The preview pod only has the files that the CLI pushes, so a glob can only match those. \
+        "The preview pod only has the files that the CLI syncs, so a glob can only match those. \
         The globs are resolved against the directory that contains `mirrord-up.yaml`, as \
         `sync.files[].local` is, and each must start with the `local` of an entry spelled out, with \
         wildcards only below it.{GENERAL_HELP}"
     ))]
-    PreviewSyncOnChangeOutsideLocal(PathBuf),
+    PreviewSyncTriggeredByOutsideLocal(PathBuf),
 
     #[error("The settings of the service's preview with `sync` are invalid: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
@@ -1069,7 +1122,7 @@ pub(crate) enum CliError {
     )]
     #[diagnostic(help(
         "The operator pauses a preview while a `mirrord exec` session targets it, and the preview \
-        pod applies no push until that session ends. Run `mirrord preview sync` again once it has \
+        pod applies no sync until that session ends. Run `mirrord preview sync` again once it has \
         ended."
     ))]
     PreviewSyncPaused {
@@ -1227,6 +1280,25 @@ pub(crate) enum CliError {
 }
 
 impl CliError {
+    /// The [`AnalyticsError`] to report when this error failed the connection to the agent.
+    pub(crate) fn connect_analytics_error(&self) -> AnalyticsError {
+        match self {
+            Self::SessionsManagerConnectTimeout => AnalyticsError::SessionsManagerConnectTimeout,
+            // The same refusal, found when the connection is made rather than by the check
+            // before it.
+            Self::SessionsManagerConnect(
+                mirrord_sessions_manager_client::SessionsManagerClientError::ServerlessSessionsManagerNotServed(..),
+            ) => AnalyticsError::ServerlessSessionsManagerNotServed,
+            Self::SessionsManagerConnect(..) => AnalyticsError::SessionsManagerConnect,
+            Self::SessionsManagerUrl(..) => AnalyticsError::SessionsManagerUrl,
+            Self::ServerlessSessionsManagerNotServed => {
+                AnalyticsError::ServerlessSessionsManagerNotServed
+            }
+            Self::SessionsManagerCloudUrl(..) => AnalyticsError::SessionsManagerCloudUrl,
+            _ => AnalyticsError::AgentConnection,
+        }
+    }
+
     /// Here we give more meaning to some errors, instead of just letting them pass as
     /// whatever [`KubeApiError`] we're getting.
     ///
@@ -1266,6 +1338,16 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
     }
 }
 
+/// A share error is written for the user, so it isn't framed as a failed config verification.
+impl From<ConfigError> for CliError {
+    fn from(error: ConfigError) -> Self {
+        match error {
+            ConfigError::Share(_) => Self::LocalShare(LocalShareError::Config(error)),
+            error => Self::ConfigError(error),
+        }
+    }
+}
+
 impl From<mirrord_up::UpError> for CliError {
     fn from(error: mirrord_up::UpError) -> Self {
         Self::PreviewUpConfig(Box::new(error))
@@ -1290,6 +1372,14 @@ impl From<OperatorApiError> for CliError {
         };
         if let Some(gate) = status.and_then(PaidFeatureGate::from_status) {
             return Self::PaidFeatureRequiresPlan { gate };
+        }
+        if let Some(status) = status
+            && status.reason == LOCAL_SHARE_REJECTED_REASON
+        {
+            return Self::LocalShare(LocalShareError::Operator(status.message.clone()));
+        }
+        if value.is_sessions_manager_not_served() {
+            return Self::ServerlessSessionsManagerNotServed;
         }
 
         match value {
@@ -1324,9 +1414,6 @@ impl From<OperatorApiError> for CliError {
                 Self::LocalPaidFeatureRequiresPlan { feature, gate }
             }
             OperatorApiError::FeatureNotLicensed { gate } => Self::PaidFeatureRequiresPlan { gate },
-            OperatorApiError::ServerlessSessionsManagerNotServed => {
-                Self::ServerlessSessionsManagerNotServed
-            }
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
@@ -1388,6 +1475,7 @@ impl From<OperatorApiError> for CliError {
                 Self::OperatorTargetResolution(KubeApiError::MalformedResource(msg))
             }
             OperatorApiError::UnsupportedTargetConfig(msg) => Self::UnsupportedTargetConfig(msg),
+            OperatorApiError::LocalShare(msg) => Self::LocalShare(LocalShareError::Operator(msg)),
             OperatorApiError::CredentialSecretCreation(msg) => {
                 Self::OperatorBranchCreationFailed(OperatorOperation::DbBranching, msg)
             }

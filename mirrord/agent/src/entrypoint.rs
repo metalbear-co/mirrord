@@ -17,7 +17,10 @@ use futures::{
     TryFutureExt,
     future::{BoxFuture, OptionFuture},
 };
-use metrics::{CLIENT_COUNT, start_metrics};
+use metrics::{
+    Buffered, CLIENT_COUNT, OUTGOING_THROTTLE_PERMITS_CLIENT, OUTGOING_THROTTLE_PERMITS_DAEMON,
+    start_metrics,
+};
 use mirrord_agent_env::{checked_env::CheckedEnv, envs};
 use mirrord_agent_iptables::{
     ChainNames, IPTablesWrapper, SafeIpTables,
@@ -466,8 +469,14 @@ impl ClientConnectionHandler {
         let dns_api = Self::create_dns_api(bg_tasks.dns);
         let reverse_dns_api = ReverseDnsApi::new(&state.network_runtime);
 
-        let outgoing_to_client_throttle = Throttle::new(Self::OUTGOING_DATA_TO_CLIENT_LIMIT);
-        let outgoing_from_client_throttle = Throttle::new(Self::OUTGOING_DATA_FROM_CLIENT_LIMIT);
+        let outgoing_to_client_throttle = Throttle::new(
+            Self::OUTGOING_DATA_TO_CLIENT_LIMIT,
+            OUTGOING_THROTTLE_PERMITS_DAEMON.clone(),
+        );
+        let outgoing_from_client_throttle = Throttle::new(
+            Self::OUTGOING_DATA_FROM_CLIENT_LIMIT,
+            OUTGOING_THROTTLE_PERMITS_CLIENT.clone(),
+        );
 
         let client_handler = Self {
             id,
@@ -516,9 +525,9 @@ impl ClientConnectionHandler {
                     Ok(api) => Ok(Some(api)),
                     Err(e) => {
                         let _ = connection
-                            .send(DaemonMessage::Close(format!(
+                            .send(Buffered::new(DaemonMessage::Close(format!(
                                 "Failed to create TcpStealerApi: {e}."
-                            )))
+                            ))))
                             .await; // Ignore message send error.
 
                         Err(e)?
@@ -551,7 +560,11 @@ impl ClientConnectionHandler {
                         return Ok(());
                     };
 
-                    match self.handle_client_message(message).await {
+                    // The message's bytes are in memory until it is handled, so they stay counted
+                    // until then.
+                    let (message, _buffered_bytes) = message.into_parts();
+
+                    match self.handle_client_message(message.into_inner()).await {
                         Ok(true) => {},
                         Ok(false) => return Ok(()),
                         Err(e) => {
@@ -582,7 +595,7 @@ impl ClientConnectionHandler {
                         unreachable!()
                     }}
                 }, if self.tcp_stealer_api.is_some() => match message {
-                    Ok(message) => self.respond(message).await?,
+                    Ok(message) => self.respond_buffered(message).await?,
                     Err(e) => break e,
                 },
                 Some(message) = self.tcp_outgoing_api.recv() => match message {
@@ -629,9 +642,17 @@ impl ClientConnectionHandler {
     }
 
     /// Sends a [`DaemonMessage`] response to the connected client (`mirrord-layer`).
-    #[tracing::instrument(level = "trace", skip(self))]
     async fn respond(&mut self, response: DaemonMessage) -> AgentResult<()> {
-        if matches!(&response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
+        self.respond_buffered(Buffered::new(response)).await
+    }
+
+    /// Sends a [`DaemonMessage`] response that is already counted in the buffered bytes metric,
+    /// such as one queued by the [`TcpStealerApi`].
+    ///
+    /// Its span is named `respond`, because every response goes through here.
+    #[tracing::instrument(name = "respond", level = "trace", skip(self))]
+    async fn respond_buffered(&mut self, response: Buffered<DaemonMessage>) -> AgentResult<()> {
+        if matches!(&*response, DaemonMessage::LogMessage(..)) && self.ready_for_logs.not() {
             return Ok(());
         }
 
@@ -784,9 +805,9 @@ pub async fn notify_client_about_dirty_iptables(
         Ok(Ok((stream, ..))) => {
             let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
             connection
-                .send(DaemonMessage::Close(
+                .send(Buffered::new(DaemonMessage::Close(
                     DIRTY_IPTABLES_ERROR_MESSAGE.to_owned(),
-                ))
+                )))
                 .await?;
         }
 

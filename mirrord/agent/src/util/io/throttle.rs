@@ -12,11 +12,14 @@ use std::{
 use bytes::{Buf, Bytes};
 use futures::{Sink, SinkExt, Stream};
 use pin_project_lite::pin_project;
+use prometheus::IntGauge;
 use tokio::{
     io::AsyncWrite,
     sync::{OwnedSemaphorePermit, Semaphore},
 };
 use tokio_util::sync::PollSemaphore;
+
+use crate::metrics::IntGaugeGuard;
 
 /// Shared store for permits that can be used to throttle data [`Stream`]s and [`Sink`]s.
 ///
@@ -25,17 +28,23 @@ use tokio_util::sync::PollSemaphore;
 ///
 /// An instance can be cloned and shared.
 /// Clones use the same permit pool.
+///
+/// The permits in use stand for the memory held: each chunk of data takes its length plus a fixed
+/// per-chunk overhead. They are reported in the `in_use` gauge, through [`ThrottlePermit`]s, and
+/// clones report to the same gauge.
 #[derive(Debug, Clone)]
 pub struct Throttle {
     max_permits: usize,
     sem: PollSemaphore,
+    in_use: IntGauge,
 }
 
 impl Throttle {
-    pub fn new(max_permits: usize) -> Self {
+    pub fn new(max_permits: usize, in_use: IntGauge) -> Self {
         Self {
             max_permits,
             sem: PollSemaphore::new(Arc::new(Semaphore::new(max_permits))),
+            in_use,
         }
     }
 
@@ -43,12 +52,24 @@ impl Throttle {
         &mut self,
         data: &D,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<OwnedSemaphorePermit>> {
+    ) -> Poll<Option<ThrottlePermit>> {
         let permits = data.size() + std::mem::size_of::<Bytes>();
         let permits = permits.min(self.max_permits);
         let permits = u32::try_from(permits).unwrap_or(u32::MAX);
-        self.sem.poll_acquire_many(cx, permits)
+        self.sem.poll_acquire_many(cx, permits).map(|permit| {
+            permit.map(|permit| ThrottlePermit {
+                _in_use: IntGaugeGuard::new(self.in_use.clone(), permit.num_permits()),
+                _permit: permit,
+            })
+        })
     }
+}
+
+/// Permits of a [`Throttle`], reported in its `in_use` gauge until dropped.
+#[derive(Debug)]
+pub struct ThrottlePermit {
+    _permit: OwnedSemaphorePermit,
+    _in_use: IntGaugeGuard,
 }
 
 /// Trait for values that store client data.
@@ -70,14 +91,14 @@ impl IsClientData for Bytes {
 #[derive(Debug)]
 pub struct Throttled<D> {
     data: D,
-    permit: OwnedSemaphorePermit,
+    permit: ThrottlePermit,
 }
 
 impl<D> Throttled<D> {
     /// Returns the client data and the permits acquired from the parent [`Throttle`] instance.
     ///
     /// Drop the permits after removing the data from memory.
-    pub fn unpack(self) -> (D, OwnedSemaphorePermit) {
+    pub fn unpack(self) -> (D, ThrottlePermit) {
         (self.data, self.permit)
     }
 }
@@ -317,6 +338,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::ops::Not;
+
     use futures::SinkExt;
     use tokio::io::AsyncWrite;
 
@@ -377,7 +400,7 @@ mod test {
     /// also when the underlying writer keeps accepting only part of each write.
     #[tokio::test]
     async fn handles_partial_writes() {
-        let throttle = Throttle::new(1024 * 1024);
+        let throttle = Throttle::new(1024 * 1024, IntGauge::new("in_use", "in_use").unwrap());
         let mut sink = ThrottledSink::new(
             IoVecThrottledSink::new(ShortWriter {
                 max_per_write: 7,
@@ -397,5 +420,39 @@ mod test {
         let written = &sink.sink.writer.written;
         assert_eq!(written.len(), expected.len());
         assert_eq!(*written, expected);
+    }
+
+    /// The throttle's gauge must report the permits of the chunks that are still in memory,
+    /// including a chunk that is only partially written, and drop to 0 once everything is written.
+    #[tokio::test]
+    async fn gauge_reports_permits_until_written() {
+        const MAX_PERMITS: usize = 1024 * 1024;
+
+        // Not a shared metric, so other tests in this process cannot change it.
+        let in_use = IntGauge::new("in_use", "in_use").unwrap();
+        let throttle = Throttle::new(MAX_PERMITS, in_use.clone());
+        let mut sink = ThrottledSink::new(
+            IoVecThrottledSink::new(ShortWriter {
+                max_per_write: 7,
+                written: Vec::new(),
+            }),
+            throttle.clone(),
+        );
+
+        // More chunks than `MAX_IO_VECS`, so the sink has to write some of them before it
+        // accepts the rest.
+        for chunk_no in 0u8..20 {
+            sink.feed(Bytes::from(vec![chunk_no; 10])).await.unwrap();
+        }
+
+        let held_permits = MAX_PERMITS - throttle.sem.available_permits();
+        assert!(sink.sink.writer.written.is_empty().not());
+        assert!(held_permits > 0);
+        assert_eq!(in_use.get(), i64::try_from(held_permits).unwrap());
+
+        sink.flush().await.unwrap();
+
+        assert_eq!(throttle.sem.available_permits(), MAX_PERMITS);
+        assert_eq!(in_use.get(), 0);
     }
 }

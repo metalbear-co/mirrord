@@ -167,17 +167,19 @@ where
     /// unconditionally passed through. Otherwise, the connection is
     /// dropped. We consider this to be an unlikely race condition.
     ///
-    /// With [`RedirectorTaskConfig::handle_unsubscribed_connections`], unsubscribed connections
+    /// With [`RedirectorTaskConfig::http_detect_inactive_ports`], unsubscribed connections
     /// are neither dropped nor unconditionally passed through, see the flag's docs.
     #[tracing::instrument(level = Level::TRACE, ret)]
     fn handle_connection(&mut self, conn: Redirected) {
         let source = conn.source;
         let destination = conn.destination;
-        let handle_unsubscribed = self.config.handle_unsubscribed_connections;
+        let http_detect_inactive_ports = self.config.http_detect_inactive_ports;
 
         let state = match self.ports.entry(destination.port()) {
             Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) if handle_unsubscribed => entry.insert(PortState::default()),
+            Entry::Vacant(entry) if http_detect_inactive_ports => {
+                entry.insert(PortState::default())
+            }
             Entry::Vacant(_) => {
                 tracing::warn!(
                     %source,
@@ -188,7 +190,10 @@ where
             }
         };
 
-        if state.mirror_txs.is_empty().not() || state.steal_tx.is_some() || handle_unsubscribed {
+        if state.mirror_txs.is_empty().not()
+            || state.steal_tx.is_some()
+            || http_detect_inactive_ports
+        {
             let tx = self.internal_tx.clone();
             let tls_store = self.tls_store.clone();
             let http_detection_timeout = self.config.http_detection_timeout;
@@ -276,44 +281,48 @@ where
             return;
         };
 
-        let Some(http_version) = conn.http_version else {
-            let mut redirected = RedirectedTcp::new(conn.stream, conn.info);
+        let http_version = match conn.http_version {
+            Ok(version) => version,
+            Err(reason) => {
+                let mut redirected = RedirectedTcp::new(conn.stream, conn.info);
 
-            for mirror_tx in &port_state.mirror_txs {
-                if let Err(TrySendError::Full(..)) =
-                    mirror_tx.try_send(MirroredTraffic::Tcp(redirected.mirror()))
-                {
-                    tracing::warn!(
-                        connection = ?redirected,
-                        "Mirroring client's traffic channel is full, \
-                        client will not receive mirrored traffic",
-                    );
+                for mirror_tx in &port_state.mirror_txs {
+                    if let Err(TrySendError::Full(..)) =
+                        mirror_tx.try_send(MirroredTraffic::Tcp(redirected.mirror()))
+                    {
+                        tracing::warn!(
+                            connection = ?redirected,
+                            "Mirroring client's traffic channel is full, \
+                            client will not receive mirrored traffic",
+                        );
+                    }
                 }
+
+                let join_handle = match &port_state.steal_tx {
+                    Some(steal_tx) => {
+                        let (tx, rx) = oneshot::channel();
+                        let _ = steal_tx
+                            .send(StolenTraffic::Tcp {
+                                conn: redirected,
+                                join_handle_tx: tx,
+                                shutdown: port_state.shutdown.child_token(),
+                                reason,
+                            })
+                            .await;
+
+                        rx.await.expect("TcpStealerTask dropped oneshot tx for returning JoinHandle to IO task for TCP connection")
+                    }
+                    None => redirected.pass_through(port_state.shutdown.child_token()),
+                };
+
+                Self::spawn_tracked_connection(self.internal_tx.clone(), port, port_state, async {
+                    if let Err(err) = join_handle.await {
+                        tracing::warn!(?err, "Redirected passthrough task returned JoinError");
+                    }
+                });
+
+                return;
             }
-
-            let join_handle = match &port_state.steal_tx {
-                Some(steal_tx) => {
-                    let (tx, rx) = oneshot::channel();
-                    let _ = steal_tx
-                        .send(StolenTraffic::Tcp {
-                            conn: redirected,
-                            join_handle_tx: tx,
-                            shutdown: port_state.shutdown.child_token(),
-                        })
-                        .await;
-
-                    rx.await.expect("TcpStealerTask dropped oneshot tx for returning JoinHandle to IO task for TCP connection")
-                }
-                None => redirected.pass_through(port_state.shutdown.child_token()),
-            };
-
-            Self::spawn_tracked_connection(self.internal_tx.clone(), port, port_state, async {
-                if let Err(err) = join_handle.await {
-                    tracing::warn!(?err, "Redirected passthrough task returned JoinError");
-                }
-            });
-
-            return;
         };
 
         let tx = self.internal_tx.clone();
@@ -466,7 +475,7 @@ where
     /// redirection first if it does not exist yet.
     ///
     /// The port may already have a [`PortState`] without a redirection, when
-    /// [`RedirectorTaskConfig::handle_unsubscribed_connections`] made [`Self::handle_connection`]
+    /// [`RedirectorTaskConfig::http_detect_inactive_ports`] made [`Self::handle_connection`]
     /// retain a connection that arrived before any subscription.
     async fn subscribe_port(&mut self, port: u16) -> Result<&mut PortState, R::Error> {
         let redirected = self.ports.get(&port).is_some_and(|state| state.redirected);
@@ -665,18 +674,20 @@ pub struct RedirectorTaskConfig {
     ///
     /// See [`ConnectionInfo::pass_through_connect`].
     pub passthrough_original_dst: bool,
-    /// Whether to handle connections to ports with no subscribers instead of dropping them or
-    /// unconditionally passing them through.
+    /// Whether connections to ports with no subscribers go through HTTP detection, as if the port
+    /// were subscribed with nothing matching, instead of being dropped or passed through as raw
+    /// TCP. HTTP connections are then handled per request, so a later subscription mirrors or
+    /// steals their requests. Non-HTTP connections, and ones that send too little data within
+    /// [`Self::http_detection_timeout`], still end up as raw TCP that no later subscription
+    /// picks up.
     ///
-    /// For redirectors that can deliver a connection before its port is subscribed, such as one
-    /// fed by connections accepted inside the workload. Not read from the environment.
-    ///
-    /// Such a connection goes through HTTP detection, as if its port were subscribed with nothing
-    /// matching. HTTP connections are handled per request, so requests arriving after a
-    /// subscription are mirrored or stolen. Connections that are not HTTP, or that do not send
-    /// enough data within [`Self::http_detection_timeout`], are handled as raw TCP when detection
-    /// finishes and are never picked up by a later subscription.
-    pub handle_unsubscribed_connections: bool,
+    /// Always enabled for redirectors that can deliver a connection before its port is
+    /// subscribed, such as the workload companion's. For iptables, set by
+    /// [`envs::HTTP_DETECT_INACTIVE_PORTS`] (`agent.http_detect_inactive_ports`), default
+    /// `false`: a port there stays redirected without subscribers while other connections are
+    /// open, e.g. between one session ending and the next subscribing, and without this flag
+    /// connections arriving in that window bypass the later subscription's filters.
+    pub http_detect_inactive_ports: bool,
 }
 
 impl RedirectorTaskConfig {
@@ -715,7 +726,7 @@ impl RedirectorTaskConfig {
             http_detection_timeout,
             unused_port_linger,
             passthrough_original_dst: envs::EXTERNAL_IP_FIX.from_env_or_default(),
-            handle_unsubscribed_connections: false,
+            http_detect_inactive_ports: envs::HTTP_DETECT_INACTIVE_PORTS.from_env_or_default(),
         }
     }
 }
@@ -820,7 +831,7 @@ struct PortState {
     cleanup_sleep: Option<Pin<Box<Sleep>>>,
     /// Whether [`PortRedirector::add_redirection`] was called for this port.
     ///
-    /// Only `false` while [`RedirectorTaskConfig::handle_unsubscribed_connections`] keeps the
+    /// Only `false` while [`RedirectorTaskConfig::http_detect_inactive_ports`] keeps the
     /// state for connections that arrived before the port's first subscription.
     redirected: bool,
 }
@@ -860,12 +871,12 @@ mod test {
 
     use bytes::Bytes;
     use http_body_util::Empty;
-    use hyper::{Response, StatusCode, service::service_fn};
+    use hyper::{Response, StatusCode, client::conn::http1::SendRequest, service::service_fn};
     use hyper_util::rt::TokioIo;
     use rstest::rstest;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
+        net::{TcpListener, TcpStream},
     };
 
     use crate::incoming::{
@@ -900,6 +911,7 @@ mod test {
             conn: rtcp,
             join_handle_tx,
             shutdown,
+            ..
         } = handle.next().await.unwrap().unwrap()
         else {
             panic!("falsely detected HTTP traffic");
@@ -1059,7 +1071,7 @@ mod test {
         redirector_task.await.unwrap().unwrap();
     }
 
-    /// With [`RedirectorTaskConfig::handle_unsubscribed_connections`], requests on a connection
+    /// With [`RedirectorTaskConfig::http_detect_inactive_ports`], requests on a connection
     /// that arrived before any subscription are passed through, and a later subscription adds the
     /// port redirection exactly once and receives later requests on the same connection.
     ///
@@ -1073,7 +1085,7 @@ mod test {
             Default::default(),
             Default::default(),
             RedirectorTaskConfig {
-                handle_unsubscribed_connections: true,
+                http_detect_inactive_ports: true,
                 ..RedirectorTaskConfig::from_env()
             },
         );
@@ -1128,5 +1140,103 @@ mod test {
         std::mem::drop(handle);
         redirector_task.await.unwrap().unwrap();
         assert!(state.borrow().has_redirections([]));
+    }
+
+    /// Opens an HTTP/1 client connection over `stream`, driving it in the background until the
+    /// returned sender is dropped.
+    async fn http1_sender(stream: TcpStream) -> SendRequest<Empty<Bytes>> {
+        let (sender, conn) =
+            hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(stream))
+                .await
+                .unwrap();
+        tokio::spawn(conn);
+        sender
+    }
+
+    /// With [`RedirectorTaskConfig::http_detect_inactive_ports`], a connection that arrives on a
+    /// port that is still redirected but has no subscriber (another connection keeps it
+    /// redirected, as during a preview environment replacement) has its later requests stolen
+    /// by the next subscriber.
+    #[tokio::test]
+    async fn connection_on_inactive_port_is_stolen_after_resubscription() {
+        let (redirector, state, mut conn_tx) = DummyRedirector::new();
+        let (task, mut handle, _) = RedirectorTask::new(
+            redirector,
+            Default::default(),
+            Default::default(),
+            RedirectorTaskConfig {
+                http_detect_inactive_ports: true,
+                ..RedirectorTaskConfig::from_env()
+            },
+        );
+        let redirector_task = tokio::spawn(task.run());
+
+        // The original destination, serving passed-through connections and requests.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = listener.local_addr().unwrap();
+        let port = destination.port();
+        let server = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                tokio::spawn(hyper::server::conn::http1::Builder::new().serve_connection(
+                    TokioIo::new(stream),
+                    service_fn(|_| async {
+                        Ok::<_, Infallible>(Response::new(Empty::<Bytes>::new()))
+                    }),
+                ));
+            }
+        });
+
+        // The first subscriber steals the port, and a connection opens and stays open.
+        handle.steal(port).await.unwrap();
+        let mut open_sender = http1_sender(conn_tx.make_connection(destination).await).await;
+        let open_request = tokio::spawn(async move {
+            let response = open_sender
+                .send_request(hyper::Request::new(Default::default()))
+                .await
+                .unwrap();
+            (open_sender, response.status())
+        });
+        let StolenTraffic::Http(http) = handle.next().await.unwrap().unwrap() else {
+            panic!("expected stolen HTTP traffic");
+        };
+        http.pass_through();
+        let (open_sender, status) = open_request.await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+
+        // The first subscriber leaves. The open connection keeps the port redirected.
+        handle.stop_steal(port);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.borrow().has_redirections([port]));
+
+        // A new connection arrives while the port has no subscriber. Completing a request on it
+        // makes sure the redirector handled the connection before the next subscription.
+        let mut sender = http1_sender(conn_tx.make_connection(destination).await).await;
+        let response = sender
+            .send_request(hyper::Request::new(Default::default()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // The next subscriber steals the port. The redirection is reused, not added again.
+        handle.steal(port).await.unwrap();
+        assert!(state.borrow().has_redirections([port]));
+
+        let request = tokio::spawn(async move {
+            sender
+                .send_request(hyper::Request::new(Default::default()))
+                .await
+        });
+        let next = tokio::time::timeout(Duration::from_secs(1), handle.next()).await;
+        assert!(
+            matches!(next, Ok(Some(Ok(StolenTraffic::Http(..))))),
+            "expected the request on the new connection to be stolen"
+        );
+
+        request.abort();
+        std::mem::drop(open_sender);
+        server.abort();
+        std::mem::drop(handle);
+        redirector_task.await.unwrap().unwrap();
     }
 }

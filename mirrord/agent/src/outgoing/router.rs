@@ -454,6 +454,7 @@ mod test {
 
     use bytes::Bytes;
     use mirrord_protocol::uid::Uid;
+    use prometheus::IntGauge;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpSocket},
@@ -472,8 +473,8 @@ mod test {
     async fn test_router() -> OutgoingRouter<TcpOrUnixConnection> {
         OutgoingRouter::<TcpOrUnixConnection>::new(
             Arc::new(BgTaskRuntime::spawn(None).await.unwrap()),
-            Throttle::new(128 * 1024),
-            Throttle::new(128 * 1024),
+            Throttle::new(128 * 1024, IntGauge::new("daemon", "daemon").unwrap()),
+            Throttle::new(128 * 1024, IntGauge::new("client", "client").unwrap()),
         )
     }
 

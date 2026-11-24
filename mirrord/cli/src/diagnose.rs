@@ -13,7 +13,7 @@ use tracing::Level;
 
 use crate::{
     CliError, CliResult, DiagnoseArgs, DiagnoseCommand, connection::create_and_connect,
-    connector::AgentConnection, util::remove_proxy_env,
+    connector::AgentConnection, error::LocalShareError, util::remove_proxy_env,
 };
 
 #[cfg(target_os = "macos")]
@@ -138,6 +138,9 @@ async fn diagnose_latency(config: Option<&Path>) -> CliResult<()> {
 
     let mut context = ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config);
     let mut config = crate::util::resolve_layer_config(&mut context).await?;
+    if config.share {
+        return Err(LocalShareError::UnsupportedCommand("diagnose").into());
+    }
 
     if !config.use_proxy {
         remove_proxy_env();

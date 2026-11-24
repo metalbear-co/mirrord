@@ -38,6 +38,7 @@ use url::Url;
 
 use crate::{
     config::{ci::CiArgs, global_config::GlobalConfigArgs},
+    preview::split_targetless_service,
     subscribe::EventStreamOptions,
 };
 
@@ -336,17 +337,19 @@ pub(super) enum Commands {
         args: Box<UiCommonArgs>,
     },
 
-    /// Launch the config wizard.
+    /// Launch the onboarding wizard, which generates a `mirrord-up.yaml`.
     ///
-    /// The config wizard is a web app that allows the user to create a mirrord config file by
-    /// interacting with the GUI instead of by hand. This includes starting with a boilerplate
-    /// config, finding targets in the cluster and using exposed target ports to create network
-    /// configuration. Like `mirrord exec` it requires a connection to the cluster. Also starts the
+    /// A web app that asks the same questions as `mirrord up init` and writes the same file, which
+    /// you run with `mirrord up -f <file>`. Requires a connection to the cluster. Also starts the
     /// local mirrord daemon and opens its Web UI.
     Wizard {
         /// Disable telemetry. See <https://github.com/metalbear-co/mirrord/blob/main/TELEMETRY.md>
         #[arg(long)]
         no_telemetry: bool,
+
+        /// Ask the questions in the terminal instead, with `mirrord up init`.
+        #[arg(long, conflicts_with_all = ["port", "no_browser", "config_file"])]
+        tui: bool,
 
         #[clap(flatten)]
         args: UiCommonArgs,
@@ -645,6 +648,11 @@ impl ExecParams {
 // `mirrord exec` command
 #[derive(Args, Debug)]
 pub(super) struct ExecArgs {
+    /// Print a temporary link that reaches this session (Team or Enterprise, needs
+    /// `incoming.mode = "steal"`).
+    #[arg(long)]
+    pub share: bool,
+
     /// Windows DLL injection method.
     ///
     /// When the flag is absent, falls back to the `MIRRORD_INJECTION_METHOD` environment
@@ -1627,18 +1635,18 @@ pub(super) enum PreviewCommand {
     ///
     /// Each service's image comes from `--image <service>=<image ref>`, then
     /// `MIRRORD_<SERVICE>_IMAGE`. Services without one are skipped. `sync` is ignored: `mirrord
-    /// preview sync` previews the services with `sync` and pushes their local directories, and
+    /// preview sync` previews the services with `sync` and syncs their local directories, and
     /// running both commands for one service under one key replaces one preview with the other.
     /// All sessions run under one key: `--key`, then `MIRRORD_KEY`, then the git branch
     /// (`GITHUB_HEAD_REF` when set), or a random key on `main`, `master` or without a branch.
     Up(PreviewUpArgs),
     /// Start a preview environment for every service of a mirrord-up.yaml with `sync` and without
-    /// `skip`, and push its `sync` directories into the preview pod.
+    /// `skip`, and sync the service's `sync.files` directories into its preview pod.
     ///
     /// Each preview runs the service's image (`--image <service>=<image ref>`, then
     /// `MIRRORD_<SERVICE>_IMAGE`) or, without one, the target's image, with the local directories
-    /// in it. An image also previews a service with `skip`. The command pushes the local code and
-    /// returns when every preview is ready; with `--watch`, it then keeps pushing changes. A later
+    /// in it. An image also previews a service with `skip`. The command syncs the local code and
+    /// returns when every preview is ready; with `--watch`, it then keeps syncing changes. A later
     /// run for a service without an image reuses a live session with the same settings and takes
     /// over its sync from an earlier `mirrord preview sync`, and a service with an image always
     /// gets a new session, which pulls the image again. `mirrord preview up` for the same service
@@ -1854,9 +1862,9 @@ pub(super) struct PreviewUpArgs {
     /// If a session hasn't reached `Ready` within this time, the CLI deletes it, unless `mirrord
     /// preview sync` reused the session from an earlier run. For `mirrord preview sync`, it is the
     /// longest time without progress: each new state of the session or of the preview pod, and
-    /// each applied push, starts it again, and it doesn't run while the pod copies the image's
-    /// files to the code volume, while the CLI lists, packs or sends a push, while the pod applies
-    /// it or while an install runs.
+    /// each applied sync, starts it again, and it doesn't run while the pod copies the image's
+    /// files to the code volume, while the CLI lists, packs or sends the files of a sync, while the
+    /// pod applies them or while `sync.prepare` runs.
     #[arg(long)]
     pub timeout: Option<u64>,
 }
@@ -1867,9 +1875,9 @@ pub(super) struct PreviewSyncArgs {
     #[command(flatten)]
     pub up: PreviewUpArgs,
 
-    /// Keep running after the previews are up, and push each change under the `sync` directories
-    /// into the preview pods. A change to `.git`, or to a path that git or the entry's `ignore`
-    /// leaves out, pushes nothing.
+    /// Keep running after the previews are up, and sync each change under the `sync` directories
+    /// into the preview pods, so one run performs many syncs. A change to `.git`, or to a
+    /// path that git or the entry's `ignore` leaves out, syncs nothing.
     #[arg(long)]
     pub watch: bool,
 }
@@ -2007,6 +2015,8 @@ pub(super) struct PreviewStopArgs {
     ///
     /// If provided, only the preview session matching both the key and this target will be
     /// deleted. If not provided, all preview sessions with the given key will be deleted.
+    /// `targetless` deletes every session without a target, `targetless/<service>` only the one
+    /// of that `mirrord preview up` service.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
@@ -2032,7 +2042,8 @@ pub(super) struct PreviewLogsArgs {
     /// Only read the environment running against this target.
     ///
     /// Without it, every environment matching the key is read. Can also be set via
-    /// `target.path` in the mirrord config.
+    /// `target.path` in the mirrord config. `targetless` reads every environment without a
+    /// target, `targetless/<service>` only the one of that `mirrord preview up` service.
     #[arg(short = 't', long)]
     pub target: Option<String>,
 
@@ -2059,7 +2070,7 @@ impl PreviewLogsArgs {
         if let Some(target) = &self.target {
             envs.insert(
                 "MIRRORD_IMPERSONATED_TARGET".as_ref(),
-                Cow::Borrowed(target.as_ref()),
+                Cow::Borrowed(split_targetless_service(target).0.as_ref()),
             );
         }
 
@@ -2085,7 +2096,7 @@ impl PreviewStopArgs {
         if let Some(target) = &self.target {
             envs.insert(
                 "MIRRORD_IMPERSONATED_TARGET".as_ref(),
-                Cow::Borrowed(target.as_ref()),
+                Cow::Borrowed(split_targetless_service(target).0.as_ref()),
             );
         }
         if let Some(namespace) = &self.namespace {
@@ -2186,12 +2197,15 @@ pub(super) enum UpListFormat {
     Json,
 }
 
+/// The default output of `mirrord up init` and `mirrord wizard --tui`.
+pub(super) const UP_INIT_DEFAULT_OUTPUT: &str = "mirrord-up.yaml";
+
 #[derive(Subcommand, Debug)]
 pub(super) enum UpSubcommand {
     /// Launch an interactive wizard that generates a skeleton mirrord-up.yaml.
     Init {
         /// Default path for the generated config (overrideable in the wizard).
-        #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = "mirrord-up.yaml")]
+        #[arg(short = 'o', long, value_hint = ValueHint::FilePath, default_value = UP_INIT_DEFAULT_OUTPUT)]
         output: PathBuf,
     },
 

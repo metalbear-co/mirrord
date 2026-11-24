@@ -1,4 +1,7 @@
-use super::{PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncInstall};
+use super::{
+    PreviewSyncConfig, PreviewSyncConfigError, PreviewSyncEntry, PreviewSyncPrepare,
+    PreviewSyncRestart, PreviewSyncRun,
+};
 
 /// Settings with `remotes` and `persist`, and with every other setting valid.
 fn config(remotes: &[&str], persist: &[&str]) -> PreviewSyncConfig {
@@ -9,22 +12,24 @@ fn config(remotes: &[&str], persist: &[&str]) -> PreviewSyncConfig {
                 remote: (*remote).to_owned(),
             })
             .collect(),
-        run_command: vec!["npm".to_owned(), "run".to_owned(), "dev".to_owned()],
-        working_dir: Some("/app".to_owned()),
-        install: Some(PreviewSyncInstall {
+        run: Some(PreviewSyncRun {
+            command: vec!["npm".to_owned(), "run".to_owned(), "dev".to_owned()],
+            working_dir: Some("/app".to_owned()),
+            restart: PreviewSyncRestart::OnSync,
+        }),
+        prepare: Some(PreviewSyncPrepare {
             command: vec!["npm".to_owned(), "ci".to_owned()],
-            on_change: vec![
+            triggered_by: vec![
                 "/app/package-lock.json".to_owned(),
                 "/app/**/requirements*.txt".to_owned(),
             ],
             persist: persist.iter().map(|path| (*path).to_owned()).collect(),
             working_dir: Some("/app".to_owned()),
         }),
-        restart_on_change: true,
     }
 }
 
-/// The pod mounts each `remote` and `install.persist` path from the code volume, so a path that
+/// The pod mounts each `remote` and `prepare.persist` path from the code volume, so a path that
 /// is not absolute, that another mount or a path of the operator's would hide, or that would hide
 /// the whole image, must be refused before the operator builds the pod.
 #[test]
@@ -78,7 +83,7 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
         ),
         (
             config(&["/app"], &["lib"]),
-            not_normalized("sync.install.persist", "lib"),
+            not_normalized("sync.prepare.persist", "lib"),
         ),
         (
             config(&["/"], &[]),
@@ -97,7 +102,7 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
         (
             config(&["/app"], &["/mirrord-code"]),
             PreviewSyncConfigError::Reserved {
-                option: "sync.install.persist",
+                option: "sync.prepare.persist",
                 path: "/mirrord-code".to_owned(),
                 reserved: "/mirrord-code",
             },
@@ -120,7 +125,7 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
             overlap(
                 "sync.files[].remote",
                 "/app",
-                "sync.install.persist",
+                "sync.prepare.persist",
                 "/app/node_modules",
             ),
         ),
@@ -131,29 +136,42 @@ fn check_refuses_paths_that_the_pod_cannot_mount() {
     }
 }
 
-/// The pod can't start the app or the install without a command, and resolves the working
-/// directories and the `on_change` globs in the container, so they must be absolute.
+/// The pod can't start the app or run `prepare` without a command, runs `prepare` only under the
+/// supervisor that `run` starts, and resolves the working directories and the `triggered_by` globs
+/// in the container, so they must be absolute.
 #[test]
 fn check_refuses_commands_and_container_paths_the_pod_cannot_use() {
     let no_entries = config(&[], &[]);
     assert_eq!(no_entries.check(), Err(PreviewSyncConfigError::NoEntries));
 
+    let mut no_run = config(&["/app"], &[]);
+    no_run.prepare = None;
+    no_run.run = None;
+    assert_eq!(no_run.check(), Ok(()));
+
+    let mut prepare_without_run = config(&["/app"], &[]);
+    prepare_without_run.run = None;
+    assert_eq!(
+        prepare_without_run.check(),
+        Err(PreviewSyncConfigError::PrepareWithoutRun)
+    );
+
     let mut no_run_command = config(&["/app"], &[]);
-    no_run_command.run_command.clear();
+    no_run_command.run.as_mut().unwrap().command.clear();
     assert_eq!(
         no_run_command.check(),
         Err(PreviewSyncConfigError::EmptyRunCommand)
     );
 
-    let mut no_install_command = config(&["/app"], &[]);
-    no_install_command.install.as_mut().unwrap().command.clear();
+    let mut no_prepare_command = config(&["/app"], &[]);
+    no_prepare_command.prepare.as_mut().unwrap().command.clear();
     assert_eq!(
-        no_install_command.check(),
-        Err(PreviewSyncConfigError::EmptyInstallCommand)
+        no_prepare_command.check(),
+        Err(PreviewSyncConfigError::EmptyPrepareCommand)
     );
 
     let mut relative_working_dir = config(&["/app"], &[]);
-    relative_working_dir.working_dir = Some("app".to_owned());
+    relative_working_dir.run.as_mut().unwrap().working_dir = Some("app".to_owned());
     assert_eq!(
         relative_working_dir.check(),
         Err(PreviewSyncConfigError::NotNormalized {
@@ -162,28 +180,28 @@ fn check_refuses_commands_and_container_paths_the_pod_cannot_use() {
         })
     );
 
-    let mut relative_install_dir = config(&["/app"], &[]);
-    relative_install_dir.install.as_mut().unwrap().working_dir = Some("./app".to_owned());
+    let mut relative_prepare_dir = config(&["/app"], &[]);
+    relative_prepare_dir.prepare.as_mut().unwrap().working_dir = Some("./app".to_owned());
     assert_eq!(
-        relative_install_dir.check(),
+        relative_prepare_dir.check(),
         Err(PreviewSyncConfigError::NotNormalized {
-            option: "sync.install.directory",
+            option: "sync.prepare.directory",
             path: "./app".to_owned(),
         })
     );
 
     let mut relative_glob = config(&["/app"], &[]);
-    relative_glob.install.as_mut().unwrap().on_change = vec!["package-lock.json".to_owned()];
+    relative_glob.prepare.as_mut().unwrap().triggered_by = vec!["package-lock.json".to_owned()];
     assert_eq!(
         relative_glob.check(),
         Err(PreviewSyncConfigError::NotNormalized {
-            option: "sync.install.on_change",
+            option: "sync.prepare.triggered_by",
             path: "package-lock.json".to_owned(),
         })
     );
 
     let mut root_working_dir = config(&["/app"], &[]);
     // Unlike a mount, the working directory can be `/`, because it hides nothing.
-    root_working_dir.working_dir = Some("/".to_owned());
+    root_working_dir.run.as_mut().unwrap().working_dir = Some("/".to_owned());
     assert_eq!(root_working_dir.check(), Ok(()));
 }

@@ -19,5 +19,7 @@ pub mod preview_template;
 
 pub mod sync;
 
+pub mod share;
+
 /// Types used in the operator that don't require any special dependencies
 pub mod types;

@@ -170,6 +170,29 @@ export type OperatorWatchStatus =
       message: string
     }
 
+// A session of the developer's organization, from the MetalBear Cloud sessions-manager
+// (`/api/v2/cloud/sessions`). Serverless targets run without an operator, so this is the only
+// place teammates' sessions on them show up.
+export interface CloudSession {
+  id: string
+  environment: string
+  service: string
+  replicaId: string
+  userSessionId: string
+  owner?: { userId: string; email: string }
+  createdAt: string
+  connected: boolean
+}
+
+// `loggedOut` means the developer has no usable `mirrord login`, so they don't use MetalBear
+// Cloud. `email` is set only once a login was read, so its absence includes failing to check.
+export interface CloudSessionsResponse {
+  status: 'available' | 'loggedOut' | 'unavailable'
+  reason?: string
+  email?: string
+  sessions: CloudSession[]
+}
+
 export interface OperatorLicense {
   fingerprint: string | null
   organization: string

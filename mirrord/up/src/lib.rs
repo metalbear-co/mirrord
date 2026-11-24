@@ -19,17 +19,18 @@ use std::{
 
 pub use config::{
     BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranching,
-    IncompatibleTarget, InstallConfig, ModeConfig, PreviewImageError, PreviewImageSource,
+    IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError, PreviewImageSource,
     PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig, RunType,
     SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
-    SubprocessCfg, SyncConfig, SyncEntry, SyncRunConfig, TargetValidationError, UnknownMode,
-    UpConfig, WindowsSupportError, preview_image_env,
+    SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig, TargetValidationError,
+    UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
-use config::{
-    ResolvedTarget, SessionKind, SpecifiedTarget, TargetConfig, UnresolvedTarget, validate_targets,
-};
+use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
-pub use init::{InitError, run_wizard};
+pub use init::{
+    InitError, PickedService, PickedWorkload, RenderError, SkeletonError, detect_ports,
+    list_workloads_for_mode, render_skeleton, run_wizard, service_name_for,
+};
 use inquire::{Confirm, Select};
 use itertools::Itertools;
 use k8s_openapi::api::core::v1::Namespace;
@@ -243,15 +244,6 @@ pub enum UpError {
         namespace: String,
     },
 
-    /// A service previewed by `mirrord preview up` or `mirrord preview sync` has no target
-    /// (`target: none` or `path: targetless`). A preview runs a copy of its target's pod, so there
-    /// has to be one.
-    #[error("service `{service}` has no target, but a preview environment needs one")]
-    PreviewTargetless {
-        /// Name of the targetless service.
-        service: Arc<str>,
-    },
-
     /// The only namespace that the user can pick has no workload that the user can list.
     #[error("found no workloads that you can list in namespace \"{0}\"")]
     NoWorkloads(String),
@@ -426,7 +418,7 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
 
 /// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
 /// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
-/// `sync.files` and the globs of its `sync.install.on_change` against the directory of the
+/// `sync.files` and the globs of its `sync.prepare.triggered_by` against the directory of the
 /// file.
 ///
 /// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
@@ -448,9 +440,9 @@ pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpE
         }
 
         for glob in sync
-            .install
+            .prepare
             .iter_mut()
-            .flat_map(|install| &mut install.on_change)
+            .flat_map(|prepare| &mut prepare.triggered_by)
         {
             *glob = config_directory.join(&*glob);
         }
@@ -909,29 +901,14 @@ pub async fn resolve_services(
 /// `mirrord preview sync` session, resolving the targets left to the cluster like
 /// [`resolve_services`] does, but without ever prompting. The caller drops the services that get
 /// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
-/// config's `feature.preview.image` to the one it picked.
+/// config's `feature.preview.image` to the one it picked. A service without a target is
+/// assembled like any other; whether its preview can run is for the CLI's `prepare` to decide.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
-    let targetless = up_config.services.iter().find(|(_, service)| {
-        matches!(
-            &service.target,
-            TargetConfig::Targetless
-                | TargetConfig::Specified(SpecifiedTarget {
-                    path: Some(Target::Targetless),
-                    ..
-                })
-        )
-    });
-    if let Some((service, _)) = targetless {
-        return Err(UpError::PreviewTargetless {
-            service: service.clone(),
-        });
-    }
-
     let up_context = UpKubeContext {
         command_arg: kube_context_arg,
         common_context: up_config.common.context.clone(),
@@ -1293,7 +1270,7 @@ services:
         let config_path = directory.path().join("mirrord-up.yaml");
         std::fs::write(
             &config_path,
-            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      files:\n        - local: missing\n          remote: /app\n      install:\n        command: [npm, ci]\n        on_change: [missing/package-lock.json]\n",
+            "services:\n  web:\n    run:\n      command: [x]\n    sync:\n      files:\n        - local: missing\n          remote: /app\n      prepare:\n        command: [npm, ci]\n        triggered_by: [missing/package-lock.json]\n      run:\n        command: [npm, start]\n",
         )
         .unwrap();
 
@@ -1306,7 +1283,7 @@ services:
         let sync = config.services["web"].sync.as_ref().unwrap();
         assert_eq!(sync.files[0].local, config_directory.join("missing"));
         assert_eq!(
-            sync.install.as_ref().unwrap().on_change,
+            sync.prepare.as_ref().unwrap().triggered_by,
             [config_directory.join("missing/package-lock.json")]
         );
     }

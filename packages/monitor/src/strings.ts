@@ -84,6 +84,14 @@ export const strings = {
     showingYours: 'Showing only your sessions.',
     connectOperator: 'Connect operator →',
     zeroSessions: '0 sessions · operator not connected',
+    cloud: 'MetalBear Cloud',
+    cloudEmpty: 'No sessions in your organization right now.',
+    cloudError: 'Could not list MetalBear Cloud sessions',
+    cloudWaiting: 'waiting for agent',
+  },
+  cloudOverview: {
+    title: 'MetalBear Cloud',
+    body: "Your organization's sessions show in the sidebar while they run. Start one with mirrord exec.",
   },
   kubernetesAccess: {
     title: 'Kubernetes access was lost',

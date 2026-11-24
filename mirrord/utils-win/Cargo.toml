@@ -50,7 +50,7 @@ winapi = { workspace = true, features = [
     "debugapi",
     "excpt",
 ] }
-zip = { version = "2", default-features = false }
+zip = { version = "9", default-features = false }
 rustc-demangle = "0.1"
 windows-sys = { version = "0.59", features = [
     "Wdk_Foundation",

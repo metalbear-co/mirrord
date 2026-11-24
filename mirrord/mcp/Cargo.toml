@@ -22,6 +22,7 @@ mirrord-config = { path = "../config" }
 mirrord-up = { path = "../up" }
 
 drain.workspace = true
+dunce.workspace = true
 flate2.workspace = true
 json-patch.workspace = true
 jsonschema.workspace = true
@@ -47,3 +48,4 @@ tar.workspace = true
 [dev-dependencies]
 rmcp = { workspace = true, features = ["client"] }
 rstest.workspace = true
+tempfile.workspace = true

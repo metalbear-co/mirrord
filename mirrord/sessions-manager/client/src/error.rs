@@ -9,6 +9,8 @@ pub enum SessionsManagerClientError {
     WebSocket(#[from] Box<tokio_tungstenite::tungstenite::Error>),
     #[error("HTTP control plane request failed: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("failed to set up TLS for sessions-manager connections: {0}")]
+    Tls(#[from] rustls::Error),
     #[error("WebSocket data-plane upgrade failed: {0}")]
     WebSocketUpgrade(#[from] ConnectError),
     #[error("Kubernetes request to the operator-hosted sessions-manager failed: {0}")]
@@ -77,6 +79,14 @@ pub enum SessionsManagerClientError {
          logs you in again, or MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN is wrong"
     )]
     LoginTokenOrSharedSecretRejected,
+    /// sessions-manager itself answers a refused token with 401, so a 403 comes from whatever
+    /// fronts it.
+    #[error(
+        "the proxy in front of sessions-manager refused this session with 403 Forbidden; check \
+         MIRRORD_SESSIONS_MANAGER_AUTH_TOKEN, the shared secret that proxy expects, and that \
+         MIRRORD_SESSIONS_MANAGER_URL (or `sessions_manager.url`) points at sessions-manager"
+    )]
+    Forbidden,
     #[error(
         "MIRRORD_SESSIONS_MANAGER_API_KEY must hold a MetalBear API key, which begins with \
          `metalbear_key_`"

@@ -9,9 +9,9 @@ use hyper::{
     header::{ACCEPT, AUTHORIZATION, HeaderMap},
     upgrade::Upgraded,
 };
-use hyper_rustls::HttpsConnectorBuilder;
+use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::{
-    client::legacy::Client as HyperClient,
+    client::legacy::{Client as HyperClient, connect::HttpConnector},
     rt::{TokioExecutor, TokioIo},
 };
 use mirrord_operator_websocket::{
@@ -20,7 +20,7 @@ use mirrord_operator_websocket::{
 };
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, ServiceScope,
+    AssignmentSubscription, ConnectionAssignment, ServiceScope, SessionList,
 };
 use reqwest::StatusCode;
 use tokio::time::Instant;
@@ -40,6 +40,7 @@ use crate::{
     },
     error::SessionsManagerClientError,
     retry::with_deadline,
+    tls,
 };
 
 /// Complete sessions-manager API base URL, including any deployment-specific path prefix.
@@ -118,6 +119,9 @@ const WEBSOCKET_UPGRADE_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub struct DirectTransport {
     http: reqwest::Client,
+    /// Dials the data-plane WebSocket upgrades, which need the raw [`Upgraded`] connection that
+    /// reqwest does not expose.
+    websocket: HyperClient<HttpsConnector<HttpConnector>, Empty<Bytes>>,
     api: ControlPlaneApi,
     credentials: Arc<dyn CredentialProvider>,
 }
@@ -125,10 +129,17 @@ pub struct DirectTransport {
 impl DirectTransport {
     /// Reaches the sessions-manager at `base_url` without credentials.
     pub fn new(base_url: Url) -> Result<Self, SessionsManagerClientError> {
+        let websocket_connector = HttpsConnectorBuilder::new()
+            .with_tls_config(tls::rustls_config()?)
+            .https_or_http()
+            .enable_http1()
+            .build();
+
         Ok(Self {
-            http: reqwest::Client::builder()
+            http: tls::http_client_builder()?
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()?,
+            websocket: HyperClient::builder(TokioExecutor::new()).build(websocket_connector),
             api: ControlPlaneApi::new(validate_base_url(base_url)?),
             credentials: Arc::new(NoCredentials),
         })
@@ -158,6 +169,43 @@ impl DirectTransport {
         self
     }
 
+    /// The live sessions of the organization the credentials name, for showing them without an
+    /// operator (`mirrord ui`).
+    pub async fn list_sessions(&self) -> Result<SessionList, SessionsManagerClientError> {
+        let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
+        let endpoint = self.api.endpoint(ControlPlaneEndpoint::Sessions)?;
+        let credentials =
+            with_deadline(Some(deadline), self.credentials.control_plane_headers()).await??;
+        let sent_authorization = credentials.contains_key(AUTHORIZATION);
+        let request = self.http.get(endpoint).headers(credentials).send();
+        let response = with_deadline(Some(deadline), request).await??;
+        self.check_refused(response.status(), sent_authorization)?;
+        if !response.status().is_success() {
+            return Err(SessionsManagerClientError::HttpStatus(response.status()));
+        }
+        Ok(with_deadline(Some(deadline), response.json()).await??)
+    }
+
+    /// Explains a control-plane request the sessions-manager refused by who it refused, the
+    /// credentials (`401`) or the caller they name (`403`). `sent_authorization` is whether the
+    /// request carried an `Authorization` header, without which a `401` says nothing about them.
+    fn check_refused(
+        &self,
+        status: StatusCode,
+        sent_authorization: bool,
+    ) -> Result<(), SessionsManagerClientError> {
+        if status == StatusCode::UNAUTHORIZED
+            && sent_authorization
+            && let Some(error) = self.credentials.unauthorized_error()
+        {
+            return Err(error);
+        }
+        if status == StatusCode::FORBIDDEN {
+            return Err(SessionsManagerClientError::Forbidden);
+        }
+        Ok(())
+    }
+
     /// Dials and authorizes the data-plane WebSocket described by a control-plane assignment.
     ///
     /// Assignment endpoints are relative to the configured base URL. The assignment
@@ -180,14 +228,6 @@ impl DirectTransport {
 
         let url = assignment.data_plane_endpoint.resolve(base_url, scheme)?;
 
-        let connector = HttpsConnectorBuilder::new()
-            .with_webpki_roots()
-            .https_or_http()
-            .enable_http1()
-            .build();
-        let client: HyperClient<_, Empty<Bytes>> =
-            HyperClient::builder(TokioExecutor::new()).build(connector);
-
         let started_at = Instant::now();
         tokio::time::timeout(WEBSOCKET_UPGRADE_TIMEOUT, async {
             // The credentials are gathered inside the timeout: a provider may have to reach the
@@ -201,7 +241,8 @@ impl DirectTransport {
             // The data-plane upgrade request never carries a body, so the (always-empty) `Vec<u8>`
             // built above is simply dropped in favor of the client's own `Empty<Bytes>` body type.
             let stream = connect_ws_direct(request, UpgradeContract::Direct, |request| async {
-                let response = client
+                let response = self
+                    .websocket
                     .request(request.map(|_| Empty::<Bytes>::new()))
                     .await
                     .map_err(|error| Box::new(error) as BoxError)?;
@@ -254,12 +295,7 @@ impl SessionsManagerTransport for DirectTransport {
             .header(ACCEPT, "text/event-stream")
             .send();
         let response = with_deadline(Some(deadline), request).await??;
-        if response.status() == StatusCode::UNAUTHORIZED
-            && sent_authorization
-            && let Some(error) = self.credentials.unauthorized_error()
-        {
-            return Err(error);
-        }
+        self.check_refused(response.status(), sent_authorization)?;
         verify_event_stream(response.status(), response.headers())?;
 
         Ok(ControlPlaneEventStream::from_bytes(response.bytes_stream()))
@@ -328,11 +364,23 @@ mod tests {
         }
     }
 
-    /// No login token was sent, so `mirrord login` is not what refused the session, and the 401
-    /// is reported as is.
-    #[tokio::test]
-    async fn a_401_without_a_login_token_is_reported_as_the_bare_status() {
-        let app = Router::new().fallback(|| async { StatusCode::UNAUTHORIZED.into_response() });
+    struct FixedLogin;
+
+    impl LoginTokenSource for FixedLogin {
+        fn login_token(
+            &self,
+        ) -> BoxFuture<'_, Result<Option<LoginToken>, SessionsManagerClientError>> {
+            std::future::ready(Ok(Some(LoginToken::from("login-token".to_owned())))).boxed()
+        }
+    }
+
+    /// Connects an intproxy authenticating with `login` to a sessions-manager that answers every
+    /// request with `status`, and returns the error the connect fails with.
+    async fn connect_error(
+        status: StatusCode,
+        login: Arc<dyn LoginTokenSource>,
+    ) -> SessionsManagerClientError {
+        let app = Router::new().fallback(move || async move { status.into_response() });
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url =
             Url::parse(&format!("http://{}/sm", listener.local_addr().unwrap())).unwrap();
@@ -340,10 +388,7 @@ mod tests {
 
         let transport = DirectTransport::new(base_url.clone())
             .unwrap()
-            .with_credentials(Arc::new(LoginTokenCredentials::new(
-                Arc::new(NoLogin),
-                &base_url,
-            )));
+            .with_credentials(Arc::new(LoginTokenCredentials::new(login, &base_url)));
         let client = IntproxyClient::with_transport(
             SessionsManagerConnectInfo {
                 scope: ServiceScope {
@@ -357,13 +402,32 @@ mod tests {
         )
         .unwrap();
 
-        let error = client.connect(Duration::from_secs(5)).await.unwrap_err();
+        client.connect(Duration::from_secs(5)).await.unwrap_err()
+    }
+
+    /// No login token was sent, so `mirrord login` is not what refused the session, and the 401
+    /// is reported as is.
+    #[tokio::test]
+    async fn a_401_without_a_login_token_is_reported_as_the_bare_status() {
+        let error = connect_error(StatusCode::UNAUTHORIZED, Arc::new(NoLogin)).await;
 
         assert!(
             matches!(
                 error,
                 SessionsManagerClientError::HttpStatus(StatusCode::UNAUTHORIZED)
             ),
+            "got {error:?}"
+        );
+    }
+
+    /// sessions-manager never answers 403, so even with a login token sent, a 403 is the
+    /// fronting proxy's, and the login is not blamed for it.
+    #[tokio::test]
+    async fn a_403_with_a_login_token_blames_the_proxy() {
+        let error = connect_error(StatusCode::FORBIDDEN, Arc::new(FixedLogin)).await;
+
+        assert!(
+            matches!(error, SessionsManagerClientError::Forbidden),
             "got {error:?}"
         );
     }

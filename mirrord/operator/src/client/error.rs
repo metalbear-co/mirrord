@@ -28,6 +28,7 @@ pub enum OperatorOperation {
     MysqlBranching,
     MongodbBranching,
     PreparingClientCertificate,
+    ReadShareLink,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -46,6 +47,7 @@ impl fmt::Display for OperatorOperation {
             Self::MysqlBranching => "MySQL branching",
             Self::MongodbBranching => "MongoDB branching",
             Self::PreparingClientCertificate => "preparing client certificate",
+            Self::ReadShareLink => "reading the share link",
         };
 
         f.write_str(as_str)
@@ -92,8 +94,6 @@ pub enum OperatorApiError {
 
     #[error("{gate}")]
     FeatureNotLicensed { gate: PaidFeatureGate },
-    #[error("mirrord operator does not serve the operator-hosted sessions-manager")]
-    ServerlessSessionsManagerNotServed,
 
     #[error("{operation} failed with code {}: {}", status.code, status.reason)]
     StatusFailure {
@@ -133,6 +133,11 @@ pub enum OperatorApiError {
 
     #[error("unsupported target configuration: {0}")]
     UnsupportedTargetConfig(String),
+
+    /// A session started with `share` can't run against this operator or target. The message is
+    /// written for the user, so it is shown as it is.
+    #[error("{0}")]
+    LocalShare(String),
 
     #[error(transparent)]
     InvalidBackoff(#[from] InvalidBackoff),
@@ -202,6 +207,22 @@ pub enum OperatorApiError {
         size: usize,
         limit: usize,
     },
+}
+
+impl OperatorApiError {
+    /// Whether the operator refused the operator-hosted sessions-manager because it either does
+    /// not support it or has it turned off.
+    pub fn is_sessions_manager_not_served(&self) -> bool {
+        matches!(
+            self,
+            Self::FeatureDisabled {
+                feature: NewOperatorFeature::ServerlessSessionsManager,
+            } | Self::UnsupportedFeature {
+                feature: NewOperatorFeature::ServerlessSessionsManager,
+                ..
+            }
+        )
+    }
 }
 
 pub type OperatorApiResult<T, E = OperatorApiError> = Result<T, E>;

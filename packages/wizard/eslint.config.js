@@ -4,7 +4,7 @@ import eslintConfigPrettier from 'eslint-config-prettier'
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'src/mirrord-schema.d.ts'],
+    ignores: ['dist/**', 'node_modules/**'],
   },
   ...base,
   {
@@ -18,5 +18,12 @@ export default tseslint.config(
   {
     files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
     extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    // Test fixtures hold ports and statuses, like the tests.
+    files: ['src/test/**/*.{ts,tsx}'],
+    rules: {
+      'no-magic-numbers': 'off',
+    },
   },
 )
