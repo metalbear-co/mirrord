@@ -30,6 +30,8 @@ thiserror.workspace = true
 futures.workspace = true
 tokio-tungstenite = { workspace = true, optional = true }
 tokio-util.workspace = true
+
+[dev-dependencies]
 rstest.workspace = true
 
 [lints]
