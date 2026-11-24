@@ -1,6 +1,6 @@
 ---
 title: mirrord MCP Server
-description: Register the MCP server built into the mirrord CLI, so that your AI agent checks mirrord configs and reads the mirrord docs of the version you have installed.
+description: Register the MCP server built into the mirrord CLI, so that your AI agent generates and validates mirrord configs offline, for the mirrord version you run.
 tags:
   - oss
   - team
@@ -9,11 +9,19 @@ tags:
 
 # mirrord MCP Server
 
-The mirrord CLI includes an [MCP](https://modelcontextprotocol.io) server, `mirrord mcp`. It gives an AI agent tools to validate `mirrord.json` and `mirrord-up.yaml` against the schema of your installed mirrord version, to explain config options, and to search and read the mirrord docs and [skills](./ai-skills-plugin.md) that this version ships with. It works offline and never starts a session.
+`mirrord mcp` is the [MCP](https://modelcontextprotocol.io) server built into the mirrord CLI. With it, your AI agent:
+
+- Generates `mirrord.json` and `mirrord-up.yaml` files, and validates them against the schema of the mirrord version you run.
+- Explains any config option: what it does, the values it takes, and the mirrord plan it needs.
+- Follows the mirrord [skills](./ai-skills-plugin.md) for tasks such as database branching, Kafka splitting, preview environments, and CI.
+- Uses safe defaults on shared clusters: it mirrors incoming traffic, steals only with an HTTP filter, and targets staging or development clusters, never production.
+- Answers mirrord questions from the docs of your installed version.
+
+The server works offline, from the docs and schema built into your mirrord binary, and never starts a session.
 
 ## What you need
 
-- mirrord CLI `3.273.0` or later. Check with `mirrord --version`, and see [Install mirrord](../getting-started/install-mirrord.md).
+- mirrord CLI `3.273.0` or later, and `3.291.0` or later on Windows for the skills. Check with `mirrord --version`, and see [Install mirrord](../getting-started/install-mirrord.md).
 - An agent that supports MCP servers over stdio, such as Claude Code, Codex, Cursor, VS Code, Windsurf, Claude Desktop, or OpenCode.
 
 ## Register the server
@@ -82,7 +90,7 @@ To check the connection, ask the agent to validate your `.mirrord/mirrord.json` 
 
 | Tool | What it does |
 | --- | --- |
-| `validate_config` | Checks the content of a `mirrord.json` or `mirrord-up.yaml` against the schema of the installed version. Returns each issue with the path of the value, a message, and the allowed values. An empty `issues` list means the config is valid. |
+| `validate_config` | Checks the content of a `mirrord.json` or `mirrord-up.yaml` against the schema of the installed version. Returns each issue with the path of the value, a message, and the allowed values. An empty `issues` list means the config is valid. Takes the directory you run mirrord from, to resolve a relative protobuf `schema_file`. |
 | `explain_config_option` | Explains one option by its dotted path, such as `feature.network.incoming.mode`: what it does, the values it takes, its default, and the mirrord plan it needs. |
 | `get_skill` | Lists the mirrord skills, or returns one skill and the files it bundles. |
 | `search_docs` | Searches the docs, skills, and config options by keywords, and returns the best matching pages. |
@@ -100,9 +108,12 @@ The server sends the agent instructions when it connects. They tell the agent to
 
 - Get the matching skill with `get_skill` before it starts a mirrord task.
 - Validate every config with `validate_config` before it writes the file, and fix issues until none remain.
+- Look up options with `explain_config_option` instead of guessing.
+- When mirrord fails, validate every config involved before it proposes a fix, and propose one fix at a time.
 - Answer questions about mirrord with `search_docs` and `read_doc`, not from memory.
 - Default to `mirror` for incoming traffic, and on a shared cluster use `steal` only with an HTTP filter.
 - Target staging or development clusters, never production.
+- Know that `mirrord exec` and `mirrord up` deploy nothing to the cluster, that database branches stay until their TTL runs out, and that preview environments stay until stopped or their TTL runs out.
 
 ## Versions
 
