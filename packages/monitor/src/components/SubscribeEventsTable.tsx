@@ -16,7 +16,11 @@ import {
   cn,
 } from '@metalbear/ui'
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
-import { labelForType, type SubscribeEventRow } from '../subscribeEvents'
+import {
+  labelForType,
+  targetLabel,
+  type SubscribeEventRow,
+} from '../subscribeEvents'
 import type { Routing } from '../eventsStore'
 import { strings } from '../strings'
 import { formatTime24 } from './events/parseEvent'
@@ -114,7 +118,8 @@ function EventRow({ row }: { row: SubscribeEventRow }) {
     <TableRow>
       <Cell value={formatTimestamp(row.timestamp)} />
       <Cell value={row.sessionKey} mono />
-      <Cell value={row.serviceName} />
+      <Cell value={row.namespace} />
+      <Cell value={targetLabel(row)} />
       <TableCell>
         <Badge
           variant="outline"
@@ -176,7 +181,8 @@ export default function SubscribeEventsTable({
     const text = query.trim().toLowerCase()
     const matches = (row: SubscribeEventRow) =>
       row.sessionKey.toLowerCase().includes(text) ||
-      row.serviceName.toLowerCase().includes(text) ||
+      row.namespace.toLowerCase().includes(text) ||
+      targetLabel(row).toLowerCase().includes(text) ||
       row.source.toLowerCase().includes(text)
 
     const matching = rows.filter(
@@ -259,12 +265,13 @@ export default function SubscribeEventsTable({
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full table-fixed caption-bottom text-sm">
           <colgroup>
-            <col className="w-[11%]" />
-            <col className="w-[14%]" />
-            <col className="w-[15%]" />
-            <col className="w-[16%]" />
-            <col className="w-[32%]" />
+            <col className="w-[10%]" />
             <col className="w-[12%]" />
+            <col className="w-[11%]" />
+            <col className="w-[15%]" />
+            <col className="w-[14%]" />
+            <col className="w-[27%]" />
+            <col className="w-[11%]" />
           </colgroup>
           <TableHeader className="bg-background sticky top-0 z-10">
             <TableRow>
@@ -288,7 +295,8 @@ export default function SubscribeEventsTable({
                 </button>
               </TableHead>
               <TableHead>{strings.subscribeEvents.sessionKey}</TableHead>
-              <TableHead>{strings.subscribeEvents.service}</TableHead>
+              <TableHead>{strings.subscribeEvents.namespace}</TableHead>
+              <TableHead>{strings.subscribeEvents.target}</TableHead>
               <TableHead>{strings.subscribeEvents.type}</TableHead>
               <TableHead>{strings.subscribeEvents.source}</TableHead>
               <TableHead>{strings.subscribeEvents.status}</TableHead>

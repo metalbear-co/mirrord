@@ -14,6 +14,8 @@ function request(
     timestamp: '2026-01-01T00:00:00Z',
     sessionKey,
     cluster,
+    namespace: '',
+    target: null,
     serviceName: 'checkout',
     type: 'http',
     source: 'GET /health',

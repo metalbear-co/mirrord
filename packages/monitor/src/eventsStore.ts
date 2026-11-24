@@ -24,6 +24,11 @@ export interface EventsState {
   unavailable: Unavailable | null
   streaming: boolean
   routing: Routing
+  /**
+   * The namespace whose events the tab streams, or `null` for every namespace that the kube user
+   * may see.
+   */
+  namespace: string | null
 }
 
 let state: EventsState = {
@@ -31,6 +36,7 @@ let state: EventsState = {
   unavailable: null,
   streaming: false,
   routing: 'consumed',
+  namespace: null,
 }
 
 const listeners = new Set<() => void>()
@@ -59,6 +65,16 @@ function flush(): void {
   publish({ rows })
 }
 
+/**
+ * Drops every collected row, along with the rows still waiting for the next frame, and publishes
+ * `next` with the empty rows.
+ */
+function reset(next: Partial<EventsState>): void {
+  pending = []
+  buffer.clear()
+  publish({ rows: [], ...next })
+}
+
 function enqueue(row: SubscribeEventRow): void {
   pending.push(row)
   if (pending.length >= MAX_ROWS) flush()
@@ -69,7 +85,11 @@ function open(): void {
   stream?.close()
 
   stream = new EventSource(
-    api.operatorEventStreamUrl(context, state.routing !== 'consumed'),
+    api.operatorEventStreamUrl(
+      context,
+      state.routing !== 'consumed',
+      state.namespace,
+    ),
   )
 
   stream.onopen = () => {
@@ -122,7 +142,8 @@ function open(): void {
 
 /**
  * Collects for the selected context once the kubeconfig's contexts are known, re-targeting a
- * running collection when the selection changes.
+ * running collection when the selection changes. A namespace picked in one cluster need not exist
+ * in the next, so a new context starts over from every namespace.
  */
 export function collectEvents({ current, selected }: ContextSelection): void {
   if (current === null) return
@@ -130,14 +151,21 @@ export function collectEvents({ current, selected }: ContextSelection): void {
   const kubeContext = selected ?? current
   if (context === kubeContext) return
 
-  if (context !== null) {
-    pending = []
-    buffer.clear()
-    publish({ rows: [], unavailable: null })
-  }
+  if (context !== null) reset({ unavailable: null, namespace: null })
 
   context = kubeContext
   open()
+}
+
+/**
+ * Narrows the collection to one namespace, or widens it to every namespace with `null`. The
+ * operator does the filtering, so this drops the rows of the old scope and reopens the stream.
+ */
+export function setNamespace(namespace: string | null): void {
+  if (state.namespace === namespace) return
+
+  reset({ unavailable: null, namespace })
+  if (context !== null) open()
 }
 
 /**
@@ -153,9 +181,7 @@ export function setRouting(routing: Routing): void {
 }
 
 export function clearEvents(): void {
-  pending = []
-  buffer.clear()
-  publish({ rows: [] })
+  reset({})
 }
 
 export function useEvents(): EventsState {

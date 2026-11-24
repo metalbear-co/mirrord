@@ -270,8 +270,8 @@ interface ContextPickerProps {
   onSelectContext: (context: string | null) => void
 }
 
-/** The kube context picker on its own, for views that have no namespace of their own to scope. */
-export function ContextPicker({
+/** The kube context picker, shown beside the namespace picker. */
+function ContextPicker({
   contexts,
   currentContext,
   selectedContext,
@@ -298,7 +298,8 @@ export function ContextPicker({
 
 /**
  * Context and namespace pickers, rendered inline in the header next to the user menu. They scope the
- * cluster (operator) session view; local sessions are always shown regardless of the selection.
+ * cluster (operator) session view and the Events tab, each of which keeps its own namespace; local
+ * sessions are always shown regardless of the selection.
  */
 export default function ContextNamespacePicker({
   contexts,
