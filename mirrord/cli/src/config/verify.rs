@@ -19,6 +19,11 @@ pub(crate) enum VerifyCommand {
     /// Exits with 0 when a verification of the commit passed, with 1 when none did, and with 2
     /// when the operator keeps no verification records.
     Check(VerifyLookupArgs),
+
+    /// Prints a signed verification as markdown for a pull request comment, with the statement
+    /// the operator signed in it, so that it can be checked without access to the cluster. For
+    /// a commit with several records, prints one that passed if there is one.
+    Receipt(VerifyLookupArgs),
 }
 
 #[derive(Args, Debug)]

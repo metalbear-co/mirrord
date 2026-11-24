@@ -48,6 +48,9 @@ pub(crate) enum VerifyError {
     #[error("No verification record found for `{0}`")]
     NoRecord(String),
 
+    #[error("No verification record of `{0}` carries a valid signature of the operator")]
+    NoSignedRecord(String),
+
     #[error("Failed to read verification records: {0}")]
     Kube(#[from] kube::Error),
 }

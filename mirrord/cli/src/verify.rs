@@ -53,6 +53,9 @@ const EXIT_NOT_VERIFIED: i32 = 1;
 /// How many groups of traffic of each kind a printed record lists.
 const PRINTED_GROUPS: usize = 12;
 
+/// First line of a receipt, by which a reader finds receipts among a pull request's comments.
+const RECEIPT_MARKER: &str = "<!-- mirrord-verify -->";
+
 /// Exit code of `check` when the records can't be read.
 const EXIT_NO_RECORDS: i32 = 2;
 
@@ -74,6 +77,7 @@ pub(crate) async fn verify_command(args: VerifyArgs) -> CliResult<()> {
         VerifyCommand::Run(args) => run(args).await,
         VerifyCommand::Show(args) => show(args).await,
         VerifyCommand::Check(args) => check(args).await,
+        VerifyCommand::Receipt(args) => receipt(args).await,
     }
 }
 
@@ -221,6 +225,76 @@ async fn check(args: VerifyLookupArgs) -> CliResult<()> {
         print_signature(&api, record).await;
     }
     std::process::exit(EXIT_NOT_VERIFIED)
+}
+
+/// Prints a signed record as markdown, with the statement the operator signed in it.
+async fn receipt(args: VerifyLookupArgs) -> CliResult<()> {
+    let api = verify_api(args.config_file).await?;
+    let public_key = public_key(&api).await?;
+    let records = find(&api.records, &args.reference).await?;
+
+    // A record that no longer says what the operator signed would print a table that its own
+    // statement contradicts.
+    let signed = records
+        .iter()
+        .filter(|record| {
+            signed_statement(record, &public_key)
+                .is_ok_and(|statement| matches_statement(record, &statement))
+        })
+        .collect::<Vec<_>>();
+    let record = signed
+        .iter()
+        .find(|record| phase(record) == VerificationPhase::Passed)
+        .or(signed.first())
+        .ok_or(VerifyError::NoSignedRecord(args.reference))?;
+
+    print_receipt(record);
+    Ok(())
+}
+
+fn print_receipt(record: &MirrordVerification) {
+    let spec = &record.spec;
+    let status = record.status.clone().unwrap_or_default();
+    // Keeps the command inside its table cell and its code span.
+    let command = spec.command.replace('|', "\\|").replace('`', "'");
+
+    println!("{RECEIPT_MARKER}");
+    println!("**mirrord verified: {}**", status.phase);
+    println!();
+    println!("| | |");
+    println!("| --- | --- |");
+    println!("| Commit | `{}` |", spec.commit);
+    println!("| Command | `{command}` |");
+    println!(
+        "| Sessions | {} observed by the operator |",
+        status.sessions.len()
+    );
+    if let Some(traffic) = &status.traffic {
+        println!(
+            "| Traffic | {} routed to the sessions, counted by the operator |",
+            traffic.total()
+        );
+    }
+    if spec.checks.is_empty().not() {
+        println!(
+            "| Checks | {} of {} seen by the operator |",
+            status.checks.iter().filter(|check| check.passed).count(),
+            spec.checks.len()
+        );
+    }
+    println!(
+        "| Record | `{}` |",
+        record.metadata.name.as_deref().unwrap_or_default()
+    );
+    println!();
+    println!("<details>");
+    println!("<summary>Statement signed by the operator</summary>");
+    println!();
+    println!("```json");
+    println!("{}", status.attestation.unwrap_or_default());
+    println!("```");
+    println!();
+    println!("</details>");
 }
 
 /// The API for verification records, when the operator of the configured cluster keeps them.
