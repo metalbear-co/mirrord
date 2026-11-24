@@ -268,6 +268,25 @@ mod tests {
     }
 
     #[test]
+    fn jq_verification_rejects_denied_builtins() {
+        for (program, builtin) in [
+            ("env | has(\"PATH\")", "env"),
+            (".a or (env.HOME == \"/root\")", "env"),
+            ("halt", "halt"),
+            ("halt_error", "halt_error"),
+            ("halt_error(1)", "halt_error"),
+        ] {
+            match VerifiedJqString::try_from(program) {
+                Err(JqError::Compile { error, .. }) => assert!(
+                    error.contains(&format!("Undefined filter: {builtin}")),
+                    "{program:?} failed with an unexpected error: {error}"
+                ),
+                other => panic!("{program:?} should fail to compile, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn test_estimate_string_len() {
         // This error doesn't make sens (complains about undefined symbols that don't appear in the
         // code) but that doesn't matter, we're just testing the string conversion and the
