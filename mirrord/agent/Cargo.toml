@@ -25,6 +25,7 @@ mirrord-sessions-manager-client.workspace = true
 mirrord-cluster-auth = { workspace = true, features = ["eks"] }
 mirrord-remote-layer-protocol.workspace = true
 mirrord-agent-env = { path = "./env", default-features = false }
+mirrord-jaq = { path = "../jaq", default-features = false }
 mirrord-agent-iptables = { path = "./iptables" }
 mirrord-tls-util = { path = "../tls-util" }
 mirrord-nightly-polyfill = { path = "../nightly-polyfill" }
@@ -84,7 +85,6 @@ rcgen.workspace = true
 serde_json_path.workspace = true
 dns-lookup.workspace = true
 tokio-retry.workspace = true
-jaq-std.workspace = true
 jaq-core.workspace = true
 jaq-json = { workspace = true, features = ["serde_json"] }
 

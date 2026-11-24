@@ -48,7 +48,7 @@ graph TD
         E --> E1["Build MSI/EXE/DLL"]
         E1 --> E2["Sign Artifacts"]
         E2 --> E3["Upload to Release"]
-        E3 --> E4["Publish Choco & WinGet"]
+        E3 --> E4["Publish Choco"]
     end
     
     C --> F["Create GitHub Release"]
@@ -56,6 +56,7 @@ graph TD
     E4 --> F
     
     F --> G["Update Homebrew Formula"]
+    F --> W["Start Release WinGet (release-winget.yaml) on main"]
     G --> H["Update 'latest' Tag"]
 ```
 
@@ -83,3 +84,13 @@ You can manually trigger workflows for testing purposes.
 *   **Trigger**: Manually via GitHub Actions UI.
 *   **Behavior**: It mimics a release but runs on the current branch.
 *   **Note**: Ensure you understand that it might try to push Docker images or publish packages if not carefully fenced by conditionals (mostly protected by `github.event_name != 'workflow_dispatch'` checks for dangerous steps).
+
+## 4. WinGet Submission Flow (`release-winget.yaml`)
+
+**Trigger**: The Release workflow starts it on `main` for each release. A person can also start it from `main`, via GitHub Actions UI or `gh workflow run`, for a release that missed its submission.
+
+**Input**: `version`, the published release to submit, such as `3.291.0`.
+
+A run with a valid version opens a real pull request on `microsoft/winget-pkgs`, unless one already exists for that version, so don't start this workflow to test it.
+
+The Release run doesn't wait for this workflow, so a failure inside it shows in its own run and in `#ci-alerts`. A failure to start it shows only as a failed `release_winget` job in the Release run. The "WinGet" section of `CONTRIBUTING.md` has the recovery steps.

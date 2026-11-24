@@ -87,7 +87,7 @@ You can do this from the command line (from within Linux, the Windows file syste
 
 ### Creating a playground project
 
-* If you already have your own project, you may [skip this section](wsl.md#root-project-vscode).
+* If you already have your own project, you may [skip this section](#using-mirrord-in-vs-code).
 
 We’ll provide you with a small playground project here, if you don’t already have your own. Let's create a sample NodeJS project to use with mirrord, but bear in mind that mirrord is not limited to any programming languages or frameworks. In the Linux terminal, navigate to the `home` directory.
 

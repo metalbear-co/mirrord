@@ -8,6 +8,22 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.291.0](https://github.com/metalbear-co/mirrord/tree/3.291.0) - 2026-11-23
+
+
+### Changed
+
+- `mirrord mcp` links each skill file to `skills/skills` in the mirrord
+  repository, at the tag of the installed version, instead of to
+  `metalbear-co/skills`. The `mirrord://info` resource no longer has the `docs`
+  and `skills` fields, and gives only the mirrord version.
+
+
+### Fixed
+
+- Fixed `mirrord mcp` serving no skills on Windows: the skills were embedded
+  with Windows line endings, which the server couldn't parse.
+
 ## [3.290.0](https://github.com/metalbear-co/mirrord/tree/3.290.0) - 2026-11-17
 
 
