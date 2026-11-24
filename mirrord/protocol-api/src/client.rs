@@ -380,29 +380,12 @@ impl MirrordClient {
             Err(..) => Err(ClientError::TaskFailed(self.failed().await)),
         }
     }
-
-    /// Makes a [`SimpleRequestNoResponse`].
-    ///
-    /// As these requests do not trigger any response, this function swallows errors for the sake of
-    /// simplicity.
-    pub async fn make_request_no_response<R: SimpleRequestNoResponse>(&self, request: R) {
-        let prepared = request.prepare();
-        self.request_tx
-            .send(ClientRequest::SimpleNoResponse(prepared))
-            .await
-            .ok();
-    }
 }
 
 /// Trait guard - prevents implementing the sealed trait outside of this crate.
 pub trait SimpleRequest: simple_request::SimpleRequest {}
 
 impl<T: simple_request::SimpleRequest> SimpleRequest for T {}
-
-/// Trait guard - prevents implementing the sealed trait outside of this crate.
-pub trait SimpleRequestNoResponse: simple_request::SimpleRequestNoResponse {}
-
-impl<T: simple_request::SimpleRequestNoResponse> SimpleRequestNoResponse for T {}
 
 /// [`Future`] that maps the output of a [`ClientTask`]'s [`JoinHandle`] into a [`TaskError`].
 ///

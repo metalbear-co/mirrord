@@ -76,7 +76,7 @@ async fn node_spawn() {
                     ))))
                     .await
             }
-            FileRequest::Close(..) => {}
+            FileRequest::Close(..) => intproxy.answer_file_close().await,
             other => panic!("unexpected message: {other:?}"),
         }
     }

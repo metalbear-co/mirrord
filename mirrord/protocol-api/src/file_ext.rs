@@ -229,6 +229,7 @@ impl FileResponseExt for FileResponse {
             | FileResponse::Futimens(..)
             | FileResponse::Fchown(..)
             | FileResponse::Fchmod(..) => None,
+            FileResponse::Close(_) => None,
 
             FileResponse::GetDEnts64(Ok(GetDEnts64Response { fd, .. }))
             | FileResponse::Open(Ok(OpenFileResponse { fd }))

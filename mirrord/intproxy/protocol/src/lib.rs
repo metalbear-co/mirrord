@@ -572,12 +572,16 @@ impl_request!(
 
 impl_request!(
     req = CloseFileRequest,
+    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::File => FileRequest::Close,
+    res_path = ProxyToLayerMessage::File => FileResponse::Close,
 );
 
 impl_request!(
     req = CloseDirRequest,
+    res = RemoteResult<()>,
     req_path = LayerToProxyMessage::File => FileRequest::CloseDir,
+    res_path = ProxyToLayerMessage::File => FileResponse::Close,
 );
 
 impl_request!(

@@ -412,6 +412,7 @@ async fn go_dir(
         intproxy.recv().await,
         ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: dir_fd }))
     );
+    intproxy.answer_file_close().await;
     intproxy.expect_file_close(fd).await;
 
     test_process.wait_assert_success().await;

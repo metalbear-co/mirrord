@@ -72,6 +72,7 @@ async fn handle_port_subscriptions(mut intproxy: TestIntProxy) {
             }
             ClientMessage::FileRequest(FileRequest::Close(close)) => {
                 assert_eq!(close.fd, 1222);
+                intproxy.answer_file_close().await;
             }
             ClientMessage::FileRequest(FileRequest::Read(read)) => {
                 assert_eq!(read.remote_fd, 1222);

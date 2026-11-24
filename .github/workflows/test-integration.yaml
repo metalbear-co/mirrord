@@ -99,6 +99,7 @@ jobs:
               -p mirrord-layer-lib \
               -p mirrord-layer \
               -p mirrord-protocol \
+              -p mirrord-protocol-api \
               -p mirrord-config \
               -p mirrord-progress \
               -p mirrord-kube \

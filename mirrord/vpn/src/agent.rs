@@ -7,10 +7,11 @@ use std::{
 use futures::{Stream, StreamExt};
 use mirrord_protocol::{
     ClientMessage, DaemonMessage, LogLevel,
+    file::CLOSE_RESPONSE_VERSION,
     vpn::{ClientVpn, NetworkConfiguration, ServerVpn},
 };
 use mirrord_protocol_io::{Client, Connection};
-use semver::VersionReq;
+use semver::{Version, VersionReq};
 use tokio::sync::oneshot;
 
 use crate::error::VpnError;
@@ -24,6 +25,9 @@ pub static MINIMAL_PROTOCOL_VERSION: LazyLock<VersionReq> = LazyLock::new(|| {
 pub struct VpnAgent {
     connection: Connection<Client>,
     pong: Option<oneshot::Sender<()>>,
+    /// [`mirrord_protocol`] version negotiated with the agent, [`None`] until
+    /// [`Self::try_create`] negotiates it.
+    protocol_version: Option<Version>,
 }
 
 impl VpnAgent {
@@ -49,6 +53,8 @@ impl VpnAgent {
             ));
         }
 
+        vpn_agnet.protocol_version = Some(agent_protocol_version);
+
         Ok(vpn_agnet)
     }
 
@@ -56,7 +62,16 @@ impl VpnAgent {
         VpnAgent {
             connection,
             pong: None,
+            protocol_version: None,
         }
+    }
+
+    /// Whether the agent answers `Close` and `CloseDir` with a `FileResponse::Close`, so the
+    /// reply has to be read before the next message from the agent.
+    pub fn close_responses(&self) -> bool {
+        self.protocol_version
+            .as_ref()
+            .is_some_and(|version| CLOSE_RESPONSE_VERSION.matches(version))
     }
 
     pub async fn ping(&mut self) -> Result<oneshot::Receiver<()>, VpnError> {

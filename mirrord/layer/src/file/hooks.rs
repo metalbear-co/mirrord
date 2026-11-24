@@ -167,11 +167,11 @@ pub(super) unsafe extern "C" fn opendir_detour(raw_filename: *const c_char) -> u
                 Ok(success) => Ok(success),
                 Err(DetourError::Bypass(bypass)) => {
                     // this shouldn't happen, but if it does we shouldn't leak fd
-                    close_layer_fd(fd);
+                    let _ = close_layer_fd(fd);
                     Err(DetourError::Bypass(bypass))
                 }
                 Err(DetourError::Error(fail)) => {
-                    close_layer_fd(fd);
+                    let _ = close_layer_fd(fd);
                     Err(DetourError::Error(fail))
                 }
             })

@@ -742,44 +742,57 @@ pub(super) fn fcntl(orig_fd: c_int, cmd: c_int, fcntl_fd: i32) -> Result<(), Hoo
 /// Extra relevant for node on macos.
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 pub(super) fn dup<const SWITCH_MAP: bool>(fd: c_int, dup_fd: i32) -> Result<(), HookError> {
-    // The copy can go on an fd that is still in `OPEN_FILES`: with `dup2` or `dup3` onto a remote
-    // file, or when the layer did not see the close of an earlier fd with the same number. Then the
-    // old `RemoteFile` can be dropped, which sends its close request, and a `fork` must not split
-    // that, see [`CLOSE_FORK_LOCK`].
+    // The copy can go on an fd that is still in `SOCKETS` or `OPEN_FILES`: with `dup2` or `dup3`
+    // onto a socket or a remote file, or when the layer did not see the close of an earlier fd with
+    // the same number. Then the old socket or `RemoteFile` can be released, which sends its close
+    // requests (`PortUnsubscribe`, ...), and a `fork` must not split that, see [`CLOSE_FORK_LOCK`].
+    //
+    // Each map is checked in its own statement, so that its guard is released before the next lock:
+    // the block below locks `SOCKETS` before `OPEN_FILES`.
+    let replaces_socket = SOCKETS.lock()?.contains_key(&dup_fd);
     let replaces_remote_file = OPEN_FILES.lock()?.contains_key(&dup_fd);
-    let _fork_guard = replaces_remote_file.then(|| {
+    let _fork_guard = (replaces_socket || replaces_remote_file).then(|| {
         CLOSE_FORK_LOCK
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     });
 
-    // The block gives back the replaced remote file, so that it is dropped after the `SOCKETS` and
-    // `OPEN_FILES` guards (see [`OPEN_FILES`]).
-    let replaced_file = {
+    // The block gives back the replaced socket and remote file, so that they are released after the
+    // `SOCKETS` and `OPEN_FILES` guards (see [`OPEN_FILES`]).
+    let (replaced_socket, replaced_file) = {
         let mut sockets = SOCKETS.lock()?;
         if let Some(socket) = sockets.get(&fd).cloned() {
-            sockets.insert(dup_fd as RawFd, socket);
+            let replaced_socket = sockets.insert(dup_fd as RawFd, socket);
 
-            if SWITCH_MAP {
+            let replaced_file = if SWITCH_MAP {
                 OPEN_FILES.lock()?.remove(&dup_fd)
             } else {
                 None
-            }
+            };
+
+            (replaced_socket, replaced_file)
         } else {
             let mut open_files = OPEN_FILES.lock()?;
             match open_files.get(&fd).cloned() {
                 Some(file) => {
-                    if SWITCH_MAP {
-                        sockets.remove(&dup_fd);
-                    }
+                    let replaced_socket = SWITCH_MAP.then(|| sockets.remove(&dup_fd)).flatten();
 
-                    open_files.insert(dup_fd as RawFd, file)
+                    (replaced_socket, open_files.insert(dup_fd as RawFd, file))
                 }
-                None => None,
+                // The kernel replaced `dup_fd` with a copy of an fd the layer doesn't manage, so
+                // whatever the layer tracked under `dup_fd` is gone.
+                None if SWITCH_MAP => (sockets.remove(&dup_fd), open_files.remove(&dup_fd)),
+                None => (None, None),
             }
         }
     };
+    // Dropped, not closed with `RemoteFile::close`: like the kernel's, the close of the replaced
+    // fd is silent, and `dup2`/`dup3` don't report its errors.
     drop(replaced_file);
+
+    if let Some(socket) = replaced_socket {
+        release_socket(socket);
+    }
 
     Ok(())
 }
@@ -822,7 +835,7 @@ fn remote_hostname_string() -> Detour<CString> {
 
     let ReadFileResponse { bytes, .. } = file::ops::RemoteFile::remote_read(fd, 256)?;
 
-    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
+    let _ = file::ops::remote_close(fd).inspect_err(|fail| {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
@@ -940,7 +953,7 @@ pub(super) fn read_remote_resolv_conf() -> Detour<Vec<u8>> {
 
     let ReadFileResponse { bytes, .. } = file::ops::RemoteFile::remote_read(fd, 4096)?;
 
-    let _ = file::ops::RemoteFile::remote_close(fd).inspect_err(|fail| {
+    let _ = file::ops::remote_close(fd).inspect_err(|fail| {
         trace!("Leaking remote file fd (should be harmless) due to {fail:#?}!")
     });
 
@@ -1482,4 +1495,13 @@ pub(super) fn getifaddrs() -> HookResult<*mut libc::ifaddrs> {
     }
 
     Ok(original_head)
+}
+
+/// Drops the layer's handle on `socket`, and sends its close requests (`PortUnsubscribe`, ...)
+/// if no other fd refers to it. Call it after releasing the `SOCKETS` guard.
+/// This function makes me weep.
+pub(crate) fn release_socket(socket: Arc<UserSocket>) {
+    if let Some(socket) = Arc::into_inner(socket) {
+        socket.close();
+    }
 }

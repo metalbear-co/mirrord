@@ -49,6 +49,9 @@ pub static RENAME_VERSION: LazyLock<VersionReq> =
 pub static COPYFILE_VERSION: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.24.0".parse().expect("Bad Identifier"));
 
+pub static CLOSE_RESPONSE_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.31.0".parse().expect("Bad Identifier"));
+
 /// Internal version of Metadata across operating system (macOS, Linux)
 /// Only mutual attributes
 #[derive(Encode, Decode, Debug, PartialEq, Clone, Copy, Eq, Default)]

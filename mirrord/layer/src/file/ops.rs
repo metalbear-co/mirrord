@@ -22,6 +22,7 @@ use mirrord_layer_lib::{
     detour::{Bypass, Detour, DetourError, DetourExt, OptionExt},
     error::{HookError, HookResult as Result},
     file::filter::FileFilter,
+    proxy_connection::ProxyError,
 };
 use mirrord_protocol::{
     Payload, ResponseError,
@@ -175,6 +176,8 @@ fn prefetchable_path_check(path: PathBuf, write: bool, path_use: PathUse) -> Det
     Ok(path)
 }
 
+/// ATTENTION: read [`Self::close`] and [`Self::drop`] before adding
+/// any new fields.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RemoteFile {
     pub fd: u64,
@@ -219,10 +222,23 @@ impl RemoteFile {
 
     /// Sends a [`CloseFileRequest`] message, closing the file in the agent.
     #[mirrord_layer_macro::instrument(level = "trace")]
-    pub(crate) fn remote_close(fd: u64) -> Result<()> {
-        common::make_proxy_request_no_response(CloseFileRequest { fd })?;
-        Ok(())
+    pub(crate) fn close(mut self) -> Result<()> {
+        // To prevent memory leaks
+        self.path = String::new();
+        let result = remote_close(self.fd);
+
+        // Don't want to call drop and run remote_close a second time.
+        std::mem::forget(self);
+        result
     }
+}
+
+/// Sends a [`CloseFileRequest`] message, closing the file in the agent.
+#[mirrord_layer_macro::instrument(level = "trace")]
+pub(crate) fn remote_close(fd: u64) -> Result<()> {
+    Ok(common::make_proxy_request_with_response(
+        CloseFileRequest { fd },
+    )??)
 }
 
 impl Drop for RemoteFile {
@@ -234,11 +250,17 @@ impl Drop for RemoteFile {
         // - This can run from `close_layer_fd`, after the caller closed stdout or stderr.
         // - A log can need a `write`, and the hooked `write` locks `OPEN_FILES`. If a caller drops
         //   a `RemoteFile` under that guard, the thread deadlocks with itself.
-        let result = Self::remote_close(self.fd);
-        assert!(
-            result.is_ok(),
-            "mirrord failed to send close file message to main layer thread. Error: {result:?}",
-        );
+        match remote_close(self.fd) {
+            // We got an answer from the proxy so we know the connection works.
+            // Don't panic here because we're about to be killed anyway.
+            Err(HookError::ProxyError(
+                ProxyError::ProxyFailure(..) | ProxyError::AgentReportedError(..),
+            )) => {}
+            err @ Err(HookError::CannotGetProxyConnection | HookError::ProxyError(_)) => {
+                panic!("failed to close fd: {err:?}")
+            }
+            _ => {}
+        };
     }
 }
 
@@ -308,7 +330,7 @@ fn create_local_devnull_file(remote_fd: u64) -> Detour<RawFd> {
 #[mirrord_layer_macro::instrument(level = "trace", ret)]
 fn close_remote_file_on_failure(fd: u64) -> Result<()> {
     error!("Creating a temporary local file resulted in an error, closing the file remotely!");
-    RemoteFile::remote_close(fd)
+    remote_close(fd)
 }
 
 /// Blocking wrapper around `libc::open` call.

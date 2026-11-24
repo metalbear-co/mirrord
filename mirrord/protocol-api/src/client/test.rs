@@ -14,10 +14,11 @@ use mirrord_protocol::{
         LookupRecord, ReverseDnsLookupRequest, ReverseDnsLookupResponse, SockType,
     },
     file::{
-        AccessFileRequest, AccessFileResponse, CloseDirRequest, CloseFileRequest, FdOpenDirRequest,
-        FsMetadataInternal, FsMetadataInternalV2, OpenDirResponse, OpenFileRequest,
-        OpenFileResponse, OpenOptionsInternal, ReadDirRequest, ReadDirResponse, STATFS_V2_VERSION,
-        STATFS_VERSION, StatFsRequestV2, XstatFsResponse, XstatFsResponseV2,
+        AccessFileRequest, AccessFileResponse, CLOSE_RESPONSE_VERSION, CloseDirRequest,
+        CloseFileRequest, FdOpenDirRequest, FsMetadataInternal, FsMetadataInternalV2,
+        OpenDirResponse, OpenFileRequest, OpenFileResponse, OpenOptionsInternal, ReadDirRequest,
+        ReadDirResponse, STATFS_V2_VERSION, STATFS_VERSION, StatFsRequestV2, XstatFsResponse,
+        XstatFsResponseV2,
     },
     outgoing::{
         DaemonConnect, DaemonConnectV2,
@@ -199,10 +200,23 @@ async fn reverse_dns(#[values(true, false)] supported: bool) {
     tokio::join!(client_fut, server_fut);
 }
 
-/// Verifies handling of multiple file requests,
-/// some requiring a response and some not.
+/// Verifies handling of multiple file requests, including closes.
+///
+/// From [`CLOSE_RESPONSE_VERSION`] on, the server answers closes. On older versions it doesn't,
+/// and the client answers them itself, so a close never blocks the requests after it.
+#[rstest]
 #[tokio::test]
-async fn file_ops() {
+async fn file_ops(#[values(true, false)] close_responses: bool) {
+    let protocol_version = if close_responses {
+        mirrord_protocol::VERSION.clone()
+    } else {
+        "1.30.2".parse().unwrap()
+    };
+    assert_eq!(
+        CLOSE_RESPONSE_VERSION.matches(&protocol_version),
+        close_responses
+    );
+
     let (connector, mut acceptor) = TestConnector::new_pair();
 
     let client_fut = async {
@@ -224,16 +238,15 @@ async fn file_ops() {
             .make_request(FdOpenDirRequest { remote_fd: fd })
             .await
             .unwrap();
-        client
-            .make_request_no_response(CloseFileRequest { fd })
-            .await;
+        client.make_request(CloseFileRequest { fd }).await.unwrap();
         let _ = client
             .make_request(ReadDirRequest { remote_fd: dir_fd })
             .await
             .unwrap();
         client
-            .make_request_no_response(CloseDirRequest { remote_fd: dir_fd })
-            .await;
+            .make_request(CloseDirRequest { remote_fd: dir_fd })
+            .await
+            .unwrap();
         let _ = client
             .make_request(AccessFileRequest {
                 pathname: "/some/file".into(),
@@ -244,7 +257,7 @@ async fn file_ops() {
     };
 
     let server_fut = async {
-        let mut server = acceptor.accept(mirrord_protocol::VERSION.clone()).await;
+        let mut server = acceptor.accept(protocol_version.clone()).await;
         match server.stream.next().await.unwrap() {
             ClientMessage::FileRequest(FileRequest::Open(_)) => {}
             other => panic!("unexpected message: {other:?}"),
@@ -271,7 +284,14 @@ async fn file_ops() {
             .unwrap();
         match server.stream.next().await.unwrap() {
             ClientMessage::FileRequest(FileRequest::Close(CloseFileRequest { fd: 0 })) => {}
-            other => panic!("unxpected message: {other:?}"),
+            other => panic!("unexpected message: {other:?}"),
+        }
+        if close_responses {
+            server
+                .sink
+                .send(Ok(DaemonMessage::File(FileResponse::Close(Ok(())))))
+                .await
+                .unwrap();
         }
         match server.stream.next().await.unwrap() {
             ClientMessage::FileRequest(FileRequest::ReadDir(ReadDirRequest { remote_fd: 1 })) => {}
@@ -288,6 +308,13 @@ async fn file_ops() {
             ClientMessage::FileRequest(FileRequest::CloseDir(CloseDirRequest { remote_fd: 1 })) => {
             }
             other => panic!("unexpected message: {other:?}"),
+        }
+        if close_responses {
+            server
+                .sink
+                .send(Ok(DaemonMessage::File(FileResponse::Close(Ok(())))))
+                .await
+                .unwrap();
         }
         match server.stream.next().await.unwrap() {
             ClientMessage::FileRequest(FileRequest::Access(..)) => {}

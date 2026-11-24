@@ -447,12 +447,13 @@ impl ClientConnectionHandler {
         let protocol_version = ClientProtocolVersion::default();
 
         let file_manager = if state.workload_companion {
-            FileManager::new_workload_companion()
+            FileManager::new_workload_companion(protocol_version.clone())
         } else {
             FileManager::new(
                 state
                     .container_pid()
                     .or_else(|| state.ephemeral.then_some(1)),
+                protocol_version.clone(),
             )
         };
 

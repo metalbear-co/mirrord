@@ -104,6 +104,7 @@ use mirrord_layer_lib::detour::DetourExt;
 #[cfg(doc)]
 use mirrord_layer_lib::setup::SETUP;
 use mirrord_layer_lib::{
+    HookError,
     detour::DetourGuard,
     error::{LayerError, Result},
     logging::init_tracing,
@@ -119,7 +120,7 @@ use nix::{
     fcntl::{OFlag, open},
     sys::stat::Mode,
 };
-use socket::{SOCKETS, UserSocket};
+use socket::{SOCKETS, UserSocket, ops::release_socket};
 
 pub(crate) use crate::macros::*;
 use crate::{
@@ -784,7 +785,7 @@ pub(crate) static CLOSE_FORK_LOCK: Mutex<()> = Mutex::new(());
 /// neither map.
 /// **DON'T ADD LOGS HERE SINCE CALLER MIGHT CLOSE STDOUT/STDERR CAUSING THIS TO CRASH**
 #[mirrord_layer_macro::instrument(level = "trace", fields(pid = std::process::id()))]
-pub(crate) fn close_layer_fd(fd: c_int) {
+pub(crate) fn close_layer_fd(fd: c_int) -> Result<(), HookError> {
     // Most fds are not in the maps, so look first, and only take the lock for an fd that is. If
     // another thread adds `fd` to a map after this check, the entry is for its own new resource,
     // and this close must keep it.
@@ -798,7 +799,7 @@ pub(crate) fn close_layer_fd(fd: c_int) {
             .expect("OPEN_FILES lock failed")
             .contains_key(&fd);
     if !in_sockets && !in_open_files {
-        return;
+        return Ok(());
     }
 
     let _fork_guard = CLOSE_FORK_LOCK
@@ -811,25 +812,8 @@ pub(crate) fn close_layer_fd(fd: c_int) {
     let removed = SOCKETS.lock().expect("SOCKETS lock failed").remove(&fd);
     match removed {
         Some(socket) => {
-            // Closed file is a socket, so if it's already bound to a port - notify agent to stop
-            // mirroring/stealing that port.
-            //
-            // Mind that there might be more instances of this socket,
-            // stored in the SOCKETS map due to `dup*` calls.
-            // We only make the request if this is the last instance.
-            let socket_cloned = socket.as_ref().clone();
-
-            // Obtain weak pointer, and drop the strong one.
-            let weak = Arc::downgrade(&socket);
-            std::mem::drop(socket);
-
-            // If there are no other strong ones, make the request.
-            // There is no chance of missed close here, because we dropped the strong pointer first.
-            // There is a chance of double close, but the second request should be a noop in the
-            // intproxy.
-            if weak.strong_count() == 0 {
-                socket_cloned.close();
-            }
+            release_socket(socket);
+            Ok(())
         }
         _ => {
             if setup().fs_config().is_active() {
@@ -838,7 +822,16 @@ pub(crate) fn close_layer_fd(fd: c_int) {
                     .lock()
                     .expect("OPEN_FILES lock failed")
                     .remove(&fd);
-                drop(removed_file);
+
+                if let Some(arc) = removed_file
+                    && let Some(removed_file) = Arc::into_inner(arc)
+                {
+                    removed_file.close()
+                } else {
+                    Ok(())
+                }
+            } else {
+                Ok(())
             }
         }
     }
@@ -858,8 +851,15 @@ pub(crate) fn close_layer_fd(fd: c_int) {
 pub(crate) unsafe extern "C" fn close_detour(fd: c_int) -> c_int {
     unsafe {
         // `close_layer_fd` first, then the real close.
-        close_layer_fd(fd);
-        FN_CLOSE(fd)
+        let layer_result = close_layer_fd(fd);
+        let real_result = FN_CLOSE(fd);
+        if real_result == 0
+            && let Err(hook_err) = layer_result
+        {
+            hook_err.into()
+        } else {
+            real_result
+        }
     }
 }
 
@@ -1150,9 +1150,17 @@ pub(crate) unsafe extern "C" fn uv_fs_close_detour(
     c: usize,
 ) -> c_int {
     unsafe {
-        // In this case we call `close_layer_fd` before the original close function, because
-        // execution does not return to here after calling `FN_UV_FS_CLOSE`.
-        close_layer_fd(fd);
+        // `close_layer_fd` goes first, for the same fd-reuse reason as in `close_detour`. An async
+        // `uv_fs_close` closes the fd later on a libuv worker thread or through io_uring, so by the
+        // time `FN_UV_FS_CLOSE` returns, the number may already belong to a new remote file.
+        //
+        // Unlike `close_detour`, the remote close result is dropped. libuv reports errors as a
+        // negated errno (`UV_EPERM` is `-1`), not as `-1` with `errno` set. An async
+        // `uv_fs_close` returns 0 once the request is queued, and its result reaches the callback
+        // through `req->result`, which this hook can't reach. Callers such as Node complete and
+        // free the request when `uv_fs_close` returns an error, so returning one for a queued
+        // request makes the callback run on a freed request later.
+        let _ = close_layer_fd(fd);
         FN_UV_FS_CLOSE(a, b, fd, c)
     }
 }
@@ -1191,10 +1199,15 @@ pub(crate) unsafe extern "C" fn syscall_detour(number: c_long, mut args: ...) ->
             libc::SYS_close => {
                 // `close_layer_fd` first, then the real close.
                 let guard = DetourGuard::new();
-                if guard.is_some() {
-                    close_layer_fd(a1 as c_int);
+                let layer_result = guard.as_ref().map(|_| close_layer_fd(a1 as c_int));
+                let real_result = FN_SYSCALL(number, a1, a2, a3, a4, a5, a6);
+                if real_result == 0
+                    && let Some(Err(hook_err)) = layer_result
+                {
+                    hook_err.into()
+                } else {
+                    real_result
                 }
-                FN_SYSCALL(number, a1, a2, a3, a4, a5, a6)
             }
             libc::SYS_statx if setup().fs_config().is_active() => {
                 let guard = DetourGuard::new();

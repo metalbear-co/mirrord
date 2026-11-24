@@ -167,11 +167,10 @@ impl OpenDirs {
         // Dropped after the `OPEN_FILES` guard, see [`OPEN_FILES`].
         let base_file = OPEN_FILES.lock()?.remove(&guard.base_fd);
         drop(base_file);
-        common::make_proxy_request_no_response(CloseDirRequest {
+        Ok(common::make_proxy_request_with_response(CloseDirRequest {
             remote_fd: guard.remote_fd,
-        })?;
-
-        Ok(0)
+        })?
+        .map(|()| 0)?)
     }
 }
 

@@ -27,11 +27,6 @@ pub enum ClientRequest {
         queue_kind: QueueKind,
         handler: Box<dyn ResultHandler>,
     },
-    /// Simple request that does not trigger any response from the server.
-    ///
-    /// Always originates from a
-    /// [`SimpleRequestNoResponse`](crate::client::simple_request::SimpleRequestNoResponse).
-    SimpleNoResponse(ClientMessage),
     /// Request to establish an outgoing TCP/UDP connection (in case of UDP, purely logical).
     ConnectIp {
         addr: SocketAddr,
