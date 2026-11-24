@@ -5016,7 +5016,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "shlex 1.3.0",
  "socket2 0.5.10",
  "stork",
@@ -5154,7 +5154,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "strum_macros 0.27.2",
  "tokio",
  "tracing",
@@ -5263,7 +5263,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "str-win",
  "strum 0.27.2",
  "strum_macros 0.27.2",
@@ -5654,7 +5654,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "serde_urlencoded",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tar",
@@ -8754,7 +8754,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
- "sha2-asm",
 ]
 
 [[package]]
@@ -8766,15 +8765,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "digest 0.11.3",
-]
-
-[[package]]
-name = "sha2-asm"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b845214d6175804686b2bd482bcffe96651bb2d1200742b712003504a2dac1ab"
-dependencies = [
- "cc",
 ]
 
 [[package]]
