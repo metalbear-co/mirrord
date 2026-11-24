@@ -1,0 +1,1 @@
+Trimmed dependencies of the CLI and the agent: `oci-spec`, `local-ip-address`, the protobuf support of `prometheus`, and the `ring` backend of `rcgen` are gone from them, and `rstest` is only compiled for tests.
