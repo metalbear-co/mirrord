@@ -22,7 +22,7 @@ jobs:
   # read the submission token.
   validate_version:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 5
+    timeout-minutes: 11
     outputs:
       version: ${{ steps.validate.outputs.version }}
     steps:
@@ -30,7 +30,7 @@ jobs:
         id: validate
         # Shorter than the job's timeout, because a job timeout concludes as cancelled,
         # which would skip the failure alert.
-        timeout-minutes: 4
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
@@ -65,7 +65,7 @@ jobs:
   submit:
     needs: validate_version
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 21
     environment: winget
     # Two runs for one version could both pass Komac's check for an existing pull request
     # and open duplicates, so they run one at a time. The group is per version, because
@@ -78,7 +78,7 @@ jobs:
       - name: Update WinGet manifest
         # Shorter than the job's timeout, because a job timeout concludes as cancelled,
         # which would skip the failure alert.
-        timeout-minutes: 14
+        timeout-minutes: 20
         env:
           # Classic PAT of metalbear-ci, because Komac opens the PR on
           # microsoft/winget-pkgs, where a GitHub App can't be installed and a
@@ -178,7 +178,7 @@ jobs:
     needs: [validate_version, submit]
     if: failure()
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 2
+    timeout-minutes: 8
     steps:
       - name: Send Slack notification
         env:

@@ -1336,14 +1336,14 @@ jobs:
     if: needs.validate_release_request.outputs.should_release == 'true'
     # `gh` sets no HTTP timeout, so a stalled request would otherwise hold this job for
     # GitHub's default of 6 hours.
-    timeout-minutes: 3
+    timeout-minutes: 9
     permissions:
       actions: write
     steps:
       - name: Start the WinGet submission
         # Shorter than the job's timeout, because a job timeout concludes as cancelled,
         # and a dispatch that never happened must show as a failure.
-        timeout-minutes: 2
+        timeout-minutes: 8
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.validate_release_request.outputs.version }}
