@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 340" width="1202" height="340" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">How mirrord loads remote environment variables</title>
+  <desc id="d">mirrord-layer in your local process sends an ENV-REQUEST to the mirrord agent in the remote cluster. The agent reads the environment of the target pod from /proc/container_pid/environ. The agent sends the variables back to mirrord-layer as REMOTE-ENV, and mirrord-layer sets them before the local process starts.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#756DF3"/>
+    </marker>
+    <symbol id="k8s" viewBox="0 0 32 32">
+      <polygon points="16.00,1.60 27.73,7.25 30.62,19.94 22.51,30.11 9.49,30.11 1.38,19.94 4.27,7.25" fill="#326CE5" stroke="#326CE5" stroke-width="2" stroke-linejoin="round"/>
+      <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+        <circle cx="16" cy="16" r="7"/>
+        <line x1="16.00" y1="13.40" x2="16.00" y2="5.80"/><line x1="18.03" y1="14.38" x2="23.97" y2="9.64"/><line x1="18.53" y1="16.58" x2="25.94" y2="18.27"/><line x1="17.13" y1="18.34" x2="20.43" y2="25.19"/><line x1="14.87" y1="18.34" x2="11.57" y2="25.19"/><line x1="13.47" y1="16.58" x2="6.06" y2="18.27"/><line x1="13.97" y1="14.38" x2="8.03" y2="9.64"/>
+      </g>
+      <circle cx="16" cy="16" r="2.4" fill="#ffffff"/>
+    </symbol>
+  </defs>
+  <rect x="0" y="0" width="1202" height="340" fill="#ffffff"/>
+
+  <!-- Boundaries -->
+  <rect x="20" y="40" width="360" height="270" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
+  <text x="44" y="68" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
+  <rect x="520" y="40" width="660" height="270" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
+  <text x="544" y="68" font-size="15" font-weight="700" fill="#4a44b8">Remote cluster</text>
+
+  <!-- Local process with mirrord-layer -->
+  <rect x="45" y="90" width="310" height="196" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="200" y="124" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
+  <text x="200" y="144" font-size="12.5" fill="#ffffff" text-anchor="middle">variables set before it starts</text>
+  <rect x="70" y="170" width="260" height="96" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="200" y="224" font-size="16" font-weight="700" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">mirrord-layer</text>
+
+  <!-- Layer and agent -->
+  <line x1="355" y1="196" x2="586" y2="196" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="470" y="186" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">ENV-REQUEST</text>
+  <line x1="590" y1="240" x2="359" y2="240" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="470" y="230" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">REMOTE-ENV</text>
+
+  <!-- mirrord agent -->
+  <rect x="590" y="150" width="200" height="120" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="690" y="216" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+
+  <!-- Agent and target pod -->
+  <line x1="790" y1="196" x2="906" y2="196" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="850" y="186" font-size="12.5" fill="#333344" text-anchor="middle">reads</text>
+  <line x1="910" y1="240" x2="794" y2="240" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="850" y="230" font-size="12.5" fill="#333344" text-anchor="middle">variables</text>
+
+  <!-- Target pod -->
+  <rect x="910" y="150" width="250" height="120" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
+  <text x="1035" y="200" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Target pod</text>
+  <text x="1035" y="226" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">/proc/&lt;container_pid&gt;/environ</text>
+  <!-- Kubernetes logos: what runs in the cluster -->
+  <use href="#k8s" x="1162" y="22" width="36" height="36"/>
+</svg>

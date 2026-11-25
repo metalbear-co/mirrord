@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 340" width="1100" height="340" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">The traditional dev loop</title>
+  <desc id="d">The traditional dev loop: code, test locally, deploy to staging, and test on staging. When tests fail on staging, the loop goes back to code. When the code works on staging, it goes to deploy to production.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1100" height="340" fill="#ffffff"/>
+
+  <!-- Loop steps -->
+  <rect x="30" y="40" width="200" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="130" y="86" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Code</text>
+  <line x1="230" y1="80" x2="306" y2="80" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="310" y="40" width="200" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="410" y="86" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Test locally</text>
+  <line x1="510" y1="80" x2="586" y2="80" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="590" y="40" width="200" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="690" y="86" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Deploy to staging</text>
+  <line x1="690" y1="120" x2="690" y2="216" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="590" y="220" width="200" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="690" y="266" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Test on staging</text>
+
+  <!-- Back to code -->
+  <polyline points="590,260 130,260 130,124" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="360" y="250" font-size="12.5" fill="#333344" text-anchor="middle">tests fail: fix and repeat</text>
+
+  <!-- Exit to production -->
+  <line x1="790" y1="260" x2="866" y2="260" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="870" y="220" width="200" height="80" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <text x="970" y="266" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Deploy to production</text>
+</svg>

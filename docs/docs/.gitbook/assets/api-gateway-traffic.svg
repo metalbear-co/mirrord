@@ -5,11 +5,22 @@
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
     </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#756DF3"/>
+    </marker>
+    <symbol id="k8s" viewBox="0 0 32 32">
+      <polygon points="16.00,1.60 27.73,7.25 30.62,19.94 22.51,30.11 9.49,30.11 1.38,19.94 4.27,7.25" fill="#326CE5" stroke="#326CE5" stroke-width="2" stroke-linejoin="round"/>
+      <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+        <circle cx="16" cy="16" r="7"/>
+        <line x1="16.00" y1="13.40" x2="16.00" y2="5.80"/><line x1="18.03" y1="14.38" x2="23.97" y2="9.64"/><line x1="18.53" y1="16.58" x2="25.94" y2="18.27"/><line x1="17.13" y1="18.34" x2="20.43" y2="25.19"/><line x1="14.87" y1="18.34" x2="11.57" y2="25.19"/><line x1="13.47" y1="16.58" x2="6.06" y2="18.27"/><line x1="13.97" y1="14.38" x2="8.03" y2="9.64"/>
+      </g>
+      <circle cx="16" cy="16" r="2.4" fill="#ffffff"/>
+    </symbol>
   </defs>
   <rect x="0" y="0" width="960" height="420" fill="#ffffff"/>
 
   <!-- Cluster boundary -->
-  <rect x="230" y="30" width="470" height="300" rx="16" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
+  <rect x="230" y="30" width="470" height="300" rx="16" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
   <text x="250" y="58" font-size="15" font-weight="700" fill="#4a44b8">Kubernetes cluster</text>
 
   <!-- Caller -->
@@ -36,15 +47,15 @@
   <text x="570" y="275" font-size="14" font-weight="700" fill="#232141" text-anchor="middle">container</text>
 
   <!-- Local process -->
-  <rect x="780" y="120" width="170" height="84" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="865" y="152" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Your local process</text>
-  <text x="865" y="174" font-size="12.5" fill="#333344" text-anchor="middle">laptop, CI runner,</text>
-  <text x="865" y="191" font-size="12.5" fill="#333344" text-anchor="middle">or AI agent</text>
+  <rect x="780" y="120" width="170" height="84" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <text x="865" y="152" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Your local process</text>
+  <text x="865" y="174" font-size="12.5" fill="#ffffff" text-anchor="middle">laptop, CI runner,</text>
+  <text x="865" y="191" font-size="12.5" fill="#ffffff" text-anchor="middle">or AI agent</text>
 
   <!-- Arrows -->
   <line x1="190" y1="178" x2="256" y2="178" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <line x1="420" y1="170" x2="486" y2="162" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <line x1="650" y1="162" x2="776" y2="162" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="650" y1="162" x2="776" y2="162" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="740" y="136" font-size="12.5" font-weight="700" fill="#4a44b8" text-anchor="middle">filter</text>
   <text x="740" y="151" font-size="12.5" font-weight="700" fill="#4a44b8" text-anchor="middle">matches</text>
   <line x1="570" y1="190" x2="570" y2="228" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
@@ -53,4 +64,6 @@
   <!-- Caption -->
   <text x="480" y="372" font-size="14" fill="#333344" text-anchor="middle">mirrord intercepts at the service pod, after the gateway. A request that reaches your local</text>
   <text x="480" y="394" font-size="14" fill="#333344" text-anchor="middle">process has already been authenticated, routed, and transformed by the real gateway.</text>
+  <!-- Kubernetes logos: what runs in the cluster -->
+  <use href="#k8s" x="682" y="12" width="36" height="36"/>
 </svg>

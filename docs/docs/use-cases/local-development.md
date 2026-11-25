@@ -22,7 +22,7 @@ Want to see it in action? [Watch the demo](https://www.youtube.com/watch?v=ZR7A7
 
 Traditionally, development happens in loops. You write and test code locally, then deploy to staging, where it meets production-like conditions for the first time. Tests fail. You fix, redeploy, repeat.
 
-![The Traditional Dev Loop](../.gitbook/assets/devloop.png)
+![The Traditional Dev Loop](../.gitbook/assets/devloop.svg)
 
 This is slow for two reasons:
 
