@@ -437,7 +437,8 @@ impl RestartableBackgroundTask for AgentConnection {
                     .max_delay(Duration::from_secs(8))
                     .take(10);
                 // Unless the operator responded with explicit 410 (meaning that the session is
-                // permanently gone), we can still retry.
+                // permanently gone), or the sessions-manager said that the agent replica a pinned
+                // session reconnects to is gone, we can still retry.
                 let can_retry = |error: &AgentConnectionError| match error {
                     AgentConnectionError::Operator(OperatorApiError::KubeError {
                         error: kube::Error::Api(error),
@@ -446,6 +447,9 @@ impl RestartableBackgroundTask for AgentConnection {
                         error.code != RECONNECT_NOT_POSSIBLE_CODE
                             || error.reason != RECONNECT_NOT_POSSIBLE_REASON
                     }
+                    AgentConnectionError::SessionsManagerClient(
+                        SessionsManagerClientError::PinnedReplicaGone,
+                    ) => false,
                     _ => true,
                 };
 

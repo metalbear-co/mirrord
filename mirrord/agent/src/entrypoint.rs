@@ -817,6 +817,9 @@ impl ClientConnectionHandler {
                     code, "ignoring the exit code of a replaced task"
                 ),
             },
+            ClientMessage::ReplacedTaskOwner => {
+                debug!(client_id = self.id, "ignoring the owner of a replaced task");
+            }
         }
 
         Ok(true)
