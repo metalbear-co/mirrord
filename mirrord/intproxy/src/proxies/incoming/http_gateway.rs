@@ -29,7 +29,10 @@ use super::{
     },
     tasks::{HttpOut, InProxyTaskMessage},
 };
-use crate::background_tasks::{BackgroundTask, MessageBus};
+use crate::{
+    background_tasks::{BackgroundTask, MessageBus},
+    session_monitor::replay::CaptureHandle,
+};
 
 /// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
 ///
@@ -50,6 +53,11 @@ pub struct HttpGatewayTask {
     listening_on: ListeningOn,
     /// How to transport the HTTP request to the server.
     transport: IncomingTrafficTransportType,
+    /// Tells the session's replay store how the local application answers the request.
+    ///
+    /// [`None`] if the session monitor is disabled, or if the request is a health probe, which
+    /// is not captured.
+    capture: Option<CaptureHandle>,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -71,6 +79,7 @@ impl HttpGatewayTask {
         response_mode: Option<ResponseMode>,
         listening_on: ListeningOn,
         transport: IncomingTrafficTransportType,
+        capture: Option<CaptureHandle>,
     ) -> Self {
         Self {
             request,
@@ -78,6 +87,7 @@ impl HttpGatewayTask {
             response_mode,
             listening_on,
             transport,
+            capture,
         }
     }
 
@@ -230,10 +240,19 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
+        if let Some(capture) = &self.capture {
+            capture.attempt_started();
+        }
+
+        let sent_at = Instant::now();
         let (client, mut response) = self
             .client_store
             .send(&self.listening_on, &self.transport, self.request.clone())
             .await?;
+
+        if let Some(capture) = &self.capture {
+            capture.responded(response.status(), response.headers(), sent_at.elapsed());
+        }
 
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
             tracing::debug!("Detected an HTTP upgrade");
@@ -684,6 +703,7 @@ mod test {
                 } else {
                     IncomingTrafficTransportType::Tcp
                 },
+                None,
             );
             tasks.register(gateway, 0, 8)
         };
@@ -846,6 +866,7 @@ mod test {
                 response_mode,
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             (),
             8,
@@ -1005,6 +1026,7 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             (),
             8,
@@ -1085,6 +1107,7 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             0,
             8,
@@ -1096,6 +1119,7 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             1,
             8,

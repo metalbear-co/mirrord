@@ -50,7 +50,7 @@ use crate::{
         BackgroundTask, BackgroundTasks, MessageBus, TaskError, TaskSender, TaskUpdate,
     },
     main_tasks::{ConnectionRefresh, LayerClosed, LayerForked, ToLayer},
-    session_monitor::{MonitorEvent, MonitorTx},
+    session_monitor::{MonitorEvent, MonitorTx, replay::CaptureHandle},
 };
 
 mod bound_socket;
@@ -129,6 +129,11 @@ struct HttpGatewayHandle {
     ///
     /// [`None`] if all frames were already sent.
     body_tx: Option<mpsc::Sender<InternalHttpBodyFrame>>,
+    /// Tells the session's replay store about the request body frames that arrive.
+    ///
+    /// [`None`] if the session monitor is disabled, or if the request is a health probe, which
+    /// is not captured.
+    capture: Option<CaptureHandle>,
 }
 
 /// Copies `headers`, marking the values that [`is_sensitive_name`] matches as sensitive,
@@ -276,6 +281,17 @@ impl IncomingProxy {
         }
     }
 
+    /// Tells the replay store where the local application listens for each subscribed port.
+    ///
+    /// A local application that restarts can come back on another address, and a replay must reach
+    /// it there, as the requests from the agent do. So this must be called after every change to
+    /// [`Self::subscriptions`] that can add, remove or replace a subscription.
+    fn sync_replay_listeners(&self) {
+        if let Some(replay_store) = self.monitor_tx.replay_store() {
+            replay_store.set_listeners(self.subscriptions.listeners());
+        }
+    }
+
     /// Starts a new [`HttpGatewayTask`] to handle the given request.
     ///
     /// If we don't have a [`PortSubscription`] for the port, the task is not started.
@@ -339,6 +355,15 @@ impl IncomingProxy {
             version: request.version(),
         };
         let listening_on = subscription.listening_on.clone();
+        let capture = self.monitor_tx.replay_store().and_then(|store| {
+            store.capture(
+                &request,
+                body_tx.is_none(),
+                is_steal,
+                &self.client_store,
+                &transport,
+            )
+        });
         let mode = if is_steal { "steal" } else { "mirror" };
         let hit_count = self
             .subscriptions
@@ -358,6 +383,7 @@ impl IncomingProxy {
                 is_steal.then_some(self.response_mode),
                 listening_on,
                 transport,
+                capture.clone(),
             ),
             if is_steal {
                 InProxyTask::StealHttpGateway(id)
@@ -370,7 +396,14 @@ impl IncomingProxy {
             .get_mut(is_steal)
             .entry(connection_id)
             .or_default()
-            .insert(request_id, HttpGatewayHandle { _tx: tx, body_tx });
+            .insert(
+                request_id,
+                HttpGatewayHandle {
+                    _tx: tx,
+                    body_tx,
+                    capture,
+                },
+            );
     }
 
     /// Handles [`NewTcpConnectionV2`] message from the agent, starting a new [`TcpProxyTask`].
@@ -589,6 +622,10 @@ impl IncomingProxy {
                     return;
                 };
 
+                if let Some(capture) = &gateway.capture {
+                    capture.body_arrived(&frames, is_last);
+                }
+
                 for frame in frames {
                     if let Err(err) = tx.send(frame).await {
                         tracing::debug!(
@@ -737,6 +774,7 @@ impl IncomingProxy {
 
             DaemonTcp::SubscribeResult(result) => {
                 let msgs = self.subscriptions.agent_responded(result)?;
+                self.sync_replay_listeners();
 
                 for msg in msgs {
                     message_bus.send(msg).await;
@@ -773,6 +811,7 @@ impl IncomingProxy {
                         mode: mode.to_owned(),
                         hit_count: self.subscriptions.hit_count(port),
                     });
+                    self.sync_replay_listeners();
                     match msg {
                         Some(Either::Left(m)) => message_bus.send(m).await,
                         Some(Either::Right(m)) => message_bus.send_agent(m).await,
@@ -782,6 +821,7 @@ impl IncomingProxy {
 
                 IncomingRequest::PortUnsubscribe(unsubscribe) => {
                     let msg = self.subscriptions.layer_unsubscribed(layer_id, unsubscribe);
+                    self.sync_replay_listeners();
 
                     if let Some(msg) = msg {
                         message_bus.send_agent(msg).await;
@@ -811,6 +851,7 @@ impl IncomingProxy {
 
             IncomingProxyMessage::LayerClosed(msg) => {
                 let msgs = self.subscriptions.layer_closed(msg.id);
+                self.sync_replay_listeners();
 
                 for msg in msgs {
                     message_bus.send_agent(msg).await;

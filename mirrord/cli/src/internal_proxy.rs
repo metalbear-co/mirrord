@@ -208,8 +208,10 @@ async fn start_session_monitor(
     let (tx, _rx) =
         tokio::sync::broadcast::channel::<mirrord_intproxy::session_monitor::MonitorEvent>(256);
     let api_monitor_rx = tx.subscribe();
-    let proxy_monitor_tx = MonitorTx::from_sender(tx.clone());
-    let api_monitor_tx = MonitorTx::from_sender(tx);
+    let proxy_monitor_tx = MonitorTx::from_sender(tx);
+    // A clone, because the API serves the requests that the proxies capture in the `ReplayStore`
+    // of this `MonitorTx`.
+    let api_monitor_tx = proxy_monitor_tx.clone();
 
     let target_name = config
         .target

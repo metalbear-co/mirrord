@@ -5354,6 +5354,7 @@ dependencies = [
  "tokio-util",
  "tower-http",
  "tracing",
+ "url",
  "utils-win",
  "uuid",
  "winapi",

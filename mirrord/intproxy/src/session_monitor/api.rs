@@ -29,15 +29,18 @@ use axum::{
     },
     routing::{get, post},
 };
-use mirrord_session_monitor_protocol::{PortSubscription, ProcessInfo, SessionInfo};
+use mirrord_session_monitor_protocol::{
+    PortSubscription, ProcessInfo, REPLAY_REQUESTS_ROUTE, SessionInfo,
+};
 use tokio::sync::{RwLock, broadcast::error::RecvError};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 
 use super::{MonitorEvent, MonitorTx};
-use crate::session_monitor::chaos::{
-    ChaosWatcherTx, analytics::ChaosAnalyticsReporter, chaos_router,
+use crate::session_monitor::{
+    chaos::{ChaosWatcherTx, analytics::ChaosAnalyticsReporter, chaos_router},
+    replay::{ReplayStore, replay_router},
 };
 
 #[cfg(unix)]
@@ -62,6 +65,8 @@ pub(crate) struct AppState {
     /// (e.g. `OutgoingProxy`).
     pub(crate) chaos_tx: ChaosWatcherTx,
     pub(crate) reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
+    /// The requests that the [`replay_router`] routes list and replay.
+    pub(crate) replay_store: ReplayStore,
 }
 
 async fn health() -> impl IntoResponse {
@@ -201,6 +206,10 @@ pub async fn start_api_server(
 
     let state = AppState {
         session_info: Arc::new(RwLock::new(session_info)),
+        replay_store: monitor_tx
+            .replay_store()
+            .cloned()
+            .expect("monitor_tx should be enabled when API server is running"),
         monitor_tx,
         shutdown: shutdown.clone(),
         chaos_tx,
@@ -215,6 +224,7 @@ pub async fn start_api_server(
         .route("/events", get(events))
         .route("/kill", post(kill))
         .nest("/chaos/rules/", chaos_router())
+        .nest(REPLAY_REQUESTS_ROUTE, replay_router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
