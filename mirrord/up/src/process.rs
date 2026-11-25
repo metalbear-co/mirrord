@@ -1,6 +1,10 @@
 //! Keeps child ownership alive until shutdown has given services time to exit.
+//!
+//! A task-driven service runs no session of its own. Its instances, one session per task its
+//! watch matched, come and go with the tasks, and none of them ends the run.
 
 use std::{
+    collections::HashSet,
     future::Future,
     io,
     ops::Not,
@@ -11,8 +15,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures::stream::BoxStream;
 use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
+use mirrord_sessions_manager_client::{ReplicaId, SessionsManagerClientError, TaskEvent};
 #[cfg(unix)]
 use nix::sys::signal::killpg;
 #[cfg(unix)]
@@ -28,6 +34,8 @@ use tokio::{
     sync::oneshot,
     task::JoinSet,
 };
+use tokio_stream::{StreamExt, StreamMap};
+use uuid::Uuid;
 
 use crate::{ReadyTracker, UpError};
 
@@ -127,14 +135,15 @@ struct SessionOutput {
 impl Service {
     /// Spawns `command` in its own process tree and forwards its output.
     ///
-    /// Only a session child's stdout carries the readiness marker, so a
-    /// pre-command (one with a `then`) doesn't count toward `readiness`.
+    /// `session` is the readiness a session child's stdout reports its readiness marker to.
+    /// [`None`] for a process that doesn't count toward readiness: a pre-command, or an instance
+    /// of a task-driven service.
     fn spawn(
         name: Arc<str>,
         debugged: bool,
         command: Command,
         then: Option<Command>,
-        readiness: &Arc<Readiness>,
+        session: Option<&Arc<Readiness>>,
         output: &mut JoinSet<()>,
     ) -> io::Result<Self> {
         // Terminal Ctrl-C must reach the supervisor first so child signal exits
@@ -155,7 +164,7 @@ impl Service {
         let held = Arc::new(AtomicBool::new(false));
         let mut stdout_closed = None;
         if let Some(stdout) = child.stdout().take() {
-            let session = then.is_none().then(|| {
+            let session = session.map(|readiness| {
                 let (closed, receiver) = oneshot::channel();
                 stdout_closed = Some(receiver);
                 SessionOutput {
@@ -378,13 +387,201 @@ pub(super) struct ServiceCommands {
     pub(super) session: Command,
 }
 
+/// The processes `mirrord up` runs for a task-driven service.
+pub(super) struct TaskServiceCommands {
+    pub(super) name: Arc<str>,
+    /// `run.pre_command`, run to completion once, before any instance starts.
+    pub(super) pre: Option<Command>,
+    /// Builds the `mirrord exec` child of the instance for the task on a replica.
+    pub(super) instance: InstanceCommand,
+    /// What the service's watch reports. Ends only after an error.
+    pub(super) tasks: BoxStream<'static, Result<TaskEvent, SessionsManagerClientError>>,
+}
+
+/// Builds the session of a task-driven service's instance, for the task on the replica.
+pub(super) type InstanceCommand = Box<dyn Fn(&ReplicaId) -> Result<Command, UpError>>;
+
+/// A task, as its watch names it: the agent instance on a replica.
+type TaskKey = (ReplicaId, Uuid);
+
+/// A task-driven service while it is supervised.
+struct TaskService {
+    name: Arc<str>,
+    instance: InstanceCommand,
+    phase: TaskPhase,
+    /// Every task an instance was started or queued for, also after the instance exited, so
+    /// that a task the watch reports again starts no second instance.
+    seen: HashSet<TaskKey>,
+    /// The running instances, by their tasks.
+    instances: Vec<(TaskKey, Service)>,
+}
+
+enum TaskPhase {
+    /// `run.pre_command` runs. The tasks matched meanwhile wait for it in `pending`.
+    Preparing {
+        pre: Box<Service>,
+        pending: Vec<TaskKey>,
+    },
+    /// Every matched task gets an instance.
+    Running,
+    /// `run.pre_command` failed, so the service starts nothing.
+    Dropped,
+}
+
+impl TaskService {
+    /// Starts the service, or its `run.pre_command`. Fails when the pre-command can't be
+    /// started, which only drops this service, as for other services.
+    fn start(
+        name: Arc<str>,
+        pre: Option<Command>,
+        instance: InstanceCommand,
+        readiness: &Arc<Readiness>,
+        output: &mut JoinSet<()>,
+    ) -> Result<Self, UpError> {
+        let mut service = Self {
+            name: name.clone(),
+            instance,
+            phase: TaskPhase::Running,
+            seen: HashSet::new(),
+            instances: Vec::new(),
+        };
+        let Some(pre) = pre else {
+            service.run(readiness);
+            return Ok(service);
+        };
+        println!("{name}: running `run.pre_command`");
+        match Service::spawn(name.clone(), false, pre, None, None, output) {
+            Ok(pre) => {
+                service.phase = TaskPhase::Preparing {
+                    pre: Box::new(pre),
+                    pending: Vec::new(),
+                };
+                Ok(service)
+            }
+            Err(source) => {
+                eprintln!("{name}: `run.pre_command` failed to start: {source}");
+                Err(UpError::PreCommandSpawn { name, source })
+            }
+        }
+    }
+
+    /// Lets every matched task get an instance. The service counts as ready from here on, as its
+    /// watch is open.
+    fn run(&mut self, readiness: &Arc<Readiness>) {
+        self.phase = TaskPhase::Running;
+        readiness.mark();
+        println!(
+            "{}: waiting for tasks whose AWS Batch job tags match `target.tag_filter` and \
+             `target.jq_filter`. A task can match only when its mirrord companion is new enough \
+             to send its job ID to the operator.",
+            self.name
+        );
+    }
+
+    fn is_dropped(&self) -> bool {
+        matches!(self.phase, TaskPhase::Dropped)
+    }
+
+    /// Starts an instance for a task the watch matched, unless one was started or queued for it
+    /// before.
+    fn matched(&mut self, task: TaskKey, output: &mut JoinSet<()>) {
+        if self.seen.insert(task.clone()).not() {
+            return;
+        }
+        match &mut self.phase {
+            TaskPhase::Preparing { pending, .. } => pending.push(task),
+            TaskPhase::Running => self.spawn_instance(task, output),
+            TaskPhase::Dropped => {}
+        }
+    }
+
+    /// Stops the instance of a task that ended.
+    async fn ended(&mut self, task: &TaskKey, grace: Duration) -> io::Result<()> {
+        if let TaskPhase::Preparing { pending, .. } = &mut self.phase {
+            pending.retain(|pending| pending != task);
+        }
+        let Some(position) = self.instances.iter().position(|(key, _)| key == task) else {
+            return Ok(());
+        };
+        if let Some((_, instance)) = self.instances.get_mut(position) {
+            println!("{}: the task ended, stopping", instance.name);
+            instance.stop(None, grace).await?;
+        }
+        self.instances.swap_remove(position);
+        Ok(())
+    }
+
+    /// Starts the instance for `task`. A failure is reported and leaves the other instances
+    /// running.
+    fn spawn_instance(&mut self, task: TaskKey, output: &mut JoinSet<()>) {
+        let name: Arc<str> = format!("{}/{}", self.name, short_replica(&task.0)).into();
+        println!("{name}: a task matched, starting");
+        let spawned = (self.instance)(&task.0).and_then(|command| {
+            Service::spawn(name.clone(), false, command, None, None, output).map_err(UpError::Io)
+        });
+        match spawned {
+            Ok(instance) => self.instances.push((task, instance)),
+            Err(error) => eprintln!("{name}: failed to start: {error}"),
+        }
+    }
+
+    /// Reaps the instances that exited. Their exit doesn't end the run.
+    async fn reap_instances(&mut self) -> io::Result<()> {
+        let mut index = 0;
+        while let Some((_, instance)) = self.instances.get_mut(index) {
+            let Some(status) = instance.child.try_wait()? else {
+                index += 1;
+                continue;
+            };
+            // Only the leader has exited, as with a pre-command.
+            instance.force_stop().await?;
+            println!("{}: exited with {status}", instance.name);
+            self.instances.swap_remove(index);
+        }
+        Ok(())
+    }
+
+    /// Every process of the service that is still supervised.
+    fn processes(&mut self) -> impl Iterator<Item = &mut Service> {
+        let pre = match &mut self.phase {
+            TaskPhase::Preparing { pre, .. } => Some(pre.as_mut()),
+            TaskPhase::Running | TaskPhase::Dropped => None,
+        };
+        pre.into_iter()
+            .chain(self.instances.iter_mut().map(|(_, instance)| instance))
+    }
+}
+
+/// A few characters that tell a task's instance apart in the output: the start of the last
+/// segment of its replica id (an ECS task ARN ends in the task id).
+fn short_replica(replica: &ReplicaId) -> String {
+    let id = replica
+        .as_str()
+        .rsplit(['/', ':'])
+        .next()
+        .unwrap_or_default();
+    id.chars().take(8).collect()
+}
+
+/// Every process of `services` and `tasks`, for teardown.
+fn all_processes<'a>(
+    services: &'a mut [Service],
+    tasks: &'a mut [TaskService],
+) -> impl Iterator<Item = &'a mut Service> {
+    services
+        .iter_mut()
+        .chain(tasks.iter_mut().flat_map(TaskService::processes))
+}
+
 pub(super) async fn run(
     commands: Vec<ServiceCommands>,
+    task_commands: Vec<TaskServiceCommands>,
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
     let shutdown = shutdown_signals()?;
     let (result, forced_signal) = supervise_with_second_signal(
         commands,
+        task_commands,
         ready,
         receive_first_signal(shutdown.first),
         receive_second_signal(shutdown.second),
@@ -399,15 +596,23 @@ pub(super) async fn run(
     result
 }
 
-/// Returns when the first session child exits.
+/// Returns when the first session child of a service that isn't task-driven exits, or when the
+/// watch of a task-driven service fails.
 ///
 /// A pre-command exiting is not such an exit: on success the service's session
 /// is spawned in its place, and on failure only that service is dropped, unless
-/// it was the last one left.
+/// it was the last one left. Neither is an instance of a task-driven service exiting, so a run
+/// with only task-driven services lasts until it is stopped.
 async fn wait_for_first_exit(
     services: &mut Vec<Service>,
+    tasks: &mut [TaskService],
+    watches: &mut StreamMap<
+        usize,
+        BoxStream<'static, Result<TaskEvent, SessionsManagerClientError>>,
+    >,
     readiness: &Arc<Readiness>,
     output: &mut JoinSet<()>,
+    grace: Duration,
 ) -> Result<(), UpError> {
     loop {
         let mut index = 0;
@@ -448,19 +653,76 @@ async fn wait_for_first_exit(
                     service.debugged,
                     session,
                     None,
-                    readiness,
+                    Some(readiness),
                     output,
                 )?;
                 index += 1;
             } else {
                 let name = services.swap_remove(index).name;
-                if services.is_empty() {
+                if services.is_empty() && tasks.iter().all(TaskService::is_dropped) {
                     return Err(UpError::PreCommandFailed { name, status });
                 }
                 eprintln!("{name}: `run.pre_command` failed with {status}, not starting");
             }
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        for index in 0..tasks.len() {
+            let Some(task) = tasks.get_mut(index) else {
+                break;
+            };
+            task.reap_instances().await?;
+            let TaskPhase::Preparing { pre, .. } = &mut task.phase else {
+                continue;
+            };
+            let Some(status) = pre.child.try_wait()? else {
+                continue;
+            };
+            pre.force_stop().await?;
+            let TaskPhase::Preparing { pending, .. } =
+                std::mem::replace(&mut task.phase, TaskPhase::Dropped)
+            else {
+                unreachable!("the phase was matched above");
+            };
+            let name = task.name.clone();
+            if status.success() {
+                println!("{name}: `run.pre_command` succeeded, starting");
+                task.run(readiness);
+                for pending in pending {
+                    task.spawn_instance(pending, output);
+                }
+                continue;
+            }
+            watches.remove(&index);
+            if services.is_empty() && tasks.iter().all(TaskService::is_dropped) {
+                return Err(UpError::PreCommandFailed { name, status });
+            }
+            eprintln!("{name}: `run.pre_command` failed with {status}, not starting");
+        }
+
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+            Some((index, event)) = watches.next() => {
+                let Some(task) = tasks.get_mut(index) else {
+                    continue;
+                };
+                match event {
+                    Ok(TaskEvent::Matched(task_match)) => task.matched(
+                        (task_match.replica_id, task_match.agent_instance_id),
+                        output,
+                    ),
+                    Ok(TaskEvent::Ended(ended)) => {
+                        task.ended(&(ended.replica_id, ended.agent_instance_id), grace)
+                            .await?
+                    }
+                    Err(source) => {
+                        return Err(UpError::TaskWatch {
+                            name: task.name.clone(),
+                            source: Box::new(source),
+                        });
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -527,19 +789,27 @@ async fn supervise(
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     grace: Duration,
 ) -> Result<(), UpError> {
-    supervise_with_second_signal(commands, ready, shutdown, std::future::pending(), grace)
-        .await?
-        .0
+    supervise_with_second_signal(
+        commands,
+        Vec::new(),
+        ready,
+        shutdown,
+        std::future::pending(),
+        grace,
+    )
+    .await?
+    .0
 }
 
 async fn supervise_with_second_signal(
     commands: Vec<ServiceCommands>,
+    task_commands: Vec<TaskServiceCommands>,
     ready: ReadyTracker,
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     second_shutdown: impl Future<Output = io::Result<SignalDelivery>>,
     grace: Duration,
 ) -> Result<(Result<(), UpError>, Option<SignalDelivery>), UpError> {
-    let total = commands.len();
+    let total = commands.len() + task_commands.len();
     let readiness = Arc::new(Readiness {
         count: AtomicUsize::new(0),
         total,
@@ -568,7 +838,7 @@ async fn supervise_with_second_signal(
                     debugged,
                     pre,
                     Some(session),
-                    &readiness,
+                    None,
                     &mut output,
                 ) {
                     Err(error) => {
@@ -582,7 +852,7 @@ async fn supervise_with_second_signal(
                     spawned => spawned,
                 }
             }
-            None => Service::spawn(name, debugged, session, None, &readiness, &mut output),
+            None => Service::spawn(name, debugged, session, None, Some(&readiness), &mut output),
         };
         match spawned {
             Ok(service) => services.push(service),
@@ -593,17 +863,46 @@ async fn supervise_with_second_signal(
         }
     }
 
+    let mut tasks = Vec::with_capacity(task_commands.len());
+    let mut watches = StreamMap::new();
+    if spawn_error.is_none() {
+        for TaskServiceCommands {
+            name,
+            pre,
+            instance,
+            tasks: watch,
+        } in task_commands
+        {
+            match TaskService::start(name, pre, instance, &readiness, &mut output) {
+                Ok(task) => {
+                    watches.insert(tasks.len(), watch);
+                    tasks.push(task);
+                }
+                Err(error) => pre_command_spawn_error = Some(error),
+            }
+        }
+    }
+
     let (result, received_signal) = if let Some(error) = spawn_error {
         // No select will poll this receiver, so dropping it marks any later
         // signal as unaccepted before cleanup begins.
         drop(shutdown);
         (Err(UpError::Io(error)), None)
-    } else if let Some(error) = pre_command_spawn_error.filter(|_| services.is_empty()) {
+    } else if let Some(error) =
+        pre_command_spawn_error.filter(|_| services.is_empty() && tasks.is_empty())
+    {
         drop(shutdown);
         (Err(error), None)
     } else {
         {
-            let exits = wait_for_first_exit(&mut services, &readiness, &mut output);
+            let exits = wait_for_first_exit(
+                &mut services,
+                &mut tasks,
+                &mut watches,
+                &readiness,
+                &mut output,
+                grace,
+            );
             tokio::select! {
                 // A deliberate signal wins a same-poll tie so the session remains
                 // successful for telemetry regardless of a coincident child exit.
@@ -620,9 +919,10 @@ async fn supervise_with_second_signal(
     // The same teardown applies to intentional stops, natural exits, and errors.
     // Keep forwarding pipes throughout the grace period so shutdown logs cannot
     // fill a pipe and prevent a cooperative child from exiting.
+    // The watches go first, so that no task is matched to a run that is ending.
+    drop(watches);
     let cleanup = Box::pin(futures::future::join_all(
-        services
-            .iter_mut()
+        all_processes(&mut services, &mut tasks)
             .map(|service| service.stop(received_signal, grace)),
     ));
     // Keep this receiver alive through output cleanup too. A second signal can
@@ -637,7 +937,12 @@ async fn supervise_with_second_signal(
     };
     let cleanup = match cleanup {
         Some(cleanup) => cleanup,
-        None => futures::future::join_all(services.iter_mut().map(Service::force_stop)).await,
+        None => {
+            futures::future::join_all(
+                all_processes(&mut services, &mut tasks).map(Service::force_stop),
+            )
+            .await
+        }
     };
     let cleanup_error = cleanup.into_iter().find_map(Result::err);
     let _ = tokio::time::timeout(Duration::from_secs(1), async {
@@ -847,6 +1152,7 @@ mod tests {
             Duration::from_secs(3),
             supervise_with_second_signal(
                 vec![command],
+                Vec::new(),
                 ReadyTracker::default(),
                 first_shutdown,
                 second_shutdown,
@@ -1064,7 +1370,7 @@ mod tests {
             },
             directory,
         );
-        run(vec![command], ready.clone()).await.unwrap();
+        run(vec![command], Vec::new(), ready.clone()).await.unwrap();
         assert!(ready.time_to_ready().is_some());
         if std::env::var_os("MIRRORD_UP_SIGNAL_TEST_DRAIN").is_some() {
             std::fs::write(directory.join("draining"), []).unwrap();

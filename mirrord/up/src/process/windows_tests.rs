@@ -244,6 +244,7 @@ async fn supervisor_helper() {
     let ready = ReadyTracker::default();
     run(
         vec![service(&directory, "service", &service_mode)],
+        Vec::new(),
         ready.clone(),
     )
     .await
@@ -506,6 +507,7 @@ async fn second_shutdown_error_forces_cleanup_before_returning() {
         TIMEOUT,
         supervise_with_second_signal(
             vec![service(directory.path(), "serving", "serve")],
+            Vec::new(),
             ReadyTracker::default(),
             first_shutdown,
             second_shutdown,

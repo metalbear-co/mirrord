@@ -158,6 +158,36 @@ where
         }
     }
 
+    /// Opens the stream without waiting for an event, so that a caller learns at once whether the
+    /// server accepted the subscription, rather than on the first event, which may come much
+    /// later or never.
+    ///
+    /// A failure is retried only as [`Self::next`] retries opening the first stream, and it ends
+    /// the subscription.
+    pub(crate) async fn open(
+        &mut self,
+        deadline: Option<Instant>,
+    ) -> Result<(), SessionsManagerClientError> {
+        if self.closed {
+            return Err(SessionsManagerClientError::SubscriptionClosed);
+        }
+
+        self.retry
+            .run_until(
+                deadline,
+                || {
+                    let state = self.state.clone();
+                    async move { state.lock().await.ensure_open(deadline).await }
+                },
+                ControlPlaneAttemptError::should_retry,
+            )
+            .await
+            .map_err(|error| {
+                self.closed = true;
+                error.into_source()
+            })
+    }
+
     /// Drops the open stream, so the next [`Self::next`] subscribes again.
     ///
     /// For feeds where the server re-sends pending events only to a new subscription.
@@ -204,6 +234,35 @@ where
         &mut self,
         deadline: Option<Instant>,
     ) -> Result<ControlPlaneEvent, ControlPlaneAttemptError> {
+        self.ensure_open(deadline).await?;
+
+        let event = match self
+            .stream
+            .as_mut()
+            .expect("control-plane subscriber opened an event stream")
+            .next()
+            .await
+        {
+            Ok(Some(event)) => event,
+            Ok(None) => Err(SessionsManagerClientError::SseStreamEnded(
+                self.subscription.name(),
+            )),
+            Err(error) => Err(error),
+        };
+
+        // Any failure here — timeout, clean end-of-stream, or a decode error — means this stream
+        // is done; drop it so the next retry attempt reopens the subscription instead of reusing
+        // one that's known bad.
+        event
+            .inspect_err(|_| self.stream = None)
+            .map_err(ControlPlaneAttemptError::Stream)
+    }
+
+    /// Opens the stream if it isn't open.
+    async fn ensure_open(
+        &mut self,
+        deadline: Option<Instant>,
+    ) -> Result<(), ControlPlaneAttemptError> {
         if self.stream.is_none() {
             tracing::debug!(
                 subscription = self.subscription.name(),
@@ -229,26 +288,7 @@ where
             self.opened_once = true;
         }
 
-        let event = match self
-            .stream
-            .as_mut()
-            .expect("control-plane subscriber opened an event stream")
-            .next()
-            .await
-        {
-            Ok(Some(event)) => event,
-            Ok(None) => Err(SessionsManagerClientError::SseStreamEnded(
-                self.subscription.name(),
-            )),
-            Err(error) => Err(error),
-        };
-
-        // Any failure here — timeout, clean end-of-stream, or a decode error — means this stream
-        // is done; drop it so the next retry attempt reopens the subscription instead of reusing
-        // one that's known bad.
-        event
-            .inspect_err(|_| self.stream = None)
-            .map_err(ControlPlaneAttemptError::Stream)
+        Ok(())
     }
 }
 

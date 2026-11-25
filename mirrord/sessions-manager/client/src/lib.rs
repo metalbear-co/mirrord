@@ -26,7 +26,9 @@ mod retry;
 mod tls;
 mod transport;
 
-pub use client::{AgentClient, AgentGate, IntproxyClient, SessionsManagerConnectInfo};
+pub use client::{
+    AgentClient, AgentGate, IntproxyClient, SessionsManagerConnectInfo, TaskEvent, TaskWatcher,
+};
 pub use credentials::{
     CloudTokenCredentials, CredentialProvider, LoginToken, LoginTokenCredentials, LoginTokenSource,
     SESSIONS_MANAGER_URL_DEFAULT, SharedSecretCredentials, cloud_url_from_env,
@@ -34,7 +36,7 @@ pub use credentials::{
 pub use error::{Result, SessionsManagerClientError};
 pub use mirrord_sessions_manager_protocol::{
     AdmissionVerdict, AgentSelector, AwsBatchJob, GateState, IntproxyIdentity, ReplicaId,
-    ServiceScope, SessionList, SessionOwner, SessionSummary,
+    ServiceScope, SessionList, SessionOwner, SessionSummary, TaskEnded, TaskMatch,
 };
 pub use transport::{
     DirectTransport, EndpointSource, OperatorTransport, SESSIONS_MANAGER_URL_ENV,

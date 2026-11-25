@@ -804,6 +804,14 @@
       "description": "The target workload of a service.",
       "type": "object",
       "properties": {
+        "jq_filter": {
+          "description": "Makes the service task-driven, as `tag_filter` does, with a jq program run on\n`{\"tags\": {\"<name>\": \"<value>\", ...}}`, the tags of a task's AWS Batch job. A task matches\nwhen the program outputs `true`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-mirrord-plan": "enterprise"
+        },
         "namespace": {
           "description": "Namespace of the target workload. Defaults to the namespace of the kube context.\n\nFor a serverless target, the environment of its service in sessions-manager, `default`\nwhen not set.",
           "type": [
@@ -824,6 +832,17 @@
               "type": "string"
             }
           ]
+        },
+        "tag_filter": {
+          "description": "Makes the service task-driven: instead of one local process, `mirrord up` starts one for\nevery task of a serverless `path` whose AWS Batch job tags match, each with that task's\nenvironment and arguments. A mapping of tag names to regexes, all of which a task's tags\nmust match. For example:\n\n```yaml\ntarget:\n  path: serverless/report-generator\n  tag_filter:\n    company_id: \"^1234$\"\n```\n\nEach local process gets the task's arguments appended to `run.command`, and is stopped\nwhen its task ends. A local process exiting doesn't stop the other services. Combined with\n`jq_filter`, a task must match both. Needs `common.operator: true`, and can't be named by\n`mirrord up --debug`.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-mirrord-plan": "enterprise"
         }
       },
       "additionalProperties": false
