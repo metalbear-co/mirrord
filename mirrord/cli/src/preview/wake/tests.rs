@@ -868,10 +868,12 @@ async fn a_ready_preview_that_wakes_again_is_waited_for() {
     assert_eq!(finished(wake).await.failed, Vec::<String>::new());
 }
 
-/// A break of a ready preview's connection is no news: the operator sends a new connection's
-/// first status only once it observed the preview, so a Ready there keeps it ready.
+/// A ready preview whose connection breaks is waited for again, since the operator's hold went
+/// with the connection and the preview may idle meanwhile: the others being ready doesn't end the
+/// wait, and the new connection's Ready, which the operator sends at once for a preview that
+/// stayed up, does.
 #[tokio::test]
-async fn a_ready_preview_stays_ready_across_a_reconnect() {
+async fn a_ready_preview_is_ready_again_once_its_new_connection_says_so() {
     let (first, mut first_operators_rx) = target("default/first");
     let (second, mut second_operators_rx) = target("default/second");
     let wake = start(vec![first, second], STEP_TIMEOUT, false);
@@ -882,20 +884,24 @@ async fn a_ready_preview_stays_ready_across_a_reconnect() {
     second.send_local(WakeState::Waking).await;
     drop(first);
 
+    // The driver reports the break before it connects again.
     let mut first = next_connection(&mut first_operators_rx).await;
-    first.send_local(WakeState::Ready).await;
     second.send_local(WakeState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!wake.is_finished());
 
+    first.send_local(WakeState::Ready).await;
     assert_eq!(finished(wake).await.failed, Vec::<String>::new());
 }
 
-/// A ready preview whose new connection hasn't reported when the deadline passes counts as it
-/// stood: its pods stayed up, and only the command's hold on them broke.
+/// A ready preview whose connection broke, and that no new connection reported ready again by the
+/// deadline, isn't ready: without the operator's hold it may have idled since. It fails naming the
+/// broken connection, while the preview that stayed connected is ready.
 #[tokio::test]
-async fn a_ready_preview_still_reconnecting_at_the_deadline_is_ready() {
+async fn a_ready_preview_not_reported_again_after_a_break_is_not_ready() {
     let (first, mut first_operators_rx) = target("default/first");
     let (second, mut second_operators_rx) = target("default/second");
-    let wake = start(vec![first, second], Duration::from_millis(300), false);
+    let wake = start(vec![first, second], Duration::from_secs(3), false);
 
     let mut first = next_connection(&mut first_operators_rx).await;
     let mut second = next_connection(&mut second_operators_rx).await;
@@ -903,9 +909,18 @@ async fn a_ready_preview_still_reconnecting_at_the_deadline_is_ready() {
     second.send_local(WakeState::Waking).await;
     drop(first);
 
-    assert_eq!(
-        finished(wake).await.failed,
-        ["default/second (not ready in time)"]
+    // The driver reports the break before it connects again; the new connection stays silent.
+    let _first = next_connection(&mut first_operators_rx).await;
+    second.send_local(WakeState::Ready).await;
+
+    let failed = finished(wake).await.failed;
+    assert!(
+        matches!(
+            failed.as_slice(),
+            [failure] if failure.starts_with("default/first (not ready in time, the connection \
+                                               to the operator broke")
+        ),
+        "{failed:?}"
     );
 }
 

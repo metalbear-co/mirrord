@@ -670,8 +670,8 @@ struct WakeOutcome {
 ///
 /// Every connection stays open until this returns, so that no preview idles while the command
 /// waits for the others, and each status that comes meanwhile counts: a preview that was ready
-/// can fail, be paused, or need waiting for again, while a break of its connection alone leaves
-/// it as it stood. Each preview's outcome is reported once, at the end, from its last standing,
+/// can fail, be paused, or need waiting for again, as it does once its connection breaks, until
+/// the new connection reports it ready. Each preview's outcome is reported once, at the end, from its last standing,
 /// and every line about a preview names it.
 async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     targets: Vec<WakeTarget<S>>,
@@ -720,13 +720,18 @@ async fn wake_all<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 
         match report {
             Report::Status(status) => preview.judge(status, no_wait),
-            // The pods of a ready preview stay as they are, and the driver connects again to hold
-            // them, so the break alone doesn't undo the preview's standing.
+            // The operator's hold on the preview went with the connection, so a ready preview may
+            // idle before the driver connects again: it is waited for until the new connection
+            // reports it ready, which the operator does at once for a preview that stayed up. A
+            // preview `--no-wait` asked to wake stays so, since the command holds nothing then.
             Report::Reconnecting { error, after } => {
                 preview.progress.warning(&format!(
                     "{error}; reconnecting in {} seconds",
                     after.as_secs()
                 ));
+                if preview.standing == (Standing::Settled { outcome: "ready" }) {
+                    preview.standing = Standing::Waiting;
+                }
                 preview.disconnected = Some(error);
             }
             Report::Fatal(message) => preview.standing = Standing::Failed(message),
