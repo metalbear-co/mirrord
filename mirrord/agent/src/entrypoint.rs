@@ -29,9 +29,10 @@ use mirrord_agent_iptables::{
 use mirrord_cluster_auth::{AuthMethod, ClusterClientFactory, ClusterCredentials, eks_region};
 use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
+use mirrord_remote_layer_protocol::APP_ARGV_ENV;
 use mirrord_sessions_manager_client::{
-    AgentClient, DirectTransport, EndpointSource, OperatorTransport, ReplicaId, ServiceScope,
-    SessionsManagerClientError, SessionsManagerEndpoint,
+    AgentClient, AwsBatchJob, DirectTransport, EndpointSource, OperatorTransport, ReplicaId,
+    ServiceScope, SessionsManagerClientError, SessionsManagerEndpoint,
 };
 use socket2::SockRef;
 use tokio::{
@@ -73,7 +74,9 @@ use crate::{
         ClientId, io::throttle::Throttle, protocol_version::ClientProtocolVersion,
         target_root::TargetRoot,
     },
-    workload_companion::{WorkloadCompanionIngress, resolve_replica_id},
+    workload_companion::{
+        WorkloadCompanionIngress, application_argv, aws_batch_job, resolve_replica_id,
+    },
 };
 
 pub(crate) mod iptables_lock;
@@ -285,6 +288,12 @@ impl State {
                 error!("Failed to get process environment variables: {err:?}");
             }
         };
+
+        if args.mode.is_workload_companion()
+            && let Some(argv) = application_argv().await
+        {
+            env.insert(APP_ARGV_ENV.to_owned(), argv);
+        }
 
         Ok(State {
             next_client_id: Default::default(),
@@ -1289,9 +1298,12 @@ fn select_sessions_manager(
 /// The operator is reached through the EKS API server, authenticated as the companion's AWS
 /// identity. The caller must poll the token-refresh future alongside the companion loop so a
 /// permanent authentication failure stops the companion with an error.
+///
+/// `aws_batch` goes to either sessions-manager, but only the operator selects tasks by it.
 async fn start_control_plane(
     scope: ServiceScope,
     replica_id: ReplicaId,
+    aws_batch: Option<AwsBatchJob>,
     cancellation_token: CancellationToken,
 ) -> AgentResult<(
     AgentClient,
@@ -1333,6 +1345,7 @@ async fn start_control_plane(
                 AgentClient::start(
                     scope,
                     replica_id,
+                    aws_batch,
                     DirectTransport::from_env(endpoint)?,
                     cancellation_token,
                 )?,
@@ -1364,7 +1377,7 @@ async fn start_control_plane(
     let token_refresh = Box::pin(async move { factory.run_token_refresh(connection).await });
 
     Ok((
-        AgentClient::start(scope, replica_id, transport, cancellation_token)?,
+        AgentClient::start(scope, replica_id, aws_batch, transport, cancellation_token)?,
         Some(token_refresh),
     ))
 }
@@ -1427,6 +1440,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
     let replica_id = resolve_replica_id()
         .await
         .ok_or::<AgentError>(SessionsManagerClientError::MissingAgentReplicaID.into())?;
+    let aws_batch = aws_batch_job(&replica_id);
     let (mut control_plane, mut token_refresh) = select! {
         _ = cancellation_token.cancelled() => return Ok(()),
         result = start_control_plane(
@@ -1435,6 +1449,7 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
                 service,
             },
             replica_id.into(),
+            aws_batch,
             cancellation_token.clone(),
         ) => result?,
     };

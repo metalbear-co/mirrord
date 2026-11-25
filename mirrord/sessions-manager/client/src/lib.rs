@@ -33,8 +33,8 @@ pub use credentials::{
 };
 pub use error::{Result, SessionsManagerClientError};
 pub use mirrord_sessions_manager_protocol::{
-    AgentSelector, IntproxyIdentity, ReplicaId, ServiceScope, SessionList, SessionOwner,
-    SessionSummary,
+    AgentSelector, AwsBatchJob, IntproxyIdentity, ReplicaId, ServiceScope, SessionList,
+    SessionOwner, SessionSummary,
 };
 pub use transport::{
     DirectTransport, EndpointSource, OperatorTransport, SESSIONS_MANAGER_URL_ENV,

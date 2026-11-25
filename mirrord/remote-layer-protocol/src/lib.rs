@@ -26,6 +26,14 @@ pub const ADMISSION_SOCKET_ENV: &str = "MIRRORD_REMOTE_ADMISSION_SOCKET";
 /// can start a local process with the task's own arguments.
 pub const APP_PID_ENV: &str = "MIRRORD_REMOTE_APP_PID";
 
+/// Name of the variable that carries the application's command line, `argv[0]` included, as a
+/// JSON array of strings, in the environment the workload companion serves to clients.
+///
+/// The companion reads it from `/proc/<pid>/cmdline` for the PID in [`APP_PID_ENV`], replacing
+/// bytes that aren't UTF-8, and leaves the variable out when it can't. The task's own
+/// environment never has it. The arguments can carry secrets, so nothing logs them.
+pub const APP_ARGV_ENV: &str = "MIRRORD_REMOTE_ARGV";
+
 /// The exit code of a replaced task whose developer session was lost before it reported the
 /// local process's exit code.
 ///
