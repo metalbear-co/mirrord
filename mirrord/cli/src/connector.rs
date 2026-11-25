@@ -125,9 +125,9 @@ pub(crate) struct DirectConnector {
 /// The first connection is established while the session is set up, so its wait for an agent
 /// shows up in the progress, and is parked in [`Self::first_conn`], to be handed out on the first
 /// [`connect`](AgentConnector::connect) call. Any later call opens a fresh, one-shot data plane
-/// connection to the room, on the replica the first one reached
-/// ([`SessionsManagerConnectInfo::assigned_replica`]). There is no reconnect support: once a
-/// connection to the room fails, the session is over, same as [`DirectConnector`].
+/// connection to the room, which for a session with a selector is on the replica the first one
+/// reached ([`SessionsManagerConnectInfo::assigned_replica`]). There is no reconnect support: once
+/// a connection to the room fails, the session is over, same as [`DirectConnector`].
 pub(crate) struct SessionsManagerConnector {
     pub(crate) connect_info: SessionsManagerConnectInfo,
     pub(crate) route: SessionsManagerRoute,

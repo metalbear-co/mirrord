@@ -616,9 +616,18 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             error => CliError::SessionsManagerConnect(error),
         })?;
         connector.first_conn = Some(Box::new(conn));
-        // The intproxy's connections and the CLI's later ones register for the replica this one
-        // reached, so they share its task even when several tasks match the selector.
-        connector.connect_info.assigned_replica = assigned_replica;
+        // With a selector, the intproxy's connections and the CLI's later ones register for the
+        // replica this one reached, so they share its task even when several tasks match. A
+        // session without one pairs as it always has.
+        if connector.connect_info.agent_selector.is_some() {
+            if assigned_replica.is_none() {
+                tracing::warn!(
+                    "the sessions-manager paired the session by selector without naming the \
+                     replica, so its later connections may reach another matching task"
+                );
+            }
+            connector.connect_info.assigned_replica = assigned_replica;
+        }
         let agent_connect_info = match &connector.route {
             SessionsManagerRoute::Operator(_) => {
                 AgentConnectInfo::OperatorSessionsManager(connector.connect_info.clone())

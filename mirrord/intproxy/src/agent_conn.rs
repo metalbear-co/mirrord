@@ -271,10 +271,9 @@ impl AgentConnection {
                 (conn, ReconnectFlow::Break(kind))
             }
 
-            // The connection is made with the connect info as the CLI gave it, which names the
-            // replica the CLI's own connection reached, so both share a task. A reconnect clears
-            // it: the task may be gone, and a session with a selector then pairs with any task
-            // that matches, as a session without one pairs with any task.
+            // A session with a selector names the replica the CLI's own connection reached, in
+            // `assigned_replica`, and reconnects keep it: the session stays on the task it
+            // attached to, and ends when that task is gone, as one targeting a gone pod does.
             AgentConnectInfo::SessionsManager(connect_info) => {
                 let endpoint =
                     SessionsManagerEndpoint::resolve(config.sessions_manager.url.as_deref())?;
@@ -290,12 +289,7 @@ impl AgentConnection {
                     Connection::from_channel(conn),
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
-                        connect_info: Box::new(AgentConnectInfo::SessionsManager(
-                            SessionsManagerConnectInfo {
-                                assigned_replica: None,
-                                ..connect_info
-                            },
-                        )),
+                        connect_info: Box::new(AgentConnectInfo::SessionsManager(connect_info)),
                         login_tokens,
                     },
                 )
@@ -312,10 +306,7 @@ impl AgentConnection {
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
                         connect_info: Box::new(AgentConnectInfo::OperatorSessionsManager(
-                            SessionsManagerConnectInfo {
-                                assigned_replica: None,
-                                ..connect_info
-                            },
+                            connect_info,
                         )),
                         login_tokens,
                     },
