@@ -25,6 +25,12 @@ const ROWS: u16 = 30;
 const COLS: u16 = 100;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Returns the path of the `mirrord-tui` binary built for these tests, which the test target has in
+/// its `data`.
+fn tui_path() -> PathBuf {
+    mirrord_test_utils::runfile_program("tui/mirrord-tui")
+}
+
 /// Feeds the captured stream into an emulator until the rendered screen contains `needle`.
 fn wait_for(rx: &Receiver<Vec<u8>>, parser: &mut vt100::Parser, needle: &str) -> String {
     let deadline = Instant::now() + TIMEOUT;
@@ -115,7 +121,7 @@ fn shell_is_constrained_to_the_pane_and_the_prefix_takes_the_keyboard_back() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    let mut cmd = CommandBuilder::new(tui_path());
     cmd.env("TERM", "xterm-256color");
     // A login shell with the developer's rc files would make the assertions non-deterministic.
     cmd.env("SHELL", "/bin/sh");
@@ -226,7 +232,7 @@ fn a_session_under_the_shell_brings_the_panel_in() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    let mut cmd = CommandBuilder::new(tui_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
     cmd.env("PS1", "$ ");
@@ -370,7 +376,7 @@ fn a_failing_credential_plugin_stays_out_of_the_interface() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_mirrord-tui"));
+    let mut cmd = CommandBuilder::new(tui_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
     cmd.env("PS1", "$ ");

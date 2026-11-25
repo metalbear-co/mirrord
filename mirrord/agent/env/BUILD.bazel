@@ -1,0 +1,16 @@
+load("@crates//mirrord-agent-env:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+# Only crates outside the workspace, like the operator's, turn on the `schema` feature, so this
+# target builds the code behind it, for the compiler and clippy to check.
+crate.library(
+    name = "env_schema",
+    crate_features = ["schema"],
+    # `@crates` gives a package only the optional dependencies that the workspace turns on.
+    deps = ["@crates//schemars"],
+    doc = False,
+)

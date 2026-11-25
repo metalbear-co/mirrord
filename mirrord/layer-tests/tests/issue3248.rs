@@ -7,9 +7,7 @@ use std::{io::Write, os::unix::fs::PermissionsExt, path::Path};
 use mirrord_sip::MIRRORD_TEMP_BIN_DIR_PATH_BUF;
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 #[rstest]
 #[tokio::test]

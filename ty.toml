@@ -1,0 +1,10 @@
+[src]
+exclude = [
+    # `docs/`, `guides/` and `skills/` came from repositories that didn't use ty, so their scripts
+    # stay out of it until a cleanup, as those trees stay out of typos.
+    "docs",
+    "guides",
+    "skills",
+    # This runs outside Bazel, with packages that Bazel doesn't have.
+    ".github/actions/next-release-version/version.py",
+]

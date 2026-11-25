@@ -2,8 +2,7 @@
 
 use std::net::SocketAddr;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// The application connects to a remote peer, then spawns two children that inherit the socket and
 /// check that the layer in each of them reports the remote peer for it.

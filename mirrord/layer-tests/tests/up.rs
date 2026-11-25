@@ -6,13 +6,7 @@
 
 #[cfg(windows)]
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-use std::{
-    collections::HashMap,
-    fs,
-    ops::Not,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::HashMap, fs, ops::Not, path::Path, time::Duration};
 
 use mirrord_config::MIRRORD_TEST_INTPROXY_ADDR;
 use mirrord_test_utils::run_command::run_mirrord;
@@ -26,18 +20,15 @@ use winapi::{
     um::{processthreadsapi::OpenProcess, synchapi::WaitForSingleObject, winnt::SYNCHRONIZE},
 };
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
-/// One `services` entry of a `mirrord-up.yaml` that runs the python app `tests/apps/<script>`
+/// One `services` entry of a `mirrord-up.yaml` that runs the python app `apps/<script>`
 /// with `args`.
 ///
 /// Files stay local and DNS is not remote, as the test intproxy answers neither.
 fn service(python: &str, name: &str, script: &str, args: &[&Path]) -> String {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/apps")
-        .join(script);
-    let command = [python, script.to_str().unwrap()]
+    let script = app_script(script);
+    let command = [python, script.as_str()]
         .into_iter()
         .chain(args.iter().map(|arg| arg.to_str().unwrap()))
         .collect::<Vec<_>>();
@@ -136,10 +127,10 @@ impl Process {
 #[tokio::test]
 async fn up_prefixes_service_output_and_ends_with_the_service() {
     let directory = TempDir::new().unwrap();
-    let python = Application::get_python3_executable().await;
+    let python = python();
     let (mut up, _intproxy) = run_up(
         directory.path(),
-        &[service(&python, "greeter", "up_greeter.py", &[])],
+        &[service(&python, "greeter", "up-greeter/main.py", &[])],
     )
     .await;
 
@@ -154,15 +145,20 @@ async fn up_prefixes_service_output_and_ends_with_the_service() {
 #[tokio::test]
 async fn up_reports_a_crashed_service_and_stops_the_others() {
     let directory = TempDir::new().unwrap();
-    let python = Application::get_python3_executable().await;
+    let python = python();
     let pid_file = directory.path().join("sleeper.pid");
     let partial = directory.path().join("sleeper.partial");
     let release = directory.path().join("release");
     let (mut up, _intproxy) = run_up(
         directory.path(),
         &[
-            service(&python, "sleeper", "up_sleeper.py", &[&partial, &pid_file]),
-            service(&python, "failing", "up_failing.py", &[&release]),
+            service(
+                &python,
+                "sleeper",
+                "up-sleeper/main.py",
+                &[&partial, &pid_file],
+            ),
+            service(&python, "failing", "up-failing/main.py", &[&release]),
         ],
     )
     .await;

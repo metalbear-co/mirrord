@@ -212,6 +212,25 @@ mod windows {
             assert_eq!(resolve(OsStr::new(program), path_of(&[dir.path()])), None);
             assert_eq!(resolve_command(program).get_program(), program);
         }
+
+        /// `which` reads `PATHEXT` once per process, so this sets it before anything calls `which`,
+        /// and the other tests keep the machine's `PATHEXT`.
+        #[test]
+        fn ps1_listed_before_cmd_still_resolves_cmd() {
+            let dir = dir_with(&["npm.ps1", "npm.cmd"]);
+
+            // SAFETY: nextest runs each test in a process of its own, so nothing else reads the
+            // environment concurrently.
+            unsafe {
+                env::set_var("PATHEXT", ".PS1;.CMD");
+                env::set_var("PATH", dir.path());
+            }
+
+            assert_eq!(
+                resolve_command("npm").get_program(),
+                dir.path().join("npm.cmd")
+            );
+        }
     }
 }
 

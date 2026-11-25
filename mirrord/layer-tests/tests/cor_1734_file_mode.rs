@@ -2,8 +2,7 @@
 
 use rstest::rstest;
 
-mod common;
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verifies that the `open`-family hooks forward the variadic `mode` argument when they bypass the
 /// call, so files created on locally-overridden paths get exactly the permissions the application

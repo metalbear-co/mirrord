@@ -1,0 +1,18 @@
+fastapi
+flask
+uvicorn
+# `//scripts:render_tui_logo` renders the logos with these.
+pillow
+resvg-py
+# `//:lint`'s fence-tag check of the skills, and its tests, use these
+# (`skills/.github/scripts/requirements.txt`).
+jsonschema
+markdown-it-py
+pyyaml
+# `//scripts:update_images` checks the certificates of the registries and of snapshot.debian.org
+# against this bundle, because the Python interpreter that Bazel downloads doesn't find the
+# machine's on every system.
+certifi
+# `bazel run //:lint` runs `towncrier check` with it. The release workflow builds the changelog with
+# the same version.
+towncrier==23.11.0

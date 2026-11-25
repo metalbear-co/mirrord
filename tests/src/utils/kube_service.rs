@@ -3,10 +3,10 @@
 use std::{ops::Not, time::Duration};
 
 use k8s_openapi::api::core::v1::Pod;
-use kube::{runtime::watcher::Config, Api, Client};
+use kube::{Api, Client, runtime::watcher::Config};
 
 use super::resource_guard::ResourceGuard;
-use crate::utils::{services::TestWorkloadType, watch::Watcher, CONTAINER_NAME};
+use crate::utils::{CONTAINER_NAME, services::TestWorkloadType, watch::Watcher};
 
 /// A service deployed to the kubernetes cluster.
 ///

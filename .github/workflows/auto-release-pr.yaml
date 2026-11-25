@@ -52,11 +52,6 @@ jobs:
         with:
           cache: false
           rustflags: ""
-      - name: Rust cache
-        if: steps.version.outputs.should-release == 'true'
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: mirrord
 
       - name: Update Cargo.lock
         if: steps.version.outputs.should-release == 'true'

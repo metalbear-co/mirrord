@@ -1,0 +1,8 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+
+js_binary(
+    name = "test-outgoing-traffic-many-requests",
+    data = ["//mirrord/test-utils:node"],
+    entry_point = "main.mjs",
+    visibility = ["//tests:__pkg__"],
+)

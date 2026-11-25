@@ -53,11 +53,11 @@ pub enum SipError {
     Sign(ExitStatus, String),
 }
 
-/// NOTE(gabriela): this was introduced in https://github.com/metalbear-co/mirrord/pull/3687
+/// NOTE(gabriela): this was introduced in <https://github.com/metalbear-co/mirrord/pull/3687>
 /// as CI suddenly started failing with unrelated changes.
 ///
 /// [`apple_codesign::AppleCodesignError`] is 208 bytes, which is larger than most of the other
-/// [`SipError`] variants, causing https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err
+/// [`SipError`] variants, causing <https://rust-lang.github.io/rust-clippy/master/index.html#result_large_err>
 /// to be triggered.
 ///
 /// The [`SipError::CodeSignError`] enum variant has been changed to box the large type, as a result

@@ -4,11 +4,11 @@
 //! Checks that the layer's connection to the internal proxy survives an application that uses
 //! low fd numbers without asking for free ones.
 //!
-//! The application (`apps/low_fd_reuse.py`) overwrites fds 3 to 9 with `dup2`, closes them, and
+//! The `low-fd-reuse` app overwrites fds 3 to 9 with `dup2`, closes them, and
 //! then opens a remote file. When the connection is on one of these fds, the layer loses it, and
 //! the remote `open` never reaches the internal proxy.
 
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use mirrord_intproxy_protocol::{LayerToProxyMessage, LocalMessage, ProxyToLayerMessage};
 use mirrord_layer_tests::fake_intproxy::FakeIntProxy;
@@ -18,9 +18,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// How long the test waits for something that must happen.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -38,11 +36,8 @@ async fn app_reuses_low_fds() {
             ("MIRRORD_FILE_READ_WRITE_PATTERN", "^/mirrord-test/"),
         ],
     );
-    let app_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/apps/low_fd_reuse.py");
-    let application = Application::DynamicApp(
-        Application::get_python3_executable().await,
-        vec!["-u".to_owned(), app_path.to_string_lossy().into_owned()],
-    );
+    let app_path = app_script("low-fd-reuse/main.py");
+    let application = Application::DynamicApp(python(), vec!["-u".to_owned(), app_path]);
     let mut process = application.get_test_process(env, None).await;
 
     let mut layer = intproxy

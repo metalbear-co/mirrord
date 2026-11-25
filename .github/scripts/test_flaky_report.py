@@ -40,6 +40,9 @@ else:
 # Answers Linear's GraphQL API from the environment: $REPEAT has an open issue already track the
 # test, $FAIL names the operations Linear answers with errors, and $REFUSE the ones it reports as
 # unsuccessful.
+#
+# The script is filled in with `%` rather than `str.format`, which would need every brace of its
+# dicts doubled. Ruff's UP031 flags `%`, so its line has a `noqa`.
 CURL = """
 import json, os, sys
 from pathlib import Path
@@ -84,7 +87,7 @@ elif operation == 'fileUpload':
     print(json.dumps({'data': {operation: {'success': True, 'uploadFile': upload}}}))
 else:
     print(json.dumps({'data': {operation: {'success': operation not in refuse, 'issue': issue}}}))
-""" % (OPERATIONS, ASSET_URL)
+""" % (OPERATIONS, ASSET_URL)  # noqa: UP031
 
 
 class FlakyReportTests(unittest.TestCase):
@@ -140,24 +143,17 @@ class FlakyReportTests(unittest.TestCase):
         )
 
     def requests(self):
-        return [
-            json.loads(line)
-            for line in (self.root / "requests").read_text().splitlines()
-        ]
+        return [json.loads(line) for line in (self.root / "requests").read_text().splitlines()]
 
     def operations(self):
         return [
-            "upload"
-            if "upload" in request
-            else next(name for name in OPERATIONS if name + "(" in request["query"])
+            "upload" if "upload" in request else next(name for name in OPERATIONS if name + "(" in request["query"])
             for request in self.requests()
         ]
 
     def request(self, operation):
         return next(
-            request
-            for request in self.requests()
-            if "query" in request and operation + "(" in request["query"]
+            request for request in self.requests() if "query" in request and operation + "(" in request["query"]
         )
 
     def test_collector_groups_rstest_cases_under_their_test(self):
@@ -261,7 +257,7 @@ class FlakyReportTests(unittest.TestCase):
         created = self.request("issueCreate")["variables"]
         self.assertEqual(created["title"], "Fix flaky test `pkg`/`fn` in repo")
         self.assertIn(
-            "cargo nextest run -p pkg -E 'binary_id(=pkg::bin) and test(/^fn::/)'",
+            "bazel test //... --test_arg=-E --test_arg='test(/^fn::/)'",
             created["body"],
         )
 
@@ -293,13 +289,27 @@ class FlakyReportTests(unittest.TestCase):
         self.file_issue("pkg", "module::flaky", 1, 1)
 
         self.assertIn(
-            "binary_id(=pkg) and test(=module::flaky)",
+            "bazel test //... --test_arg=-E --test_arg='test(=module::flaky)'",
             self.request("issueCreate")["variables"]["body"],
         )
         self.assertEqual(
             self.request("commentCreate")["variables"]["body"],
             f"Failed in [this run]({RUN_URL}).\n\n[flaky.log]({ASSET_URL})",
         )
+
+    def test_end_to_end_test_is_run_by_its_suite(self):
+        for test, suite in [
+            ("traffic::ipv6::flaky", "e2e_ipv6"),
+            ("operator_install::flaky", "e2e_operator_install"),
+            ("traffic::steal::flaky", "e2e"),
+        ]:
+            with self.subTest(test=test):
+                (self.root / "requests").write_text("")
+                self.file_issue("mirrord-tests", test, 1, 1)
+                self.assertIn(
+                    f"bazel test //tests:{suite} --test_arg=-E --test_arg='test(={test})'",
+                    self.request("issueCreate")["variables"]["body"],
+                )
 
     def test_repeat_is_noted_however_rarely_it_flaked(self):
         self.env["REPEAT"] = "1"

@@ -25,18 +25,18 @@ To generate the `configuration.md` that you see in the
 [docs page](https://metalbear.co/mirrord/docs/reference/configuration/) we use the `medschool` tool as such:
 
 ```sh
-cargo run -p medschool -- \
+bazel run //medschool -- \
     --root-type LayerConfig \
-    --input ./mirrord/config/src \
-    --output .configuration.md
+    --input "mirrord/config/src" \
+    --output ".configuration.md"
 ```
 
 You can also use the `--prepend` argument to include a file at the start of the generated Markdown file.
 
 ```sh
-cargo run -p medschool -- \
+bazel run //medschool -- \
     --root-type LayerConfig \
-    --prepend ./header.txt \
-    --input ./mirrord/config/src \
-    --output .configuration.md
+    --prepend "header.txt" \
+    --input "mirrord/config/src" \
+    --output ".configuration.md"
 ```

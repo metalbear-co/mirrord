@@ -1,0 +1,11 @@
+load("@crates//mirrord-sip:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "MACOS_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+crate.unit_tests(
+    target_compatible_with = MACOS_ONLY,
+)

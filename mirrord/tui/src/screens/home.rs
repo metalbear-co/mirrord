@@ -17,7 +17,7 @@ use crate::{context::Context, helpers::centered, screens::Screen, theme};
 /// colour of its own - it is drawn in the brand colour over whatever background the terminal
 /// already has, like the rest of the palette.
 ///
-/// Regenerate with `scripts/render_tui_logo.sh`, which documents the exact invocations.
+/// Regenerate with `bazel run //scripts:render_tui_logo`.
 ///
 /// Lines are padded to a fixed width, so the art is rendered left aligned in an
 /// area of exactly that width. Centring the lines individually would skew it.

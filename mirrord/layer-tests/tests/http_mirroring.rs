@@ -5,9 +5,7 @@ use std::{path::Path, time::Duration};
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 const METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
 

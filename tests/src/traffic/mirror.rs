@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![cfg(feature = "job")]
 
 use std::{cmp::Ordering, time::Duration};
 
@@ -9,8 +8,8 @@ use serde_json::json;
 use tempfile::NamedTempFile;
 
 use crate::utils::{
-    application::Application, client::kube_client, kube_service::KubeService, send_request,
-    services::basic_service, KubeClient,
+    KubeClient, application::Application, client::kube_client, kube_service::KubeService,
+    send_request, services::basic_service,
 };
 
 /// Test mirror mode with HTTP header filter.

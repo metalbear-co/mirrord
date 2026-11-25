@@ -14,9 +14,7 @@ use mirrord_protocol::{
 use rstest::rstest;
 use tempfile::NamedTempFile;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 async fn serve_remote_file(intproxy: &mut TestIntProxy, contents: &str, remote_fd: u64) {
     intproxy
@@ -98,10 +96,8 @@ dns.lookup("missing.example.test", (err) => {
         )
         .unwrap();
 
-    let application = Application::DynamicApp(
-        "node".to_owned(),
-        vec![app.path().to_string_lossy().to_string()],
-    );
+    let application =
+        Application::DynamicApp(node(), vec![app.path().to_string_lossy().to_string()]);
 
     let (mut test_process, mut intproxy) = application
         .start_process(vec![("MIRRORD_REMOTE_DNS", "true")], None)

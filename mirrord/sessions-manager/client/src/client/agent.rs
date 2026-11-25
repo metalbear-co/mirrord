@@ -250,7 +250,7 @@ mod tests {
     use tokio::{sync::watch, time::Instant};
 
     use super::*;
-    use crate::control_plane::{ControlPlaneEvent, ControlPlaneEventStream};
+    use crate::control_plane::{ControlPlaneEvent, ControlPlaneEventStream, EVENT_READ_TIMEOUT};
 
     /// Offers the same assignment on every subscription and upgrades it over an in-memory
     /// WebSocket, so the agent control plane runs end to end without a sessions-manager.
@@ -282,7 +282,11 @@ mod tests {
             let events = stream::iter([Ok(ControlPlaneEvent::Assignment(assignment))])
                 .chain(stream::pending());
             let (_activity_tx, activity_rx) = watch::channel(Instant::now());
-            Ok(ControlPlaneEventStream::new(Box::pin(events), activity_rx))
+            Ok(ControlPlaneEventStream::new(
+                Box::pin(events),
+                activity_rx,
+                EVENT_READ_TIMEOUT,
+            ))
         }
 
         async fn connect_data_plane<E: ProtocolEndpoint + Send + Unpin + 'static>(

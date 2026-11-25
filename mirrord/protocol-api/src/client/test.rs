@@ -687,9 +687,7 @@ async fn retrying_response_errors() {
 
 /// Verifies that [`MirrordClientRetry::make_request_retry`] gives up after a bounded number of
 /// retryable agent errors, surfacing the last one instead of looping forever.
-///
-/// Uses paused time so the exponential backoff between attempts elapses instantly.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn retrying_response_errors_gives_up() {
     let (connector, mut acceptor) = TestConnector::new_pair();
 

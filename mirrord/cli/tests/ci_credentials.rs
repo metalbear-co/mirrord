@@ -15,6 +15,7 @@ use mirrord_auth::{
     credentials::{CiApiKey, Credentials},
 };
 use mirrord_command::resolve_tokio_command;
+use mirrord_test_utils::runfile_program;
 use rcgen::{CertificateParams, CertificateSigningRequestParams, CertifiedIssuer, KeyPair};
 use rstest::rstest;
 use serde_json::{Value, json};
@@ -195,13 +196,22 @@ impl Fixture {
     }
 
     async fn run_ci(&self, subcommand: &str, api_key: Option<&str>) -> Output {
-        let mut command = resolve_tokio_command(env!("CARGO_BIN_EXE_mirrord"));
+        let cli = runfile_program("cli/mirrord");
+
+        let mut command = resolve_tokio_command(cli);
         command
             .current_dir(self.directory.path())
             .env_clear()
             .env("HOME", self.directory.path())
             .env("TMPDIR", self.directory.path().join("tmp"))
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            // The CLI reads its layer from the test's runfiles. Without `RUNFILES_DIR`, it would
+            // look next to its own file, where Bazel only lays out the runfiles when it builds
+            // `//mirrord/cli:cli` itself.
+            .env(
+                "RUNFILES_DIR",
+                std::env::var_os("RUNFILES_DIR").expect("Bazel sets RUNFILES_DIR"),
+            )
             .env("MIRRORD_PROGRESS_MODE", "off")
             .args([
                 "ci",

@@ -1,5 +1,5 @@
 use std::{
-    any::{type_name, TypeId},
+    any::{TypeId, type_name},
     fmt::Debug,
 };
 
@@ -7,10 +7,10 @@ use futures::FutureExt;
 use futures_util::future::BoxFuture;
 use k8s_openapi::{ClusterResourceScope, NamespaceResourceScope};
 use kube::{
-    api::{ApiResource, DeleteParams, DynamicObject, PostParams},
     Api, Client, Config, Error, Resource,
+    api::{ApiResource, DeleteParams, DynamicObject, PostParams},
 };
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::utils::origin_labels;
 

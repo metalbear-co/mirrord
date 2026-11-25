@@ -1,0 +1,11 @@
+load("@crates//mirrord-agent-iptables:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "LINUX_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.library()
+
+crate.unit_tests(
+    target_compatible_with = LINUX_ONLY,
+)

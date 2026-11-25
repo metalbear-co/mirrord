@@ -1,0 +1,29 @@
+load("@bazel_skylib//rules:select_file.bzl", "select_file")
+load("@crates//mirrord-layer-win:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+# MinHook's C code includes headers that only the Windows SDK has.
+MSVC_ONLY = ["@llvm//constraints/windows/abi:msvc"]
+
+crate.shared_library(
+    # stork's import-table injection (https://github.com/metalbear-co/stork) finds the layer's
+    # marker export by ordinal 1.
+    # `/EXPORT` is `link.exe` syntax, which works because the layer only builds for MSVC.
+    rustc_flags = ["-Clink-arg=/EXPORT:mirrord_stork_marker,@1"],
+    target_compatible_with = MSVC_ONLY,
+)
+
+crate.unit_tests(
+    target_compatible_with = MSVC_ONLY,
+)
+
+# The CLI embeds only the DLL, not the import library that `:layer-win` also outputs.
+select_file(
+    name = "layer_win_dll",
+    srcs = ":layer-win",
+    subpath = "mirrord_layer_win.dll",
+    target_compatible_with = MSVC_ONLY,
+    visibility = ["//mirrord/cli:__pkg__"],
+)

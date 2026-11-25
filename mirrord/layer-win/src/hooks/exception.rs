@@ -3,12 +3,12 @@
 //! A target's runtime (its C runtime, or std) typically calls `SetUnhandledExceptionFilter` during
 //! startup, which would replace mirrord's crash filter and leave real crashes uncaptured. The
 //! layer puts ours into the OS slot with the real API just before it enables this hook (see
-//! [`utils_win::diagnostics::crash::install_filter`]), because from then on this hook makes every
-//! call a no-op for the OS slot, mirrord's own included. The caller's filter is remembered as the
-//! chain target instead, so it still runs after ours; a filter registered before the layer loaded
-//! is the first chain target.
+//! [`mirrord_utils_win::diagnostics::crash::install_filter`]), because from then on this hook
+//! makes every call a no-op for the OS slot, mirrord's own included. The caller's filter is
+//! remembered as the chain target instead, so it still runs after ours; a filter registered before
+//! the layer loaded is the first chain target.
 //!
-//! See [`utils_win::diagnostics::crash::adopt_previous_filter`].
+//! See [`mirrord_utils_win::diagnostics::crash::adopt_previous_filter`].
 
 use std::sync::OnceLock;
 
@@ -31,7 +31,7 @@ static SET_UEF_ORIGINAL: OnceLock<&SetUnhandledExceptionFilterFn> = OnceLock::ne
 unsafe extern "system" fn set_unhandled_exception_filter_detour(
     filter: LPTOP_LEVEL_EXCEPTION_FILTER,
 ) -> LPTOP_LEVEL_EXCEPTION_FILTER {
-    utils_win::diagnostics::crash::adopt_previous_filter(filter)
+    mirrord_utils_win::diagnostics::crash::adopt_previous_filter(filter)
 }
 
 /// Installs the filter-guard hook.

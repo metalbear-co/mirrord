@@ -1,0 +1,2 @@
+# nextest only checks that the workspace's `Cargo.toml` exists, so each nextest test gets this empty
+# stand-in in its runfiles rather than the real manifest, whose changes would rerun every test.

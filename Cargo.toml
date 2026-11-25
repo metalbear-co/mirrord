@@ -1,54 +1,90 @@
-# Cross compilable mirrord workspace
-# On Windows: You can build specific packages like cargo build -p mirrord -p mirrord-layer-win
-# On Unix: Default cargo build will build the Unix-compatible crates
-# All platforms: mirrord/* in members ensures all crates are available for explicit builds
-# This will be resolved in the future, follow - https://github.com/rust-lang/rfcs/pull/3759
+# Every member builds on every platform, so that Cargo and rust-analyzer cover the whole workspace
+# on any machine. A crate that only works on other platforms, like the agent, builds as an empty
+# crate or program.
 [workspace]
 
+# rules_rs only finds the crates of a git dependency, like mirrord in another module's build, among
+# the members that this list names without a glob, so it names every member, also the ones that Cargo
+# finds as path dependencies.
 members = [
-    "mirrord/*",
+    "mirrord/agent",
     "mirrord/agent/env",
     "mirrord/agent/iptables",
-    "mirrord/layer-tests/tests/apps/fileops",
-    "mirrord/layer-tests/tests/apps/outgoing",
-    "mirrord/layer-tests/tests/apps/double_listen",
-    "mirrord/layer-tests/tests/apps/listen_ports",
-    "mirrord/layer-tests/tests/apps/dns_resolve",
-    "mirrord/layer-tests/tests/apps/recv_from",
-    "mirrord/layer-tests/tests/apps/issue1776",
-    "mirrord/layer-tests/tests/apps/issue1776portnot53",
-    "mirrord/layer-tests/tests/apps/issue1899",
-    "mirrord/layer-tests/tests/apps/issue2001",
-    "mirrord/layer-tests/tests/apps/issue2438",
-    "mirrord/layer-tests/tests/apps/issue3248",
-    "mirrord/layer-tests/tests/apps/rebind0",
-    "mirrord/layer-tests/tests/apps/dup_listen",
-    "mirrord/layer-tests/tests/apps/posix_spawn_shared_sockets",
+    "mirrord/analytics",
+    "mirrord/auth",
+    "mirrord/cli",
+    "mirrord/cluster-auth",
+    "mirrord/command",
+    "mirrord/config",
+    "mirrord/config/derive",
+    "mirrord/console",
+    "mirrord/intproxy",
+    "mirrord/intproxy/protocol",
+    "mirrord/jaq",
+    "mirrord/kube",
+    "mirrord/layer",
+    "mirrord/layer-go",
+    "mirrord/layer-lib",
+    "mirrord/layer-tests",
+    "mirrord/layer-tests/apps/dns-resolve",
+    "mirrord/layer-tests/apps/double-listen",
+    "mirrord/layer-tests/apps/dup-listen",
+    "mirrord/layer-tests/apps/fileops/rust",
+    "mirrord/layer-tests/apps/issue1054",
+    "mirrord/layer-tests/apps/issue1123",
+    "mirrord/layer-tests/apps/issue1458",
+    "mirrord/layer-tests/apps/issue1458portnot53",
+    "mirrord/layer-tests/apps/issue1776",
+    "mirrord/layer-tests/apps/issue1776portnot53",
+    "mirrord/layer-tests/apps/issue1899",
+    "mirrord/layer-tests/apps/issue2001",
+    "mirrord/layer-tests/apps/issue2058",
+    "mirrord/layer-tests/apps/issue2204",
+    "mirrord/layer-tests/apps/issue2438",
+    "mirrord/layer-tests/apps/issue3248",
+    "mirrord/layer-tests/apps/listen-ports",
+    "mirrord/layer-tests/apps/outgoing",
+    "mirrord/layer-tests/apps/posix-spawn-shared-sockets",
+    "mirrord/layer-tests/apps/rebind0",
+    "mirrord/layer-tests/apps/recv-from",
+    "mirrord/layer-win",
+    "mirrord/layer/core",
+    "mirrord/layer/macro",
+    "mirrord/macros",
+    "mirrord/mcp",
+    "mirrord/nightly-polyfill",
+    "mirrord/operator",
+    "mirrord/operator-websocket",
+    "mirrord/progress",
+    "mirrord/protocol",
+    "mirrord/protocol-api",
+    "mirrord/protocol-io",
+    "mirrord/remote-layer-protocol",
+    "mirrord/runfiles",
+    "mirrord/session-monitor-client",
+    "mirrord/session-monitor-protocol",
+    "mirrord/sessions-manager/client",
+    "mirrord/sessions-manager/protocol",
+    "mirrord/sip",
+    "mirrord/str-win",
+    "mirrord/test-macros",
+    "mirrord/test-utils",
+    "mirrord/tls-util",
+    "mirrord/tui",
+    "mirrord/up",
+    "mirrord/utils-win",
+    "mirrord/vpn",
     "sample/rust",
     "medschool",
     "tests",
-    "test-utils",
-    "tests/rust-e2e-fileops",
-    "tests/rust-unix-socket-client",
-    "tests/rust-bypassed-unix-socket",
-    "tests/issue1317",
-    "tests/rust-websockets",
-    "tests/rust-sqs-printer",
-    "tests/kafka-consumer",
-    "tests/rust-access-denied-server",
-    "xtask",
-    "mirrord/sessions-manager/client",
-    "mirrord/sessions-manager/protocol",
+    "tests/apps/rust-bypassed-unix-socket",
+    "tests/apps/rust-e2e-fileops",
+    "tests/apps/rust-unix-socket-client",
+    "tests/apps/rust-websockets",
+    # A member, so that the runner takes its dependencies from this workspace.
+    "bazel/nextest-runner",
 ]
 
-default-members = [
-    "mirrord/*",
-    "mirrord/agent/env",
-    "mirrord/agent/iptables",
-    "xtask",
-    "mirrord/sessions-manager/client",
-    "mirrord/sessions-manager/protocol",
-]
 exclude = [
     "mirrord/sessions-manager",
 ]
@@ -59,14 +95,6 @@ resolver = "2"
 ignored = [
     "serde_json_path_macros",
     "strum",
-]
-ignored-paths = [
-    "mirrord/layer-tests/tests/apps/issue1054/issue1054.rs",
-    "mirrord/layer-tests/tests/apps/issue1123/issue1123.rs",
-    "mirrord/layer-tests/tests/apps/issue1458/issue1458.rs",
-    "mirrord/layer-tests/tests/apps/issue1458portnot53/issue1458portnot53.rs",
-    "mirrord/layer-tests/tests/apps/issue2058/issue2058.rs",
-    "mirrord/layer-tests/tests/apps/issue2204/issue2204.rs",
 ]
 
 # latest commits on rustls suppress certificate verification
@@ -109,7 +137,6 @@ async-trait = "0.1"
 aws-config = { version = "1.5", default-features = false }
 aws-credential-types = "1.2"
 aws-sigv4 = { version = "1.2", default-features = false }
-aws-sdk-sqs = { version = "1.39", default-features = false }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 base64 = "0.22"
@@ -124,18 +151,15 @@ chrono = "0.4"
 ci_info = "0.14"
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4.4.1"
-const-random = "0.1.15"
 containerd-client = "0.9"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 ctor = "0.2"
 derive_more = "2.0.1"
-dirs = "6"
 dns-lookup = "3"
 dotenvy = "0.15"
 drain = "0.1"
 dunce = "1"
 enum_dispatch = "0.3"
-env_logger = "0.11"
 errno = "0.3"
 eventsource-stream = "0.2"
 exec = "0.3"
@@ -214,6 +238,7 @@ opener = "0.8.3"
 pem = "3"
 phnt = "0.1.2"
 pin-project-lite = "0.2"
+plist = "1"
 pnet_packet = "0.35"
 portable-pty = "0.9"
 prettytable-rs = "0.10"
@@ -230,10 +255,6 @@ quote = "1"
 rand = "0.10"
 ratatui = "0.30.2"
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
-rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e84de5dcb5d3cbe2b7036b21f016581445e445c", features = [
-    "cmake-build",
-    "ssl-vendored",
-] }
 regex = { version = "1", features = ["unicode-case"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "blocking",
@@ -250,8 +271,19 @@ rmcp = { version = "3.5", default-features = false, features = [
     "server",
     "transport-io",
 ] }
-rstest = { version = "0.23", default-features = false, features = ["crate-name"] }
-rust-embed = "8"
+# Without the `crate-name` feature, because it makes rstest's macros read `Cargo.toml`, and Bazel's
+# compile actions don't have the manifests.
+rstest = { version = "0.23", default-features = false }
+runfiles = "0.3"
+rust-embed = { version = "8", features = [
+    # Debug builds embed the CLI's UI too, because without it they read its files at run time from
+    # the folder that rustc got, which is in Bazel's sandbox and gone by then.
+    "debug-embed",
+    # Makes the CLI's bytes not depend on when the UI was built.
+    "deterministic-timestamps",
+    # Lets the CLI take the UI's folder from `MIRRORD_BUNDLED_UI`.
+    "interpolate-folder-path",
+] }
 rustls = "0.23"
 rustls-pemfile = "2"
 rustls-platform-verifier = "0.7"
@@ -296,7 +328,6 @@ tokio-seqpacket = { version = "0.8.2" }
 tonic = "0.14"
 tower = "0.5"
 tower-http = { version = "0.6.6", features = ["fs", "set-header", "trace"] }
-tower-test = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tui-term = "0.3.4"
@@ -361,12 +392,8 @@ yamlpath = "0.32.0"
 private_intra_doc_links = "allow"
 
 [workspace.lints.clippy]
-"str_to_string" = "warn"
-
-[profile.release]
-strip = "debuginfo"
-# Enabling LTO causes this issue https://github.com/metalbear-co/mirrord/issues/906
-lto = false
+indexing_slicing = "warn"
+str_to_string = "warn"
 
 [patch.crates-io]
 tree-sitter = { git = "https://github.com/metalbear-co/tree-sitter.git", tag = "hotfix" }

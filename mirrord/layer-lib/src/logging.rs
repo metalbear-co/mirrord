@@ -73,7 +73,7 @@ pub const MIRRORD_LAYER_LOG_PATH: &str = "MIRRORD_LAYER_LOG_PATH";
 /// The prefix of every layer log file name.
 ///
 /// On Windows the crash monitor opens a registered log only under a name of this shape, see
-/// `utils_win::diagnostics::monitor::is_log_name`.
+/// `mirrord_utils_win::diagnostics::monitor::is_log_name`.
 const LOG_FILE_PREFIX: &str = "mirrord-layer_";
 
 /// Address of a running mirrord-console. When set, the console owns the layer's logs.
@@ -839,7 +839,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_crash_monitor_accepts_the_log_file_name() {
-        assert_eq!(LOG_FILE_PREFIX, utils_win::diagnostics::monitor::LOG_PREFIX);
+        assert_eq!(
+            LOG_FILE_PREFIX,
+            mirrord_utils_win::diagnostics::monitor::LOG_PREFIX
+        );
 
         let directory = tempdir().expect("temp dir");
         let path = build_log_file_path(&directory.path().to_string_lossy()).expect("log path");
@@ -848,7 +851,7 @@ mod tests {
             .and_then(|name| name.to_str())
             .expect("a file name");
         assert!(
-            utils_win::diagnostics::monitor::is_log_name(name),
+            mirrord_utils_win::diagnostics::monitor::is_log_name(name),
             "{name} is refused by the crash monitor"
         );
     }

@@ -1,5 +1,5 @@
 [package]
-name = "utils-win"
+name = "mirrord-utils-win"
 version = "0.1.0"
 authors.workspace = true
 description.workspace = true
@@ -13,15 +13,15 @@ categories.workspace = true
 publish.workspace = true
 edition.workspace = true
 
+[lints]
+workspace = true
+
 [lib]
 doctest = false
 
-[build-dependencies]
-embed-resource = "2"
-
 [target.'cfg(windows)'.dependencies]
 mirrord-config = { path = "../config" }
-str-win = { path = "../str-win" }
+mirrord-str-win = { path = "../str-win" }
 winapi = { workspace = true, features = [
     "psapi",
     "winver",

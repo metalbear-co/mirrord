@@ -1,0 +1,481 @@
+load("@bazel_lib//lib:copy_file.bzl", "copy_file")
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@crates//mirrord-cli:data.bzl", "crate_data")
+load("@rules_img//img:layer.bzl", "file_metadata", "image_layer")
+load("@rules_powershell//powershell:defs.bzl", "pwsh_binary", "pwsh_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//bazel:compatibility.bzl", "LINUX_ONLY", "MACOS_ONLY", "UNIX_ONLY", "WINDOWS_ONLY")
+load("//bazel:image.bzl", "IMAGE_LABELS", "image_targets")
+load("//bazel:platform.bzl", "platform_filegroup")
+load("//bazel:rust.bzl", "crate_package")
+load(":macos_sign.bzl", "macos_sign")
+
+crate = crate_package(crate_data = crate_data())
+
+# CLI ----------------------------------------------------------------------------------------------
+
+# The files that the CLI bundles on each platform, by the variable that gives the CLI each file's
+# path: `:cli_standalone` gets the file's path in the build, which it embeds, and `:cli` the file's
+# path in its runfiles. The targets need each file both as a label and as a path, and Starlark can't
+# read the values of a `select()`, so each attribute builds its own `select()` from this dict.
+#
+# The dict has no `//conditions:default`, so Bazel refuses to build a CLI for a platform without a
+# layer.
+BUNDLED_FILES = {
+    "@platforms//os:linux": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer",
+        "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
+    },
+    "@platforms//os:macos": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer:universal_layer",
+        # The arm64e shim in the universal layer loads the arm64 layer.
+        "MIRRORD_BUNDLED_LAYER_MACOS_ARM64": "//mirrord/layer:layer_aarch64",
+        # The utilities that the CLI uses to run SIP-protected programs.
+        "MIRRORD_BUNDLED_SIP_BINARIES": "@apple_utils//file",
+        "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
+    },
+    "@platforms//os:windows": {
+        "MIRRORD_BUNDLED_LAYER": "//mirrord/layer-win:layer_win_dll",
+        "MIRRORD_BUNDLED_UI": "//packages/ui:dist",
+    },
+}
+
+# The variables of `BUNDLED_FILES` that name a layer.
+LAYER_VARIABLES = [
+    "MIRRORD_BUNDLED_LAYER",
+    "MIRRORD_BUNDLED_LAYER_MACOS_ARM64",
+]
+
+py_binary(
+    name = "layer_id",
+    srcs = ["scripts/layer_id.py"],
+)
+
+# The `rustc_env_files` file that gives `:cli_standalone` the ID of the layers that it embeds.
+run_binary(
+    name = "bundled_layer_id",
+    srcs = select({
+        condition: [files[variable] for variable in LAYER_VARIABLES if variable in files]
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    outs = ["bundled/layer_id.env"],
+    tool = ":layer_id",
+    args = ["$(execpath bundled/layer_id.env)"] + select({
+        condition: [
+            "$(execpath {})".format(files[variable])
+            for variable in LAYER_VARIABLES
+            if variable in files
+        ]
+        for condition, files in BUNDLED_FILES.items()
+    }),
+)
+
+# Gives the CLI's main thread a 4 MiB stack on Windows, which otherwise gives it 1 MiB. The CLI
+# polls its whole async runtime on that thread (see "Stack Usage" in `AGENTS.md`).
+MAIN_THREAD_STACK_FLAGS = select({
+    "@llvm//constraints/windows/abi:msvc": ["-Clink-arg=/STACK:4194304"],
+    "//conditions:default": [],
+})
+
+# The CLI that the tests and `bazel run //mirrord/cli` run.
+crate.binary(
+    # Reads the layer and the UI from the runfiles rather than embedding them, so that a change to
+    # either doesn't compile the CLI again. Its compile only gets their paths, and not the files,
+    # which rules_rust leaves out of the compile's inputs when they're in `data`.
+    data = select({
+        condition: files.values()
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    rustc_env = select({
+        condition: {
+            variable: "$(rlocationpath {})".format(file)
+            for variable, file in files.items()
+        }
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    rustc_flags = MAIN_THREAD_STACK_FLAGS,
+    # Public for the modules that depend on mirrord and run the CLI.
+    visibility = ["//visibility:public"],
+)
+
+# The CLI that mirrord distributes. It embeds the bundled files, so that it runs without runfiles.
+crate.binary(
+    name = "cli_standalone",
+    # `:cli` writes `mirrord`, and two targets of a package can't write the same file.
+    binary_name = "standalone/mirrord",
+    crate_features = ["standalone"],
+    compile_data = select({
+        condition: files.values()
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    # `include_bytes!` and rust-embed resolve a relative path from different directories, so they
+    # need the absolute paths that rules_rust makes of each `$(execpath)` here.
+    rustc_env = select({
+        condition: {
+            variable: "$(execpath {})".format(file)
+            for variable, file in files.items()
+        }
+        for condition, files in BUNDLED_FILES.items()
+    }),
+    rustc_env_files = [":bundled_layer_id"],
+    rustc_flags = MAIN_THREAD_STACK_FLAGS,
+    # Both binaries build the same crate, so only `:cli` documents it.
+    doc = False,
+    # Public for the modules that depend on mirrord and put the CLI in an image.
+    visibility = ["//visibility:public"],
+)
+
+# Tests the crate as `:cli` builds it, which reads the layer and the UI from its runfiles, so that a
+# change to either doesn't compile the tests again.
+crate.unit_tests(
+    # A few tests wait for several seconds each, so they run four at a time to fit in a `small`
+    # test's timeout.
+    test_threads = 4,
+)
+
+crate.integration_tests(
+    target_compatible_with = UNIX_ONLY,
+)
+
+# Universal macOS CLI ------------------------------------------------------------------------------
+
+# The standalone CLI for each Mac CPU, which `:cli_universal` combines.
+[
+    platform_filegroup(
+        name = "cli_" + cpu,
+        srcs = [":cli_standalone"],
+        cpu = cpu,
+        os = "macos",
+        tags = ["manual"],
+        target_compatible_with = MACOS_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# The universal CLI for macOS, which keeps the ad hoc signature that lld gives its arm64 slice. That
+# signature is all that running it needs.
+run_binary(
+    name = "cli_universal",
+    srcs = [
+        ":cli_aarch64",
+        ":cli_x86_64",
+    ],
+    outs = ["universal/mirrord"],
+    tool = "@llvm//tools:llvm-lipo",
+    args = [
+        "-create",
+        "-output",
+        "$(execpath universal/mirrord)",
+        "$(execpath :cli_x86_64)",
+        "$(execpath :cli_aarch64)",
+    ],
+    target_compatible_with = MACOS_ONLY,
+    visibility = ["//visibility:public"],
+)
+
+# The paths of the PKCS #12 file with MetalBear's Developer ID and of its password, which
+# `macos_sign` signs the universal CLI and layer with. The `release.yaml` workflow sets them.
+#
+# The flags are in the CLI's package rather than the layer's because the CLI's release distributes
+# both files, and the layer only gets signed because the CLI embeds and distributes it.
+#
+# `rcodesign` only reads PKCS #12 files with the legacy encryption, and fails with "incorrect
+# password" on others, so export the identity with `openssl pkcs12 -export -legacy`.
+[
+    string_flag(
+        name = name,
+        build_setting_default = "",
+    )
+    for name in [
+        "macos_signing_p12_file",
+        "macos_signing_p12_password_file",
+    ]
+]
+
+# The universal CLI that a release distributes, signed with MetalBear's Developer ID.
+#
+# Without the signing flags, it's only signed ad hoc, despite its name. That lets a build of the
+# release's files without the identity, like `ci.yaml`'s on a release branch, still run the whole
+# signing chain. So a `signed` file from a build by hand isn't one that a release would ship.
+#
+# It's `manual`, so that only a build that asks for the release's file signs the CLI. The
+# `:cli_universal` that `//...` builds is the same CLI, with the same embedded layer.
+#
+# Releases don't notarize it.
+macos_sign(
+    name = "cli_universal_signed",
+    src = ":cli_universal",
+    out = "universal/signed/mirrord",
+    identifier = "mirrord",
+    tags = ["manual"],
+    target_compatible_with = MACOS_ONLY,
+)
+
+# Container image of `mirrord container`'s sidecar -------------------------------------------------
+
+# The image and every target that only the image uses are `manual`, so that `//...` doesn't package
+# the standalone CLI into a layer on every change to the CLI. `ci.yaml` builds the image on release
+# branches, where it builds what `release.yaml` publishes.
+#
+# The layers have entries only for the directories under `/opt/mirrord`, so that they leave the
+# directories of the base image, like `/usr/bin`, as they are.
+image_layer(
+    name = "image_layer",
+    srcs = {
+        "/opt/mirrord": "//bazel:empty_directory",
+        "/opt/mirrord/bin": "//bazel:empty_directory",
+        "/opt/mirrord/bin/mirrord": ":cli_standalone",
+        "/opt/mirrord/lib": "//bazel:empty_directory",
+        # `mirrord container` mounts the certificate of the external proxy in this directory, at
+        # `container.cli_tls_path`.
+        "/opt/mirrord/tls": "//bazel:empty_directory",
+    },
+    file_metadata = {
+        path: file_metadata(mode = "0777")
+        for path in [
+            "/opt/mirrord/lib/libmirrord_layer.so",
+            "/usr/bin/mirrord",
+        ]
+    },
+    include_runfiles = False,
+    # Without `container.platform`, `mirrord container` gives the user's container
+    # `/opt/mirrord/lib/libmirrord_layer.so`, and the container runs on the image's own CPU (see
+    # `resolve_library_path`), so this path links to the layer for that CPU.
+    symlinks = {"/usr/bin/mirrord": "/opt/mirrord/bin/mirrord"} | select({
+        "@platforms//cpu:aarch64": {"/opt/mirrord/lib/libmirrord_layer.so": "aarch64/libmirrord_layer.so"},
+        "//conditions:default": {"/opt/mirrord/lib/libmirrord_layer.so": "x86_64/libmirrord_layer.so"},
+    }),
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The image has the layer for each Linux CPU in `/opt/mirrord/lib/<cpu>`, because `mirrord
+# container` gives each container the layer for its own CPU (see `resolve_library_path`).
+[
+    platform_filegroup(
+        name = "layer_" + cpu,
+        srcs = ["//mirrord/layer"],
+        cpu = cpu,
+        os = "linux",
+        tags = ["manual"],
+        target_compatible_with = LINUX_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+[
+    image_layer(
+        name = "image_layer_{}_lib".format(cpu),
+        srcs = {
+            "/opt/mirrord/lib/" + cpu: "//bazel:empty_directory",
+            "/opt/mirrord/lib/{}/libmirrord_layer.so".format(cpu): ":layer_" + cpu,
+        },
+        tags = ["manual"],
+        target_compatible_with = LINUX_ONLY,
+    )
+    for cpu in [
+        "aarch64",
+        "x86_64",
+    ]
+]
+
+# `mirrord container` gives the user's container the layer by mounting the volumes of the sidecar
+# that runs this image, with `--volumes-from`.
+write_file(
+    name = "image_config_fragment",
+    out = "image_config_fragment.json",
+    content = [json.encode({"config": {"Volumes": {"/opt/mirrord": {}}}})],
+    tags = ["manual"],
+    target_compatible_with = LINUX_ONLY,
+)
+
+# The arm64 image also builds the x86-64 layer, which a build on an arm64 machine would otherwise
+# cross-compile in every `//...`.
+image_targets(
+    name = "image",
+    registry = "ghcr.io",
+    repository = "metalbear-co/mirrord-cli",
+    base = "@debian",
+    layers = [
+        "//bazel:cacerts_layer",
+        ":image_layer",
+    ] + select({
+        # The arm64 image also has the x86-64 layer, for x86-64 containers that run under emulation.
+        "@platforms//cpu:aarch64": [
+            ":image_layer_aarch64_lib",
+            ":image_layer_x86_64_lib",
+        ],
+        "//conditions:default": [":image_layer_x86_64_lib"],
+    }),
+    config_fragment = ":image_config_fragment",
+    labels = IMAGE_LABELS,
+    manual = True,
+)
+
+# Windows stack check ------------------------------------------------------------------------------
+
+filegroup(
+    name = "cli_standalone_pdb",
+    srcs = [":cli_standalone"],
+    output_group = "pdb_file",
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+# Windows gives the CLI's main thread only the stack that the binary asks for, so this checks that
+# the CLI fits in it.
+pwsh_test(
+    name = "win_stack_check",
+    srcs = ["scripts/win_stack_check.ps1"],
+    data = [
+        ":cli_standalone",
+        ":cli_standalone_pdb",
+    ],
+    env = {
+        "CLI": "$(rlocationpath :cli_standalone)",
+        "CLI_PDB": "$(rlocationpath :cli_standalone_pdb)",
+        "MIRRORD_TELEMETRY": "false",
+    },
+    # vswhere finds editbin, which changes the stack of the CLI's copies, from these.
+    env_inherit = [
+        "ProgramData",
+        "ProgramFiles(x86)",
+    ],
+    deps = ["@rules_powershell//powershell/runfiles"],
+    # Each run of the CLI ends in seconds, but the test only gives up on one after five minutes.
+    timeout = "long",
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+pwsh_binary(
+    name = "win_stack_report",
+    srcs = ["scripts/win_stack_report.ps1"],
+    target_compatible_with = WINDOWS_ONLY,
+)
+
+# Release files ------------------------------------------------------------------------------------
+
+# The platforms whose files the release builds on Linux, keyed by the platform's name in the file
+# names, as in `mirrord_mac_universal`.
+#
+# The Windows files aren't here, because the release signs them on Windows after the build.
+RELEASE_PLATFORMS = {
+    "linux_x86_64": {
+        "cli": ":cli_standalone",
+        "cpu": "x86_64",
+        "layer": "//mirrord/layer",
+        "layer_file": "libmirrord_layer_linux_x86_64.so",
+        "os": "linux",
+    },
+    "linux_aarch64": {
+        "cli": ":cli_standalone",
+        "cpu": "aarch64",
+        "layer": "//mirrord/layer",
+        "layer_file": "libmirrord_layer_linux_aarch64.so",
+        "os": "linux",
+    },
+    # The universal targets build the slices of both CPUs themselves, so either CPU works here.
+    # `platform_filegroup` only needs one to pick a macOS platform.
+    "mac_universal": {
+        "cli": ":cli_universal_signed",
+        "cpu": "aarch64",
+        "layer": "//mirrord/layer:universal_layer",
+        "layer_file": "libmirrord_layer_mac_universal.dylib",
+        "os": "macos",
+    },
+}
+
+py_binary(
+    name = "zip_with_checksum",
+    srcs = ["scripts/zip_with_checksum.py"],
+)
+
+# The CLI and the layer of each platform, so that one machine builds the release's files for every
+# platform. Each file keeps the name that its own target gives it, like `standalone/mirrord` or
+# `libmirrord_layer.so`, which is the same for every platform.
+[
+    platform_filegroup(
+        name = "release_{}_{}".format(name, part),
+        srcs = [platform[part]],
+        cpu = platform["cpu"],
+        os = platform["os"],
+        tags = ["manual"],
+    )
+    for name, platform in RELEASE_PLATFORMS.items()
+    for part in [
+        "cli",
+        "layer",
+    ]
+]
+
+# Copies each platform's CLI to the name that the release publishes it under, like
+# `release/mirrord_linux_x86_64`. GitHub names each asset of a release after its file, and the files
+# above have the same names on every platform, so they need names of their own.
+#
+# A target can't have the same name as its output file, so the targets take a `_copy` suffix, and
+# other targets use the file's label, like `ci.yaml` does with `:release/mirrord_<platform>`.
+[
+    copy_file(
+        name = "release_mirrord_{}_copy".format(name),
+        src = ":release_{}_cli".format(name),
+        out = "release/mirrord_" + name,
+        is_executable = True,
+        tags = ["manual"],
+    )
+    for name in RELEASE_PLATFORMS
+]
+
+# The same for each platform's layer, like `release/libmirrord_layer_linux_x86_64.so`.
+[
+    copy_file(
+        name = "release_{}_copy".format(platform["layer_file"]),
+        src = ":release_{}_layer".format(name),
+        out = "release/" + platform["layer_file"],
+        tags = ["manual"],
+    )
+    for name, platform in RELEASE_PLATFORMS.items()
+]
+
+# Zips each platform's CLI as `mirrord`, next to a file with the zip's checksum, which the Homebrew
+# formula takes.
+[
+    run_binary(
+        name = "release_mirrord_{}_zip".format(name),
+        srcs = [":release/mirrord_" + name],
+        outs = [
+            "release/mirrord_{}.zip".format(name),
+            "release/mirrord_{}.shasum256".format(name),
+        ],
+        tool = ":zip_with_checksum",
+        args = [
+            "$(execpath :release/mirrord_{})".format(name),
+            "$(execpath release/mirrord_{}.zip)".format(name),
+            "$(execpath release/mirrord_{}.shasum256)".format(name),
+        ],
+        tags = ["manual"],
+    )
+    for name in RELEASE_PLATFORMS
+]
+
+# `release.yaml` builds these files on Linux and uploads them to the GitHub release under the names
+# they have here.
+filegroup(
+    name = "release_unix",
+    srcs = [
+        target
+        for name, platform in RELEASE_PLATFORMS.items()
+        for target in [
+            ":release/mirrord_" + name,
+            ":release/" + platform["layer_file"],
+            ":release_mirrord_{}_zip".format(name),
+        ]
+    ],
+    tags = ["manual"],
+)

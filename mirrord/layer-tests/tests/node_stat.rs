@@ -10,9 +10,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// libuv stats paths and fds with `statx` through libc's `syscall`, so the layer only sees
 /// `statSync`, `lstatSync` and `fstatSync` with `experimental.hook_libc_syscall`.

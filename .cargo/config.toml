@@ -1,17 +1,18 @@
-[alias]
-xtask = "run --package xtask --"
-
-[profile.dev]
-opt-level = 0
-debug = true
-
-[profile.test.package."*"]
-incremental = true
-
-[profile.debug-overflow]
-inherits = "dev"
-opt-level = 0
-debug = 2  # full debug info
-overflow-checks = true
-debug-assertions = true
-incremental = false
+[env]
+# Placeholders for the files that `mirrord-mcp` and the `standalone` CLI embed, like the layer and the
+# UI, which keep rust-analyzer's `cargo check` working. Bazel builds the real files and passes their
+# paths in the crates' `rustc_env`. A `standalone` CLI that Cargo builds would have no layer, so it
+# fails to build.
+#
+# `cargo run` also sets these variables for the programs that it starts, so they shouldn't use a
+# name that mirrord reads at run time, like `MIRRORD_LAYER_FILE`.
+#
+# `relative = true` makes the paths absolute, because `include_bytes!` and rust-embed resolve
+# relative paths from different directories.
+MIRRORD_BUNDLED_LAYER = { value = ".cargo/placeholders/empty", relative = true }
+MIRRORD_BUNDLED_LAYER_MACOS_ARM64 = { value = ".cargo/placeholders/empty", relative = true }
+MIRRORD_BUNDLED_SIP_BINARIES = { value = ".cargo/placeholders/empty", relative = true }
+MIRRORD_BUNDLED_UI = { value = ".cargo/placeholders/ui", relative = true }
+MIRRORD_BUNDLED_MCP_CORPUS = { value = ".cargo/placeholders/empty", relative = true }
+# The ID of the embedded layers, which a file that Bazel generates gives the `standalone` CLI.
+MIRRORD_BUNDLED_LAYER_ID = "0"

@@ -1,0 +1,8 @@
+load("@crates//mirrord-config-derive:data.bzl", "crate_data")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.proc_macro(
+    compile_data = ["README.md"],
+)

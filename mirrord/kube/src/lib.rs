@@ -13,9 +13,9 @@
 //! Turn this feature on if you want to connect to agent pods from outside the cluster with port
 //! forwarding.
 
-pub use kube;
 #[cfg(test)]
-use {http as _, tower_test as _};
+use http as _;
+pub use kube;
 
 pub mod api;
 pub mod error;

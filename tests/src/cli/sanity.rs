@@ -48,9 +48,9 @@ mod cli {
         let mut config_path = config_dir.to_path_buf();
         config_path.push("default_ide.json");
 
-        let mut process = run_verify_config(Some(vec![config_path
-            .to_str()
-            .expect("Valid config path!")]))
+        let mut process = run_verify_config(Some(vec![
+            config_path.to_str().expect("Valid config path!"),
+        ]))
         .await;
 
         assert!(process.wait().await.success());

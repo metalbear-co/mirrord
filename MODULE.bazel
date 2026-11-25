@@ -1,0 +1,500 @@
+module(name = "mirrord")
+
+bazel_dep(name = "aspect_rules_js", version = "3.6.0")
+bazel_dep(name = "bazel_lib", version = "3.8.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "codesign.bzl", version = "0.0.13")
+bazel_dep(name = "gazelle", version = "0.54.0")
+bazel_dep(name = "llvm", version = "0.8.27")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "rules_cc", version = "0.2.28")
+bazel_dep(name = "rules_distroless", version = "0.9.4")
+bazel_dep(name = "rules_go", version = "0.65.0")
+bazel_dep(name = "rules_img", version = "0.3.25")
+bazel_dep(name = "rules_multitool", version = "1.11.1")
+bazel_dep(name = "rules_nodejs", version = "6.7.7")
+bazel_dep(name = "rules_powershell", version = "0.3.1")
+bazel_dep(name = "rules_python", version = "2.4.6")
+bazel_dep(name = "rules_rs", version = "0.2.4")
+bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "tar.bzl", version = "0.10.9")
+bazel_dep(name = "toml.bzl", version = "0.5.0")
+
+# The C libraries that the `-sys` crates link, and the assembler that builds AWS-LC for x86-64
+# Windows (see the crate annotations below).
+bazel_dep(name = "bzip2", version = "1.0.8.bcr.4")
+bazel_dep(name = "nasm", version = "3.02")
+
+# The `nasm` module asks for rules_cc_autoconf 0.21.0, whose checker misses an `#include <iterator>`
+# and so doesn't compile against the llvm toolchain's libc++.
+single_version_override(
+    module_name = "rules_cc_autoconf",
+    version = "0.37.0",
+)
+
+bazel_dep(name = "xz", version = "5.4.5.bcr.9")
+
+cargo_packages = use_repo_rule("//bazel:cargo_packages.bzl", "cargo_packages")
+
+cargo_packages(
+    name = "cargo_packages",
+    cargo_toml = "//:Cargo.toml",
+)
+
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
+    edition = "2024",
+    # rules_rs can't read `rust-toolchain.toml`, so this must match the `channel` there.
+    version = "1.99.1",
+)
+
+# Unused, but the extension reports it as a direct dependency, and Bazel warns unless it's listed.
+use_repo(toolchains, "default_rust_toolchains")
+
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+
+# The patch lets any machine build the Windows CLI and layer. It makes rustc link for Windows with
+# the llvm toolchain's `lld-link` rather than its clang-cl, which rejects rustc's `link.exe` options
+# (hermetic-llvm#910, rules_rs#137). See the patch's commit message.
+#
+# The patch can go once rules_rs ships https://github.com/hermeticbuild/rules_rust/pull/92.
+rules_rust.patch(
+    patches = [
+        "//bazel/third_party/rules_rust:lld-link.patch",
+    ],
+    strip = 1,
+)
+use_repo(rules_rust, "rules_rust")
+
+# Bazel takes the first registered toolchain of each type that fits, and these come before the ones
+# that the dependencies register.
+register_toolchains(
+    "@llvm//toolchain:all",
+    "@codesign.bzl//toolchain:all",
+    "//bazel/platforms:tests_run_on_the_host",
+)
+
+# The llvm toolchain only copies the listed frameworks from the macOS SDK. The list replaces the
+# toolchain's default one, so it repeats the defaults.
+osx = use_extension("@llvm//extensions:osx.bzl", "osx")
+osx.frameworks(
+    names = [
+        # CoreServices re-exports it, and lld can't link against a framework whose re-exports are
+        # missing.
+        "CFNetwork",
+        "CoreFoundation",
+        # The `notify` crate uses its FSEvents.
+        "CoreServices",
+        "Foundation",
+        "Kernel",
+        "OSLog",
+        "Security",
+        "SystemConfiguration",
+    ],
+)
+
+# Python -------------------------------------------------------------------------------------------
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.13",
+)
+
+# Stops rules_python from creating an empty `__init__.py` in every directory of the runfiles, which
+# rules_python deprecated. Nothing relies on those files: the test apps are single files, and the
+# pip packages ship their own.
+rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")
+rules_python_config.explicit_init_py(default = True)
+
+# The packages of the Python test apps and of the scripts, like `//:lint`.
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pip",
+    python_version = "3.13",
+    requirements_lock = "//mirrord/test-utils:requirements.txt",
+    # By default, only the host's wheels resolve, so a build for another platform would fail.
+    target_platforms = [
+        "linux_aarch64",
+        "linux_x86_64",
+        "osx_aarch64",
+        "osx_x86_64",
+        "windows_x86_64",
+    ],
+)
+use_repo(pip, "pip")
+
+# Crate hub ----------------------------------------------------------------------------------------
+
+# rules_rs unifies features across the whole workspace, build and dev dependencies included, so
+# crates can have more features than under Cargo (see `CONTRIBUTING.md`):
+#
+# - `serde_json` has `preserve_order`, so JSON objects keep the order of their keys.
+# - `rustls` has both the `aws_lc_rs` and `ring` providers, so it can't pick one, and binaries and
+#   tests have to install `aws_lc_rs` as the default provider.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    generate_lint_config = True,
+    incompatible_no_root_alias_targets = True,
+    incompatible_no_root_crate_data = True,
+    # rules_rs resolves platform-specific dependencies and features only for these platforms, so the
+    # list must have every platform that builds run on or build for.
+    platform_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+    ],
+)
+use_repo(crate, "crates")
+
+# Lets the crates' repositories name this module as `@mirrord`. A repository of an extension only
+# sees the extension's own repositories and the ones injected here, and Bazel resolves a label in a
+# string, like the `$(execpath)` of an annotation's `build_script_env`, in the crate's repository.
+#
+# Bazel ignores `inject_repo` outside the root module. So a module that depends on this one must
+# have the same line to build this module's crates, or to build them in its own crate hub.
+inject_repo(crate, "mirrord")
+
+# The crate annotations, sorted by crate.
+#
+# An annotation names a target of this module as `@mirrord//...` in a string, and as `//...` in an
+# attribute that takes labels, which Bazel resolves here.
+#
+# Some `-sys` crates turn off their build scripts and link the C library of a Bazel module instead.
+# Their build scripts would build the library with the machine's CMake or Perl, or link the
+# machine's own library if `pkg-config` finds one, so the build would depend on the machine.
+
+# aws-lc-sys's build script builds the AWS-LC that the crate bundles. It would also link an AWS-LC
+# that `OPENSSL_DIR` or `pkg-config` points it at, which `AWS_LC_SYS_USE_SYSTEM=0` turns off.
+#
+# rules_rs suggests building AWS-LC from the `aws-lc` module instead, but the module is older than
+# the crate's AWS-LC, and only builds AWS-LC's assembly for Linux. Setting "on" silences the
+# suggestion.
+crate.annotation(
+    crate = "aws-lc-sys",
+    build_script_env = {"AWS_LC_SYS_USE_SYSTEM": "0"},
+    gen_build_script = "on",
+)
+
+# For x86-64 Windows, the build script assembles AWS-LC's NASM sources with the `nasm` that it finds
+# on `PATH`, so `PATH` only holds the `nasm` module's:
+#
+# - `AWS_LC_SYS_PREBUILT_NASM=0` makes a missing `nasm` fail the build, rather than link the objects
+#   that the crate ships prebuilt.
+# - `NASMENV` passes `--reproducible` to `nasm`, which otherwise writes the time and the start of
+#   the source's absolute path into each object, so the objects would differ between builds and
+#   machines.
+crate.annotation_select(
+    crate = "aws-lc-sys",
+    build_script_env = {
+        "AWS_LC_SYS_PREBUILT_NASM": "0",
+        "NASMENV": "--reproducible",
+        "PATH": "$(execpath @mirrord//bazel/third_party/nasm:bin)",
+    },
+    build_script_tools = ["//bazel/third_party/nasm:bin"],
+    triples = ["x86_64-pc-windows-msvc"],
+)
+crate.annotation(
+    crate = "bzip2-sys",
+    gen_build_script = "off",
+    deps = ["@bzip2//:bz2"],
+)
+
+# The build scripts of these crates run `protoc`, and take the one that Bazel downloads (see
+# `//bazel/third_party/protoc`), because the machine's own would make the build depend on the
+# machine.
+[
+    crate.annotation(
+        crate = name,
+        build_script_env = {"PROTOC": "$(execpath @mirrord//bazel/third_party/protoc)"},
+        build_script_tools = ["//bazel/third_party/protoc"],
+    )
+    for name in [
+        "containerd-client",
+        "k8s-cri",
+    ]
+]
+
+# `frida-gum-sys`'s build script is off, and the targets of `frida_gum_sys` do its work with Frida's
+# devkit (see the devkit's archives below). The macro runs in the crate's own BUILD file, which only
+# has to see `@mirrord`.
+crate.annotation(
+    crate = "frida-gum-sys",
+    additive_build_file_content = """
+load("@mirrord//bazel/third_party/frida:frida_gum_sys.bzl", "frida_gum_sys")
+
+frida_gum_sys(name = "frida_gum_sys")
+""",
+    extra_aliased_targets = {
+        "frida-gum-sys-listeners": "frida_gum_sys_listeners",
+        "frida-gum-sys-out-dir": "frida_gum_sys_out_dir",
+    },
+    gen_build_script = "off",
+    deps = [
+        "@crates//frida-gum-sys-listeners",
+        "@crates//frida-gum-sys-out-dir",
+    ],
+)
+crate.annotation(
+    crate = "lzma-sys",
+    gen_build_script = "off",
+    deps = ["@xz//:lzma"],
+)
+
+# The patch fixes the case of the `sdkddkver.h` include. See the patch's commit message.
+crate.annotation(
+    crate = "minhook-detours-sys",
+    patch_args = ["-p1"],
+    patches = ["//bazel/third_party/minhook-detours-sys:sdkddkver.patch"],
+)
+
+# Frontends ----------------------------------------------------------------------------------------
+
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    pnpm_lock = "//:pnpm-lock.yaml",
+)
+use_repo(npm, "npm")
+
+# The pnpm that `bazel run //:lint` and `bazel run //:format` install the frontends' packages with,
+# and run their checks and formatters with. It's the version in `packageManager`, which Corepack
+# would pick too.
+pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
+pnpm.pnpm(pnpm_version_from = "//:package.json")
+use_repo(pnpm, "pnpm")
+
+# Images -------------------------------------------------------------------------------------------
+
+pull = use_repo_rule("@rules_img//img:pull.bzl", "pull")
+
+# `debian:trixie`, the base of the CLI's image and of the images of the end-to-end tests' apps.
+#
+# Bazel only downloads the image's manifests and configs. A push or a load that needs one of the
+# image's layers downloads it from Docker Hub when it runs.
+pull(
+    name = "debian",
+    registry = "index.docker.io",
+    repository = "library/debian",
+    digest = "sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6",
+    platforms = [
+        "linux/amd64",
+        "linux/arm64",
+    ],
+    tag = "trixie",
+)
+
+# The Debian packages that the images take files from. Each `apt.install` resolves its packages from
+# the snapshot of Debian's archive in `apt.sources_list`.
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+
+# `//mirrord/agent:image_runtime` copies the agent image's programs out of these packages.
+apt.install(
+    dependency_set = "agent_runtime",
+    packages = [
+        # The programs look for the dynamic linker in `/lib` or `/lib64`, but trixie installs it
+        # under `/usr`, and `base-files` has the links from `/lib` and `/lib64` into `/usr`.
+        "base-files",
+        "conntrack",
+        "coreutils",
+        "iproute2",
+        "iptables",
+    ],
+    suites = ["trixie"],
+)
+apt.sources_list(
+    architectures = [
+        "amd64",
+        "arm64",
+    ],
+    components = ["main"],
+    suites = ["trixie"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261110T000000Z"],
+)
+
+# The `debian` base image has no trust store, and the CLI's HTTP clients need one, so
+# `//bazel:cacerts_layer` builds one from Debian's `ca-certificates` package.
+apt.install(
+    dependency_set = "trixie",
+    include_transitive = False,
+    packages = ["ca-certificates"],
+    suites = ["trixie"],
+)
+use_repo(
+    apt,
+    "agent_runtime",
+    "trixie",
+)
+
+# Test apps ----------------------------------------------------------------------------------------
+
+# The tests run their Node apps with this Node.js (see `//mirrord/test-utils:node`).
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+
+# Pinned, because rules_nodejs's default changes with its releases, so upgrading rules_nodejs would
+# also change the Node.js that the tests run.
+node.toolchain(node_version = "24.22.1")
+
+# One SDK for each version in `GO_VERSIONS`.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+
+# The first SDK is the default, which a `go_binary` that doesn't pick a version builds with, like
+# the end-to-end tests' staging apps.
+go_sdk.download(version = "1.27.3")
+go_sdk.download(version = "1.26.10")
+go_sdk.download(version = "1.25.14")
+
+# `go_deps` runs Go's minimal version selection over the `go.mod` of every app in
+# `//:go_apps.work` and of every other Bazel module that uses `go_deps`. So all the apps get the
+# same version of a module, the highest that any of them requires, which can be newer than what an
+# app's own `go.mod` requires.
+go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
+go_deps.from_file(go_work = "//:go_apps.work")
+use_repo(
+    go_deps,
+    "com_github_gin_gonic_gin",
+    "com_rogchap_v8go",
+    "net_kuoruan_go_v8go_polyfills",
+)
+
+# The patch makes v8go's prebuilt V8 archive an input of the link, and turns off warnings in v8go's
+# C++. Its commit message says why.
+#
+# gazelle only lets the root module override a Go module, so the override is a dev dependency,
+# which Bazel ignores when another module depends on mirrord. Such a module builds v8go without the
+# patch, which only the layer tests' `issue834` app needs.
+go_deps_dev = use_extension("@gazelle//:extensions.bzl", "go_deps", dev_dependency = True)
+go_deps_dev.module_override(
+    patch_strip = 1,
+    patches = ["//bazel/third_party/v8go:libv8.patch"],
+    path = "rogchap.com/v8go",
+)
+
+# Prebuilt tools and libraries ---------------------------------------------------------------------
+
+# The programs that `bazel run //:lint`, `bazel run //:format` and the end-to-end tests run, which
+# their projects publish prebuilt, like typos, Ruff, kind and kubectl. The lockfile names each
+# program's download for each platform, and `@multitool//tools/<program>` runs the one for the
+# machine (`CONTRIBUTING.md` says how to move them to newer versions).
+#
+# A module that depends on mirrord gets these programs in the same `@multitool`, and adds its own
+# with a lockfile of its own.
+multitool = use_extension("@rules_multitool//multitool:extension.bzl", "multitool")
+multitool.hub(lockfile = "//bazel:multitool.lock.json")
+use_repo(multitool, "multitool")
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+# The macOS utilities that the CLI embeds to run SIP-protected programs.
+http_file(
+    name = "apple_utils",
+    downloaded_file_path = "apple-utils.tar.gz",
+    sha256 = "03125cd565e5a2f64274e7968e38289f3bfe68b86397fa1886568b1dd0e65c39",
+    # `mirrord-sip` only extracts the utilities again when `APPLE_UTILS_VERSION` changes, so this
+    # version has to match that constant, or users keep the utilities of an older CLI.
+    url = "https://github.com/metalbear-co/appleutils/releases/download/v10/apple-utils-v10.tar.gz",
+)
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Frida's devkit for each platform, which `//bazel/third_party/frida` selects from.
+#
+# The version must match `FRIDA_VERSION` in the `frida-gum-sys` crate.
+FRIDA_VERSION = "17.9.5"
+
+[
+    http_archive(
+        name = "frida_gum_devkit_" + platform.replace("-", "_"),
+        build_file_content = """
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "devkit",
+    srcs = ["libfrida-gum.a"],
+    hdrs = ["frida-gum.h"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = "https://github.com/frida/frida/releases/download/{version}/frida-gum-devkit-{version}-{platform}.tar.xz".format(
+            platform = platform,
+            version = FRIDA_VERSION,
+        ),
+    )
+    for platform, sha256 in {
+        "linux-arm64": "598b4e6a22d4cc48f0b7fe7ba9cb65332bbc356c2107c7bbc894fe940a42dce8",
+        "linux-x86_64": "c25f5f3e6b9f3a237d3136d2adb710b717fc53a2f3e59272674f0d2465c8e271",
+        "macos-arm64": "1e7272a74c19eb395ff0d9934c5c3c0ac906dfa839f49bf47f691d2d1e7f2671",
+        "macos-x86_64": "2436110dd85a96a90ea776f7ec5ac14e668086c3f6526f3f489c51bbea19a449",
+    }.items()
+]
+
+# cargo-nextest for each platform, which `//bazel/third_party/nextest` selects from. The tests that
+# `rust_nextest_test` declares run under it.
+NEXTEST_VERSION = "0.9.151"
+
+[
+    http_archive(
+        name = "nextest_" + platform.replace("-", "_"),
+        build_file_content = """
+alias(
+    name = "nextest",
+    actual = glob(
+        ["cargo-nextest", "cargo-nextest.exe"],
+        allow_empty = True,
+    )[0],
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-{version}/cargo-nextest-{version}-{platform}.tar.gz".format(
+            platform = platform,
+            version = NEXTEST_VERSION,
+        ),
+    )
+    for platform, sha256 in {
+        # We use the musl builds on Linux because they're statically linked, so they don't depend on
+        # the machine's glibc version.
+        "aarch64-unknown-linux-musl": "a9ee2d53cf0711d879f068c0ff814b6fe3af3f9be8799f8ab484e47571087160",
+        "universal-apple-darwin": "d1d7d025d4bfc9fb154cd76aea3949bd78534829a0589abefa6e5dd4edb135dd",
+        "x86_64-pc-windows-msvc": "e51bdb4b5883df48f335381b287378edb244318fac65ae0adaf6b9e69298246b",
+        "x86_64-unknown-linux-musl": "6b284d6fde9670dfb6ee10ea9d9abbc85f95643d3f592472d420d82e257b3a6c",
+    }.items()
+]
+
+# `protoc` for each platform, which `//bazel/third_party/protoc` selects from.
+PROTOC_VERSION = "36.2"
+
+[
+    http_archive(
+        name = "protoc_" + platform.replace("-", "_"),
+        build_file_content = """
+alias(
+    name = "protoc",
+    actual = glob(
+        ["bin/protoc", "bin/protoc.exe"],
+        allow_empty = True,
+    )[0],
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = "https://github.com/protocolbuffers/protobuf/releases/download/v{version}/protoc-{version}-{platform}.zip".format(
+            platform = platform,
+            version = PROTOC_VERSION,
+        ),
+    )
+    for platform, sha256 in {
+        "linux-aarch_64": "8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a",
+        "linux-x86_64": "121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278",
+        "osx-universal_binary": "83d0dc80672f53486f54299bca6177159f9cad1fd54d4d3143eeea53c4423e1b",
+        "win64": "f0c128dc0d8492eceece83bb459a4c0e316764b929ffbf1aa416357fd644edd3",
+    }.items()
+]

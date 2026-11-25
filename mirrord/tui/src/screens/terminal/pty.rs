@@ -121,7 +121,8 @@ fn pty_size(rows: u16, cols: u16) -> PtySize {
     }
 }
 
-#[cfg(test)]
+// The tests run `stty` in `/bin/sh` and check the SIGWINCH that a resize sends, so they need Unix.
+#[cfg(all(test, unix))]
 mod tests {
     use std::{sync::mpsc, time::Duration};
 

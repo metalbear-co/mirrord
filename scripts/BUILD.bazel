@@ -1,0 +1,106 @@
+load("@pip//:requirements.bzl", "all_requirements", "requirement")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+
+# The scripts are Python rather than shell scripts because they run on Windows too.
+py_binary(
+    name = "lint",
+    srcs = ["lint.py"],
+    data = [
+        "//scripts/tools",
+        "//skills:check_fence_tags",
+    ],
+    env = {"RUNNER_TOOLS": "$(rlocationpaths //scripts/tools)"},
+    # ty type-checks the workspace's Python code against these, so they must hold every package
+    # that the code imports.
+    deps = all_requirements + [
+        ":frontends",
+        ":runner",
+        ":tools",
+        "@rules_python//python/runfiles",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+py_binary(
+    name = "format",
+    srcs = ["format.py"],
+    data = [
+        "//scripts/tools",
+        "@rules_rust//tools/rustfmt",
+    ],
+    env = {
+        "RUNNER_TOOLS": "$(rlocationpaths //scripts/tools)",
+        "RUSTFMT": "$(rlocationpath @rules_rust//tools/rustfmt)",
+    },
+    deps = [
+        ":frontends",
+        ":runner",
+        ":tools",
+    ],
+    visibility = ["//:__pkg__"],
+)
+
+py_library(
+    name = "frontends",
+    srcs = ["frontends.py"],
+)
+
+# The libraries below are public, for the programs of other modules, which import them by the
+# names of their files, like `mirrord_tools`: `imports` puts this directory on their `sys.path`.
+# Each name starts with `mirrord_`, so that it can't clash with a module of the program's own
+# repository, like the operator's `scripts/tools.py`.
+
+# For the modules, like the operator, that define their own `//:lint` and `//:format` with it.
+py_library(
+    name = "runner",
+    srcs = ["mirrord_runner.py"],
+    imports = ["."],
+    deps = [":tools"],
+    visibility = ["//visibility:public"],
+)
+
+# For the scripts of other modules, which find their files and run their commands with it, as their
+# lint, their formatters and the setup programs of their `cluster_test` targets do.
+py_library(
+    name = "tools",
+    srcs = ["mirrord_tools.py"],
+    imports = ["."],
+    deps = ["@rules_python//python/runfiles"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "render_tui_logo",
+    srcs = ["render_tui_logo.py"],
+    deps = [
+        requirement("pillow"),
+        requirement("resvg-py"),
+    ],
+)
+
+py_binary(
+    name = "update_tools",
+    srcs = ["update_tools.py"],
+    deps = [requirement("certifi")],
+)
+
+py_binary(
+    name = "update_images",
+    srcs = ["mirrord_update_images.py"],
+    main = "mirrord_update_images.py",
+    deps = [":update_images_lib"],
+)
+
+# For the modules, like the operator, that move their own pins with it: a program of theirs calls
+# `main` with the functions that move the pins that only they have.
+py_library(
+    name = "update_images_lib",
+    srcs = ["mirrord_update_images.py"],
+    imports = ["."],
+    deps = [
+        ":tools",
+        requirement("certifi"),
+    ],
+    visibility = ["//visibility:public"],
+)

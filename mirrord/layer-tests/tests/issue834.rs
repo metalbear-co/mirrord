@@ -2,19 +2,13 @@
 #![cfg(target_os = "linux")]
 #![warn(clippy::indexing_slicing)]
 
-use rstest::rstest;
-
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that issue [#834](https://github.com/metalbear-co/mirrord/issues/834) is fixed
-#[rstest]
 #[tokio::test]
-async fn test_issue834(
-    #[values(GoVersion::GO_1_25, GoVersion::GO_1_26, GoVersion::GO_1_27)] go_version: GoVersion,
-) {
-    let (mut test_process, _intproxy) = Application::GoIssue834(go_version)
+async fn test_issue834() {
+    // `//mirrord/layer-tests/apps/issue834` builds the app with one Go version only.
+    let (mut test_process, _intproxy) = Application::GoIssue834(GoVersion::GO_1_25)
         .start_process(vec![], None)
         .await;
 

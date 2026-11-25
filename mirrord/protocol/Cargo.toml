@@ -52,8 +52,5 @@ libc.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { workspace = true, features = ["fs"] }
 
-[features]
-windows_build = []
-
 [lib]
 doctest = false

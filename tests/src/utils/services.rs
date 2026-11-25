@@ -4,25 +4,24 @@ use k8s_openapi::api::{
     apps::v1::{Deployment, StatefulSet},
     core::v1::{ConfigMap, EnvFromSource, Namespace, Service},
 };
-use kube::{api::DeleteParams, Api, Resource, ResourceExt};
+use kube::{Api, Resource, ResourceExt, api::DeleteParams};
 use kube_service::KubeService;
 use mirrord_kube::api::kubernetes::rollout::Rollout;
 use mirrord_test_utils::format_time;
 use resource_guard::ResourceGuard;
 use rstest::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{cluster_resource, kube_service, resource_guard};
 use crate::utils::{
+    KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
     client::kube_client,
     default_env,
     images::{
         GO_STATFS_IMAGE, NODE_UDP_LOGGER_IMAGE, PYTEST_IMAGE, TCP_ECHO_IMAGE, WEBSOCKET_IMAGE,
     },
-    random_string, set_ipv6_only, watch, KubeClient, PRESERVE_FAILED_ENV_NAME, TEST_RESOURCE_LABEL,
+    random_string, set_ipv6_only, watch,
 };
-
-pub(crate) mod operator;
 
 /// Create a new [`KubeService`] and related Kubernetes resources. The resources will be deleted
 /// when the returned service is dropped, unless it is dropped during panic.
@@ -395,27 +394,6 @@ pub async fn internal_service(
         guards,
         workload_type,
     }
-}
-
-#[cfg(not(feature = "operator"))]
-#[fixture]
-pub async fn service_for_mirrord_ls(
-    #[default("default")] namespace: &str,
-    #[default("NodePort")] service_type: &str,
-    #[default(PYTEST_IMAGE)] image: &str,
-    #[default("http-echo")] service_name: &str,
-    #[default(true)] randomize_name: bool,
-    #[future] kube_client: KubeClient,
-) -> KubeService {
-    basic_service(
-        namespace,
-        service_type,
-        image,
-        service_name,
-        randomize_name,
-        kube_client,
-    )
-    .await
 }
 
 /// Service that should only be reachable from inside the cluster, as a communication partner

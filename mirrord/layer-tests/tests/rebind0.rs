@@ -2,9 +2,7 @@ use std::path::Path;
 
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Run an application that binds 0.0.0.0:0 twice and verify:
 /// 1. A port is bound successfully both times (the app does not panic).

@@ -16,8 +16,6 @@ edition.workspace = true
 [lints]
 workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-protocol = { path = "../protocol" }
@@ -64,7 +62,7 @@ rstest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 mirrord-layer-tests = { path = "../layer-tests", default-features = false }
-mirrord-test-utils = { path = "../../test-utils" }
+mirrord-test-utils = { path = "../test-utils" }
 test-cdylib.workspace = true
 tokio = { workspace = true, features = [
   "rt",

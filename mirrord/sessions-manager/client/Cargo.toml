@@ -56,7 +56,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
 
 [lib]

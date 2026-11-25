@@ -20,13 +20,14 @@ permissions:
 
 jobs:
   report:
-    name: Report flaky tests
+    name: report flaky tests
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'skipped' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     env:
       RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: "Collect retried tests"
         id: collect
         env:
@@ -36,6 +37,7 @@ jobs:
             "$GITHUB_REPOSITORY" \
             "$RUN_ID" \
             "$RUNNER_TEMP/flaky-tests"
+
       - name: "File issues and notify #ci-alerts"
         if: ${{ steps.collect.outputs.count != '0' }}
         env:

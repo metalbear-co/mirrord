@@ -1,7 +1,7 @@
 //! The mirrord docs and skills compiled into this binary, which `mirrord mcp` answers from without
 //! network access.
 //!
-//! `build.rs` packs them from `docs/docs` and `skills/skills` at the repository root, so a binary
+//! The build packs them from `docs/docs` and `skills/skills` at the repository root, so a binary
 //! serves the docs and skills of the checkout it is built from. The tests below are the checks the
 //! content has to pass to ship, so a pull request that breaks a page or a skill fails them.
 
@@ -11,30 +11,42 @@ use flate2::read::GzDecoder;
 use serde_json::Value;
 use thiserror::Error;
 
-/// The docs and skills, packed by `build.rs`.
-static ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/corpus.tar.gz"));
+/// The docs and skills as a gzipped tar, which Bazel packs (`:corpus` in `BUILD.bazel`), with each
+/// file at its path in the repository, e.g. `skills/skills/mirrord-up/SKILL.md`.
+///
+/// A Cargo build gets an empty placeholder from `.cargo/config.toml`, so that it compiles, and then
+/// has no docs or skills to serve.
+static ARCHIVE: &[u8] = include_bytes!(env!("MIRRORD_BUNDLED_MCP_CORPUS"));
 
-/// Every packed file, keyed by its path in the archive, e.g. `skills/mirrord-up/SKILL.md`.
+/// Every packed file, keyed by its path in `docs/` or `skills/`, e.g. `skills/mirrord-up/SKILL.md`
+/// for `skills/skills/mirrord-up/SKILL.md`, which is the file's path in the repository it was
+/// imported from, `metalbear-co/docs` or `metalbear-co/skills`.
 pub(crate) static FILES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+    if ARCHIVE.is_empty() {
+        return BTreeMap::new();
+    }
+
     let mut archive = tar::Archive::new(GzDecoder::new(ARCHIVE));
-    let entries = archive.entries().expect("build.rs packs a valid archive");
+    let entries = archive.entries().expect("the build packs a valid archive");
     entries
-        .map(|entry| {
-            let mut entry = entry.expect("build.rs packs a valid archive");
+        .map(|entry| entry.expect("the build packs a valid archive"))
+        // The archive also has an entry for each directory.
+        .filter(|entry| entry.header().entry_type().is_file())
+        .map(|mut entry| {
             let path = entry
                 .path()
-                .expect("build.rs packs valid paths")
+                .expect("the build packs valid paths")
                 .components()
+                .skip(1)
                 .map(|component| component.as_os_str().to_string_lossy())
                 .collect::<Vec<_>>()
                 .join("/");
             let mut contents = Vec::with_capacity(entry.size() as usize);
             entry
                 .read_to_end(&mut contents)
-                .expect("build.rs packs a valid archive");
-            let contents = String::from_utf8(contents).unwrap_or_else(|_| {
-                panic!("`build.rs` packs only UTF-8 files, but `{path}` isn't")
-            });
+                .expect("the build packs a valid archive");
+            let contents = String::from_utf8(contents)
+                .unwrap_or_else(|_| panic!("the build packs only UTF-8 files, but `{path}` isn't"));
             (path, contents)
         })
         .collect()
@@ -225,7 +237,7 @@ fn source_url(path: &str) -> String {
             };
             format!("https://metalbear.com/mirrord/docs/{page}")
         }
-        // Skills are packed under `skills/` from the repository's `skills/skills` (`build.rs`).
+        // `path` is the skill file's path in `skills/` (see `FILES`).
         None => format!(
             "https://github.com/metalbear-co/mirrord/blob/{}/skills/{path}",
             env!("CARGO_PKG_VERSION")

@@ -1,0 +1,12 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+
+py_binary(
+    name = "app-flask",
+    srcs = ["main.py"],
+    data = ["//mirrord/test-utils:python_env"],
+    main = "main.py",
+    deps = [
+        "@pip//flask",
+    ],
+    visibility = ["//tests:__pkg__"],
+)

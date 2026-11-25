@@ -3,9 +3,7 @@
 use mirrord_protocol::{ClientMessage, tcp::LayerTcp};
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Verify that issue [#1123](https://github.com/metalbear-co/mirrord/issues/1123) is fixed.
 #[rstest]

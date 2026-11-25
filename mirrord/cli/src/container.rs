@@ -67,36 +67,32 @@ fn get_mirrord_console_addr() -> Option<String> {
     }
 }
 
-/// Resolves the architecture-specific library path based on the platform configuration.
+/// Returns the path of the layer that the user's container loads. The CLI's image has a layer for
+/// each Linux CPU in `/opt/mirrord/lib/<cpu>/`, and the container needs the one for its own CPU.
 ///
-/// When a platform is specified (e.g., "linux/amd64"), this function returns the
-/// architecture-specific path within the multi-architecture container.
-/// If no platform is specified, returns the default path.
+/// Without `container.platform`, the user's container runs on the container runtime's own
+/// platform, as the sidecar does, so it loads `/opt/mirrord/lib/libmirrord_layer.so`, which the
+/// image links to the layer for its own CPU. A custom `container.cli_image` may only have that
+/// path.
 fn resolve_library_path(config: &LayerConfig) -> CliResult<String> {
     if let Some(path) = &config.container.cli_image_lib_path {
         return Ok(path.clone());
     }
 
-    if let Some(platform) = &config.container.platform {
-        // Extract architecture from platform string (e.g., "linux/amd64" -> "amd64")
-        let arch = platform
-            .split('/')
-            .next_back()
-            .ok_or_else(|| ContainerError::UnsupportedPlatform(platform.clone()))?;
-        let arch_suffix = match arch {
-            "amd64" | "x86_64" => "x86_64",
-            "arm64" | "aarch64" => "aarch64",
-            _ => Err(ContainerError::UnsupportedPlatform(arch.to_owned()))?,
-        };
+    let Some(platform) = &config.container.platform else {
+        return Ok("/opt/mirrord/lib/libmirrord_layer.so".to_owned());
+    };
 
-        // Return architecture-specific path
-        return Ok(format!(
-            "/opt/mirrord/lib/{}/libmirrord_layer.so",
-            arch_suffix
-        ));
-    }
+    // A platform is `<os>/<architecture>[/<variant>]`, like `linux/arm64/v8`, or only an
+    // architecture, like `amd64`, which the container runtimes run as Linux's.
+    let architecture = platform.split('/').nth(1).unwrap_or(platform);
+    let cpu = match architecture {
+        "amd64" | "x86_64" => "x86_64",
+        "arm64" | "aarch64" => "aarch64",
+        _ => Err(ContainerError::UnsupportedPlatform(architecture.to_owned()))?,
+    };
 
-    Ok("/opt/mirrord/lib/libmirrord_layer.so".to_owned())
+    Ok(format!("/opt/mirrord/lib/{cpu}/libmirrord_layer.so"))
 }
 
 /// Resolves the [`LayerConfig`] and creates [`AnalyticsReporter`] whilst reporting any warnings.

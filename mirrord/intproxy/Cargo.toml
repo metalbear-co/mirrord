@@ -16,8 +16,6 @@ edition.workspace = true
 [lints]
 workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube", features = ["portforward"] }
@@ -65,7 +63,7 @@ socket2.workspace = true
 nix = { workspace = true, features = ["signal"] }
 
 [target.'cfg(windows)'.dependencies]
-utils-win = { path = "../utils-win" }
+mirrord-utils-win = { path = "../utils-win" }
 winapi = { workspace = true }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
@@ -78,7 +76,7 @@ mirrord-session-monitor-client.workspace = true
 mirrord-command = { path = "../command" }
 futures.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = { workspace = true }
 assert-json-diff.workspace = true
 

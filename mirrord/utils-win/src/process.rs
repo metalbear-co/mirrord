@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use str_win::{string_to_u16_buffer, u16_buffer_to_string};
+use mirrord_str_win::{string_to_u16_buffer, u16_buffer_to_string};
 use winapi::{
     shared::{
         minwindef::{DWORD, FALSE},

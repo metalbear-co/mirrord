@@ -1,0 +1,1 @@
+Fixed mirrord not loading into macOS programs whose `allow-dyld-environment-variables` entitlement is set to `false`, like `/usr/bin/aa` on recent macOS versions. mirrord took the entitlement's presence to mean that the program keeps `DYLD_INSERT_LIBRARIES`, so it didn't patch the program, and macOS removed the variable.

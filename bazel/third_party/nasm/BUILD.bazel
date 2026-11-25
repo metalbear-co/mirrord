@@ -1,0 +1,15 @@
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+
+# aws-lc-sys's build script runs `nasm` from `PATH` to assemble AWS-LC for x86-64 Windows, and a
+# `PATH` entry is a directory, so this puts the `nasm` module's assembler alone in one. The build
+# script takes it as a tool, so `nasm` is built for the execution platform.
+#
+# It's `manual`, because `//...` would otherwise build `nasm` for the target platform too, which
+# nothing uses, and configuring and compiling it takes thousands of actions.
+copy_to_directory(
+    name = "bin",
+    srcs = ["@nasm"],
+    include_external_repositories = ["nasm+"],
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,10 @@
+load("@crates//issue1776:data.bzl", "crate_data")
+load("//bazel:compatibility.bzl", "UNIX_ONLY")
+load("//bazel:rust.bzl", "crate_package")
+
+crate = crate_package(crate_data = crate_data())
+
+crate.binary(
+    target_compatible_with = UNIX_ONLY,
+    visibility = ["//mirrord/layer-tests:__pkg__"],
+)

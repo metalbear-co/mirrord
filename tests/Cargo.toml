@@ -1,8 +1,17 @@
 [package]
 name = "mirrord-tests"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
 license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
 
 [lints]
 workspace = true
@@ -36,19 +45,7 @@ rstest.workspace = true
 mirrord-kube = { path = "../mirrord/kube" }
 
 futures-util.workspace = true
-chrono.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true
 
-mirrord-test-utils = { path = "../test-utils" }
-
-[features]
-default = ["ephemeral", "job", "cli", "targetless"]
-ephemeral = []
-job = []
-operator = []
-cli = []
-targetless = []
-# Tests that need a single-stack IPv6 cluster (see CONTRIBUTING.md). Not in default
-# features, so they are ignored unless the cluster is actually IPv6.
-ipv6 = []
+mirrord-test-utils = { path = "../mirrord/test-utils" }

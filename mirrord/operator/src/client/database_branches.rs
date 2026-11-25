@@ -2746,12 +2746,12 @@ mod test {
         time::Duration,
     };
 
-    use http::{Method, Request, Response};
+    use http::{Method, Response};
     use k8s_openapi::{
         apimachinery::pkg::apis::meta::v1::{Condition, MicroTime, Time},
         jiff::Timestamp,
     };
-    use kube::{Api, Client, ResourceExt, client::Body};
+    use kube::{Api, ResourceExt, client::Body};
     use mirrord_config::{
         feature::database_branches::{
             S3BranchConfig, SingleOrVec, SqlBranchMigrationsConfig, TurbopufferBranchConfig,
@@ -2770,6 +2770,7 @@ mod test {
         replace_spec_values_with_secret_refs, replace_values_with_secret_refs, resolve_branch_id,
         reused_branch_connection_sources,
     };
+    use crate::client::test::mock_client;
     use crate::crd::{
         db_branching::{
             branch_database::{
@@ -2854,8 +2855,8 @@ mod test {
     /// the operator recorded on the way, such as a `SourceCompatible` warning, are there to relay.
     #[tokio::test]
     async fn created_branch_comes_back_as_it_was_once_ready() {
-        let (service, mut handle) = tower_test::mock::pair::<Request<Body>, Response<Body>>();
-        let api = Api::<BranchDatabase>::namespaced(Client::new(service, "default"), "default");
+        let (client, mut requests) = mock_client();
+        let api = Api::<BranchDatabase>::namespaced(client, "default");
 
         let (name, created) = found_branch("created", None);
         let (_, mut ready) = found_branch("created", Some(BranchDatabasePhase::Ready));
@@ -2885,18 +2886,20 @@ mod test {
                 &NullProgress,
             ),
             async {
-                let (request, send) = handle.next_request().await.unwrap();
+                let (request, send) = requests.recv().await.unwrap();
                 assert_eq!(request.method(), Method::POST);
-                send.send_response(json(serde_json::to_value(&created).unwrap()));
+                send.send(json(serde_json::to_value(&created).unwrap()))
+                    .unwrap();
 
-                let (request, send) = handle.next_request().await.unwrap();
+                let (request, send) = requests.recv().await.unwrap();
                 assert_eq!(request.method(), Method::GET);
-                send.send_response(json(serde_json::json!({
+                send.send(json(serde_json::json!({
                     "apiVersion": "dbs.mirrord.metalbear.co/v1alpha1",
                     "kind": "BranchDatabaseList",
                     "metadata": { "resourceVersion": "1" },
                     "items": [ready],
-                })));
+                })))
+                .unwrap();
             },
         );
 

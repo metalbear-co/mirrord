@@ -4,12 +4,12 @@
 //! Checks what the other threads of an application can do while a close hook waits for the
 //! intproxy.
 //!
-//! The application (`apps/close_while_blocked.py`) starts a large remote write, which blocks
+//! The `close-while-blocked` app starts a large remote write, which blocks
 //! because the test does not read the intproxy connection of the layer. Then a second thread
 //! closes something remote, so the close hook waits for that connection in the middle of its close
 //! request. Then the main thread does an action, and the test checks what happens.
 
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use mirrord_intproxy_protocol::{
     IncomingRequest, IncomingResponse, LayerToProxyMessage, LocalMessage, ProxyToLayerMessage,
@@ -21,9 +21,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// How long the test waits for something that must happen.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -44,13 +42,12 @@ async fn start(action: &str, target: &str) -> (TestProcess, FakeIntProxy, FakeLa
             ("MIRRORD_FILE_READ_WRITE_PATTERN", "^/mirrord-test/"),
         ],
     );
-    let app_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/apps/close_while_blocked.py");
+    let app_path = app_script("close-while-blocked/main.py");
     let application = Application::DynamicApp(
-        Application::get_python3_executable().await,
+        python(),
         vec![
             "-u".to_owned(),
-            app_path.to_string_lossy().into_owned(),
+            app_path,
             action.to_owned(),
             target.to_owned(),
         ],

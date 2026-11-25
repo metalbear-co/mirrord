@@ -11,9 +11,7 @@ use mirrord_protocol::{
 };
 use rstest::rstest;
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 
 /// Regression test for outgoing Unix pathname address lengths. The C app calls
 /// `connect(2)` with an exact length, a padded `sockaddr_un`, and PHP's

@@ -1,11 +1,10 @@
 #![warn(clippy::indexing_slicing)]
 #![deny(unused_crate_dependencies)]
 
-/// Silences `deny(unused_crate_dependencies)`.
-///
-/// These dependencies are only used in the console binary.
-#[cfg(feature = "binary")]
+/// Silences `deny(unused_crate_dependencies)` for the dependencies that only the console binary
+/// uses, and for `futures`, which the library only uses behind the `async-logger` feature.
 mod binary_deps {
+    use futures as _;
     use mirrord_protocol as _;
     use tokio as _;
     use tracing as _;

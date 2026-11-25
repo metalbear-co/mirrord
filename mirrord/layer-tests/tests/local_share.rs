@@ -1,10 +1,7 @@
 #![cfg(target_os = "linux")]
 
-mod common;
-
 use std::{io::Write, ops::Not};
 
-pub use common::*;
 use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, MirrordConfig},
@@ -33,7 +30,7 @@ async fn local_share_resolved_config_keeps_port_order() {
         Some(vec![9000, 8080])
     );
     let output =
-        mirrord_command::resolve_tokio_command(std::env::var("MIRRORD_TESTS_USE_BINARY").unwrap())
+        mirrord_command::resolve_tokio_command(mirrord_test_utils::runfile_program("cli/mirrord"))
             .env("TMPDIR", tmpdir)
             .args(["verify-config", "--resolved"])
             .arg(file.path())
@@ -98,7 +95,7 @@ async fn local_share_exec_rejects_unsupported_config(
     let mut config = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
     config.write_all(contents.as_bytes()).unwrap();
     let output =
-        mirrord_command::resolve_tokio_command(std::env::var("MIRRORD_TESTS_USE_BINARY").unwrap())
+        mirrord_command::resolve_tokio_command(mirrord_test_utils::runfile_program("cli/mirrord"))
             .env("TMPDIR", tmpdir)
             .args([
                 "exec",

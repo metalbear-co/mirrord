@@ -11,19 +11,18 @@ create some CRDs.
 ## Command Reference
 
 ```bash
-CARGO_BUILD_WARNINGS=deny cargo clippy -p mirrord-operator --all-targets --all-features --keep-going -- -Wclippy::indexing_slicing
-
-# CI also checks the `crd` feature on its own
-cargo check -p mirrord-operator --features crd
+# also lints `:operator_crd`, the crate with only its `crd` feature and that feature's dependencies
+bazel build --config=clippy //mirrord/operator/...
 ```
 
 ## Modifying a CRD
 
-When modifying a CRD definition run the `generate_helm_crd_yaml` test in the operator repo to update the generated helm
-charts.
+The operator's Helm chart has the CRDs that these types generate. The operator builds this crate from the mirrord commit
+that it pins, so once a CRD change is in mirrord, move the operator's pin to it and write the chart's CRDs again, from
+the operator's checkout:
 
 ```bash
-cargo test -p operator-crd generate_helm_crd_yaml -- --ignored --nocapture
+bazel run //crates/operator-crd:write_crd
 ```
 
 Kubernetes drops the fields an installed CRD's schema doesn't know, so a CRD change only shows on a cluster whose CRDs

@@ -15,9 +15,7 @@ use mirrord_protocol::{
 use rstest::rstest;
 use tokio::{io::AsyncWriteExt, net::TcpListener};
 
-mod common;
-
-pub use common::*;
+use mirrord_layer_tests::*;
 use tokio::net::TcpStream;
 
 /// Verifies that the layer respects `feature.network.incoming.listen_ports` mapping.

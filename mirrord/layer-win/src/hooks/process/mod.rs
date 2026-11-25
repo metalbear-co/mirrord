@@ -122,7 +122,7 @@ fn program_name(application: Option<String>, command_line: Option<&str>) -> Opti
 ///
 /// The text, or `None` for a null pointer.
 unsafe fn wide_argument(argument: *const u16) -> Option<String> {
-    (!argument.is_null()).then(|| unsafe { str_win::u16_ptr_to_string(argument) })
+    (!argument.is_null()).then(|| unsafe { mirrord_str_win::u16_ptr_to_string(argument) })
 }
 
 /// Windows API hook for CreateProcessInternalW function.
@@ -326,7 +326,7 @@ unsafe extern "system" fn loadlibrary_w_detour(lpLibFileName: *const u16) -> HMO
     // Log LoadLibrary calls for debugging
     if !lpLibFileName.is_null() {
         // Convert the wide string to a Rust string for logging
-        let lib_name = unsafe { str_win::u16_ptr_to_string(lpLibFileName) };
+        let lib_name = unsafe { mirrord_str_win::u16_ptr_to_string(lpLibFileName) };
 
         if !lib_name.is_empty() {
             // Trace library loading for debugging
@@ -381,7 +381,7 @@ unsafe extern "system" fn getprocaddress_detour(
             );
         } else {
             // Convert the function name to a string for logging
-            let function_name = unsafe { str_win::u8_ptr_to_string(lpProcName) };
+            let function_name = unsafe { mirrord_str_win::u8_ptr_to_string(lpProcName) };
 
             if !function_name.is_empty() {
                 // Trace function resolution for debugging

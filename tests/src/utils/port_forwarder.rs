@@ -1,11 +1,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
-use k8s_openapi::api::core::v1::Pod;
-#[cfg(feature = "operator")]
-use k8s_openapi::api::core::v1::Service;
-#[cfg(feature = "operator")]
-use kube::api::ListParams;
-use kube::{Api, Client};
+use k8s_openapi::api::core::v1::{Pod, Service};
+use kube::{Api, Client, api::ListParams};
 use tokio::{
     net::TcpListener,
     task::{JoinHandle, JoinSet},
@@ -38,13 +34,14 @@ impl PortForwarder {
             port,
         ));
 
-        println!("Created a portforwarder for {pod_namespace}/{pod_name}:{port}. Local address is {address}");
+        println!(
+            "Created a portforwarder for {pod_namespace}/{pod_name}:{port}. Local address is {address}"
+        );
 
         Self { address, handle }
     }
 
     /// Creates a portforwarder for a specific port on any pod from the given service.
-    #[cfg(feature = "operator")]
     pub async fn new_for_service(client: Client, service: &Service, port: u16) -> Self {
         let selector = service
             .spec

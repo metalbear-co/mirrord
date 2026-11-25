@@ -22,6 +22,8 @@ mod client;
 mod control_plane;
 mod credentials;
 mod error;
+#[cfg(test)]
+mod intproxy_credentials_tests;
 mod retry;
 mod tls;
 mod transport;
