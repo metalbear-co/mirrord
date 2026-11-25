@@ -111,3 +111,7 @@ Only the `users` collection is created, containing documents for alice and bob. 
 {% hint style="info" %}
 The `dump_args` field is not supported for MongoDB. MongoDB branches use their own internal dump mechanism, so only MySQL, MariaDB, and PostgreSQL branches accept custom dump arguments.
 {% endhint %}
+
+## Custom Branch Image
+
+A branch that sets [`image`](../db-branching.md#custom-branch-image) runs that image through its own `docker-entrypoint.sh`. With mirrord operator `3.238.0` or later the branch container's command replaces the image's `CMD`, so the server starts as plain `mongod`: flags your image's `CMD` carried go in the `dbServerArgs` of the operator's `mongodbBranchConfig` Helm value instead.
