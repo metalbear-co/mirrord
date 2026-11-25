@@ -81,7 +81,7 @@ Example output:
     ✓ configuration loaded
     ✓ connected to operator
     ✓ preview session resource created
-    ✓ preview pod is ready
+    ✓ preview session is ready
   info:
     * key: <key>
     * namespace: <namespace>

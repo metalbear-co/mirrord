@@ -1,5 +1,7 @@
 # Diagram style
 
+Paths in this file are relative to the `docs` directory of the mirrord repository.
+
 All diagrams in the docs use one style. Write each diagram as a hand-written SVG file in `docs/.gitbook/assets/`. Do not export diagrams from Excalidraw, D2, draw.io, or Figma, and do not add PNG diagrams. Screenshots of the product are not diagrams, and this guide does not apply to them.
 
 Two diagrams show the style well. Copy from them when you start a new one:

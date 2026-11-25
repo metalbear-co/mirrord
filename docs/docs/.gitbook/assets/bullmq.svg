@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 400" width="1202" height="400" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">BullMQ queue splitting flow</title>
-  <desc id="d">A producer app pushes a job ID with RPUSH to the Redis list bull:orders:wait. The job data is in the hash bull:orders:&lt;jobId&gt;. The BullMQ forwarder in the mirrord operator takes job IDs from the wait list with BLPOP, reads the job data with HGETALL, and checks the data JSON field against the users' filters. A job that matches a filter is pushed with RPUSH to the per-session queue bull:mirrord-tmp-&lt;session&gt;-orders:wait, which your local process reads with BLPOP. A job that matches no filter is pushed with RPUSH to the main queue bull:mirrord-tmp-&lt;main&gt;-orders:wait, which the deployed workload reads with BLPOP after the operator patches its queue-name environment variable.</desc>
+  <desc id="d">A producer app pushes a job ID with RPUSH to the Redis list bull:orders:wait. The job data is in the hash bull:orders:&lt;jobId&gt;. The BullMQ forwarder in the mirrord operator moves job IDs from the wait list to its in-flight list bull:orders:mirrord-forwarding with BLMOVE, reads the job data with HGETALL, and checks the data JSON field against the users' filters. A job that matches a filter is pushed with RPUSH to the per-session queue bull:mirrord-tmp-&lt;session&gt;-orders:wait, which your local process reads with BLPOP. A job that matches no filter is pushed with RPUSH to the main queue bull:mirrord-tmp-&lt;main&gt;-orders:wait, which the deployed workload reads with BLPOP after the operator patches its queue-name environment variable.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -38,7 +38,7 @@
 
   <!-- Redis to forwarder -->
   <line x1="280" y1="270" x2="346" y2="270" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="313" y="258" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">BLPOP</text>
+  <text x="313" y="258" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">BLMOVE</text>
 
   <!-- Forwarder -->
   <rect x="350" y="180" width="220" height="190" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>

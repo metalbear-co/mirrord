@@ -49,7 +49,7 @@
   <text x="60" y="484" font-size="14" font-weight="700" fill="#232141">Output</text>
   <text x="60" y="510" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">✓ mirrord preview start</text>
   <text x="60" y="527" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session resource created</text>
-  <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview pod is ready</text>
+  <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session is ready</text>
   <text x="60" y="561" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">info:</text>
   <text x="60" y="578" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * key: &lt;env-key&gt;</text>
   <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * session: preview-session-users-service-&lt;id&gt;</text>
