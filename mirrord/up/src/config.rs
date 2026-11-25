@@ -938,6 +938,10 @@ impl ServiceConfig {
     /// The one place that decides it. A filter that `config_patch` sets doesn't count: the
     /// service then runs one session, which attaches to one matching task as `mirrord exec`
     /// does.
+    ///
+    /// Neither a task's local process exiting nor a task ending stops the run. The watch for the
+    /// tasks failing for good does: like a crash of a service that isn't task-driven, it ends the
+    /// run with [`UpError::TaskWatch`](crate::UpError::TaskWatch).
     pub(crate) fn is_task_driven(&self) -> bool {
         matches!(
             &self.target,

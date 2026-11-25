@@ -15,7 +15,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::stream::BoxStream;
+use futures::{
+    FutureExt,
+    future::LocalBoxFuture,
+    stream::{BoxStream, FuturesUnordered},
+};
 use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 use mirrord_sessions_manager_client::{ReplicaId, SessionsManagerClientError, TaskEvent};
@@ -404,6 +408,24 @@ pub(super) type InstanceCommand = Box<dyn Fn(&ReplicaId) -> Result<Command, UpEr
 /// A task, as its watch names it: the agent instance on a replica.
 type TaskKey = (ReplicaId, Uuid);
 
+/// The instances of ended tasks while they are stopped, each with its name and how its stop went.
+///
+/// Stopped apart from the supervision loop, which would otherwise wait out each one's grace
+/// period before it reads the next event. Each future owns its instance, so dropping one kills
+/// the instance's tree at once (`KillOnDrop`).
+type Stopping = FuturesUnordered<LocalBoxFuture<'static, (Arc<str>, io::Result<()>)>>;
+
+/// Stops `instance` with `grace`, as a future of `stopping`.
+fn stop_instance(stopping: &mut Stopping, mut instance: Service, grace: Duration) {
+    stopping.push(
+        async move {
+            let result = instance.stop(None, grace).await;
+            (instance.name.clone(), result)
+        }
+        .boxed_local(),
+    );
+}
+
 /// A task-driven service while it is supervised.
 struct TaskService {
     name: Arc<str>,
@@ -495,20 +517,17 @@ impl TaskService {
         }
     }
 
-    /// Stops the instance of a task that ended.
-    async fn ended(&mut self, task: &TaskKey, grace: Duration) -> io::Result<()> {
+    /// Forgets a task that ended, so that the watch can match it again, should it come back.
+    /// Returns its instance, for the caller to stop.
+    fn ended(&mut self, task: &TaskKey) -> Option<Service> {
+        self.seen.remove(task);
         if let TaskPhase::Preparing { pending, .. } = &mut self.phase {
             pending.retain(|pending| pending != task);
         }
-        let Some(position) = self.instances.iter().position(|(key, _)| key == task) else {
-            return Ok(());
-        };
-        if let Some((_, instance)) = self.instances.get_mut(position) {
-            println!("{}: the task ended, stopping", instance.name);
-            instance.stop(None, grace).await?;
-        }
-        self.instances.swap_remove(position);
-        Ok(())
+        let position = self.instances.iter().position(|(key, _)| key == task)?;
+        let (_, instance) = self.instances.swap_remove(position);
+        println!("{}: the task ended, stopping", instance.name);
+        Some(instance)
     }
 
     /// Starts the instance for `task`. A failure is reported and leaves the other instances
@@ -610,11 +629,16 @@ async fn wait_for_first_exit(
         usize,
         BoxStream<'static, Result<TaskEvent, SessionsManagerClientError>>,
     >,
+    stopping: &mut Stopping,
     readiness: &Arc<Readiness>,
     output: &mut JoinSet<()>,
     grace: Duration,
 ) -> Result<(), UpError> {
     loop {
+        // Instances come and go for as long as the run lasts, so the forwarding of their output
+        // is reaped as it ends.
+        while output.try_join_next().is_some() {}
+
         let mut index = 0;
         while let Some(service) = services.get_mut(index) {
             let Some(status) = service.child.try_wait()? else {
@@ -701,6 +725,11 @@ async fn wait_for_first_exit(
 
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+            Some((name, result)) = stopping.next() => {
+                if let Err(error) = result {
+                    eprintln!("{name}: failed to stop: {error}");
+                }
+            }
             Some((index, event)) = watches.next() => {
                 let Some(task) = tasks.get_mut(index) else {
                     continue;
@@ -711,8 +740,11 @@ async fn wait_for_first_exit(
                         output,
                     ),
                     Ok(TaskEvent::Ended(ended)) => {
-                        task.ended(&(ended.replica_id, ended.agent_instance_id), grace)
-                            .await?
+                        if let Some(instance) =
+                            task.ended(&(ended.replica_id, ended.agent_instance_id))
+                        {
+                            stop_instance(stopping, instance, grace);
+                        }
                     }
                     Err(source) => {
                         return Err(UpError::TaskWatch {
@@ -865,6 +897,7 @@ async fn supervise_with_second_signal(
 
     let mut tasks = Vec::with_capacity(task_commands.len());
     let mut watches = StreamMap::new();
+    let mut stopping = Stopping::new();
     if spawn_error.is_none() {
         for TaskServiceCommands {
             name,
@@ -899,6 +932,7 @@ async fn supervise_with_second_signal(
                 &mut services,
                 &mut tasks,
                 &mut watches,
+                &mut stopping,
                 &readiness,
                 &mut output,
                 grace,
@@ -921,9 +955,15 @@ async fn supervise_with_second_signal(
     // fill a pipe and prevent a cooperative child from exiting.
     // The watches go first, so that no task is matched to a run that is ending.
     drop(watches);
-    let cleanup = Box::pin(futures::future::join_all(
-        all_processes(&mut services, &mut tasks)
-            .map(|service| service.stop(received_signal, grace)),
+    let cleanup = Box::pin(futures::future::join(
+        futures::future::join_all(
+            all_processes(&mut services, &mut tasks)
+                .map(|service| service.stop(received_signal, grace)),
+        ),
+        // The instances of ended tasks keep stopping as they were.
+        (&mut stopping)
+            .map(|(_, result)| result)
+            .collect::<Vec<_>>(),
     ));
     // Keep this receiver alive through output cleanup too. A second signal can
     // arrive after the service trees finish but before supervision returns.
@@ -936,8 +976,13 @@ async fn supervise_with_second_signal(
         },
     };
     let cleanup = match cleanup {
-        Some(cleanup) => cleanup,
+        Some((mut cleanup, stopped)) => {
+            cleanup.extend(stopped);
+            cleanup
+        }
         None => {
+            // Kills the instances of ended tasks still stopping.
+            drop(stopping);
             futures::future::join_all(
                 all_processes(&mut services, &mut tasks).map(Service::force_stop),
             )
