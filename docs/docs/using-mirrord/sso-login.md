@@ -9,7 +9,7 @@ tags:
 
 When your team's mirrord Operator has [single sign-on](../managing-mirrord/sso.md) turned on, you log in to it through your company's identity provider instead of a kubeconfig. One login lasts 24 hours, and mirrord uses it for every command that talks to that Operator until it expires or you log out.
 
-You need mirrord `3.292.0` or later and an Operator of version `3.238.0` or later with an Enterprise license. Your admin gives you the Operator's URL, the `sso.url` value of its Helm chart.
+You need mirrord `3.292.0` or later and an Operator of version `3.239.0` or later with an Enterprise license. Your admin gives you the Operator's URL, the `sso.url` value of its Helm chart.
 
 ## Logging in
 
@@ -23,7 +23,7 @@ mirrord opens your browser at your identity provider. Once you have signed in th
 Logged in to mirrord.corp.example.com as dev@corp.example.com. The login is valid until 2026-11-20 09:12. mirrord uses this operator now.
 ```
 
-Before the browser opens, mirrord checks the URL. An Operator without SSO, or one older than `3.238.0`, is refused with a message naming what is missing. An Operator whose license does not include SSO is refused with the same error every paid feature gives, naming SSO and the Enterprise plan. A URL that is neither an Operator nor mirrord Cloud is refused too, so a typo never sends you to a login page it should not.
+Before the browser opens, mirrord checks the URL. An Operator without SSO, or one older than `3.239.0`, is refused with a message naming what is missing. An Operator whose license does not include SSO is refused with the same error every paid feature gives, naming SSO and the Enterprise plan. A URL that is neither an Operator nor mirrord Cloud is refused too, so a typo never sends you to a login page it should not.
 
 If your browser does not open, the command prints the link to open by hand. The login finishes when the browser reaches mirrord's page on your machine, so both must run on the same computer.
 
@@ -60,7 +60,7 @@ operator: false can't be used while logged in to mirrord.corp.example.com. Run m
 
 A [MetalBear Cloud](beyond-kubernetes/metalbear-cloud.md) config selects Cloud with that same `operator: false`, so log out of the Operator before running one. With several Operator logins saved, logging out of one switches to the next, so log out of each until `mirrord whoami` shows no Operator login.
 
-Profiles work as before: the Operator reads the `MirrordClusterProfile` or `MirrordProfile` your config names on your behalf, because only the Operator's own API is reachable through its URL. That needs an Operator of version `3.238.0` or later; with an older one, a profile fails with ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator <version>.``
+Profiles work as before: the Operator reads the `MirrordClusterProfile` or `MirrordProfile` your config names on your behalf, because only the Operator's own API is reachable through its URL. That needs an Operator of version `3.239.0` or later; with an older one, a profile fails with ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator <version>.``
 
 If the Operator's license drops below Enterprise while you are logged in, the next command fails with the same message every paid feature gives, naming SSO and the Enterprise plan. Log out, or wait for the admin to restore the license.
 
@@ -80,7 +80,7 @@ mirrord ls -n payments
 
 The namespace picker of the IDE asks the Operator which namespaces you may list targets in, and offers those: every namespace the Operator serves where RBAC grants you `list` on targets, nothing else. Without a namespace in the config or on the command line, the listing starts in the `default` namespace, like a session does. When RBAC does not let you list targets there, the picker shows no targets until you switch to one of the namespaces it offers.
 
-The namespace list needs an Operator of version `3.238.0` or later. With an older one, mirrord falls back to the namespaces that hold targets you may list cluster-wide, which is the current namespace alone when your roles grant you namespaces only. The pickers never fail because of the namespace list: when the Operator refuses it, for example because your user's roles predate the chart version that grants `list` on `namespaces` in the Operator's API group, the current namespace is the only one offered and the targets of that namespace are still listed.
+The namespace list needs an Operator of version `3.239.0` or later. With an older one, mirrord falls back to the namespaces that hold targets you may list cluster-wide, which is the current namespace alone when your roles grant you namespaces only. The pickers never fail because of the namespace list: when the Operator refuses it, for example because your user's roles predate the chart version that grants `list` on `namespaces` in the Operator's API group, the current namespace is the only one offered and the targets of that namespace are still listed.
 
 ## Seeing your logins
 
@@ -133,7 +133,7 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 
 | Message | Why | What to do |
 | --- | --- | --- |
-| `the operator at ... does not support mirrord login yet` | The Operator predates the login flow. | Ask your admin to upgrade the Operator to `3.238.0` or later. |
+| `the operator at ... does not support mirrord login yet` | The Operator predates the login flow. | Ask your admin to upgrade the Operator to `3.239.0` or later. |
 | `Feature sso requires a mirrord Enterprise plan.` | The Operator's license is Teams. | Ask your admin about the Enterprise plan. |
 | `... is not a mirrord operator with SSO enabled, and it is not mirrord Cloud` | The URL answered, but not as an Operator with SSO or as mirrord Cloud does. | Check the URL with your admin: it is the chart's `sso.url`. |
 | `could not reach ...` | The Operator's URL is not reachable from your machine. | Check your network, VPN and the URL. |
@@ -142,8 +142,12 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | `kube_context is ignored while logged in to ...` | Your config names a kubeconfig or a context, and a login is in use. | Nothing, mirrord runs against the Operator. Log out of each Operator to use the kubeconfig again. |
 | `operator: false can't be used while logged in to ...` | Your config turns the Operator off while a login is in use. | Run `mirrord logout --url` with that URL, or drop `operator: false`. |
 | `Feature sso requires a mirrord Enterprise plan.` while running | The Operator's license dropped below Enterprise after you logged in. | Ask your admin about the license, or log out and use your kubeconfig. |
-| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.238.0` or later, or drop the profile. |
-| The IDE's namespace picker offers only the current namespace | Your roles predate the chart version that grants `list` on `namespaces` in the Operator's API group. | Ask your admin to upgrade the chart release to `3.238.0` or later. Until then, set the namespace in the config or with `mirrord ls -n`. |
-| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.238.0` or later, or drop the profile. |
+<<<<<<< HEAD
+| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
+| The IDE's namespace picker offers only the current namespace | Your roles predate the chart version that grants `list` on `namespaces` in the Operator's API group. | Ask your admin to upgrade the chart release to `3.239.0` or later. Until then, set the namespace in the config or with `mirrord ls -n`. |
+| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
+=======
+| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
+>>>>>>> 048e1bc79ce79178173c9225fd7aae04e0fefcf9
 | `the login token was not issued by this operator or has expired` before the time `mirrord whoami` shows | The Operator stopped accepting your token, for example after its client secret was rotated. `mirrord login --url` alone reuses the saved token while it has not expired. | Run `mirrord logout --url <operator-url>`, then `mirrord login --url <operator-url>`. |
 | A command fails with `403` after a login | You are logged in, but RBAC grants your user or groups nothing in that namespace. | Ask your admin to bind your group, see [Granting a group access](../managing-mirrord/sso.md#granting-a-group-access-to-a-namespace). |
