@@ -1180,6 +1180,7 @@ fn service(entries: &[(&str, &str)], prepare: Option<PrepareConfig>) -> Subproce
         db_branches_origin: RequestOrigin::Config,
         queues_origin: RequestOrigin::Config,
         task_driven: false,
+        replace_task: false,
     }
 }
 

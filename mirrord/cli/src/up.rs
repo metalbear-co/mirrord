@@ -1,6 +1,6 @@
 //! The `mirrord up` command - runs multiple mirrord sessions from a `mirrord-up.yaml` file.
 
-use std::{collections::HashMap, io::ErrorKind, ops::Not, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, ops::Not, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use miette::Diagnostic;
@@ -14,8 +14,8 @@ use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_progress::NullProgress;
 use mirrord_sessions_manager_client::{AgentSelector, OperatorTransport, TaskWatcher};
 use mirrord_up::{
-    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, SubprocessCfg, TaskWatch, UpConfig,
-    UpError, UpListing, load_up_config, run_wizard,
+    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, SubprocessCfg, TaskOwners, TaskWatch,
+    UpConfig, UpError, UpListing, load_up_config, run_wizard,
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -389,19 +389,30 @@ async fn open_task_watch(service: &SubprocessCfg) -> Result<TaskWatch, CliError>
         tag_filter: config.target.tag_filter.clone(),
         jq_filter: config.target.jq_filter.clone(),
     };
+    let scope = serverless_scope(config, target)?;
+    let transport = OperatorTransport::new(client);
     let watcher = TaskWatcher::open(
-        OperatorTransport::new(client),
-        serverless_scope(config, target)?,
+        transport.clone(),
+        scope.clone(),
         session_id.clone(),
         selector,
-        false,
+        service.replace_task,
     )
     .await
     .map_err(CliError::SessionsManagerConnect)?;
+    let owners = service.replace_task.then(|| {
+        TaskOwners::new(
+            transport,
+            scope,
+            session_id.clone(),
+            Duration::from_secs(config.internal_proxy.ping_interval.max(1)),
+        )
+    });
 
     Ok(TaskWatch {
         session_id,
         tasks: watcher.into_stream().boxed(),
+        owners,
     })
 }
 
@@ -490,6 +501,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::NoInferredTarget { .. })
             | UpCliError::Up(UpError::TaskDrivenContainer { .. })
             | UpCliError::Up(UpError::TaskSelector { .. })
+            | UpCliError::Up(UpError::ReplaceWithoutSelector { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,

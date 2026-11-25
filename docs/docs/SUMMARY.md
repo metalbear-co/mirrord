@@ -61,6 +61,7 @@
     * [Connecting ECS to the Operator](using-mirrord/beyond-kubernetes/ecs-operator-hosted.md)
     * [Connecting ECS to MetalBear Cloud](using-mirrord/beyond-kubernetes/ecs-metalbear-cloud.md)
     * [ECS Sample App](using-mirrord/beyond-kubernetes/ecs-sample-app.md)
+  * [AWS Batch](using-mirrord/beyond-kubernetes/aws-batch.md)
   * [Cloudflare Containers](using-mirrord/beyond-kubernetes/cloudflare-containers.md)
 * [Multiple concurrent sessions (mirrord up)](using-mirrord/multiple-concurrent-sessions.md)
 * [Targeting Pods by Label](using-mirrord/targeting-pods-by-label.md)

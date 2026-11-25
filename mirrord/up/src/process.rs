@@ -4,10 +4,11 @@
 //! watch matched, come and go with the tasks, and none of them ends the run.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     io,
     ops::Not,
+    process::ExitStatus,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -37,7 +38,10 @@ use tokio::{
 use tokio_stream::{StreamExt, StreamMap};
 use uuid::Uuid;
 
-use crate::{ReadyTracker, UpError};
+use crate::{
+    ReadyTracker, UpError,
+    owner::{Owner, TaskOwners},
+};
 
 mod platform;
 use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
@@ -394,6 +398,8 @@ pub(super) struct TaskServiceCommands {
     pub(super) pre: Option<Command>,
     /// Builds the `mirrord exec` child of the instance for the task on a replica.
     pub(super) instance: InstanceCommand,
+    /// Set for a service with `replace_task`: how it reaches the tasks it replaces.
+    pub(super) replace: Option<TaskOwners>,
     /// What the service's watch reports. Ends only after an error.
     pub(super) tasks: BoxStream<'static, Result<TaskEvent, SessionsManagerClientError>>,
 }
@@ -414,6 +420,11 @@ struct TaskService {
     seen: HashSet<TaskKey>,
     /// The running instances, by their tasks.
     instances: Vec<(TaskKey, Service)>,
+    /// Set for a service with `replace_task`: how it reaches the tasks it replaces.
+    replace: Option<TaskOwners>,
+    /// The owner connection of each replaced task (see [`crate::owner`]), from the match until it
+    /// sent the exit code. A task whose connection is still opening has no instance yet.
+    owners: HashMap<TaskKey, Owner>,
 }
 
 enum TaskPhase {
@@ -435,6 +446,7 @@ impl TaskService {
         name: Arc<str>,
         pre: Option<Command>,
         instance: InstanceCommand,
+        replace: Option<TaskOwners>,
         readiness: &Arc<Readiness>,
         output: &mut JoinSet<()>,
     ) -> Result<Self, UpError> {
@@ -444,6 +456,8 @@ impl TaskService {
             phase: TaskPhase::Running,
             seen: HashSet::new(),
             instances: Vec::new(),
+            replace,
+            owners: HashMap::new(),
         };
         let Some(pre) = pre else {
             service.run(readiness);
@@ -484,8 +498,17 @@ impl TaskService {
 
     /// Starts an instance for a task the watch matched, unless one was started or queued for it
     /// before.
+    ///
+    /// A replaced task gets its owner connection first, also while `run.pre_command` runs, so
+    /// that the task isn't lost meanwhile. Its instance starts in [`Self::reap_instances`], once
+    /// the connection is open and the service runs.
     fn matched(&mut self, task: TaskKey, output: &mut JoinSet<()>) {
-        if self.seen.insert(task.clone()).not() {
+        if self.seen.insert(task.clone()).not() || self.is_dropped() {
+            return;
+        }
+        if let Some(replace) = &self.replace {
+            let owner = replace.open(&task.0, self.instance_name(&task.0));
+            self.owners.insert(task, owner);
             return;
         }
         match &mut self.phase {
@@ -495,8 +518,12 @@ impl TaskService {
         }
     }
 
-    /// Stops the instance of a task that ended.
+    /// Stops the instance of a task that ended. A replaced task's owner connection is dropped
+    /// without a code: the task is gone, or was withdrawn.
     async fn ended(&mut self, task: &TaskKey, grace: Duration) -> io::Result<()> {
+        if let Some(owner) = self.owners.remove(task) {
+            owner.abort();
+        }
         if let TaskPhase::Preparing { pending, .. } = &mut self.phase {
             pending.retain(|pending| pending != task);
         }
@@ -514,19 +541,47 @@ impl TaskService {
     /// Starts the instance for `task`. A failure is reported and leaves the other instances
     /// running.
     fn spawn_instance(&mut self, task: TaskKey, output: &mut JoinSet<()>) {
-        let name: Arc<str> = format!("{}/{}", self.name, short_replica(&task.0)).into();
+        let name = self.instance_name(&task.0);
         println!("{name}: a task matched, starting");
         let spawned = (self.instance)(&task.0).and_then(|command| {
             Service::spawn(name.clone(), false, command, None, None, output).map_err(UpError::Io)
         });
         match spawned {
             Ok(instance) => self.instances.push((task, instance)),
-            Err(error) => eprintln!("{name}: failed to start: {error}"),
+            Err(error) => {
+                eprintln!("{name}: failed to start: {error}");
+                if let Some(owner) = self.owners.get_mut(&task) {
+                    owner.report_lost();
+                }
+            }
         }
     }
 
-    /// Reaps the instances that exited. Their exit doesn't end the run.
-    async fn reap_instances(&mut self) -> io::Result<()> {
+    /// The name of the instance for the task on `replica`, which prefixes its output.
+    fn instance_name(&self, replica: &ReplicaId) -> Arc<str> {
+        format!("{}/{}", self.name, short_replica(replica)).into()
+    }
+
+    /// Starts the instances of the replaced tasks whose owner connections opened, and reaps the
+    /// instances that exited, reporting their exit codes to replaced tasks. Their exit doesn't
+    /// end the run.
+    async fn reap_instances(&mut self, output: &mut JoinSet<()>) -> io::Result<()> {
+        if matches!(self.phase, TaskPhase::Running) {
+            let opened: Vec<_> = self
+                .owners
+                .iter_mut()
+                .filter_map(|(task, owner)| Some((task.clone(), owner.opened()?)))
+                .collect();
+            for (task, opened) in opened {
+                if opened {
+                    self.spawn_instance(task, output);
+                } else {
+                    self.owners.remove(&task);
+                }
+            }
+        }
+        self.owners.retain(|_, owner| owner.is_done().not());
+
         let mut index = 0;
         while let Some((_, instance)) = self.instances.get_mut(index) {
             let Some(status) = instance.child.try_wait()? else {
@@ -536,9 +591,26 @@ impl TaskService {
             // Only the leader has exited, as with a pre-command.
             instance.force_stop().await?;
             println!("{}: exited with {status}", instance.name);
-            self.instances.swap_remove(index);
+            let (task, _) = self.instances.swap_remove(index);
+            if let Some(owner) = self.owners.get_mut(&task) {
+                owner.report_exit(replaced_task_exit_code(status));
+            }
         }
         Ok(())
+    }
+
+    /// Ends every task the service replaces as lost, rather than after the companion's 30
+    /// seconds without connections, and hands over their owner connections to wait for. For a
+    /// run that is ending, before its instances are stopped, and for a service that won't
+    /// start.
+    fn lose_tasks(&mut self) -> Vec<Owner> {
+        self.owners
+            .drain()
+            .map(|(_, mut owner)| {
+                owner.report_lost();
+                owner
+            })
+            .collect()
     }
 
     /// Every process of the service that is still supervised.
@@ -550,6 +622,19 @@ impl TaskService {
         pre.into_iter()
             .chain(self.instances.iter_mut().map(|(_, instance)| instance))
     }
+}
+
+/// The exit code a replaced task ends with for its instance's exit `status`: the instance's code,
+/// or `128 + <signal>` when a signal killed it.
+fn replaced_task_exit_code(status: ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return 128 + signal;
+    }
+    mirrord_remote_layer_protocol::LOST_SESSION_EXIT_CODE.into()
 }
 
 /// A few characters that tell a task's instance apart in the output: the start of the last
@@ -670,7 +755,7 @@ async fn wait_for_first_exit(
             let Some(task) = tasks.get_mut(index) else {
                 break;
             };
-            task.reap_instances().await?;
+            task.reap_instances(output).await?;
             let TaskPhase::Preparing { pre, .. } = &mut task.phase else {
                 continue;
             };
@@ -693,6 +778,8 @@ async fn wait_for_first_exit(
                 continue;
             }
             watches.remove(&index);
+            // Nothing will start for the tasks it held.
+            drop(task.lose_tasks());
             if services.is_empty() && tasks.iter().all(TaskService::is_dropped) {
                 return Err(UpError::PreCommandFailed { name, status });
             }
@@ -870,10 +957,11 @@ async fn supervise_with_second_signal(
             name,
             pre,
             instance,
+            replace,
             tasks: watch,
         } in task_commands
         {
-            match TaskService::start(name, pre, instance, &readiness, &mut output) {
+            match TaskService::start(name, pre, instance, replace, &readiness, &mut output) {
                 Ok(task) => {
                     watches.insert(tasks.len(), watch);
                     tasks.push(task);
@@ -921,10 +1009,23 @@ async fn supervise_with_second_signal(
     // fill a pipe and prevent a cooperative child from exiting.
     // The watches go first, so that no task is matched to a run that is ending.
     drop(watches);
-    let cleanup = Box::pin(futures::future::join_all(
-        all_processes(&mut services, &mut tasks)
-            .map(|service| service.stop(received_signal, grace)),
-    ));
+    // The replaced tasks end as lost before their instances are stopped, at once rather than
+    // after the companion's 30 seconds without connections.
+    let owners: Vec<_> = tasks.iter_mut().flat_map(TaskService::lose_tasks).collect();
+    let cleanup = Box::pin(async {
+        let (stopped, _) = futures::future::join(
+            futures::future::join_all(
+                all_processes(&mut services, &mut tasks)
+                    .map(|service| service.stop(received_signal, grace)),
+            ),
+            tokio::time::timeout(
+                grace,
+                futures::future::join_all(owners.into_iter().map(Owner::closed)),
+            ),
+        )
+        .await;
+        stopped
+    });
     // Keep this receiver alive through output cleanup too. A second signal can
     // arrive after the service trees finish but before supervision returns.
     tokio::pin!(second_shutdown);

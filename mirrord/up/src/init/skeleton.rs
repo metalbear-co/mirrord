@@ -249,6 +249,7 @@ impl PickedService {
             },
             context: None,
             config_patch: None,
+            replace_task: false,
             sync: None,
         })
     }

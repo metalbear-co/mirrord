@@ -636,6 +636,7 @@ mod tests {
             },
             context: Some("popper-deskpop".into()),
             config_patch: None,
+            replace_task: false,
             sync: None,
         }
     }
@@ -710,6 +711,7 @@ mod tests {
             },
             context: None,
             config_patch: None,
+            replace_task: false,
             sync: None,
         };
         let cfg = UpConfig {
@@ -762,6 +764,7 @@ mod tests {
             },
             context: None,
             config_patch: None,
+            replace_task: false,
             sync: None,
         };
         let cfg = UpConfig {
@@ -813,6 +816,7 @@ mod tests {
             },
             context: None,
             config_patch: None,
+            replace_task: false,
             sync: None,
         };
         let cfg = UpConfig {

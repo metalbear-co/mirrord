@@ -659,6 +659,27 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub(crate) target: TargetConfig,
 
+    /// Replaces the serverless tasks that `target.tag_filter` or `target.jq_filter` match with
+    /// local processes: a matching task doesn't run its own code, and ends with the exit code of
+    /// the local process started for it. Only tasks that start while `mirrord up` runs, and that
+    /// set `MIRRORD_REMOTE_ADMISSION`, are replaced. For example:
+    ///
+    /// ```yaml
+    /// target:
+    ///   path: serverless/report-generator
+    ///   tag_filter:
+    ///     company_id: "^1234$"
+    /// replace_task: true
+    /// ```
+    ///
+    /// A task ends with the local process's exit code, `128 + <signal>` when a signal killed it,
+    /// or 214 when the session was lost before the local process exited, which includes stopping
+    /// `mirrord up`. Needs `target.tag_filter` or `target.jq_filter`, and `common.operator: true`.
+    /// Defaults to `false`.
+    #[serde(default, skip_serializing_if = "Not::not")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) replace_task: bool,
+
     /// Environment variable settings for the local process.
     ///
     /// For example:
@@ -934,11 +955,18 @@ impl ServiceConfig {
 
     /// Whether the service is task-driven: it runs no local process of its own, and starts one
     /// for every serverless task that matches its target's `tag_filter` or `jq_filter` instead.
+    /// `replace_task` makes it task-driven too, so that a service setting it without a filter is
+    /// refused rather than run as one session.
     ///
     /// The one place that decides it. A filter that `config_patch` sets doesn't count: the
     /// service then runs one session, which attaches to one matching task as `mirrord exec`
     /// does.
     pub(crate) fn is_task_driven(&self) -> bool {
+        self.replace_task || self.has_task_selector()
+    }
+
+    /// Whether the service's target sets `tag_filter` or `jq_filter`.
+    pub(crate) fn has_task_selector(&self) -> bool {
         matches!(
             &self.target,
             TargetConfig::Specified(SpecifiedTarget {
@@ -973,6 +1001,7 @@ impl ServiceConfig {
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let preview = kind == SessionKind::Preview;
         let task_driven = self.is_task_driven();
+        let replace_task = self.replace_task;
         if preview {
             self.default_mode = ServiceMode::Split.into();
             self.env = EnvConfig::default();
@@ -1129,6 +1158,7 @@ impl ServiceConfig {
             db_branches_origin,
             queues_origin,
             task_driven,
+            replace_task,
         })
     }
 
@@ -1365,6 +1395,10 @@ pub struct SubprocessCfg {
     /// task gets a session of its own, with the filters removed and the target pinned to the
     /// task.
     pub task_driven: bool,
+    /// Whether the service replaces its tasks (`replace_task`): its watch asks for every task it
+    /// matches to be held for it, and `mirrord up` reports each local process's exit code to its
+    /// task.
+    pub replace_task: bool,
 }
 
 /// Whether `target` is one workload. The operator resolves a DB branching request against the
@@ -2308,6 +2342,7 @@ impl CollectAnalytics for &UpConfig {
         for svc in self.services.values() {
             let ServiceConfig {
                 target,
+                replace_task: _,
                 env,
                 default_mode,
                 http_filter,
