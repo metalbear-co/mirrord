@@ -1,4 +1,4 @@
-use std::{fmt, io, net::SocketAddr, ops::Not};
+use std::{fmt, io, net::SocketAddr, ops::Not, time::Duration};
 
 use hyper::{
     Method, Request, Response, StatusCode, Uri, Version,
@@ -14,6 +14,7 @@ use mirrord_protocol::{
 };
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 mod client_store;
@@ -164,6 +165,15 @@ impl LocalHttpError {
             .not(),
         }
     }
+}
+
+/// How long to wait before each new attempt to send one request to the local application:
+/// 50ms, 100ms, 200ms, 400ms, and then 500ms five times.
+pub fn send_backoffs() -> impl Iterator<Item = Duration> {
+    ExponentialBackoff::from_millis(2)
+        .factor(25)
+        .max_delay(Duration::from_millis(500))
+        .take(9)
 }
 
 /// Produces a mirrord-specific [`StatusCode::BAD_GATEWAY`] response.

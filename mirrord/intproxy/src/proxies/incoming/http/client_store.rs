@@ -7,8 +7,9 @@ use std::{
 };
 
 use futures::FutureExt;
-use hyper::{Uri, Version};
-use mirrord_protocol::tcp::IncomingTrafficTransportType;
+use hyper::{Response, Uri, Version, body::Incoming};
+use mirrord_intproxy_protocol::ListeningOn;
+use mirrord_protocol::tcp::{HttpRequest, IncomingTrafficTransportType};
 use mirrord_tls_util::{MaybeTls, UriExt};
 use rustls::pki_types::ServerName;
 use tokio::{
@@ -19,8 +20,8 @@ use tokio::{
 use tokio_rustls::TlsStream;
 use tracing::Level;
 
-use super::{HttpSender, LocalHttpClient, LocalHttpError};
-use crate::proxies::incoming::tls::LocalTlsSetup;
+use super::{HttpSender, LocalHttpClient, LocalHttpError, StreamingBody};
+use crate::proxies::incoming::{ListeningOnExt, tls::LocalTlsSetup};
 
 /// Idle [`LocalHttpClient`] caches in [`ClientStore`].
 struct IdleLocalClient {
@@ -100,6 +101,37 @@ impl ClientStore {
     fn should_enable_connection_pooling() -> bool {
         // Re-enabled for Windows to fix HTTP mirroring issues
         true
+    }
+
+    /// Sends `request` to the local application that listens on `listening_on`, with a client from
+    /// this store.
+    ///
+    /// Returns the client along with the response. The caller should give the client back with
+    /// [`Self::push_idle`] once its connection can serve another request.
+    pub async fn send(
+        &self,
+        listening_on: &ListeningOn,
+        transport: &IncomingTrafficTransportType,
+        request: HttpRequest<StreamingBody>,
+    ) -> Result<(LocalHttpClient, Response<Incoming>), LocalHttpError> {
+        // `resolve_addr` returns a connectable address, normalizing a wildcard listen address
+        // (e.g. `0.0.0.0`) to loopback. That matters on Windows, where connecting to `0.0.0.0`
+        // fails outright (on Linux it happens to route to loopback).
+        let server_addr = listening_on
+            .resolve_addr()
+            .await
+            .map_err(LocalHttpError::ConnectTcpFailed)?;
+        let mut client = self
+            .get(
+                server_addr,
+                request.version(),
+                transport,
+                &request.internal_request.uri,
+            )
+            .await?;
+        let response = client.send_request(request).await?;
+
+        Ok((client, response))
     }
 
     /// Reuses or creates a new [`LocalHttpClient`].

@@ -20,12 +20,13 @@ use mirrord_protocol::{
     },
 };
 use tokio::time;
-use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 use super::{
-    ListeningOnExt,
-    http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
+    http::{
+        ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response,
+        send_backoffs,
+    },
     tasks::{HttpOut, InProxyTaskMessage},
 };
 use crate::background_tasks::{BackgroundTask, MessageBus};
@@ -229,24 +230,11 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
-        // `resolve_addr` returns a connectable address, normalizing a wildcard listen address
-        // (e.g. `0.0.0.0`) to loopback. That matters on Windows, where connecting to `0.0.0.0`
-        // fails outright (on Linux it happens to route to loopback).
-        let server_addr = self
-            .listening_on
-            .resolve_addr()
-            .await
-            .map_err(LocalHttpError::ConnectTcpFailed)?;
-        let mut client = self
+        let (client, mut response) = self
             .client_store
-            .get(
-                server_addr,
-                self.request.version(),
-                &self.transport,
-                &self.request.internal_request.uri,
-            )
+            .send(&self.listening_on, &self.transport, self.request.clone())
             .await?;
-        let mut response = client.send_request(self.request.clone()).await?;
+
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
             tracing::debug!("Detected an HTTP upgrade");
             hyper::upgrade::on(&mut response)
@@ -365,11 +353,7 @@ impl BackgroundTask for HttpGatewayTask {
         ret, err(level = Level::WARN),
     )]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        // Will return 9 backoffs: 50ms, 100ms, 200ms, 400ms, 500ms, 500ms, ...
-        let mut backoffs = ExponentialBackoff::from_millis(2)
-            .factor(25)
-            .max_delay(Duration::from_millis(500))
-            .take(9);
+        let mut backoffs = send_backoffs();
 
         let closed_token = message_bus.closed_token().clone();
 
