@@ -77,7 +77,7 @@ A replay is sent once. mirrord only sends it again when your application can't h
 mirrord replay show 1
 ```
 
-This prints the headers and body of the request, the status of the response to the original request, and the status of its latest replays. Values of headers and query parameters that usually carry secrets, such as `authorization`, `cookie`, and `token`, are printed as `[REDACTED]`. A replay still sends the original values. Bodies are printed as they are.
+This prints the headers and body of the request, the status of the response to the original request, and the status of its latest replays. Values of headers and query parameters that usually carry secrets, such as `authorization`, `cookie`, and `token`, are printed as `[REDACTED]`. A replay still sends the original values. Bodies are printed as they are, except that control characters, such as terminal escape sequences, are printed escaped. With `--format json`, they are escaped the JSON way.
 
 ## Replaying from the Local UI
 

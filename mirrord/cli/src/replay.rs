@@ -190,8 +190,8 @@ fn print_list(requests: &[CapturedRequestSummary]) {
         };
         table.add_row(row![
             request.id,
-            request.method,
-            request.path,
+            printable(&request.method),
+            printable(&request.path),
             request
                 .status
                 .map_or_else(|| "-".to_owned(), |status| status.to_string()),
@@ -210,8 +210,8 @@ fn print_request(request: &CapturedRequest) {
     let summary = &request.summary;
     println!(
         "{} {} {}   (request {}, {} on port {}, {} ago)",
-        summary.method,
-        summary.path,
+        printable(&summary.method),
+        printable(&summary.path),
         request.version,
         summary.id,
         summary.mode,
@@ -259,15 +259,41 @@ fn print_run(id: u64, original: Option<(u16, u64)>, run: &ReplayRun) {
 
 fn print_headers_and_body(headers: &[(String, String)], body: &CapturedBody) {
     for (name, value) in headers {
-        println!("{name}: {value}");
+        println!("{}: {}", printable(name), printable(value));
     }
 
+    let text = printable(&body.text);
     match (body.size, body.truncated) {
         (0, false) => {}
         (0, true) => println!("\n(no body arrived in time)"),
-        (_, false) => println!("\n{}", body.text),
-        (_, true) => println!("\n{}\n(only the start of the body is shown)", body.text),
+        (_, false) => println!("\n{text}"),
+        (_, true) => println!("\n{text}\n(only the start of the body is shown)"),
     }
+}
+
+/// Returns `text` with its control characters escaped, except tabs and line breaks.
+///
+/// The text comes from HTTP traffic, which anyone who can reach the target can send, and a
+/// terminal would run the escape sequences in it.
+fn printable(text: &str) -> String {
+    let mut printable = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        let keep = match c {
+            '\n' | '\t' => true,
+            // On its own, a carriage return moves the cursor back over what is already printed.
+            '\r' => chars.peek() == Some(&'\n'),
+            c => !c.is_control(),
+        };
+
+        if keep {
+            printable.push(c);
+        } else {
+            printable.extend(c.escape_default());
+        }
+    }
+
+    printable
 }
 
 fn status_and_duration(status: u16, duration_ms: u64) -> String {
