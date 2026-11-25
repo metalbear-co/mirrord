@@ -268,8 +268,8 @@ impl DirectTransport {
 }
 
 impl SessionsManagerTransport for DirectTransport {
-    /// Ignores `subscription_options`: the standalone and MetalBear Cloud sessions-managers select
-    /// no tasks by their tags, and the CLI refuses a session that asks them to.
+    /// Ignores `subscription_options`: only the operator-hosted sessions-manager reads them, and
+    /// the standalone and MetalBear Cloud sessions-managers select no tasks by their tags.
     async fn subscribe_assignments(
         &self,
         scope: &ServiceScope,

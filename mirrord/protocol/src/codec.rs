@@ -217,6 +217,11 @@ pub enum ClientMessage {
     /// it then arrives on the same ordered stream as the connection's end, so the code and a
     /// disconnect can't race, and only a session already paired with the task can send it.
     ///
+    /// The code is the local process's exit status as an `i32`. A companion relays any value
+    /// outside `0..=255` as 1: `_exit` keeps only the low 8 bits, and on Windows
+    /// `ExitStatus::code()` can be 256 or an NTSTATUS, either of which could otherwise end the
+    /// task as a success.
+    ///
     /// A client sends it only after [`ClientMessage::SwitchProtocolVersion`] settled on a version
     /// that matches [`REPLACED_TASK_EXIT_VERSION`]. An agent that isn't a companion holding a
     /// replaced task ignores it. The first one a companion receives on any of its connections

@@ -101,9 +101,12 @@ pub struct IntproxySubscriptionOptions {
 
     /// Makes this registration a watch: it is never paired with an agent, and instead receives a
     /// [`TaskMatch`](crate::TaskMatch) for every agent matching [`Self::agent_selector`], and a
-    /// [`TaskEnded`](crate::TaskEnded) when that agent goes away.
-    /// The developer then connects to each matched task with a registration of its own, pinned
-    /// to the task's replica with `agent_replica_filter`.
+    /// [`TaskEnded`](crate::TaskEnded) when that agent goes away. The developer then connects to
+    /// each matched task with a registration of its own, pinned to the task's replica with
+    /// `agent_replica_filter`.
+    ///
+    /// Every watch needs an [`Self::agent_selector`], whether it replaces tasks or not: the
+    /// sessions-manager refuses a watch without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watch: Option<Watch>,
 }
@@ -154,12 +157,10 @@ pub struct Watch {
     /// task ends with that process's exit code.
     ///
     /// Only tasks whose agent registered with [`GateState::Pending`] can be replaced, because
-    /// their code hasn't started yet, and each one goes to the oldest replace watch that matches
-    /// it. A replace watch must have an [`IntproxySubscriptionOptions::agent_selector`], since
-    /// it would otherwise take every task of the scope: the sessions-manager refuses one
-    /// without. The watch's developer reports the local exit code with
-    /// `mirrord_protocol::codec::ClientMessage::ReplacedTaskExit` on a connection paired with the
-    /// task.
+    /// their code hasn't started yet, and each one goes to the oldest replace watch whose
+    /// [`IntproxySubscriptionOptions::agent_selector`] matches it. The watch's developer reports
+    /// the local exit code with `mirrord_protocol::codec::ClientMessage::ReplacedTaskExit` on a
+    /// connection paired with the task.
     ///
     /// Without it, matched tasks run their own code, and the watch only learns about them.
     #[serde(default)]
@@ -168,8 +169,9 @@ pub struct Watch {
 
 /// What an agent's registration tells the sessions-manager about the task it serves.
 ///
-/// Read leniently, ignoring fields it doesn't know: what an agent says about its task is
-/// information, not a request, and a newer agent must keep working with an older operator.
+/// Read leniently, ignoring fields it doesn't know and reading a [`GateState`] it doesn't know
+/// as [`GateState::Unknown`]: what an agent says about its task is information, not a request,
+/// and a newer agent must keep working with an older operator.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSubscriptionOptions {
     /// The AWS Batch job the agent's task belongs to. The operator reads the job's tags with
@@ -204,4 +206,9 @@ pub enum GateState {
     /// example after the operator restarted, so the task stays out of every pairing that doesn't
     /// name its replica.
     Held,
+    /// A state this version doesn't know, sent by a newer agent. Read as no gate at all: the
+    /// sessions-manager sends no verdict, and the task decides on its own, as it does with an
+    /// operator that predates admission.
+    #[serde(other)]
+    Unknown,
 }

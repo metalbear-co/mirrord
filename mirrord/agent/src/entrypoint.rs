@@ -790,11 +790,11 @@ impl ClientConnectionHandler {
             ClientMessage::ShareLink(update) => {
                 self.share_links.update(update);
             }
-            // Only a workload companion holding a replaced task acts on the exit code.
+            // The agent replaces no task, so it has nothing to end with the code.
             ClientMessage::ReplacedTaskExit(code) => {
                 debug!(
                     client_id = self.id,
-                    code, "ignoring the exit code of a replaced task, no task is held"
+                    code, "ignoring the exit code of a replaced task"
                 );
             }
         }
