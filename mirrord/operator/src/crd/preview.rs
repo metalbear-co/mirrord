@@ -1534,6 +1534,11 @@ pub struct PreviewDbBranchingConfig {
     /// turbopuffer branch namespace names to use for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turbopuffer_branch_names: Vec<String>,
+
+    /// Generic branch database names to use for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_branch_names: Vec<String>,
+
     /// This session's own connection mapping for the branches it reuses, keyed by branch
     /// resource name.
     ///
@@ -1569,6 +1574,7 @@ impl PreviewDbBranchingConfig {
             cockroachdb_branch_names,
             s3_branch_names,
             turbopuffer_branch_names,
+            generic_branch_names,
             connection_sources: _,
         } = self;
 
@@ -1585,6 +1591,7 @@ impl PreviewDbBranchingConfig {
             cockroachdb_branch_names.iter(),
             s3_branch_names.iter(),
             turbopuffer_branch_names.iter(),
+            generic_branch_names.iter(),
         ]
         .into_iter()
         .flatten()
@@ -1592,27 +1599,48 @@ impl PreviewDbBranchingConfig {
     }
 
     /// Returns `None` when all branch name lists are empty.
+    ///
+    /// [`BranchDbNames`] is unpacked field by field on purpose: a dialect added there then fails
+    /// to compile here until it is carried into the preview, instead of silently going missing.
     #[cfg(feature = "client")]
     pub fn from_db_names(branch_db_names: BranchDbNames) -> Option<Self> {
         if branch_db_names.is_empty() {
-            None
-        } else {
-            Some(Self {
-                mysql_branch_names: branch_db_names.mysql,
-                mariadb_branch_names: branch_db_names.mariadb,
-                pg_branch_names: branch_db_names.pg,
-                dynamodb_branch_names: branch_db_names.dynamodb,
-                mongodb_branch_names: branch_db_names.mongodb,
-                mssql_branch_names: branch_db_names.mssql,
-                redis_branch_names: branch_db_names.redis,
-                spanner_branch_names: branch_db_names.spanner,
-                clickhouse_branch_names: branch_db_names.clickhouse,
-                cockroachdb_branch_names: branch_db_names.cockroachdb,
-                s3_branch_names: branch_db_names.s3,
-                turbopuffer_branch_names: branch_db_names.turbopuffer,
-                connection_sources: branch_db_names.connection_sources,
-            })
+            return None;
         }
+
+        let BranchDbNames {
+            pg,
+            mysql,
+            mariadb,
+            dynamodb,
+            mongodb,
+            mssql,
+            redis,
+            spanner,
+            clickhouse,
+            cockroachdb,
+            generic,
+            s3,
+            turbopuffer,
+            connection_sources,
+        } = branch_db_names;
+
+        Some(Self {
+            mysql_branch_names: mysql,
+            mariadb_branch_names: mariadb,
+            pg_branch_names: pg,
+            dynamodb_branch_names: dynamodb,
+            mongodb_branch_names: mongodb,
+            mssql_branch_names: mssql,
+            redis_branch_names: redis,
+            spanner_branch_names: spanner,
+            clickhouse_branch_names: clickhouse,
+            cockroachdb_branch_names: cockroachdb,
+            s3_branch_names: s3,
+            turbopuffer_branch_names: turbopuffer,
+            generic_branch_names: generic,
+            connection_sources,
+        })
     }
 }
 
