@@ -86,7 +86,7 @@ The `mirrord diagnose timings` command shows where the time of your latest sessi
 The output has two sections:
 
 - **Session start** is what the operator did before your application could start, phase by phase. It is shown for sessions that use an operator which records it.
-- **Application calls** is what your application then waited on mirrord for. While your application runs, mirrord counts every call it answers from the cluster: name lookups, file operations, outgoing connections. Calls that stay on your machine are not counted, and neither is your application's own code.
+- **Application calls** is what your application then waited on mirrord for. While your application runs, mirrord counts every call it does not leave to your machine: name lookups, file operations, outgoing connections. Those calls go through mirrord to the cluster. A read that mirrord answers from data it already fetched is counted too, and shows as a fast call. Calls mirrord leaves to your machine are not counted, and neither is your application's own code.
 
 Nothing has to be turned on. The calls are counted where mirrord intercepts them, so the language of your application does not matter.
 
@@ -99,7 +99,7 @@ Options
 
 `-f, --config-file <CONFIG_FILE>`: Config file to use for reaching the operator. Without it, the session's own cluster is asked.
 
-`--json`: Print one JSON object with a key per section (`session_start`, `application`).
+`--json`: Print one JSON object with a key per section (`session_start`, `application`). Every key is `null` when this machine has no session to show.
 
 `-h, --help`: Print help information.
 
@@ -148,12 +148,12 @@ Slowest calls:
  206.0 ms  file stat    /srv/demo-app/plugins/plugin-22.yaml
 
 Suggestions:
-- 40 file lookups under `/srv/demo-app/plugins` went to the cluster (about 6.94 s) and every one came back "not found". Add "^/srv/demo-app/plugins/" to `feature.fs.not_found` to give the same answer without the round trip, or to `feature.fs.local` if those files are on your machine.
+- 40 file lookups under `/srv/demo-app/plugins` went to the cluster (about 6.94 s) and every one came back "not found". Add "(?-i)^/srv/demo-app/plugins/" to `feature.fs.not_found` to give the same answer without the round trip, or to `feature.fs.local` if those files are on your machine.
 ```
 
 **Phase:** the operator's own name for a step, with a few words on what it is. A phase the session did not need is not listed.
 
-**Calls:** how many calls of that kind mirrord answered from the cluster.
+**Calls:** how many calls of that kind mirrord handled instead of your machine. Most of them are a round trip to the cluster; a read answered from data mirrord already fetched is not.
 
 **Total / Slowest:** how long your application waited for those answers, all together and for the single longest call. Time spent sending and receiving data over connections is not included.
 
