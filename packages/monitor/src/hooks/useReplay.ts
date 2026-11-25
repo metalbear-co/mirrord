@@ -116,6 +116,10 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
   // states after it, also when the user is back on the session of that replay.
   const switchCountRef = useRef(0)
 
+  // The fetch of the open request that waits for its answer. An answer to an earlier fetch is
+  // dropped, because it can arrive after a newer one.
+  const detailFetchRef = useRef<object | null>(null)
+
   useEffect(() => {
     setRequests([])
     setLoadError(false)
@@ -129,8 +133,13 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
 
   const loadSelected = useCallback(
     async (id: number) => {
+      const fetch = {}
+      detailFetchRef.current = fetch
+
       const isCurrent = () =>
-        sessionIdRef.current === sessionId && selectedIdRef.current === id
+        sessionIdRef.current === sessionId &&
+        selectedIdRef.current === id &&
+        detailFetchRef.current === fetch
 
       try {
         const request = await api.getCapturedRequest(sessionId, id)
@@ -145,6 +154,8 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         setSelectedError(null)
       } catch (err) {
         if (isCurrent()) setSelectedError(message(err))
+      } finally {
+        if (detailFetchRef.current === fetch) detailFetchRef.current = null
       }
     },
     [sessionId],
@@ -154,8 +165,7 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
     if (!active) return undefined
     let cancelled = false
 
-    const poll = async () => {
-      if (document.hidden) return
+    const fetchList = async () => {
       try {
         const listed = await api.listCapturedRequests(sessionId)
         if (cancelled) return
@@ -166,10 +176,15 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         setLoadError(false)
 
         // The open request can change after it was loaded, for example when the application
-        // answers it.
+        // answers it. A fetch of it that still waits for its answer covers the change.
         const detail = selectedRef.current
         const summary = next.find((request) => request.id === detail?.id)
-        if (detail && summary && isStale(detail, summary)) {
+        if (
+          detail &&
+          summary &&
+          isStale(detail, summary) &&
+          detailFetchRef.current === null
+        ) {
           void loadSelected(detail.id)
         }
       } catch {
@@ -177,8 +192,19 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
       }
     }
 
-    void poll()
-    const interval = setInterval(() => void poll(), POLL_INTERVAL_MS)
+    // One fetch of the list at a time, so that a slow answer can't replace a newer one.
+    let pending = false
+    const poll = () => {
+      if (document.hidden || pending) return
+
+      pending = true
+      void fetchList().finally(() => {
+        pending = false
+      })
+    }
+
+    poll()
+    const interval = setInterval(poll, POLL_INTERVAL_MS)
     return () => {
       cancelled = true
       clearInterval(interval)
