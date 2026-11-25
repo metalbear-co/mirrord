@@ -1,6 +1,6 @@
 use std::{
     convert::TryFrom,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     sync::Arc,
 };
@@ -206,6 +206,31 @@ pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
     }
 }
 
+/// Returns the address to connect to when `requested_address` is served by a local listener.
+///
+/// An IPv4-mapped IPv6 request comes from an IPv6 (dual-stack) socket, which can't connect to an
+/// IPv4 sockaddr, so an IPv4 listener address is returned in its IPv4-mapped IPv6 form. Every
+/// other pair returns `listener_address` unchanged.
+fn address_for_local_listener(
+    requested_address: SocketAddr,
+    listener_address: SocketAddr,
+) -> SocketAddr {
+    match (requested_address, listener_address) {
+        (SocketAddr::V6(requested), SocketAddr::V4(listener))
+            if requested.ip().to_ipv4_mapped().is_some() =>
+        {
+            SocketAddr::new(listener.ip().to_ipv6_mapped().into(), listener.port())
+        }
+        (_, listener_address) => listener_address,
+    }
+}
+
+/// Checks for loopback or unspecified addresses, including their IPv4-mapped IPv6 forms.
+fn is_local_ip(ip: IpAddr) -> bool {
+    let canonical_ip = ip.to_canonical();
+    canonical_ip.is_loopback() || canonical_ip.is_unspecified()
+}
+
 /// Iterate through sockets, if any of them has the requested port that the application is now
 /// trying to connect to - then don't forward this connection to the agent, and instead of
 /// connecting to the requested address, connect to the actual address where the application
@@ -244,7 +269,7 @@ where
                         && address.port() == ip_address.port());
 
                 (is_same_target && socket.protocol == user_socket_info.protocol)
-                    .then(|| SockAddr::from(address))
+                    .then(|| SockAddr::from(address_for_local_listener(ip_address, address)))
             }
             SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
                 None
@@ -337,8 +362,7 @@ where
 
         // Handle localhost/unspecified addresses first -
         //  if applicable, connect locally without proxy
-        let ip = ip_address.ip();
-        if (ip.is_loopback() || ip.is_unspecified())
+        if is_local_ip(ip_address.ip())
             && let Some(result) =
                 connect_to_local_address(&user_socket_info, ip_address, &mut call_connect_fn)?
         {
@@ -797,6 +821,8 @@ where
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
+    use rstest::rstest;
+
     use super::*;
 
     #[test]
@@ -833,5 +859,44 @@ mod tests {
             8080,
         ));
         assert!(!is_unix_address(&addr));
+    }
+
+    #[rstest]
+    #[case(
+        "[::ffff:127.0.0.1]:18080",
+        "127.0.0.1:28080",
+        "[::ffff:127.0.0.1]:28080"
+    )]
+    #[case("127.0.0.1:18080", "127.0.0.1:28080", "127.0.0.1:28080")]
+    #[case("[::1]:18080", "[::1]:28080", "[::1]:28080")]
+    #[case("[::1]:18080", "127.0.0.1:28080", "127.0.0.1:28080")]
+    #[case("[::ffff:127.0.0.1]:18080", "[::1]:28080", "[::1]:28080")]
+    fn local_listener_address_preserves_the_requested_socket_family(
+        #[case] requested_address: SocketAddr,
+        #[case] listener_address: SocketAddr,
+        #[case] expected: SocketAddr,
+    ) {
+        assert_eq!(
+            address_for_local_listener(requested_address, listener_address),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case("127.0.0.1", true)]
+    #[case("::1", true)]
+    #[case("0.0.0.0", true)]
+    #[case("::", true)]
+    #[case("::ffff:127.0.0.1", true)]
+    #[case("::ffff:127.1.2.3", true)]
+    #[case("::ffff:0.0.0.0", true)]
+    #[case("10.0.0.1", false)]
+    #[case("::ffff:10.0.0.1", false)]
+    #[case("fe80::1", false)]
+    fn local_ip_recognizes_native_and_ipv4_mapped_addresses(
+        #[case] ip: IpAddr,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(is_local_ip(ip), expected);
     }
 }

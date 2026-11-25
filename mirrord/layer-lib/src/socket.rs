@@ -741,7 +741,13 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
             return Ok(false);
         }
 
-        let family = if address.is_ipv4() { AF_INET } else { AF_INET6 };
+        let ip = address.ip();
+        let canonical_ip = ip.to_canonical();
+        let family = if canonical_ip.is_ipv4() {
+            AF_INET
+        } else {
+            AF_INET6
+        };
 
         let addr_protocol = if matches!(protocol, NetProtocol::Stream) {
             SOCK_STREAM
@@ -791,12 +797,14 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
                     }
                 };
 
-                Ok(resolved_ips.into_iter().any(|ip| ip == address.ip()))
+                Ok(resolved_ips
+                    .into_iter()
+                    .any(|resolved_ip| resolved_ip == ip || resolved_ip == canonical_ip))
             }
             AddressFilter::Socket(addr) => {
-                Ok(addr.ip().is_unspecified() || addr.ip() == address.ip())
+                Ok(addr.ip().is_unspecified() || addr.ip() == ip || addr.ip() == canonical_ip)
             }
-            AddressFilter::Subnet(net, _) => Ok(net.contains(&address.ip())),
+            AddressFilter::Subnet(net, _) => Ok(net.contains(&ip) || net.contains(&canonical_ip)),
             AddressFilter::Port(..) => Ok(true),
         }
     }
@@ -805,6 +813,7 @@ impl ProtocolAndAddressFilterExt for ProtocolAndAddressFilter {
 #[cfg(test)]
 mod outgoing_selector_tests {
     use mirrord_config::util::VecOrSingle;
+    use rstest::rstest;
 
     use super::*;
 
@@ -846,5 +855,41 @@ mod outgoing_selector_tests {
             ),
             "{error:?}"
         );
+    }
+
+    #[rstest]
+    #[case("127.0.0.1")]
+    #[case("127.0.0.1:18080")]
+    #[case("127.0.0.0/8")]
+    #[case("tcp://127.0.0.1:18080")]
+    fn local_filters_match_ipv4_mapped_ipv6(#[case] filter: &str) {
+        let address = "[::ffff:127.0.0.1]:18080".parse().unwrap();
+        let config = OutgoingConfig {
+            tcp: true,
+            udp: true,
+            filter: Some(OutgoingFilterConfig::Local(VecOrSingle::Single(
+                filter.to_owned(),
+            ))),
+            ..Default::default()
+        };
+        let selector = OutgoingSelector::new(&config).unwrap();
+        let connection = selector
+            .get_connection_through(address, NetProtocol::Stream)
+            .unwrap();
+
+        assert!(matches!(connection, ConnectionThrough::Local(actual) if actual == address));
+    }
+
+    #[test]
+    fn remote_filter_matches_ipv4_mapped_ipv6() {
+        let address = "[::ffff:127.0.0.1]:18080".parse().unwrap();
+        let selector =
+            OutgoingSelector::new(&remote(VecOrSingle::Single("127.0.0.1:18080".to_owned())))
+                .unwrap();
+        let connection = selector
+            .get_connection_through(address, NetProtocol::Stream)
+            .unwrap();
+
+        assert!(matches!(connection, ConnectionThrough::Remote(actual) if actual == address));
     }
 }
