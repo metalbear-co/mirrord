@@ -13,7 +13,7 @@ use chrono::Utc;
 use mirrord_config::LayerConfig;
 use thiserror::Error;
 
-use crate::sso::{LoginExpired, OperatorLogin, OperatorLoginStore};
+use crate::sso::{LoginExpired, OperatorLogin, OperatorLoginStore, host_of};
 
 /// Which credentials a client to the operator carries.
 #[derive(Debug, Clone)]
@@ -56,6 +56,14 @@ pub enum OperatorAccessError {
     )]
     OperatorDisabled { host: String, url: String },
 
+    /// The session was prepared under a login that is no longer in the store, so there is no
+    /// token to reconnect with. The login selected since does not stand in: its operator knows
+    /// nothing of this session.
+    #[error(
+        "this session started under a login to {host} that was removed since. Run mirrord login --url {url} to let it reconnect."
+    )]
+    SessionLoginRemoved { host: String, url: String },
+
     #[error("failed to read the login store at {path}: {error}")]
     Store {
         path: String,
@@ -77,17 +85,42 @@ pub enum OperatorAccessError {
 /// kubeconfig, which is also the answer when the home directory is unknown: nothing could have
 /// been saved there.
 pub async fn active_operator_login() -> Result<Option<OperatorLogin>, OperatorAccessError> {
+    Ok(read_login_store().await?.active_login(Utc::now())?)
+}
+
+/// The login a session reconnects with: the one to the operator the session was prepared on,
+/// read from `~/.mirrord/auth.json` by that operator's `url`, whatever login is selected now.
+/// A `mirrord login --url` to another operator in the meantime must not send this session there.
+pub async fn session_login(url: &str) -> Result<OperatorLogin, OperatorAccessError> {
+    session_login_in(&read_login_store().await?, url, Utc::now())
+}
+
+/// Pure half of [`session_login`], for the test below.
+pub fn session_login_in(
+    store: &OperatorLoginStore,
+    url: &str,
+    now: chrono::DateTime<Utc>,
+) -> Result<OperatorLogin, OperatorAccessError> {
+    store
+        .login(url, now)?
+        .ok_or_else(|| OperatorAccessError::SessionLoginRemoved {
+            host: host_of(url).to_owned(),
+            url: url.to_owned(),
+        })
+}
+
+/// `~/.mirrord/auth.json`, or an empty store when the home directory is unknown: nothing could
+/// have been saved there.
+async fn read_login_store() -> Result<OperatorLoginStore, OperatorAccessError> {
     let Some(path) = OperatorLoginStore::default_path() else {
-        return Ok(None);
+        return Ok(OperatorLoginStore::default());
     };
-    let store =
-        OperatorLoginStore::read(&path)
-            .await
-            .map_err(|error| OperatorAccessError::Store {
-                path: path.display().to_string(),
-                error,
-            })?;
-    Ok(store.active_login(Utc::now())?)
+    OperatorLoginStore::read(&path)
+        .await
+        .map_err(|error| OperatorAccessError::Store {
+            path: path.display().to_string(),
+            error,
+        })
 }
 
 /// Refuses `operator: false` under a login: without the operator there is nothing the login can
@@ -137,7 +170,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::sso::OperatorLoginToken;
+    use crate::sso::{OperatorLoginToken, StoredOperatorLogin};
 
     fn login() -> OperatorLogin {
         OperatorLogin {
@@ -217,6 +250,39 @@ mod tests {
             error.to_string(),
             "Your login to mirrord.corp.example.com expired. \
              Run mirrord login --url https://mirrord.corp.example.com."
+        );
+    }
+
+    /// A session prepared on operator A reconnects to A after `mirrord login --url` selected
+    /// operator B. Before, the reconnect reread the selected login and sent A's session to B,
+    /// which knows nothing of it, so the reconnect failed.
+    #[test]
+    fn session_login_is_the_sessions_operator_not_the_selected_one() {
+        let now = Utc::now();
+        let stored = |token: &str| StoredOperatorLogin {
+            token: OperatorLoginToken::from(token.to_owned()),
+            username: "dev@corp.example.com".to_owned(),
+            account: "dev@corp.example.com".to_owned(),
+            expires_at: now + TimeDelta::hours(1),
+            logged_in_at: now,
+        };
+        let a = "https://a.mirrord.corp.example.com";
+        let b = "https://b.mirrord.corp.example.com";
+        let mut store = OperatorLoginStore::default();
+        store.operators.insert(a.to_owned(), stored("token-a"));
+        store.operators.insert(b.to_owned(), stored("token-b"));
+        store.active_operator = Some(b.to_owned());
+
+        let login = session_login_in(&store, a, now).unwrap();
+        assert_eq!(login.url, a);
+        assert_eq!(login.token.expose_secret(), "token-a");
+
+        store.operators.remove(a);
+        assert_eq!(
+            session_login_in(&store, a, now).unwrap_err().to_string(),
+            "this session started under a login to a.mirrord.corp.example.com that was removed \
+             since. Run mirrord login --url https://a.mirrord.corp.example.com to let it \
+             reconnect."
         );
     }
 }

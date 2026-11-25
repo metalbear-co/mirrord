@@ -117,7 +117,7 @@ pub mod split_config_branches;
 
 pub use access::{
     OperatorAccess, OperatorAccessError, active_operator_login, check_config_under_login,
-    check_operator_enabled_under_login,
+    check_operator_enabled_under_login, session_login,
 };
 pub use discovery::operator_installed;
 pub use queue_split_progress::temporal_mirror_warning;
@@ -230,6 +230,11 @@ pub struct OperatorSession {
     /// OpenTelemetry (OTel) / W3C baggage propagator.
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     baggage: Option<String>,
+    /// The operator login URL the session was prepared under, `None` for a kubeconfig. A
+    /// reconnect reads that login from the store, not the one selected now, so a `mirrord login
+    /// --url` to another operator in the meantime never sends this session there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    login_url: Option<String>,
 }
 
 impl OperatorSession {
@@ -427,9 +432,10 @@ pub struct OperatorApi<C> {
     /// URL of the API server [`Self::client`] talks to. Unlike [`Self::kube_context`], it tells
     /// clusters apart: two contexts can name one cluster.
     cluster_url: String,
-    /// Whether [`Self::client`] reaches the operator over its public URL with a saved login. Only
-    /// the operator's own API group answers there, so the workload is never read from here.
-    through_login: bool,
+    /// The URL of the operator login [`Self::client`] reaches the operator with, `None` through
+    /// the kubeconfig. Under a login only the operator's own API group answers, so the workload is
+    /// never read from here, and the sessions this API prepares stay bound to that operator.
+    login_url: Option<String>,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -475,7 +481,7 @@ impl OperatorApi<NoClientCert> {
     {
         let (base_config, access) = Self::base_client_config(config).await?;
         let kube_context = access.kube_context().map(ToOwned::to_owned);
-        let through_login = access.login().is_some();
+        let login_url = access.login().map(|login| login.url.clone());
         let cluster_url = base_config.cluster_url.to_string();
 
         let client = progress
@@ -509,7 +515,7 @@ impl OperatorApi<NoClientCert> {
                     kube_context,
                     machine_id: reporter.machine_id(),
                     cluster_url,
-                    through_login,
+                    login_url,
                 }));
             }
 
@@ -614,7 +620,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context: self.kube_context,
                 machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
-                through_login: self.through_login,
+                login_url: self.login_url,
             },
 
             Err(error) => OperatorApi {
@@ -626,7 +632,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context: self.kube_context,
                 machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
-                through_login: self.through_login,
+                login_url: self.login_url,
             },
         }
     }
@@ -678,7 +684,7 @@ impl OperatorApi<NoClientCert> {
         let kube_context = self.kube_context.clone();
         let machine_id = self.machine_id;
         let cluster_url = self.cluster_url.clone();
-        let through_login = self.through_login;
+        let login_url = self.login_url.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -711,7 +717,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context,
                 machine_id,
                 cluster_url,
-                through_login,
+                login_url,
             },
         }
     }
@@ -734,7 +740,7 @@ impl OperatorApi<MaybeClientCert> {
             kube_context: self.kube_context,
             machine_id: self.machine_id,
             cluster_url: self.cluster_url,
-            through_login: self.through_login,
+            login_url: self.login_url,
         })
     }
 }
@@ -753,7 +759,7 @@ where
     /// Whether this API reaches the operator over its public URL with a saved login, where only
     /// the operator's own API group answers and the operator resolves the target itself.
     pub fn through_login(&self) -> bool {
-        self.through_login
+        self.login_url.is_some()
     }
 
     /// Returns the URL of the API server this API's client talks to, which identifies the
@@ -1960,7 +1966,18 @@ where
     pub async fn base_client_config(
         layer_config: &LayerConfig,
     ) -> OperatorApiResult<(Config, OperatorAccess)> {
-        let (mut client_config, access) = match active_operator_login().await? {
+        let login = active_operator_login().await?;
+        Self::client_config_with(layer_config, login).await
+    }
+
+    /// [`Self::base_client_config`] with the login decided by the caller: the selected one for a
+    /// new run, the session's own for a reconnect ([`Self::session_client`]). `None` is the
+    /// kubeconfig.
+    async fn client_config_with(
+        layer_config: &LayerConfig,
+        login: Option<OperatorLogin>,
+    ) -> OperatorApiResult<(Config, OperatorAccess)> {
+        let (mut client_config, access) = match login {
             Some(login) => (
                 Self::login_client_config(layer_config, &login)?,
                 OperatorAccess::Login(login),
@@ -2767,7 +2784,7 @@ impl OperatorApi<PreparedClientCert> {
         // where the target is resolved and the session is created
 
         if layer_config.feature.kafka_branch {
-            let reason = if self.through_login {
+            let reason = if self.through_login() {
                 "Kafka branching is not available while logged in to the operator; run `mirrord \
                  logout` and use a kubeconfig for this session"
             } else {
@@ -3267,6 +3284,7 @@ impl OperatorApi<PreparedClientCert> {
             allow_reconnect,
             traceparent,
             baggage,
+            login_url: self.login_url.clone(),
         })
     }
 
@@ -3703,11 +3721,19 @@ impl OperatorApi<PreparedClientCert> {
     /// Builds a client that authenticates with the session's certificate, for a process that
     /// holds only the [`OperatorSession`] and not the [`OperatorApi`] that prepared it, such as
     /// the intproxy.
+    ///
+    /// The operator is the one the session was prepared on: its login, read from the store by
+    /// [`OperatorSession::login_url`], or the kubeconfig when it had none. The login selected now
+    /// is not consulted, so a `mirrord login --url` since the session started changes nothing here.
     async fn session_client(
         layer_config: &LayerConfig,
         session: &OperatorSession,
     ) -> OperatorApiResult<Client> {
-        let (mut config, _) = Self::base_client_config(layer_config).await?;
+        let login = match &session.login_url {
+            Some(url) => Some(session_login(url).await?),
+            None => None,
+        };
+        let (mut config, _) = Self::client_config_with(layer_config, login).await?;
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers
@@ -4041,7 +4067,7 @@ mod test {
                 })).unwrap(),
                 kube_context: None,
                 machine_id: None,
-                through_login: false,
+                login_url: None,
             };
                 let result = api.check_serverless_sessions_manager_served();
                 assert_eq!(result.is_ok(), enabled);
@@ -4833,7 +4859,7 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
             machine_id: None,
-            through_login: false,
+            login_url: None,
         };
         tokio::time::timeout(
             std::time::Duration::from_secs(60),
@@ -4887,7 +4913,7 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
             machine_id: None,
-            through_login: false,
+            login_url: None,
             cluster_url: "https://127.0.0.1:9669/".to_owned(),
         };
 
