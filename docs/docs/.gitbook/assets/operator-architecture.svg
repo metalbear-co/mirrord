@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1212 620" width="1212" height="620" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 660" width="1200" height="660" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">mirrord for Teams architecture</title>
-  <desc id="d">Two developers run local processes with mirrord on their laptops. Each local process connects to the mirrord Operator in the Kubernetes cluster. The Operator sends incoming traffic to each local process, and each local process sends outgoing traffic, database access, and file reads and writes to the Operator. The Operator connects to a mirrord agent for each target pod. Each agent runs as a separate pod in the network namespace of its target pod. Internet traffic and traffic from other services reach the target pods. The agents send outgoing traffic to other services and database access to the database.</desc>
+  <desc id="d">Two developers run local processes with mirrord on their laptops. Each local process connects to the mirrord Operator in the Kubernetes cluster. The Operator sends incoming traffic to each local process, and each local process sends outgoing traffic, database access, and file reads and writes to the Operator. The Operator connects to the mirrord agents of the target pods. Each agent runs as a separate pod in the network namespace of its target pod. Internet traffic and traffic from other services reach the target pods. The agents send outgoing traffic to other services and database access to the database.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -33,91 +33,55 @@
 <path d="M243.9,427.5c11.1-4.4,16-21.4,12-40.5c-0.3-0.3-0.6-0.6-0.9-0.9c2,15.9-1.2,29.1-7.6,30.2c-7.3,1.5-15.8-12-19-29.7 c-0.3-1.2-0.3-2.3-0.6-3.5h0.9l12.5-1.5l-11.1-6.5l-3.2-1.8c0-10,2.3-17.6,6.4-20.3c-1.2-2.1-2.3-4.1-3.8-6.2 c-7-4.1-13.7-5-19.3-2.6c-6.4,2.6-11.1,9.4-12.8,18.8c-1.8,10-0.3,22,4.4,33.5c3.5,8.8,8.5,16.4,14,22c0,0,0.3,0,0.3,0.3 c0.6,0.3,1.2,0.9,1.5,1.2C225.9,427.2,235.8,430.7,243.9,427.5z M204.9,319.1c11.1,2.1,19.3,9.7,24.2,15.6c2,2.3,3.8,5,5.5,7.3 c0,0,0,0,0,0.3c2,2.9,3.5,5.6,5,8.2c1.2,1.8,2,3.5,3.2,5.6l1.5,2.3c3.8,6.5,7.6,12.9,12.3,19.1c5.8,7.3,11.7,12.9,18.4,16.7 c-0.6-5-2-9.7-4.4-14.1c-0.9-1.8-0.3-3.8,1.5-4.7c1.8-0.9,3.8-0.3,4.7,1.5c2.9,5.6,4.7,11.5,5,17.9c0,0.9,0.3,3.5-1.5,5.6 c-1.2,1.2-2.6,1.8-4.1,1.8c-1.5,0-2.9-0.6-4.4-1.2c-2.6-1.5-5.3-3.2-7.9-5.3c1.7,18.5-5,34.1-17.5,39.3c-2.9,1.2-5.8,1.8-8.8,1.8 c-8.5,0-17.5-4.4-25.7-11.7c-11.4-6.2-21.6-14.7-29.5-24.7c-1.2-1.5-0.9-3.8,0.6-5c1.5-1.2,3.8-0.9,5,0.6c3.2,4.1,7,7.9,11.1,11.5 c-1.2-2.3-2.6-5-3.5-7.6c-5-12.6-6.7-25.8-4.7-37.3c2-12,8.2-20.6,16.9-24.1c4.1-1.8,8.8-2.1,13.7-1.2c-4.4-4.4-10.2-8.8-17.5-10 c-8.2-1.5-16.6,1.5-20.4,7.3c-1.2,1.5-3.2,2.1-4.7,0.9c-1.5-1.2-2-3.2-0.9-4.7C183,320.9,194.1,317.1,204.9,319.1z"/>
     </symbol>
   </defs>
-  <rect x="0" y="0" width="1212" height="620" fill="#ffffff"/>
-
-  <!-- Cluster boundary -->
-  <rect x="390" y="100" width="800" height="500" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
-  <text x="414" y="128" font-size="15" font-weight="700" fill="#4a44b8">Kubernetes cluster</text>
-
-  <!-- Internet traffic to the target pods -->
-  <rect x="585" y="10" width="200" height="52" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="685" y="42" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Internet</text>
-  <polyline points="685,62 685,148" fill="none" stroke="#232141" stroke-width="2.5"/>
-  <text x="697" y="86" font-size="12.5" fill="#333344">incoming traffic</text>
-  <polyline points="535,148 835,148" fill="none" stroke="#232141" stroke-width="2.5"/>
-  <line x1="535" y1="148" x2="535" y2="166" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <line x1="685" y1="148" x2="685" y2="166" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <line x1="835" y1="148" x2="835" y2="166" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-
-  <!-- Target pods, each with a separate mirrord agent pod in its network namespace -->
-  <rect x="470" y="170" width="130" height="60" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
-  <text x="535" y="206" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Pod</text>
-  <line x1="535" y1="230" x2="535" y2="250" stroke="#232141" stroke-width="2"/>
-  <rect x="470" y="250" width="130" height="50" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="478" y="257" width="20" height="36"/>
-  <text x="547" y="280" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
-  <rect x="620" y="170" width="130" height="60" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
-  <text x="685" y="206" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Pod</text>
-  <line x1="685" y1="230" x2="685" y2="250" stroke="#232141" stroke-width="2"/>
-  <rect x="620" y="250" width="130" height="50" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="628" y="257" width="20" height="36"/>
-  <text x="697" y="280" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
-  <rect x="770" y="170" width="130" height="60" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
-  <text x="835" y="206" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Pod</text>
-  <line x1="835" y1="230" x2="835" y2="250" stroke="#232141" stroke-width="2"/>
-  <rect x="770" y="250" width="130" height="50" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="778" y="257" width="20" height="36"/>
-  <text x="847" y="280" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
-  <!-- Operator to agents -->
-  <line x1="535" y1="300" x2="535" y2="356" stroke="#232141" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-  <line x1="685" y1="300" x2="685" y2="356" stroke="#232141" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-  <line x1="835" y1="300" x2="835" y2="356" stroke="#232141" stroke-width="2.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-  <!-- mirrord Operator -->
-  <rect x="450" y="360" width="470" height="200" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="604" y="440" width="22" height="40"/>
-  <text x="700" y="466" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord Operator</text>
-
-  <!-- Local process 1 -->
-  <rect x="20" y="350" width="230" height="80" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M4 430 h262 l-8 12 h-246 z" fill="#232141"/>
-  <use href="#mirrord" x="36" y="370" width="22" height="40"/>
-  <text x="148" y="386" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
-  <text x="148" y="408" font-size="12.5" fill="#ffffff" text-anchor="middle">developer machine 1</text>
-  <line x1="450" y1="372" x2="254" y2="372" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="320" y="364" font-size="12.5" fill="#4a44b8" text-anchor="middle">incoming traffic</text>
-  <line x1="250" y1="410" x2="446" y2="410" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="320" y="428" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
-  <text x="320" y="444" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
-  <text x="320" y="460" font-size="12.5" fill="#333344" text-anchor="middle">file reads and writes</text>
-
-  <!-- Local process 2 -->
-  <rect x="20" y="480" width="230" height="80" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M4 560 h262 l-8 12 h-246 z" fill="#232141"/>
-  <use href="#mirrord" x="36" y="500" width="22" height="40"/>
-  <text x="148" y="516" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
-  <text x="148" y="538" font-size="12.5" fill="#ffffff" text-anchor="middle">developer machine 2</text>
-  <line x1="450" y1="502" x2="254" y2="502" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="320" y="494" font-size="12.5" fill="#4a44b8" text-anchor="middle">incoming traffic</text>
-  <line x1="250" y1="540" x2="446" y2="540" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="320" y="558" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
-  <text x="320" y="574" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
-  <text x="320" y="590" font-size="12.5" fill="#333344" text-anchor="middle">file reads and writes</text>
-
-  <!-- Other services and database -->
-  <rect x="1036" y="144" width="150" height="120" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <rect x="1028" y="152" width="150" height="120" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <rect x="1020" y="160" width="150" height="120" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="1095" y="214" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Other</text>
-  <text x="1095" y="234" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">services</text>
-  <line x1="1020" y1="190" x2="904" y2="190" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="960" y="182" font-size="12.5" fill="#333344" text-anchor="middle">incoming traffic</text>
-  <line x1="900" y1="266" x2="1016" y2="266" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="960" y="258" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
-  <polyline points="900,290 1095,290 1095,346" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="960" y="308" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
-  <path d="M1025 364 L1025 440 A70 14 0 0 0 1165 440 L1165 364" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <ellipse cx="1095" cy="364" rx="70" ry="14" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="1095" y="414" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Database</text>
-  <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="1172" y="82" width="36" height="36"/>
+  <rect x="0" y="0" width="1200" height="660" fill="#ffffff"/>
+  <path d="M432 640 A22 22 0 0 1 410 618 L410.0 327.2 A97.9 97.9 0 0 1 539.2 180.0 A140.4 140.4 0 0 1 790.0 180.0 A127.7 127.7 0 0 1 1018.0 180.0 A105.8 105.8 0 0 1 1170.0 327.2 L1170 618 A22 22 0 0 1 1148 640 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
+  <use href="#k8s" x="1074" y="128" width="40" height="40"/>
+  <text x="1150" y="624" font-size="15" font-weight="700" fill="#4a44b8" text-anchor="end">Kubernetes cluster</text>
+  <polyline points="660,8 660,232" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="672" y="40" font-size="12.5" fill="#333344" text-anchor="start">incoming internet traffic</text>
+  <rect x="596" y="236" width="160" height="60" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/><rect x="588" y="244" width="160" height="60" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/><rect x="580" y="252" width="160" height="60" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
+  <text x="660" y="288" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Pods</text>
+  <rect x="596" y="316" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/><rect x="588" y="324" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/><rect x="580" y="332" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <use href="#mirrord" x="596" y="339" width="20" height="36"/>
+  <text x="672" y="363" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agents</text>
+  <polyline points="632,384 632,436" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <polyline points="688,436 688,388" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="540" y="440" width="300" height="150" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <use href="#mirrord" x="580" y="482" width="36" height="66"/>
+  <text x="720" y="512" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord</text>
+  <text x="720" y="536" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">Operator</text>
+  <rect x="966" y="236" width="160" height="90" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/><rect x="958" y="244" width="160" height="90" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/><rect x="950" y="252" width="160" height="90" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="1030" y="292" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Other</text>
+  <text x="1030" y="312" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">services</text>
+  <polyline points="950,264 744,264" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="845" y="256" font-size="12.5" fill="#333344" text-anchor="middle">incoming traffic</text>
+  <polyline points="740,350 845,350 845,302 946,302" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="895" y="294" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
+  <polyline points="740,372 1040,372 1040,446" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="895" y="364" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
+  <path d="M970 460 L970 540 A70 14 0 0 0 1110 540 L1110 460" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <ellipse cx="1040" cy="460" rx="70" ry="14" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="1040" y="512" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Database</text>
+  <rect x="24" y="150" width="196" height="124" rx="10" fill="#232141"/><rect x="32" y="158" width="180" height="108" rx="4" fill="#ffffff"/><path d="M24 274 H220 L236 288 H8 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="34" y1="279" x2="210" y2="279" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="106" y="282.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="4" y="288" width="236" height="5" rx="2.5" fill="#232141"/>
+  <rect x="42" y="168" width="160" height="88" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <use href="#mirrord" x="52" y="192" width="22" height="40"/>
+  <text x="138" y="208" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
+  <text x="138" y="228" font-size="12.5" fill="#ffffff" text-anchor="middle">developer 1</text>
+  <rect x="24" y="430" width="196" height="124" rx="10" fill="#232141"/><rect x="32" y="438" width="180" height="108" rx="4" fill="#ffffff"/><path d="M24 554 H220 L236 568 H8 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="34" y1="559" x2="210" y2="559" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="106" y="562.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="4" y="568" width="236" height="5" rx="2.5" fill="#232141"/>
+  <rect x="42" y="448" width="160" height="88" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <use href="#mirrord" x="52" y="472" width="22" height="40"/>
+  <text x="138" y="488" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
+  <text x="138" y="508" font-size="12.5" fill="#ffffff" text-anchor="middle">developer 2</text>
+  <polyline points="560,440 560,190 224,190" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="300" y="182" font-size="12.5" fill="#4a44b8" text-anchor="middle">incoming traffic</text>
+  <polyline points="220,236 520,236 520,436" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="300" y="256" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
+  <text x="300" y="272" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
+  <text x="300" y="288" font-size="12.5" fill="#333344" text-anchor="middle">file reads and writes</text>
+  <polyline points="540,470 224,470" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="300" y="462" font-size="12.5" fill="#4a44b8" text-anchor="middle">incoming traffic</text>
+  <polyline points="220,516 536,516" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="300" y="536" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
+  <text x="300" y="552" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
+  <text x="300" y="568" font-size="12.5" fill="#333344" text-anchor="middle">file reads and writes</text>
 </svg>

@@ -36,10 +36,10 @@
   <rect x="0" y="0" width="1202" height="490" fill="#ffffff"/>
 
   <!-- Boundaries -->
-  <rect x="20" y="200" width="330" height="230" rx="8" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
-  <path d="M4 430 h362 l-8 12 h-346 z" fill="#232141"/>
+  <rect x="20" y="200" width="330" height="230" rx="10" fill="#232141"/><rect x="28" y="208" width="314" height="214" rx="4" fill="#F5F4FE"/>
+  <path d="M20 430 H350 L366 444 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="435" x2="340" y2="435" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="169" y="438.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="444" width="370" height="5" rx="2.5" fill="#232141"/>
   <text x="44" y="228" font-size="15" font-weight="700" fill="#4a44b8">CI runner</text>
-  <rect x="520" y="120" width="660" height="350" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
+  <path d="M542.0 470.0 A22 22 0 0 1 520.0 448.0 L520.0 232.0 A79.3 79.3 0 0 1 632.2 120.0 A122.0 122.0 0 0 1 850.0 120.0 A110.9 110.9 0 0 1 1048.0 120.0 A86.6 86.6 0 0 1 1180.0 232.0 L1180.0 448.0 A22 22 0 0 1 1158.0 470.0 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
   <text x="544" y="148" font-size="15" font-weight="700" fill="#4a44b8">Kubernetes cluster</text>
 
   <!-- Tests and microservice on the CI runner -->
@@ -91,5 +91,5 @@
   <text x="1080" y="390" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Database</text>
 
   <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="1162" y="102" width="36" height="36"/>
+  <use href="#k8s" x="1096" y="71" width="36" height="36"/>
 </svg>

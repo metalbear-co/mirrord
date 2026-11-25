@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 360" width="1100" height="360" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 540" width="1000" height="540" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">The traditional dev loop</title>
   <desc id="d">The traditional dev loop: code and test locally on a laptop, then deploy to staging and test on staging in the cloud. When tests fail on staging, the loop goes back to code. When the code works on staging, it goes to deploy to production.</desc>
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
+    <marker id="ring-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#756DF3"/>
     </marker>
     <symbol id="cloud" viewBox="0 0 48 32">
       <path d="M13 30 H37 A9 9 0 0 0 38 12 A13 13 0 0 0 13 10 A10 10 0 0 0 13 30 Z" fill="#ffffff" stroke="#232141" stroke-width="2.5" stroke-linejoin="round"/>
@@ -14,32 +14,30 @@
       <path d="M19 9 L15 13 L19 17 M29 9 L33 13 L29 17" fill="none" stroke="#756DF3" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     </symbol>
   </defs>
-  <rect x="0" y="0" width="1100" height="360" fill="#ffffff"/>
-
-  <!-- Loop steps: local work has a laptop, remote environments have a cloud -->
-  <rect x="30" y="30" width="200" height="96" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <use href="#code" x="106" y="44" width="48" height="32"/>
-  <text x="130" y="106" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Code</text>
-  <line x1="230" y1="78" x2="306" y2="78" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="310" y="30" width="200" height="96" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <use href="#code" x="386" y="44" width="48" height="32"/>
-  <text x="410" y="106" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Test locally</text>
-  <line x1="510" y1="78" x2="586" y2="78" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="590" y="30" width="200" height="96" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <use href="#cloud" x="666" y="44" width="48" height="32"/>
-  <text x="690" y="106" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Deploy to staging</text>
-  <line x1="690" y1="126" x2="690" y2="226" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="590" y="230" width="200" height="96" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <use href="#cloud" x="666" y="244" width="48" height="32"/>
-  <text x="690" y="306" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Test on staging</text>
-
-  <!-- Back to code -->
-  <polyline points="590,278 130,278 130,130" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="360" y="268" font-size="12.5" fill="#333344" text-anchor="middle">tests fail: fix and repeat</text>
-
-  <!-- Exit to production -->
-  <line x1="790" y1="278" x2="866" y2="278" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <rect x="870" y="230" width="200" height="96" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
-  <use href="#cloud" x="946" y="244" width="48" height="32"/>
-  <text x="970" y="306" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Deploy to production</text>
+  <rect x="0" y="0" width="1000" height="540" fill="#ffffff"/>
+  <path d="M198.9 199.3 A190 190 0 0 0 198.9 400.7" fill="none" stroke="#756DF3" stroke-width="7" stroke-linecap="round" marker-end="url(#ring-arrow)"/>
+  <path d="M259.3 461.1 A190 190 0 0 0 460.7 461.1" fill="none" stroke="#756DF3" stroke-width="7" stroke-linecap="round" marker-end="url(#ring-arrow)"/>
+  <path d="M521.1 400.7 A190 190 0 0 0 521.1 199.3" fill="none" stroke="#756DF3" stroke-width="7" stroke-linecap="round" marker-end="url(#ring-arrow)"/>
+  <path d="M460.7 138.9 A190 190 0 0 0 259.3 138.9" fill="none" stroke="#756DF3" stroke-width="7" stroke-linecap="round" marker-end="url(#ring-arrow)"/>
+  <path d="M518.4 141.6 C 548.4 71.6 610 77 686 77" fill="none" stroke="#756DF3" stroke-width="7" stroke-linecap="round" marker-end="url(#ring-arrow)"/>
+  <text x="360" y="76" font-size="13" fill="#333344" text-anchor="middle">tests fail: fix and repeat</text>
+  <rect x="700" y="40" width="270" height="74" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
+  <use href="#cloud" x="718" y="61" width="48" height="32"/>
+  <text x="776" y="83" font-size="17" font-weight="700" fill="#232141">Deploy to production</text>
+  <circle cx="225.6" cy="165.6" r="40" fill="#ffffff" stroke="#232141" stroke-width="2.5"/>
+  <use href="#code" x="199.6" y="147.6" width="52" height="35"/>
+  <rect x="99.2" y="141.6" width="74" height="48" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="136.4" y="171.6" font-size="17" font-weight="700" fill="#232141" text-anchor="middle">Code</text>
+  <circle cx="225.6" cy="434.4" r="40" fill="#ffffff" stroke="#232141" stroke-width="2.5"/>
+  <use href="#code" x="199.6" y="416.4" width="52" height="35"/>
+  <rect x="22.4" y="410.4" width="151" height="48" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="98.0" y="440.4" font-size="17" font-weight="700" fill="#232141" text-anchor="middle">Test locally</text>
+  <circle cx="494.4" cy="434.4" r="40" fill="#ffffff" stroke="#232141" stroke-width="2.5"/>
+  <use href="#cloud" x="468.4" y="416.4" width="52" height="35"/>
+  <rect x="546.4" y="410.4" width="199" height="48" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="646.0" y="440.4" font-size="17" font-weight="700" fill="#232141" text-anchor="middle">Deploy to staging</text>
+  <circle cx="494.4" cy="165.6" r="40" fill="#ffffff" stroke="#232141" stroke-width="2.5"/>
+  <use href="#cloud" x="468.4" y="147.6" width="52" height="35"/>
+  <rect x="546.4" y="141.6" width="180" height="48" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="636.4" y="171.6" font-size="17" font-weight="700" fill="#232141" text-anchor="middle">Test on staging</text>
 </svg>

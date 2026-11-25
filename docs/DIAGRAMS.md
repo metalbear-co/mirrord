@@ -40,7 +40,7 @@ Two diagrams show the style well. Copy from them when you start a new one:
 - Box: `rx="12"`. A box inside a box: `rx="8"` to `rx="10"`.
 - Database: a cylinder (an `ellipse` top on a `path` body), same stroke and colors as a box.
 - Queue or topic: a box with three thin vertical lines at the right end, or a plain box with the type in the secondary text.
-- Do not draw icons, logos, mascots, laptops, clouds, or hand-drawn shapes. Put the kind of thing in the text: "Kubernetes cluster", "Your machine". Logos are the one exception (see below).
+- Do not draw hand-drawn or sketchy shapes. Use the symbols in [Symbols](#symbols) to show what a thing is.
 
 ## Logos
 
@@ -48,7 +48,7 @@ Two diagrams show the style well. Copy from them when you start a new one:
 
 The Kubernetes logo shows what runs in the cluster. Use it in two places:
 
-- **On a Kubernetes cluster boundary.** Center a 36px logo on the top-right corner of the boundary, at `x + width - 18`, `y - 18`. Do not put it on a broker boundary, such as "Kafka cluster". A broker boundary gets the broker logo (see below).
+- **On a Kubernetes cluster.** On a cloud, center the logo on the top of the right corner bump, at `x + 0.9w` and `y + a/2 - c/2`, where `c` is the chord of that bump: `sqrt((0.2w)² + a²)`. On a boundary, center a 36px logo on the top-right corner, at `x + width - 18`, `y - 18`. Do not put it on a broker boundary, such as "Kafka cluster". A broker boundary gets the broker logo (see below).
 - **On a box that runs in the cluster, when the diagram has no Kubernetes cluster boundary.** Center a 36px logo on the bottom-right corner of the box, at `x + width - 18`, `y + height - 18`. Examples: the mirrord operator, a forwarder, the deployed app, a preview pod. Do not put it on brokers or managed services.
 
 Define the symbol once in `<defs>`, and place it with `<use href="#k8s" x="..." y="..." width="36" height="36"/>`. The logo half covers the corner, so make sure it does not cover an arrow or text, and grow the canvas when it goes past the edge:
@@ -95,14 +95,28 @@ The symbol is the mirror from `images/logo.svg` at the repository root, without 
 
 ### Laptop
 
-Draw a developer machine, a local process, or a CI runner as a laptop. The box is the screen. Add the keyboard as a dark bar under it, 16 wider on each side:
+Draw a developer machine, a local process, or a CI runner as a laptop: a dark screen frame and a keyboard deck under it. The rect `X, Y, W, H` is the screen frame. Arrows end at its edge.
 
 ```xml
-<rect x="X" y="Y" width="W" height="H" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-<path d="M X-16 Y+H h W+32 l -8 12 h -(W+16) z" fill="#232141"/>
+<rect x="X" y="Y" width="W" height="H" rx="10" fill="#232141"/>
+<rect x="X+8" y="Y+8" width="W-16" height="H-16" rx="4" fill="FILL"/>
+<path d="M X Y+H H X+W L X+W+16 Y+H+14 H X-16 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+<line x1="X+10" y1="Y+H+5" x2="X+W-10" y2="Y+H+5" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/>
+<rect x="X+W/2-16" y="Y+H+8.5" width="32" height="3.5" rx="1.5" fill="#232141"/>
+<rect x="X-20" y="Y+H+14" width="W+40" height="5" rx="2.5" fill="#232141"/>
 ```
 
-Calculate the path numbers. The screen keeps the fill of its role, for example `#756DF3` for a local process. When the laptop holds other boxes, such as `mirrord-layer` or a terminal, the screen is a boundary (`#F5F4FE`).
+Calculate the numbers. The laptop reaches 20 beyond the frame on each side and 19 below it. Put the content 8 or more inside the frame. `FILL` is the fill of the role: `#756DF3` when the screen is a local process, or the boundary fill `#F5F4FE` when the screen holds other boxes, such as `mirrord-layer`, a terminal, or `mirrord.json`. When the screen holds one box, such as "Local process", you can also put the box on a white screen, as in `operator-architecture.svg`.
+
+### Cluster
+
+Draw a Kubernetes cluster as a cloud when the diagram shows one cluster. The cloud holds the whole rect `x, y, w, h` that you plan for its content: the two top corners are half circles, and three bumps sit on the top edge. The bumps reach about 0.12 of `w` above the rect, and the corner bumps reach about 0.05 of `w` beside it, so leave that space free. Copy the path from `operator-architecture.svg` and scale it, or calculate it:
+
+- `a = min(0.32 h, 0.22 w)`
+- Points on the rect: `(x, y+a)`, `(x+0.17w, y)`, `(x+0.5w, y)`, `(x+0.8w, y)`, `(x+w, y+a)`.
+- Join the points with clockwise arcs (`A r r 0 0 1`). The two corner arcs have a radius of half their chord, and the three top arcs have a radius of 0.56 of their chord. The sides go straight down to rounded bottom corners (`r = 22`).
+
+Use `fill="#F5F4FE" stroke="#756DF3" stroke-width="2"`. Put the cluster label inside the rect, clear of the arcs. When the diagram shows several clusters side by side, such as the multi-cluster diagrams, draw each cluster as a boundary: there is no space for the bumps.
 
 ### Stack
 
@@ -131,9 +145,9 @@ Put an envelope on the arrow from a producer or publisher to a queue, topic, or 
 </symbol>
 ```
 
-### Code and cloud
+### Code and cloud icons
 
-The dev loop diagram uses a laptop with code (`#code`) for local work and a cloud (`#cloud`) for a remote environment. Copy them from `docs/.gitbook/assets/devloop.svg` when another diagram needs the same meaning.
+The dev loop diagram uses a laptop with code (`#code`) for local work and a cloud (`#cloud`) for a remote environment. The env vars diagram uses the cloud for the remote environment that the agent sends back. Copy them from `docs/.gitbook/assets/devloop.svg` when another diagram needs the same meaning. The dev loop is a ring, as in the original: keep the stages on a circle and the arrow out to production.
 
 ## Text
 
@@ -164,7 +178,7 @@ The dev loop diagram uses a laptop with code (`#code`) for local work and a clou
 </marker>
 ```
 
-- Use straight lines or right-angle `polyline`s. Do not use curves. Arrows must not cross boxes or labels.
+- Use straight lines or right-angle `polyline`s. Do not use curves, except for a loop such as the dev loop ring. Arrows must not cross boxes or labels.
 - Flow goes left to right, or top to bottom.
 
 ## Check a diagram

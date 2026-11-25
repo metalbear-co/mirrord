@@ -101,8 +101,8 @@
   <text x="715" y="435" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">rule: route = &lt;id&gt;</text>
   <line x1="830" y1="410" x2="956" y2="410" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="889" y="396" font-size="12.5" fill="#4a44b8" text-anchor="middle">matched messages</text>
-  <rect x="960" y="370" width="216" height="80" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M944 450 h248 l-8 12 h-232 z" fill="#232141"/>
+  <rect x="960" y="370" width="216" height="80" rx="10" fill="#232141"/><rect x="968" y="378" width="200" height="64" rx="4" fill="#756DF3"/>
+  <path d="M960 450 H1176 L1192 464 H944 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="970" y1="455" x2="1166" y2="455" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1052" y="458.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="940" y="464" width="256" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="974" y="390" width="22" height="40"/>
   <text x="1081" y="406" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer</text>
   <text x="1081" y="426" font-size="12.5" fill="#ffffff" text-anchor="middle">mirrord exec</text>

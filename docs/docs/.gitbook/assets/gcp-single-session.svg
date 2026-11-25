@@ -72,8 +72,8 @@
   <text x="200" y="402" font-size="15" font-weight="700" font-family="Menlo, Consolas, monospace" fill="#232141" text-anchor="middle">session-output-sub</text>
   <text x="200" y="422" font-size="12.5" fill="#333344" text-anchor="middle">temporary subscription</text>
   <line x1="200" y1="438" x2="200" y2="474" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <rect x="70" y="478" width="260" height="64" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M54 542 h292 l-8 12 h-276 z" fill="#232141"/>
+  <rect x="70" y="478" width="260" height="64" rx="10" fill="#232141"/><rect x="78" y="486" width="244" height="48" rx="4" fill="#756DF3"/>
+  <path d="M70 542 H330 L346 556 H54 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="80" y1="547" x2="320" y2="547" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="184" y="550.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="50" y="556" width="300" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="84" y="490" width="22" height="40"/>
   <text x="213" y="506" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord 1</text>
   <text x="213" y="526" font-size="12.5" fill="#ffffff" text-anchor="middle">user 1's local app</text>

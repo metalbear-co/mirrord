@@ -80,8 +80,8 @@
   <text x="765" y="252" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" text-anchor="middle">-orders:wait</text>
   <line x1="880" y1="230" x2="946" y2="230" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="913" y="218" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">BLPOP</text>
-  <rect x="950" y="190" width="230" height="80" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M934 270 h262 l-8 12 h-246 z" fill="#232141"/>
+  <rect x="950" y="190" width="230" height="80" rx="10" fill="#232141"/><rect x="958" y="198" width="214" height="64" rx="4" fill="#756DF3"/>
+  <path d="M950 270 H1180 L1196 284 H934 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="960" y1="275" x2="1170" y2="275" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1049" y="278.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="930" y="284" width="270" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="964" y="210" width="22" height="40"/>
   <text x="1078" y="226" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Your local process</text>
   <text x="1078" y="248" font-size="12.5" fill="#ffffff" text-anchor="middle">runs with <tspan font-family="Menlo, Consolas, monospace">mirrord exec</tspan></text>

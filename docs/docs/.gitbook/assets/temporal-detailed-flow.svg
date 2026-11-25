@@ -64,8 +64,8 @@
   <line x1="800" y1="162" x2="876" y2="162" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <rect x="880" y="84" width="210" height="44" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <text x="985" y="111" font-size="12.5" font-weight="700" fill="#232141" text-anchor="middle">cluster worker</text>
-  <rect x="880" y="140" width="210" height="44" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M864 184 h242 l-8 12 h-226 z" fill="#232141"/>
+  <rect x="880" y="140" width="210" height="44" rx="10" fill="#232141"/><rect x="888" y="148" width="194" height="28" rx="4" fill="#756DF3"/>
+  <path d="M880 184 H1090 L1106 198 H864 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="890" y1="189" x2="1080" y2="189" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="969" y="192.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="860" y="198" width="250" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="888" y="146" width="18" height="32"/>
   <text x="995" y="167" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">dev local worker</text>
 
@@ -88,8 +88,8 @@
   <line x1="800" y1="282" x2="876" y2="282" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <rect x="880" y="204" width="210" height="44" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <text x="985" y="231" font-size="12.5" font-weight="700" fill="#232141" text-anchor="middle">cluster worker</text>
-  <rect x="880" y="260" width="210" height="44" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M864 304 h242 l-8 12 h-226 z" fill="#232141"/>
+  <rect x="880" y="260" width="210" height="44" rx="10" fill="#232141"/><rect x="888" y="268" width="194" height="28" rx="4" fill="#756DF3"/>
+  <path d="M880 304 H1090 L1106 318 H864 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="890" y1="309" x2="1080" y2="309" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="969" y="312.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="860" y="318" width="250" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="888" y="266" width="18" height="32"/>
   <text x="995" y="287" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">dev local worker</text>
 
@@ -165,8 +165,8 @@
   <text x="220" y="756" font-size="12.5" fill="#333344" text-anchor="middle">receives replies on the real queue name</text>
 
   <!-- Your machine -->
-  <rect x="20" y="796" width="1160" height="176" rx="8" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
-  <path d="M4 972 h1192 l-8 12 h-1176 z" fill="#232141"/>
+  <rect x="20" y="796" width="1160" height="176" rx="10" fill="#232141"/><rect x="28" y="804" width="1144" height="160" rx="4" fill="#F5F4FE"/>
+  <path d="M20 972 H1180 L1196 986 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="977" x2="1170" y2="977" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="584" y="980.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="986" width="1200" height="5" rx="2.5" fill="#232141"/>
   <text x="36" y="822" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
   <text x="36" y="842" font-size="12.5" fill="#333344">Local workers run with mirrord. They connect through the operator proxy, not to Temporal directly.</text>
   <rect x="40" y="858" width="420" height="94" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>

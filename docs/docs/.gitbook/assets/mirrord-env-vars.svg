@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 340" width="1202" height="340" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -35 1202 375" width="1202" height="375" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">How mirrord loads remote environment variables</title>
-  <desc id="d">mirrord-layer in your local process sends an ENV-REQUEST to the mirrord agent in the remote cluster. The agent reads the environment of the target pod from /proc/container_pid/environ. The agent sends the variables back to mirrord-layer as REMOTE-ENV, and mirrord-layer sets them before the local process starts.</desc>
+  <desc id="d">mirrord-layer in your local process sends an ENV-REQUEST to the mirrord agent in the remote cluster. The agent reads the environment of the target pod from /proc/container_pid/environ. The agent sends the variables, shown as a cloud, back to mirrord-layer as REMOTE-ENV, and mirrord-layer sets them before the local process starts.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -32,14 +32,17 @@
 <path d="M213.6,279.8l122.5-93.7c0.6-0.6,1.8-0.3,2.3,0.3c0.6,0.9,0.3,1.8-0.3,2.3l-122.5,93.7c-0.3,0.3-0.6,0.3-0.9,0.3 c-0.6,0-1.2-0.3-1.5-0.6C212.7,281.6,212.7,280.4,213.6,279.8z"/>
 <path d="M243.9,427.5c11.1-4.4,16-21.4,12-40.5c-0.3-0.3-0.6-0.6-0.9-0.9c2,15.9-1.2,29.1-7.6,30.2c-7.3,1.5-15.8-12-19-29.7 c-0.3-1.2-0.3-2.3-0.6-3.5h0.9l12.5-1.5l-11.1-6.5l-3.2-1.8c0-10,2.3-17.6,6.4-20.3c-1.2-2.1-2.3-4.1-3.8-6.2 c-7-4.1-13.7-5-19.3-2.6c-6.4,2.6-11.1,9.4-12.8,18.8c-1.8,10-0.3,22,4.4,33.5c3.5,8.8,8.5,16.4,14,22c0,0,0.3,0,0.3,0.3 c0.6,0.3,1.2,0.9,1.5,1.2C225.9,427.2,235.8,430.7,243.9,427.5z M204.9,319.1c11.1,2.1,19.3,9.7,24.2,15.6c2,2.3,3.8,5,5.5,7.3 c0,0,0,0,0,0.3c2,2.9,3.5,5.6,5,8.2c1.2,1.8,2,3.5,3.2,5.6l1.5,2.3c3.8,6.5,7.6,12.9,12.3,19.1c5.8,7.3,11.7,12.9,18.4,16.7 c-0.6-5-2-9.7-4.4-14.1c-0.9-1.8-0.3-3.8,1.5-4.7c1.8-0.9,3.8-0.3,4.7,1.5c2.9,5.6,4.7,11.5,5,17.9c0,0.9,0.3,3.5-1.5,5.6 c-1.2,1.2-2.6,1.8-4.1,1.8c-1.5,0-2.9-0.6-4.4-1.2c-2.6-1.5-5.3-3.2-7.9-5.3c1.7,18.5-5,34.1-17.5,39.3c-2.9,1.2-5.8,1.8-8.8,1.8 c-8.5,0-17.5-4.4-25.7-11.7c-11.4-6.2-21.6-14.7-29.5-24.7c-1.2-1.5-0.9-3.8,0.6-5c1.5-1.2,3.8-0.9,5,0.6c3.2,4.1,7,7.9,11.1,11.5 c-1.2-2.3-2.6-5-3.5-7.6c-5-12.6-6.7-25.8-4.7-37.3c2-12,8.2-20.6,16.9-24.1c4.1-1.8,8.8-2.1,13.7-1.2c-4.4-4.4-10.2-8.8-17.5-10 c-8.2-1.5-16.6,1.5-20.4,7.3c-1.2,1.5-3.2,2.1-4.7,0.9c-1.5-1.2-2-3.2-0.9-4.7C183,320.9,194.1,317.1,204.9,319.1z"/>
     </symbol>
+    <symbol id="cloud" viewBox="0 0 48 32">
+      <path d="M13 30 H37 A9 9 0 0 0 38 12 A13 13 0 0 0 13 10 A10 10 0 0 0 13 30 Z" fill="#ffffff" stroke="#232141" stroke-width="2.5" stroke-linejoin="round"/>
+    </symbol>
   </defs>
-  <rect x="0" y="0" width="1202" height="340" fill="#ffffff"/>
+  <rect x="0" y="-35" width="1202" height="375" fill="#ffffff"/>
 
   <!-- Boundaries -->
-  <rect x="20" y="40" width="360" height="270" rx="8" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
-  <path d="M4 310 h392 l-8 12 h-376 z" fill="#232141"/>
+  <rect x="20" y="40" width="360" height="270" rx="10" fill="#232141"/><rect x="28" y="48" width="344" height="254" rx="4" fill="#F5F4FE"/>
+  <path d="M20 310 H380 L396 324 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="315" x2="370" y2="315" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="184" y="318.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="324" width="400" height="5" rx="2.5" fill="#232141"/>
   <text x="44" y="68" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
-  <rect x="520" y="40" width="660" height="270" rx="12" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
+  <path d="M542.0 310.0 A22 22 0 0 1 520.0 288.0 L520.0 126.4 A70.8 70.8 0 0 1 632.2 40.0 A122.0 122.0 0 0 1 850.0 40.0 A110.9 110.9 0 0 1 1048.0 40.0 A78.9 78.9 0 0 1 1180.0 126.4 L1180.0 288.0 A22 22 0 0 1 1158.0 310.0 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
   <text x="544" y="68" font-size="15" font-weight="700" fill="#4a44b8">Remote cluster</text>
 
   <!-- Local process with mirrord-layer -->
@@ -55,6 +58,7 @@
   <text x="470" y="186" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">ENV-REQUEST</text>
   <line x1="590" y1="240" x2="359" y2="240" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="470" y="230" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">REMOTE-ENV</text>
+  <use href="#cloud" x="450" y="248" width="40" height="27"/>
 
   <!-- mirrord agent -->
   <rect x="590" y="150" width="200" height="120" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
@@ -66,11 +70,12 @@
   <text x="850" y="186" font-size="12.5" fill="#333344" text-anchor="middle">reads</text>
   <line x1="910" y1="240" x2="794" y2="240" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="850" y="230" font-size="12.5" fill="#333344" text-anchor="middle">variables</text>
+  <use href="#cloud" x="830" y="248" width="40" height="27"/>
 
   <!-- Target pod -->
   <rect x="910" y="150" width="250" height="120" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <text x="1035" y="200" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Target pod</text>
   <text x="1035" y="226" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">/proc/&lt;container_pid&gt;/environ</text>
   <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="1162" y="22" width="36" height="36"/>
+  <use href="#k8s" x="1096" y="-14" width="36" height="36"/>
 </svg>

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 660" width="1200" height="660" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -45 1200 705" width="1200" height="705" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">Preview environment creation workflow</title>
   <desc id="d">Step 1: on your laptop, you run mirrord preview start with a container image from a registry, a mirrord.json file, and an optional env key. Step 2: mirrord.json steals incoming traffic with a header filter, and mirrord replaces {{ key }} in every filter with the env key. The CLI prints the env key and the preview session. Step 3: in the staging cluster, a temporary cars-service preview pod starts with your image and lives until its TTL expires. Requests to cars-service that match the env key filter go to the preview pod.</desc>
   <defs>
@@ -33,11 +33,11 @@
 <path d="M243.9,427.5c11.1-4.4,16-21.4,12-40.5c-0.3-0.3-0.6-0.6-0.9-0.9c2,15.9-1.2,29.1-7.6,30.2c-7.3,1.5-15.8-12-19-29.7 c-0.3-1.2-0.3-2.3-0.6-3.5h0.9l12.5-1.5l-11.1-6.5l-3.2-1.8c0-10,2.3-17.6,6.4-20.3c-1.2-2.1-2.3-4.1-3.8-6.2 c-7-4.1-13.7-5-19.3-2.6c-6.4,2.6-11.1,9.4-12.8,18.8c-1.8,10-0.3,22,4.4,33.5c3.5,8.8,8.5,16.4,14,22c0,0,0.3,0,0.3,0.3 c0.6,0.3,1.2,0.9,1.5,1.2C225.9,427.2,235.8,430.7,243.9,427.5z M204.9,319.1c11.1,2.1,19.3,9.7,24.2,15.6c2,2.3,3.8,5,5.5,7.3 c0,0,0,0,0,0.3c2,2.9,3.5,5.6,5,8.2c1.2,1.8,2,3.5,3.2,5.6l1.5,2.3c3.8,6.5,7.6,12.9,12.3,19.1c5.8,7.3,11.7,12.9,18.4,16.7 c-0.6-5-2-9.7-4.4-14.1c-0.9-1.8-0.3-3.8,1.5-4.7c1.8-0.9,3.8-0.3,4.7,1.5c2.9,5.6,4.7,11.5,5,17.9c0,0.9,0.3,3.5-1.5,5.6 c-1.2,1.2-2.6,1.8-4.1,1.8c-1.5,0-2.9-0.6-4.4-1.2c-2.6-1.5-5.3-3.2-7.9-5.3c1.7,18.5-5,34.1-17.5,39.3c-2.9,1.2-5.8,1.8-8.8,1.8 c-8.5,0-17.5-4.4-25.7-11.7c-11.4-6.2-21.6-14.7-29.5-24.7c-1.2-1.5-0.9-3.8,0.6-5c1.5-1.2,3.8-0.9,5,0.6c3.2,4.1,7,7.9,11.1,11.5 c-1.2-2.3-2.6-5-3.5-7.6c-5-12.6-6.7-25.8-4.7-37.3c2-12,8.2-20.6,16.9-24.1c4.1-1.8,8.8-2.1,13.7-1.2c-4.4-4.4-10.2-8.8-17.5-10 c-8.2-1.5-16.6,1.5-20.4,7.3c-1.2,1.5-3.2,2.1-4.7,0.9c-1.5-1.2-2-3.2-0.9-4.7C183,320.9,194.1,317.1,204.9,319.1z"/>
     </symbol>
   </defs>
-  <rect x="0" y="0" width="1200" height="660" fill="#ffffff"/>
+  <rect x="0" y="-45" width="1200" height="705" fill="#ffffff"/>
 
   <!-- Your machine -->
-  <rect x="20" y="20" width="540" height="620" rx="8" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
-  <path d="M4 640 h572 l-8 12 h-556 z" fill="#232141"/>
+  <rect x="20" y="20" width="540" height="620" rx="10" fill="#232141"/><rect x="28" y="28" width="524" height="604" rx="4" fill="#F5F4FE"/>
+  <path d="M20 640 H560 L576 654 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="645" x2="550" y2="645" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="274" y="648.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="654" width="580" height="5" rx="2.5" fill="#232141"/>
   <text x="40" y="48" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
 
   <!-- The command -->
@@ -82,7 +82,7 @@
   <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * session: preview-session-cars-service-&lt;id&gt;</text>
 
   <!-- Staging cluster -->
-  <rect x="600" y="20" width="580" height="620" rx="16" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
+  <path d="M622.0 640.0 A22 22 0 0 1 600.0 618.0 L600.0 145.0 A79.0 79.0 0 0 1 696.6 20.0 A105.0 105.0 0 0 1 884.0 20.0 A95.4 95.4 0 0 1 1054.4 20.0 A84.4 84.4 0 0 1 1168.0 145.0 L1168.0 618.0 A22 22 0 0 1 1146.0 640.0 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
   <text x="620" y="48" font-size="15" font-weight="700" fill="#4a44b8">Staging cluster</text>
 
   <!-- Deployed services -->
@@ -116,5 +116,5 @@
   <polyline points="540,140 580,140 580,395 616,395" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
 
   <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="1162" y="2" width="36" height="36"/>
+  <use href="#k8s" x="1093" y="-20" width="36" height="36"/>
 </svg>

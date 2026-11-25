@@ -125,8 +125,8 @@
   <line x1="1050" y1="606" x2="1050" y2="722" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
 
   <!-- One local session and one target app receive both streams -->
-  <rect x="330" y="638" width="540" height="56" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M314 694 h572 l-8 12 h-556 z" fill="#232141"/>
+  <rect x="330" y="638" width="540" height="56" rx="10" fill="#232141"/><rect x="338" y="646" width="524" height="40" rx="4" fill="#756DF3"/>
+  <path d="M330 694 H870 L886 708 H314 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="340" y1="699" x2="860" y2="699" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="584" y="702.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="310" y="708" width="580" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="344" y="648" width="20" height="36"/>
   <text x="600" y="662" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord 1</text>
   <text x="600" y="682" font-size="12.5" fill="#ffffff" text-anchor="middle">local app, gets matched messages from both streams</text>

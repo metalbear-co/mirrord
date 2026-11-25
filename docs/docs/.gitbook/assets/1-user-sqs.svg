@@ -74,8 +74,8 @@
   <text x="592" y="347" font-size="12.5" fill="#333344" text-anchor="middle">for local application x</text>
   <line x1="735" y1="330" x2="918" y2="330" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="840" y="320" font-size="12.5" fill="#4a44b8" text-anchor="middle">consume messages</text>
-  <rect x="920" y="290" width="260" height="80" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M904 370 h292 l-8 12 h-276 z" fill="#232141"/>
+  <rect x="920" y="290" width="260" height="80" rx="10" fill="#232141"/><rect x="928" y="298" width="244" height="64" rx="4" fill="#756DF3"/>
+  <path d="M920 370 H1180 L1196 384 H904 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="930" y1="375" x2="1170" y2="375" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1034" y="378.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="900" y="384" width="300" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="934" y="310" width="22" height="40"/>
   <text x="1064" y="318" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Application</text>
   <text x="1064" y="338" font-size="12.5" fill="#ffffff" text-anchor="middle">running locally with mirrord</text>

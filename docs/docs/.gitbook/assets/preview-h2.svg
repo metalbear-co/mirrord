@@ -36,8 +36,8 @@
   <rect x="0" y="-2" width="1202" height="802" fill="#ffffff"/>
 
   <!-- Developer -->
-  <rect x="20" y="58" width="220" height="64" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <path d="M4 122 h252 l-8 12 h-236 z" fill="#232141"/>
+  <rect x="20" y="58" width="220" height="64" rx="10" fill="#232141"/><rect x="28" y="66" width="204" height="48" rx="4" fill="#756DF3"/>
+  <path d="M20 122 H240 L256 136 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="127" x2="230" y2="127" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="114" y="130.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="136" width="260" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="34" y="70" width="22" height="40"/>
   <text x="142" y="85" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord CLI</text>
   <text x="142" y="106" font-size="12.5" fill="#ffffff" text-anchor="middle">preview start, stop, status</text>
