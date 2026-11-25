@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 )
 
@@ -67,8 +68,33 @@ func requireEnv(key string) string {
 	return val
 }
 
-func main() {
+// newClient connects the way the pod's env says. A real namespace comes as
+// SERVICEBUS_FULLY_QUALIFIED_NAMESPACE with no key: the app signs in as the
+// pod's Entra identity (workload identity env and token file on the pod, or
+// `az login` on a laptop). Anything else is a connection string, which is how
+// the emulator is reached. Returns the host:port the TCP probe below checks.
+func newClient() (*azservicebus.Client, string) {
+	if fqns := os.Getenv("SERVICEBUS_FULLY_QUALIFIED_NAMESPACE"); fqns != "" {
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			log.Fatalf("Failed to build the Azure credential: %v", err)
+		}
+		client, err := azservicebus.NewClient(fqns, cred, nil)
+		if err != nil {
+			log.Fatalf("Failed to create Service Bus client for %s: %v", fqns, err)
+		}
+		return client, fqns + ":5671"
+	}
+
 	connStr := requireEnv("SERVICEBUS_CONNECTION_STRING")
+	client, err := azservicebus.NewClientFromConnectionString(connStr, nil)
+	if err != nil {
+		log.Fatalf("Failed to create Service Bus client: %v", err)
+	}
+	return client, extractHost(connStr)
+}
+
+func main() {
 	_, printProps := os.LookupEnv("SERVICEBUS_TEST_PRINT_PROPS")
 
 	mode := modeFromEnv()
@@ -84,10 +110,7 @@ func main() {
 	defer cancel()
 
 	stderr("Creating AMQP client (lazy, no network yet)...")
-	client, err := azservicebus.NewClientFromConnectionString(connStr, nil)
-	if err != nil {
-		log.Fatalf("Failed to create Service Bus client: %v", err)
-	}
+	client, probeEndpoint := newClient()
 	defer client.Close(ctx)
 	stderr("Client created")
 
@@ -99,10 +122,10 @@ func main() {
 	defer receiver.Close(ctx)
 	stderr("Receiver created")
 
-	// Raw TCP probe: verify we can reach the emulator before the SDK
+	// Raw TCP probe: verify we can reach the broker before the SDK
 	// tries its own connection. This tells us whether the network path
 	// through mirrord works at all.
-	if ep := extractHost(connStr); ep != "" {
+	if ep := probeEndpoint; ep != "" {
 		stderr("TCP probe to %s ...", ep)
 		probeConn, probeErr := net.DialTimeout("tcp", ep, 10*time.Second)
 		if probeErr != nil {
