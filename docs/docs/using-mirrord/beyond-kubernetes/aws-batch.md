@@ -239,7 +239,7 @@ Only jobs that turn on admission are replaced. Add it to the application contain
 | Variable | Value |
 | --- | --- |
 | `MIRRORD_REMOTE_ADMISSION` | Any value turns admission on. Without it, the job starts as it does without mirrord's admission, with no delay, and is never replaced. |
-| `MIRRORD_REMOTE_ADMISSION_TIMEOUT` | How long a job waits for the Operator's answer, in whole seconds. Defaults to `5`. |
+| `MIRRORD_REMOTE_ADMISSION_TIMEOUT` | How long a job waits for the Operator's answer, in whole seconds. Defaults to `5`. With `0` or `1`, the job never waits, and is never replaced. |
 
 With admission on, the bootstrap holds the job's application before it starts, and asks the Operator whether a developer replaces the job. A job that no `replace_task` service matches starts its application as soon as the answer arrives, usually within a second. A job that one matches is held until its local process exits.
 
