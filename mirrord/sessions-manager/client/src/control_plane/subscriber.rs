@@ -47,14 +47,17 @@ pub(crate) trait ControlPlaneSubscription {
         scope: &ServiceScope,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError>;
 
-    /// Maps a wire event to the caller-facing output.
+    /// Maps a wire event to the caller-facing output, or to [`None`] for an event this feed has
+    /// no use for, which [`ControlPlaneSubscriber`] skips.
     ///
     /// An error here marks the event terminal: [`ControlPlaneSubscriber`] ends the subscription
     /// instead of reconnecting. [`ControlPlaneEvent::Superseded`] is the motivating case — a newer
     /// attachment has taken over this identity, and reopening would make the two clients displace
     /// each other indefinitely.
-    fn extract(&self, event: ControlPlaneEvent)
-    -> Result<Self::Output, SessionsManagerClientError>;
+    fn extract(
+        &self,
+        event: ControlPlaneEvent,
+    ) -> Result<Option<Self::Output>, SessionsManagerClientError>;
 }
 
 /// Drives a control-plane subscription and yields its typed events across reconnects.
@@ -115,39 +118,42 @@ where
             return Err(SessionsManagerClientError::SubscriptionClosed);
         }
 
-        let event = match self
-            .retry
-            .run_until(
-                deadline,
-                || {
-                    let state = self.state.clone();
-                    async move { state.lock().await.next_event_attempt(deadline).await }
-                },
-                ControlPlaneAttemptError::should_retry,
-            )
-            .await
-        {
-            Ok(event) => event,
-            Err(error) => {
-                self.closed = true;
-                return Err(error.into_source());
-            }
-        };
+        loop {
+            let event = match self
+                .retry
+                .run_until(
+                    deadline,
+                    || {
+                        let state = self.state.clone();
+                        async move { state.lock().await.next_event_attempt(deadline).await }
+                    },
+                    ControlPlaneAttemptError::should_retry,
+                )
+                .await
+            {
+                Ok(event) => event,
+                Err(error) => {
+                    self.closed = true;
+                    return Err(error.into_source());
+                }
+            };
 
-        let state = self.state.lock().await;
-        match state.subscription.extract(event) {
-            Ok(output) => {
-                self.retry.reset();
-                Ok(output)
-            }
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    subscription = state.subscription.name(),
-                    "sessions-manager control-plane subscription returned a terminal event"
-                );
-                self.closed = true;
-                Err(error)
+            let state = self.state.lock().await;
+            match state.subscription.extract(event) {
+                Ok(Some(output)) => {
+                    self.retry.reset();
+                    return Ok(output);
+                }
+                Ok(None) => self.retry.reset(),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        subscription = state.subscription.name(),
+                        "sessions-manager control-plane subscription returned a terminal event"
+                    );
+                    self.closed = true;
+                    return Err(error);
+                }
             }
         }
     }
@@ -353,10 +359,13 @@ mod tests {
         fn extract(
             &self,
             event: ControlPlaneEvent,
-        ) -> Result<Self::Output, SessionsManagerClientError> {
+        ) -> Result<Option<Self::Output>, SessionsManagerClientError> {
             match event {
-                ControlPlaneEvent::Assignment(_) => Ok(()),
+                ControlPlaneEvent::Assignment(_) => Ok(Some(())),
                 ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
+                ControlPlaneEvent::Matched(_)
+                | ControlPlaneEvent::Ended(_)
+                | ControlPlaneEvent::Admission(_) => Ok(None),
             }
         }
     }
@@ -370,6 +379,7 @@ mod tests {
             &self,
             _scope: &ServiceScope,
             _subscription: &AssignmentSubscription,
+            _subscription_options: Option<&str>,
         ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
             unreachable!("TestSubscription opens its own streams")
         }

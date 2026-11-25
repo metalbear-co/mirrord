@@ -56,6 +56,12 @@ pub enum SessionsManagerClientError {
     ProtocolError(#[from] SessionsManagerProtocolError),
     #[error("authorization header is invalid")]
     InvalidAuthorization,
+    #[error("the sessions-manager subscription options are not a valid header value")]
+    InvalidSubscriptionOptions,
+    /// The operator answered 400, with its message as the body. A registration's options are
+    /// what it validates, so the message names the filter or option it refused.
+    #[error("the operator refused the sessions-manager subscription: {0}")]
+    SubscriptionRefused(String),
     #[error("assignment contains an invalid operator data-plane endpoint")]
     InvalidOperatorDataPlaneEndpoint,
     #[error("sessions-manager shared secret is not a valid header value")]

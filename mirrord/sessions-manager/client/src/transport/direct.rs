@@ -268,10 +268,13 @@ impl DirectTransport {
 }
 
 impl SessionsManagerTransport for DirectTransport {
+    /// Ignores `subscription_options`: the standalone and MetalBear Cloud sessions-managers select
+    /// no tasks by their tags, and the CLI refuses a session that asks them to.
     async fn subscribe_assignments(
         &self,
         scope: &ServiceScope,
         subscription: &AssignmentSubscription,
+        _subscription_options: Option<&str>,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
         let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
         let endpoint = self
