@@ -64,10 +64,14 @@ impl Target {
 
     /// The directory where cargo puts the artifacts for this target.
     pub fn out_dir(&self, options: CargoOptions) -> PathBuf {
+        let target_dir = env::var_os("CARGO_TARGET_DIR").map_or_else(
+            || relative_to_root(Path::new("target")),
+            |path| std::path::absolute(path).expect("Failed to resolve target directory"),
+        );
         let mode = if options.release { "release" } else { "debug" };
         match self.cargo_target(options.cross) {
-            Some(triple) => Path::new("target").join(triple).join(mode),
-            None => Path::new("target").join(mode),
+            Some(triple) => target_dir.join(triple).join(mode),
+            None => target_dir.join(mode),
         }
     }
 
