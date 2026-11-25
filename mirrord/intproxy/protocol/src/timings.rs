@@ -7,7 +7,6 @@
 
 use bincode::{Decode, Encode};
 use mirrord_protocol::FileRequest;
-use strum::VariantArray;
 use strum_macros::{IntoStaticStr, VariantArray};
 
 use crate::{IncomingRequest, LayerToProxyMessage, OutgoingRequest};
@@ -38,7 +37,11 @@ pub enum CallKind {
 impl CallKind {
     /// Every kind, in the order they are declared. A kind's position here is its `as usize`
     /// value, which the layer uses as an index into its counters.
-    pub const ALL: &'static [Self] = <Self as VariantArray>::VARIANTS;
+    ///
+    /// The trait is named by its path and not imported: with strum's `derive` feature on, which
+    /// another workspace building this crate may turn on, importing it would also bring in a
+    /// derive macro of the same name as the one from `strum_macros`.
+    pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
 
     /// The kind of the call behind `message`, or [`None`] when the message is not a call the
     /// application waits on the cluster for.
