@@ -13,8 +13,18 @@ use mirrord_protocol_io::{Client, ProtocolEndpoint};
 use thiserror::Error;
 use tokio_tungstenite::{
     WebSocketStream,
-    tungstenite::{self, Message},
+    tungstenite::{self, Message, protocol::CloseFrame},
 };
+
+/// The close code and reason with which the sessions-manager's data plane closes one side of a
+/// room after the other side left it.
+///
+/// That is how a sessions-manager connection ends normally, so [`OperatorConnection`] reports it
+/// as the end of its stream, as for a connection that ended without a close frame, and not as an
+/// [`OperatorConnectionError`]. Other close frames, such as the policy close of a refused claim,
+/// stay errors that name why the connection closed.
+const PEER_LEFT_CLOSE_CODE: u16 = 4002;
+const PEER_LEFT_CLOSE_REASON: &str = "peer-left";
 
 /// A mirrord-protocol connection over an HTTP-upgraded WebSocket.
 ///
@@ -65,6 +75,7 @@ impl<E: ProtocolEndpoint> Stream for OperatorConnection<E> {
                     // `tungstenite` can surface ping messages, but handles them automatically
                     continue;
                 }
+                Some(Ok(Message::Close(Some(frame)))) if is_peer_left(&frame) => None,
                 Some(Ok(msg @ (Message::Text(..) | Message::Frame(..) | Message::Close(..)))) => {
                     Some(Err(OperatorConnectionError::InvalidMessage(msg.into())))
                 }
@@ -144,6 +155,12 @@ impl<E> Sink<Bytes> for OperatorConnection<E> {
             .start_send_unpin(Message::Binary(item))
             .map_err(From::from)
     }
+}
+
+/// Whether `frame` is the sessions-manager's close after the other side of the room left (see
+/// [`PEER_LEFT_CLOSE_CODE`]).
+fn is_peer_left(frame: &CloseFrame) -> bool {
+    u16::from(frame.code) == PEER_LEFT_CLOSE_CODE && frame.reason == PEER_LEFT_CLOSE_REASON
 }
 
 /// Errors that can occur when working with [`OperatorConnection`].

@@ -64,8 +64,11 @@ impl ControlPlaneSubscription for WatchSubscription {
             ControlPlaneEvent::Matched(task) => Ok(Some(TaskEvent::Matched(task))),
             ControlPlaneEvent::Ended(task) => Ok(Some(TaskEvent::Ended(task))),
             ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
-            // A watch is never given a room, nor is it an agent.
-            ControlPlaneEvent::Assignment(_) | ControlPlaneEvent::Admission(_) => Ok(None),
+            // A watch is never given a room, nor is it an agent, and it names no replica that
+            // could be gone.
+            ControlPlaneEvent::Assignment(_)
+            | ControlPlaneEvent::Admission(_)
+            | ControlPlaneEvent::Gone => Ok(None),
         }
     }
 }

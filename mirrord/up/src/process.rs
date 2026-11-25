@@ -717,13 +717,21 @@ impl TaskService {
         format!("{}/{}", self.name, short_replica(replica)).into()
     }
 
-    /// Starts the instances of the replaced tasks whose owner connections opened, and reaps the
-    /// instances that exited, reporting their exit codes to replaced tasks. Their exit doesn't
-    /// end the run, and neither does a failure to reap one: its task ends as lost.
+    /// Starts the instances of the replaced tasks whose owner connections opened, stops those of
+    /// the replaced tasks whose owner connections gave up, and reaps the instances that exited,
+    /// reporting their exit codes to replaced tasks. Their exit doesn't end the run, and neither
+    /// does a failure to reap one: its task ends as lost.
     ///
     /// Never waits, so that a run that ends meanwhile can't lose a code. What is left of an
-    /// exited instance's tree is killed in `stopping`.
-    fn reap_instances(&mut self, output: &mut JoinSet<()>, stopping: &mut Stopping) {
+    /// exited instance's tree is killed in `stopping`, and a stopped instance is given `grace`
+    /// there.
+    fn reap_instances(
+        &mut self,
+        output: &mut JoinSet<()>,
+        stopping: &mut Stopping,
+        grace: Duration,
+    ) {
+        self.stop_lost_tasks(stopping, grace);
         if matches!(self.phase, TaskPhase::Running) {
             let opened: Vec<_> = self
                 .owners
@@ -762,6 +770,30 @@ impl TaskService {
             }
             // Only the leader has exited, as with a pre-command.
             force_stop_instance(stopping, service);
+        }
+    }
+
+    /// Stops the instances of the replaced tasks whose owner connections gave up (see
+    /// [`Owner::gave_up`]) and printed why. The companion has ended such a task as lost, or the
+    /// operator says it is gone, so no exit code can reach it, and its local process has nothing
+    /// left to run for. The task stays seen, so that it starts no second instance.
+    fn stop_lost_tasks(&mut self, stopping: &mut Stopping, grace: Duration) {
+        let lost: Vec<_> = self
+            .owners
+            .iter()
+            .filter(|(_, owner)| owner.gave_up())
+            .map(|(task, _)| task.clone())
+            .collect();
+        for task in lost {
+            self.owners.remove(&task);
+            if let Some(position) = self
+                .instances
+                .iter()
+                .position(|instance| instance.task == task)
+            {
+                let instance = self.instances.swap_remove(position);
+                stop_instance(stopping, instance.service, grace);
+            }
         }
     }
 
@@ -942,7 +974,7 @@ async fn wait_for_first_exit(
             let Some(task) = tasks.get_mut(index) else {
                 break;
             };
-            task.reap_instances(output, stopping);
+            task.reap_instances(output, stopping, grace);
             let TaskPhase::Preparing { pre, .. } = &mut task.phase else {
                 continue;
             };

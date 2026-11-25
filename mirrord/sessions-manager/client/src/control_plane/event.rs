@@ -33,4 +33,8 @@ pub(crate) enum ControlPlaneEvent {
     /// The verdict on this gated agent's task. Only an agent registered with a pending gate
     /// receives it.
     Admission(Admission),
+
+    /// The agent replica this intproxy registration names is gone for good. Only an intproxy
+    /// registration pinned to a replica receives it, and it ends the stream.
+    Gone,
 }

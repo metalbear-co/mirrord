@@ -567,6 +567,15 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     SessionsManagerConnect(mirrord_sessions_manager_client::SessionsManagerClientError),
 
+    /// Kept apart from [`CliError::SessionsManagerConnect`] because the operator refuses only
+    /// what the user configured, so the refusal is no bug to report.
+    #[error("the operator refused the target's task filters: {0}")]
+    #[diagnostic(help(
+        "Correct the filter it names in `target.tag_filter` or `target.jq_filter` in the mirrord \
+        config."
+    ))]
+    TaskSelectorRefused(String),
+
     /// Kept apart from [`CliError::SessionsManagerConnect`] because the timeout's message alone
     /// doesn't say what to fix, while the other errors name it themselves.
     #[error("timed out connecting to the serverless target's agent through sessions-manager")]
@@ -1289,7 +1298,9 @@ impl CliError {
             Self::SessionsManagerConnect(
                 mirrord_sessions_manager_client::SessionsManagerClientError::ServerlessSessionsManagerNotServed(..),
             ) => AnalyticsError::ServerlessSessionsManagerNotServed,
-            Self::SessionsManagerConnect(..) => AnalyticsError::SessionsManagerConnect,
+            Self::SessionsManagerConnect(..) | Self::TaskSelectorRefused(..) => {
+                AnalyticsError::SessionsManagerConnect
+            }
             Self::SessionsManagerUrl(..) => AnalyticsError::SessionsManagerUrl,
             Self::ServerlessSessionsManagerNotServed => {
                 AnalyticsError::ServerlessSessionsManagerNotServed
