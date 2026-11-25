@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 
 pub mod error;
 pub mod io;
-pub mod path_resolver;
 pub mod protocol_version;
 pub mod rolledback_stream;
+pub mod target_root;
 
 /// Id of an agent's client. Each new client connection is assigned with a unique id.
 pub type ClientId = u32;

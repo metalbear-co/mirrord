@@ -76,7 +76,6 @@ strum.workspace = true
 strum_macros.workspace = true
 clap_complete.workspace = true
 rustls.workspace = true
-local-ip-address.workspace = true
 tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true

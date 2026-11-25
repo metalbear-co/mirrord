@@ -1,6 +1,6 @@
 ---
 title: mirrord MCP Server
-description: Register the MCP server built into the mirrord CLI, so that your AI agent checks mirrord configs and reads the mirrord docs of the version you have installed.
+description: Register the MCP server built into the mirrord CLI, so that your AI agent generates and validates mirrord configs offline, for the mirrord version you run.
 tags:
   - oss
   - team
@@ -9,16 +9,24 @@ tags:
 
 # mirrord MCP Server
 
-The mirrord CLI includes an [MCP](https://modelcontextprotocol.io) server, `mirrord mcp`. It gives an AI agent tools to validate `mirrord.json` and `mirrord-up.yaml` against the schema of your installed mirrord version, to explain config options, and to search and read the mirrord docs and [skills](./ai-skills-plugin.md) that this version ships with. It works offline and never starts a session.
+`mirrord mcp` is the [MCP](https://modelcontextprotocol.io) server built into the mirrord CLI. With it, your AI agent:
+
+- Generates `mirrord.json` and `mirrord-up.yaml` files, and validates them against the schema of the mirrord version you run.
+- Explains any config option: what it does, the values it takes, and the mirrord plan it needs.
+- Follows the mirrord [skills](./ai-skills-plugin.md) for tasks such as database branching, Kafka splitting, preview environments, and CI.
+- Uses safe defaults on shared clusters: it mirrors incoming traffic, steals only with an HTTP filter, and targets staging or development clusters, never production.
+- Answers mirrord questions from the docs of your installed version.
+
+The server works offline, from the docs and schema built into your mirrord binary, and never starts a session.
 
 ## What you need
 
-- mirrord CLI `3.273.0` or later. Check with `mirrord --version`, and see [Install mirrord](../getting-started/install-mirrord.md).
+- mirrord CLI `3.273.0` or later, and `3.291.0` or later on Windows for the skills. Check with `mirrord --version`, and see [Install mirrord](../getting-started/install-mirrord.md).
 - An agent that supports MCP servers over stdio, such as Claude Code, Codex, Cursor, VS Code, Windsurf, Claude Desktop, or OpenCode.
 
 ## Register the server
 
-Use the absolute path to the `mirrord` binary. Clients that start from a desktop launcher don't inherit your shell's `PATH`. To find the path, run:
+If the client doesn't find `mirrord` on its `PATH`, use the absolute path to the binary. Clients started from a desktop launcher often don't see your shell's `PATH`. To find the path, run:
 
 ```sh
 which mirrord
@@ -43,7 +51,9 @@ codex mcp add mirrord -- /absolute/path/to/mirrord mcp
 {% endtab %}
 {% tab title="Cursor, Windsurf, Claude Desktop" %}
 
-Add the entry under `"mcpServers"` in the client's config file:
+In Cursor, you can [add the server with one click](cursor://anysphere.cursor-deeplink/mcp/install?name=mirrord&config=eyJjb21tYW5kIjoibWlycm9yZCIsImFyZ3MiOlsibWNwIl19). The link registers the command `mirrord` without a path, so Cursor has to find `mirrord` on its `PATH`. If Cursor lists no `mirrord` tools, replace `mirrord` in the entry's `command` with the absolute path.
+
+To register the server by hand, add the entry under `"mcpServers"` in the client's config file:
 
 - Cursor: `~/.cursor/mcp.json`, or `.cursor/mcp.json` in the project.
 - Windsurf: `~/.codeium/windsurf/mcp_config.json`.
@@ -56,7 +66,9 @@ Add the entry under `"mcpServers"` in the client's config file:
 {% endtab %}
 {% tab title="VS Code" %}
 
-Add the entry under `"servers"` in `.vscode/mcp.json`:
+You can [install the server with one click](vscode:mcp/install?%7B%22name%22%3A%22mirrord%22%2C%22command%22%3A%22mirrord%22%2C%22args%22%3A%5B%22mcp%22%5D%7D). The link registers the command `mirrord` without a path, so VS Code has to find `mirrord` on its `PATH`. If VS Code lists no `mirrord` tools, replace `mirrord` in `command` with the absolute path.
+
+To register the server by hand, add the entry under `"servers"` in `.vscode/mcp.json`:
 
 ```json
 "mirrord": { "type": "stdio", "command": "/absolute/path/to/mirrord", "args": ["mcp"] }
@@ -100,9 +112,12 @@ The server sends the agent instructions when it connects. They tell the agent to
 
 - Get the matching skill with `get_skill` before it starts a mirrord task.
 - Validate every config with `validate_config` before it writes the file, and fix issues until none remain.
+- Look up options with `explain_config_option` instead of guessing.
+- When mirrord fails, validate every config involved before it proposes a fix, and propose one fix at a time.
 - Answer questions about mirrord with `search_docs` and `read_doc`, not from memory.
 - Default to `mirror` for incoming traffic, and on a shared cluster use `steal` only with an HTTP filter.
 - Target staging or development clusters, never production.
+- Know that `mirrord exec` and `mirrord up` deploy nothing to the cluster, that database branches stay until their TTL runs out, and that preview environments stay until stopped or their TTL runs out.
 
 ## Versions
 
