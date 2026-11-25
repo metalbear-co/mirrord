@@ -12,7 +12,10 @@
 //! [`ADMISSION_TIMEOUT_ENV`] and starts the application, so a `replace` it read late would hold a
 //! task that already runs its own code. The companion therefore accepts a verdict only until
 //! [`DEADLINE_MARGIN`] before that, then closes the socket and registers again without a gate,
-//! which ends any hold the sessions-manager took on the task meanwhile.
+//! which ends any hold the sessions-manager took on the task meanwhile. A `replace` written just
+//! before the bootstrap gave up can still sit unread in the socket, so the companion holds the
+//! task only once the bootstrap answered it with [`GateAck::Held`], and withdraws it the same way
+//! otherwise.
 //!
 //! While the task is held, the companion decides when its developer is gone: the session reports
 //! the local exit code with [`ClientMessage::ReplacedTaskExit`] on any client connection, and a
@@ -25,15 +28,15 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use futures::future::OptionFuture;
 use mirrord_remote_layer_protocol::{
-    ADMISSION_SOCKET_ENV, ADMISSION_TIMEOUT_ENV, DEFAULT_ADMISSION_TIMEOUT, GateMessage,
+    ADMISSION_SOCKET_ENV, ADMISSION_TIMEOUT_ENV, DEFAULT_ADMISSION_TIMEOUT, GateAck, GateMessage,
     LOST_SESSION_EXIT_CODE, gate_exit_code,
 };
 use mirrord_sessions_manager_client::{AdmissionVerdict, AgentGate, GateState};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixStream,
     sync::watch,
-    time::{Instant, sleep_until},
+    time::{Instant, sleep_until, timeout},
 };
 
 use crate::util::ClientId;
@@ -41,6 +44,11 @@ use crate::util::ClientId;
 /// How much earlier than the bootstrap the companion stops accepting a verdict, so that a verdict
 /// already written always reaches a bootstrap that still waits for it.
 const DEADLINE_MARGIN: Duration = Duration::from_secs(1);
+
+/// How long the companion waits for the bootstrap's [`GateAck::Held`] after writing
+/// [`GateMessage::Replace`]. The bootstrap answers as soon as it reads the line, so only a
+/// bootstrap that already gave up, or hangs, takes longer.
+const HELD_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How long a held task waits without any client connection before it ends with
 /// [`LOST_SESSION_EXIT_CODE`]. Long enough for the developer's connections to come back after a
@@ -51,8 +59,9 @@ const LOST_SESSION_GRACE: Duration = Duration::from_secs(30);
 pub(crate) struct Admission {
     socket: UnixStream,
     path: PathBuf,
-    /// Past it, a verdict no longer reaches the application.
-    deadline: Instant,
+    /// Past it, a verdict no longer reaches the application. [`None`] when the timeout is too
+    /// large to be a point in time, and only the bootstrap's own wait bounds the companion's.
+    deadline: Option<Instant>,
     clients: AdmissionHandle,
 }
 
@@ -75,7 +84,8 @@ impl Admission {
                 return None;
             }
         };
-        let deadline = Instant::now() + admission_timeout().saturating_sub(DEADLINE_MARGIN);
+        let deadline =
+            Instant::now().checked_add(admission_timeout().saturating_sub(DEADLINE_MARGIN));
         tracing::info!(
             path = %path.display(),
             "Holding the application until the task is admitted"
@@ -100,10 +110,11 @@ impl Admission {
     /// Returns once the bootstrap has everything it gets from the companion. A verdict that comes
     /// later is dropped by the control plane at `DEBUG`.
     pub(crate) async fn run(mut self, mut gate: AgentGate) {
+        let deadline = OptionFuture::from(self.deadline.map(sleep_until));
         let verdict = tokio::select! {
             // A verdict that is ready together with the deadline is already too late.
             biased;
-            () = sleep_until(self.deadline) => {
+            Some(()) = deadline => {
                 tracing::info!(
                     "No admission verdict came in time, so the task runs its own code"
                 );
@@ -123,9 +134,10 @@ impl Admission {
                 self.write(GateMessage::Continue).await;
             }
             Some(AdmissionVerdict::Replace) => {
-                if !self.write(GateMessage::Replace).await {
-                    // The bootstrap is gone or gave up waiting, so the application runs its own
-                    // code, and the developer must not get the task.
+                if !self.write(GateMessage::Replace).await || !self.wait_for_held().await {
+                    // The bootstrap is gone, gave up waiting or hangs. The application then runs
+                    // its own code, or the task ends as lost once the socket closes, and the
+                    // developer must not get the task either way.
                     self.withdraw(&gate);
                     return;
                 }
@@ -146,6 +158,46 @@ impl Admission {
         drop(self.socket);
     }
 
+    /// Whether the bootstrap answered [`GateMessage::Replace`] with [`GateAck::Held`] within
+    /// [`HELD_ACK_TIMEOUT`], skipping lines it doesn't know. A failure is logged here.
+    async fn wait_for_held(&mut self) -> bool {
+        let mut reader = BufReader::new(&mut self.socket);
+        let mut line = Vec::new();
+        let read = timeout(HELD_ACK_TIMEOUT, async {
+            loop {
+                line.clear();
+                match reader.read_until(b'\n', &mut line).await? {
+                    0 => break Ok::<_, std::io::Error>(false),
+                    _ if GateAck::parse(&String::from_utf8_lossy(&line)) == Some(GateAck::Held) => {
+                        break Ok(true);
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await;
+
+        match read {
+            Ok(Ok(true)) => return true,
+            Ok(Ok(false)) => tracing::warn!(
+                path = %self.path.display(),
+                "The admission gate closed before the bootstrap held the task, so the task runs \
+                 its own code"
+            ),
+            Ok(Err(error)) => tracing::warn!(
+                %error,
+                path = %self.path.display(),
+                "Failed to read from the admission gate, so the task runs its own code"
+            ),
+            Err(_) => tracing::warn!(
+                path = %self.path.display(),
+                timeout = ?HELD_ACK_TIMEOUT,
+                "The bootstrap didn't hold the task in time, so the developer doesn't get it"
+            ),
+        }
+        false
+    }
+
     /// Whether the bootstrap could be sent `message`. A failure is logged here.
     async fn write(&mut self, message: GateMessage) -> bool {
         let result = self.socket.write_all(message.encode().as_bytes()).await;
@@ -161,6 +213,9 @@ impl Admission {
 }
 
 /// The admission timeout from [`ADMISSION_TIMEOUT_ENV`], read as the bootstrap reads it.
+///
+/// With 0 or 1 second, the deadline passes as the companion connects, so it withdraws the gate at
+/// once and the task can't be replaced.
 fn admission_timeout() -> Duration {
     let Some(value) = std::env::var_os(ADMISSION_TIMEOUT_ENV) else {
         return DEFAULT_ADMISSION_TIMEOUT;
@@ -186,7 +241,8 @@ fn admission_timeout() -> Duration {
 struct Clients {
     /// Client connections being served.
     connections: usize,
-    /// Whether the task is replaced and waits for the local process's exit code.
+    /// Whether the task is replaced and still waits for the local process's exit code. Cleared
+    /// when it ends as lost.
     held: bool,
     /// The first exit code a client reported while the task was held.
     exit_code: Option<i32>,
@@ -195,7 +251,10 @@ struct Clients {
 /// Shared by a gated companion's client connections and its [`Admission`], which needs their
 /// count and the exit code they report while the task is held.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct AdmissionHandle(Arc<watch::Sender<Clients>>);
+pub(crate) struct AdmissionHandle(
+    /// client connections --their count and the first local exit code--> [`AdmissionHandle::hold`]
+    Arc<watch::Sender<Clients>>,
+);
 
 impl AdmissionHandle {
     /// Counts a client connection until the returned value is dropped.
@@ -206,8 +265,8 @@ impl AdmissionHandle {
 
     /// Ends the held task with `code`, if it's the first code reported while held.
     ///
-    /// Before the task is held, and after another code, the code is ignored: a task the
-    /// developer doesn't own, or no longer can end, must not end with it.
+    /// Before the task is held, after another code, and after the task ended as lost, the code is
+    /// ignored: a task the developer doesn't own, or no longer can end, must not end with it.
     pub(crate) fn replaced_task_exit(&self, client_id: ClientId, code: i32) {
         let accepted = self.0.send_if_modified(|clients| {
             let accepted = clients.held && clients.exit_code.is_none();
@@ -223,8 +282,8 @@ impl AdmissionHandle {
             tracing::debug!(
                 client_id,
                 code,
-                "Ignoring the exit code of a replaced task, since this task isn't held or already \
-                 has one"
+                "Ignoring the exit code of a replaced task, since this task isn't held, already \
+                 has one, or ended as lost"
             );
         }
     }
@@ -261,11 +320,23 @@ impl AdmissionHandle {
                 // `self` holds the sender, so this never fails.
                 _ = clients.changed() => {}
                 Some(()) = lost => {
-                    tracing::warn!(
-                        grace = ?LOST_SESSION_GRACE,
-                        "No developer connected to the replaced task in time, so it ends as lost"
-                    );
-                    return LOST_SESSION_EXIT_CODE;
+                    // Atomically with a client reporting a code, so that a code either wins or is
+                    // ignored as late.
+                    let mut ended = false;
+                    self.0.send_if_modified(|clients| {
+                        ended = clients.exit_code.is_none();
+                        if ended {
+                            clients.held = false;
+                        }
+                        false
+                    });
+                    if ended {
+                        tracing::warn!(
+                            grace = ?LOST_SESSION_GRACE,
+                            "No developer connected to the replaced task in time, so it ends as lost"
+                        );
+                        return LOST_SESSION_EXIT_CODE;
+                    }
                 }
             }
         }
@@ -273,7 +344,10 @@ impl AdmissionHandle {
 }
 
 /// One client connection counted by [`AdmissionHandle::client_connected`], until dropped.
-pub(crate) struct AdmissionConnection(Arc<watch::Sender<Clients>>);
+pub(crate) struct AdmissionConnection(
+    /// this client connection --its end--> [`AdmissionHandle::hold`]
+    Arc<watch::Sender<Clients>>,
+);
 
 impl Drop for AdmissionConnection {
     fn drop(&mut self) {
