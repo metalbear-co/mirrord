@@ -42,6 +42,12 @@ impl ControlPlaneSubscription for AssignmentSubscription {
         match event {
             ControlPlaneEvent::Assignment(assignment) => Ok(Some(assignment)),
             ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
+            // Reconnecting can't bring the pinned agent back, so the subscription ends here
+            // rather than waiting out its deadline for an assignment that never comes.
+            ControlPlaneEvent::Gone => match self {
+                Self::Intproxy { .. } => Err(SessionsManagerClientError::PinnedReplicaGone),
+                Self::Agent { .. } => Ok(None),
+            },
             ControlPlaneEvent::Matched(_)
             | ControlPlaneEvent::Ended(_)
             | ControlPlaneEvent::Admission(_) => Ok(None),

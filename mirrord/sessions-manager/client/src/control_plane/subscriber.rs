@@ -365,7 +365,8 @@ mod tests {
                 ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
                 ControlPlaneEvent::Matched(_)
                 | ControlPlaneEvent::Ended(_)
-                | ControlPlaneEvent::Admission(_) => Ok(None),
+                | ControlPlaneEvent::Admission(_)
+                | ControlPlaneEvent::Gone => Ok(None),
             }
         }
     }
