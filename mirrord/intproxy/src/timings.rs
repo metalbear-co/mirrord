@@ -7,20 +7,25 @@
 //! one that keeps the numbers: [`SessionTimings`] adds the layers up and [`CallTimingsRecorder`]
 //! writes the result to `<timings directory>/<session id>.json`.
 //!
-//! A layer only sends a snapshot when one of its calls finishes, so an application that makes a
-//! few calls and then sits idle would keep its last calls to itself until it exits. The proxy
-//! sees every request and its answer too, so it keeps its own count per layer and the summary
-//! uses whichever of the two has seen more calls of a kind: the layer's numbers, which are the
-//! application's real waits, once they are complete, and the proxy's until then.
+//! A layer only sends a snapshot together with a request it makes anyway, so an application
+//! that makes a few calls and then sits idle keeps its last calls to itself. The proxy sees
+//! every request and its answer too, so it keeps its own count per layer and the summary
+//! takes the larger of the two for every number of a kind. Both sides only count up, and the
+//! application waited at least as long as either measured, so what is shown never goes down.
 //!
 //! The proxy also sees every file request with its path, which the layers' counters leave out to
 //! stay cheap. It tallies path lookups per directory and how many of them the cluster answered
 //! with "not found", which is what the command's suggestions are built on.
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    fs, io,
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
     time::{Duration, Instant, SystemTime},
 };
 
@@ -32,7 +37,12 @@ use mirrord_protocol::{
     ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
 };
 use serde::{Deserialize, Serialize};
-use tokio::{sync::watch, task::JoinHandle};
+
+use crate::main_tasks::{FromLayer, ProxyMessage};
+use tokio::{
+    sync::{oneshot, watch},
+    task::JoinHandle,
+};
 
 /// How many sessions' summaries stay in the timings directory for good.
 ///
@@ -91,10 +101,16 @@ pub struct SessionLabel {
     /// timings under the same `session_id`.
     #[serde(default)]
     pub operator: bool,
-    /// The kube context the session was started with, when the configuration names one. The
-    /// command uses it to ask the same cluster about the session.
+    /// The kube context the session's client resolved when its internal proxy started: the
+    /// configured one, or the kubeconfig's current one. The command uses it to ask the same
+    /// cluster about the session after the current context has moved on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kube_context: Option<String>,
+    /// The kubeconfig the session was started with, when the configuration or `KUBECONFIG`
+    /// names one, as it was written there. A relative path in it is read against the directory
+    /// the command runs in. It names the user's home directory, so reports leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubeconfig: Option<String>,
     /// The target's namespace, when the configuration names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
@@ -149,8 +165,10 @@ pub struct TimingsSummary {
     pub slowest_calls: Vec<SlowCallSummary>,
     /// Slowest directory first.
     pub path_lookups: Vec<DirLookups>,
-    /// Lookups that are missing from `path_lookups` because [`MAX_TRACKED_DIRS`] directories
-    /// were already tracked. When this is not zero, `path_lookups` is not the whole picture.
+    /// Lookups that are missing from `path_lookups`: [`MAX_TRACKED_DIRS`] directories were
+    /// already tracked, or the path does not say which directory it is in (it is relative, as
+    /// one given next to an open directory is). When this is not zero, `path_lookups` is not
+    /// the whole picture.
     #[serde(default)]
     pub untracked_path_lookups: u64,
 }
@@ -191,9 +209,12 @@ impl From<&KindTimings> for KindTotals {
 /// One layer's totals per kind, from its own latest snapshot and from what the proxy saw it wait
 /// for.
 ///
-/// For each kind the side that counted more calls wins. The layer measures the application's
-/// real wait, so it wins a tie; the proxy is ahead whenever the layer has made calls it has not
-/// reported yet.
+/// Every number is the larger of the two sides. The proxy has always answered at least as many
+/// calls as the layer has reported, and the layer's waits are the application's real ones, a
+/// little longer than what the proxy measures between a request arriving and its answer leaving.
+/// Taking either side whole would make a total jump down when the other side takes over, for
+/// example when one more call reaches the proxy before the layer's next snapshot. The larger of
+/// each never goes down, and the application waited at least that long.
 fn layer_totals(
     snapshot: Option<&CallTimingsSnapshot>,
     seen_by_proxy: Option<&HashMap<CallKind, KindTotals>>,
@@ -202,12 +223,40 @@ fn layer_totals(
     for timings in snapshot.into_iter().flat_map(|snapshot| &snapshot.kinds) {
         let reported = KindTotals::from(timings);
         let seen = totals.entry(timings.kind).or_default();
-        if reported.calls >= seen.calls {
-            *seen = reported;
-        }
+        *seen = KindTotals {
+            calls: seen.calls.max(reported.calls),
+            total_nanos: seen.total_nanos.max(reported.total_nanos),
+            slowest_nanos: seen.slowest_nanos.max(reported.slowest_nanos),
+        };
     }
 
     totals
+}
+
+/// Takes every call timings snapshot of `layer_id` out of the messages that wait for a
+/// reconnect to end, and returns the last one.
+///
+/// For a layer that has just closed. Left in the queue, its snapshot would be replayed after the
+/// layer's totals were added to the closed layers, and would then count a second time as a live
+/// layer that never closes.
+pub(crate) fn take_queued_snapshots(
+    queue: &mut VecDeque<ProxyMessage>,
+    layer_id: LayerId,
+) -> Option<CallTimingsSnapshot> {
+    let mut last = None;
+    queue.retain_mut(|message| match message {
+        ProxyMessage::FromLayer(FromLayer {
+            layer_id: sender,
+            message: LayerToProxyMessage::CallTimings(snapshot),
+            ..
+        }) if *sender == layer_id => {
+            last = Some(std::mem::take(snapshot));
+            false
+        }
+        _ => true,
+    });
+
+    last
 }
 
 #[derive(Default)]
@@ -221,8 +270,16 @@ struct DirTally {
 struct PendingCall {
     kind: CallKind,
     received: Instant,
-    /// The directory the call looks a path up in, when it is such a call.
-    lookup_dir: Option<String>,
+    /// Where the call's path lookup is counted, when it is such a call.
+    lookup: Option<PathLookup>,
+}
+
+/// Where a path lookup is counted.
+enum PathLookup {
+    /// Under this directory.
+    In(String),
+    /// Under no directory, because the path does not say which one it is in.
+    Unplaced,
 }
 
 /// The session's numbers, as a plain state machine with no IO.
@@ -294,8 +351,9 @@ impl SessionTimings {
         let Some(kind) = CallKind::of(request) else {
             return;
         };
-        let lookup_dir = match request {
-            LayerToProxyMessage::File(request) => looked_up_path(request).and_then(dir_key),
+        let lookup = match request {
+            LayerToProxyMessage::File(request) => looked_up_path(request)
+                .map(|path| dir_key(path).map_or(PathLookup::Unplaced, PathLookup::In)),
             _ => None,
         };
 
@@ -304,7 +362,7 @@ impl SessionTimings {
             PendingCall {
                 kind,
                 received: now,
-                lookup_dir,
+                lookup,
             },
         );
     }
@@ -331,8 +389,13 @@ impl SessionTimings {
             .add_call(waited);
         self.changed = true;
 
-        let Some(dir) = call.lookup_dir else {
-            return;
+        let dir = match call.lookup {
+            Some(PathLookup::In(dir)) => dir,
+            Some(PathLookup::Unplaced) => {
+                self.untracked_path_lookups = self.untracked_path_lookups.saturating_add(1);
+                return;
+            }
+            None => return,
         };
 
         if !self.dirs.contains_key(&dir) && self.dirs.len() >= MAX_TRACKED_DIRS {
@@ -446,9 +509,13 @@ fn keep_slowest(calls: &mut Vec<SlowCall>) {
 /// The path a request looks up by name, for the requests that only look: opening, checking and
 /// reading metadata. Requests on an already open file have no path, and requests that change the
 /// file system are left out because "not found" is not their usual answer.
+///
+/// A path relative to an open directory is a lookup too. Leaving it out would let a file found
+/// that way go unseen, and its directory would look like one where nothing is ever found.
 fn looked_up_path(request: &FileRequest) -> Option<&Path> {
     match request {
         FileRequest::Open(request) => Some(&request.path),
+        FileRequest::OpenRelative(request) => Some(&request.path),
         FileRequest::Access(request) => Some(&request.pathname),
         FileRequest::Xstat(request) => request.path.as_deref(),
         FileRequest::ReadLink(request) => Some(&request.path),
@@ -500,33 +567,99 @@ fn is_not_found(response: &ProxyToLayerMessage) -> bool {
     )
 }
 
+/// One write of the summary file, for the thread that does them.
+struct WriteJob {
+    summary: TimingsSummary,
+    /// Whether the directory still has to be made and tidied.
+    first_write: bool,
+    /// Where the file thread sends how the write went, for the writer task.
+    done_tx: oneshot::Sender<io::Result<()>>,
+}
+
 /// Keeps a session's [`SessionTimings`] and writes its summary file.
 ///
-/// Writing happens on a task of its own, off the proxy's main loop, because the file is in the
-/// user's home directory and a slow disk there must not hold up the application's traffic.
+/// Writing happens off the proxy's main loop, because the file is in the user's home directory
+/// and a slow disk there must not hold up the application's traffic. A task decides when to
+/// write and a thread of its own does the writing. The thread is a plain one and not one of the
+/// runtime's blocking threads, because the runtime waits for those when the proxy exits, and a
+/// home directory that stopped answering would then keep the proxy alive.
 pub struct CallTimingsRecorder {
     timings: SessionTimings,
-    latest: watch::Sender<Option<TimingsSummary>>,
-    /// Ends the writer's pause between two writes. Dropping it does the same.
-    write_now: watch::Sender<()>,
+    /// The proxy sends the newest summary; the writer task writes the last one it finds.
+    summary_tx: watch::Sender<Option<TimingsSummary>>,
+    /// The proxy sends a tick to end the writer task's pause between two writes. Dropping it
+    /// does the same.
+    write_now_tx: watch::Sender<()>,
     writer: JoinHandle<()>,
 }
 
 impl CallTimingsRecorder {
-    /// Starts the task that writes the session's summary into `dir`. Must be called from a tokio
-    /// runtime.
-    pub fn start(dir: PathBuf, session: SessionLabel) -> Self {
-        let (latest, summaries) = watch::channel(None);
-        let (write_now, pause_over) = watch::channel(());
-        let path = dir.join(format!("{}.{SUMMARY_EXTENSION}", session.session_id));
-        let writer = tokio::spawn(write_summaries(path, summaries, pause_over));
+    /// Starts the task and the thread that write the session's summary into `dir`. Must be
+    /// called from a tokio runtime.
+    ///
+    /// # Returns
+    ///
+    /// [`None`] for a session whose id is not made of ASCII letters, digits, `-` and `_`. The
+    /// id can come from the `MIRRORD_SESSION_ID` environment variable, and one with a path in
+    /// it would put the summary, and the cleanup of old summaries next to it, outside `dir`.
+    /// The ids mirrord makes itself are hex numbers and UUIDs. Also [`None`] when the thread
+    /// cannot be started.
+    pub fn start(dir: PathBuf, session: SessionLabel) -> Option<Self> {
+        Self::start_with(dir, session, |path, summary, first_write| {
+            if first_write {
+                prepare_dir(path)?;
+            }
+            write_summary(path, summary)
+        })
+    }
 
-        Self {
-            timings: SessionTimings::new(session),
-            latest,
-            write_now,
-            writer,
+    /// [`Self::start`] with the function that puts a summary into its file, which a test
+    /// replaces to stand in for a disk that does not answer.
+    fn start_with(
+        dir: PathBuf,
+        session: SessionLabel,
+        mut write: impl FnMut(&Path, &TimingsSummary, bool) -> io::Result<()> + Send + 'static,
+    ) -> Option<Self> {
+        let is_file_name = !session.session_id.is_empty()
+            && session.session_id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            });
+        if !is_file_name {
+            tracing::debug!(
+                session_id = session.session_id,
+                "The session id cannot be a file name, the session's call timings are not recorded."
+            );
+            return None;
         }
+
+        let path = dir.join(format!("{}.{SUMMARY_EXTENSION}", session.session_id));
+        // The writer task sends one job per write; the file thread does them in order and ends
+        // when the task is gone.
+        let (job_tx, job_rx) = mpsc::channel::<WriteJob>();
+        let file_thread = thread::Builder::new()
+            .name("mirrord-call-timings".to_owned())
+            .spawn(move || {
+                for job in job_rx {
+                    let result = write(&path, &job.summary, job.first_write);
+                    // The writer task stops waiting when the proxy exits.
+                    let _ = job.done_tx.send(result);
+                }
+            });
+        if let Err(error) = file_thread {
+            tracing::debug!(%error, "Could not start the thread that writes the call timings.");
+            return None;
+        }
+
+        let (summary_tx, summary_rx) = watch::channel(None);
+        let (write_now_tx, write_now_rx) = watch::channel(());
+        let writer = tokio::spawn(write_summaries(job_tx, summary_rx, write_now_rx));
+
+        Some(Self {
+            timings: SessionTimings::new(session),
+            summary_tx,
+            write_now_tx,
+            writer,
+        })
     }
 
     pub fn timings(&mut self) -> &mut SessionTimings {
@@ -537,7 +670,7 @@ impl CallTimingsRecorder {
     /// passed since its last write. Only the newest summary is kept when the writer is behind.
     pub fn publish(&mut self) {
         self.timings.changed = false;
-        self.latest.send_replace(Some(self.timings.summary()));
+        self.summary_tx.send_replace(Some(self.timings.summary()));
     }
 
     /// [`Self::publish`], when the numbers moved since the last one.
@@ -556,24 +689,28 @@ impl CallTimingsRecorder {
     /// `mirrord diagnose timings`, and the file must already hold the process's last numbers.
     pub fn publish_now(&mut self) {
         self.publish();
-        self.write_now.send_replace(());
+        self.write_now_tx.send_replace(());
     }
 
     /// Waits for the last summary to reach the file, for at most [`FINAL_WRITE_TIMEOUT`].
+    ///
+    /// A write that is still running after that is left behind on its thread. Nothing waits for
+    /// that thread, so it ends with the process.
     pub async fn finish(self) {
         let Self {
-            latest,
-            write_now,
-            writer,
+            summary_tx,
+            write_now_tx,
+            mut writer,
             ..
         } = self;
-        drop(latest);
-        drop(write_now);
+        drop(summary_tx);
+        drop(write_now_tx);
 
-        if tokio::time::timeout(FINAL_WRITE_TIMEOUT, writer)
+        if tokio::time::timeout(FINAL_WRITE_TIMEOUT, &mut writer)
             .await
             .is_err()
         {
+            writer.abort();
             tracing::warn!(
                 timeout = ?FINAL_WRITE_TIMEOUT,
                 "The last call timings summary was not written in time, \
@@ -583,65 +720,71 @@ impl CallTimingsRecorder {
     }
 }
 
-/// Writes every new summary to `path` until the recorder is dropped, pausing for
-/// [`WRITE_INTERVAL`] after each write unless `pause_over` says to write now.
+/// Hands every new summary to the file thread until the recorder is dropped, pausing for
+/// [`WRITE_INTERVAL`] after each write unless `write_now_rx` says to write now.
 ///
 /// Stops at the first failed write: a directory that cannot be written now will not be writable
 /// a second later, and the summary is not worth a warning every second.
 async fn write_summaries(
-    path: PathBuf,
-    mut summaries: watch::Receiver<Option<TimingsSummary>>,
-    mut pause_over: watch::Receiver<()>,
+    job_tx: mpsc::Sender<WriteJob>,
+    mut summary_rx: watch::Receiver<Option<TimingsSummary>>,
+    mut write_now_rx: watch::Receiver<()>,
 ) {
     let mut first_write = true;
 
-    while summaries.changed().await.is_ok() {
-        let Some(summary) = summaries.borrow_and_update().clone() else {
+    while summary_rx.changed().await.is_ok() {
+        let Some(summary) = summary_rx.borrow_and_update().clone() else {
             continue;
         };
 
-        let write = {
-            let path = path.clone();
-            tokio::task::spawn_blocking(move || {
-                if first_write {
-                    prepare_dir(&path)?;
-                }
-                write_summary(&path, &summary)
-            })
+        // The file thread sends how this one write went.
+        let (done_tx, done_rx) = oneshot::channel();
+        let job = WriteJob {
+            summary,
+            first_write,
+            done_tx,
         };
-        match write.await {
-            Ok(Ok(())) => first_write = false,
-            Ok(Err(error)) => {
+        let written = match job_tx.send(job) {
+            Ok(()) => done_rx.await.ok(),
+            Err(_) => None,
+        };
+        match written {
+            Some(Ok(())) => first_write = false,
+            Some(Err(error)) => {
                 tracing::warn!(
                     %error,
-                    path = %path.display(),
                     "Failed to write the call timings summary, \
                     `mirrord diagnose timings` will not show this session."
                 );
                 return;
             }
-            Err(error) => {
-                tracing::warn!(%error, "The task writing the call timings summary failed.");
+            None => {
+                tracing::warn!("The thread writing the call timings summary is gone.");
                 return;
             }
         }
 
         // A dropped recorder also ends the pause, so the last summary is written at once and
-        // the loop then ends on the closed `summaries` channel.
+        // the loop then ends on the closed `summary_rx` channel.
         tokio::select! {
             _ = tokio::time::sleep(WRITE_INTERVAL) => {}
-            _ = pause_over.changed() => {}
+            _ = write_now_rx.changed() => {}
         }
     }
 }
 
 /// Creates the timings directory and removes the summaries that are both beyond the
 /// [`KEPT_SESSIONS`] newest (counting this session's file) and older than [`PRUNE_AFTER`].
+///
+/// On unix the directory is set to the user alone, also one that was already there: summaries
+/// name the paths and hosts the application asked for.
 fn prepare_dir(summary_path: &Path) -> io::Result<()> {
     let Some(dir) = summary_path.parent() else {
         return Ok(());
     };
     fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
 
     let summaries = fs::read_dir(dir)?
         .filter_map(Result::ok)
@@ -695,15 +838,31 @@ fn stale_summaries(
 }
 
 /// Replaces the summary file in one step, so a reader never sees a half-written file.
+///
+/// On unix the file is created for the user alone. A partial file left by a proxy that died is
+/// removed first, because a mode only applies to a file that is being created.
 fn write_summary(path: &Path, summary: &TimingsSummary) -> io::Result<()> {
     let partial = path.with_extension("partial");
-    fs::write(&partial, serde_json::to_vec_pretty(summary)?)?;
+    match fs::remove_file(&partial) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options
+        .open(&partial)?
+        .write_all(&serde_json::to_vec_pretty(summary)?)?;
     fs::rename(partial, path)
 }
 
 #[cfg(test)]
 mod tests {
-    use mirrord_protocol::file::{AccessFileRequest, ReadFileRequest, XstatRequest, XstatResponse};
+    use mirrord_protocol::file::{
+        AccessFileRequest, OpenFileResponse, OpenRelativeFileRequest, ReadFileRequest,
+        XstatRequest, XstatResponse,
+    };
 
     use super::*;
 
@@ -715,6 +874,7 @@ mod tests {
             started_at: "2026-11-25T10:00:00Z".to_owned(),
             operator: true,
             kube_context: None,
+            kubeconfig: None,
             namespace: None,
             baggage: None,
         }
@@ -851,12 +1011,12 @@ mod tests {
         );
     }
 
-    /// The layer's numbers are the application's real waits, a little longer than what the
-    /// proxy measures between a request arriving and its answer leaving. Once a snapshot covers
-    /// every call the proxy saw, it replaces the proxy's numbers, and it is counted once, not on
-    /// top of them. A snapshot that is behind for a kind leaves that kind to the proxy.
+    /// The layer and the proxy count the same calls, so a kind is counted once, not once per
+    /// side. While the layer's snapshot is behind, the proxy's count of calls stands; once it
+    /// has caught up, its waits, which are the application's real ones and a little longer than
+    /// the proxy's, are what shows.
     #[test]
-    fn a_layers_snapshot_replaces_the_proxys_count_once_it_has_caught_up() {
+    fn a_kind_counted_by_both_sides_is_counted_once_with_the_larger_numbers() {
         let mut session = SessionTimings::new(label());
         let start = Instant::now();
         let layer = LayerId(1);
@@ -874,28 +1034,107 @@ mod tests {
             layer,
             snapshot(vec![timings(CallKind::FileStat, 2, 2_400_000, 1_300_000)]),
         );
-        let behind = session.summary().kinds;
         assert_eq!(
-            behind.iter().map(|kind| kind.calls).collect::<Vec<_>>(),
-            [3],
-            "the snapshot has seen two of three calls, so the proxy's count stands"
+            session.summary().kinds,
+            [KindSummary {
+                kind: "file_stat".to_owned(),
+                calls: 3,
+                total_nanos: 3_000_000,
+                slowest_nanos: 1_300_000,
+            }],
+            "the snapshot has seen two of the three calls the proxy answered"
         );
 
         session.layer_snapshot(
             layer,
             snapshot(vec![timings(CallKind::FileStat, 3, 3_600_000, 1_300_000)]),
         );
+        let caught_up = [KindSummary {
+            kind: "file_stat".to_owned(),
+            calls: 3,
+            total_nanos: 3_600_000,
+            slowest_nanos: 1_300_000,
+        }];
+        assert_eq!(session.summary().kinds, caught_up);
+
+        session.layer_closed(layer);
+        assert_eq!(
+            session.summary().kinds,
+            caught_up,
+            "a closed layer keeps the same numbers"
+        );
+    }
+
+    /// The application can wait far longer for a call than the proxy takes to answer it, for
+    /// example behind another thread that is writing to the same connection. When the summary
+    /// took the proxy's numbers whole as soon as the proxy had seen one more call than the
+    /// layer's snapshot, a wait of 100 ms the layer had reported showed as 2 ms until the next
+    /// snapshot. A number that was shown must not go down.
+    #[test]
+    fn a_wait_the_layer_reported_does_not_shrink_when_the_proxy_sees_one_more_call() {
+        let mut session = SessionTimings::new(label());
+        let start = Instant::now();
+        let layer = LayerId(1);
+
+        session.layer_request(layer, 1, &stat("/etc/hostname"), start);
+        session.layer_response(layer, 1, &found(), start + Duration::from_millis(1));
+        session.layer_snapshot(
+            layer,
+            snapshot(vec![timings(
+                CallKind::FileStat,
+                1,
+                100_000_000,
+                100_000_000,
+            )]),
+        );
+        session.layer_request(layer, 2, &stat("/etc/hosts"), start);
+        session.layer_response(layer, 2, &found(), start + Duration::from_millis(1));
+
         assert_eq!(
             session.summary().kinds,
             [KindSummary {
                 kind: "file_stat".to_owned(),
-                calls: 3,
-                total_nanos: 3_600_000,
-                slowest_nanos: 1_300_000,
+                calls: 2,
+                total_nanos: 100_000_000,
+                slowest_nanos: 100_000_000,
             }]
         );
+    }
 
-        session.layer_closed(layer);
+    /// While the proxy reconnects to the agent it queues what the layers send, snapshots
+    /// included, and replays the queue afterwards. A layer that closes in the meantime has its
+    /// totals added to the closed layers at once. Its queued snapshot, replayed later, then
+    /// came back as a live layer that never closes, and every summary counted its calls twice.
+    #[test]
+    fn a_snapshot_queued_during_a_reconnect_counts_once_when_its_layer_closes() {
+        let queued = |layer_id: u64, calls: u64| {
+            ProxyMessage::FromLayer(FromLayer {
+                message_id: calls,
+                layer_id: LayerId(layer_id),
+                message: LayerToProxyMessage::CallTimings(snapshot(vec![timings(
+                    CallKind::NameLookup,
+                    calls,
+                    calls * 10,
+                    10,
+                )])),
+            })
+        };
+        let mut queue = VecDeque::from([
+            queued(1, 2),
+            ProxyMessage::FromLayer(FromLayer {
+                message_id: 9,
+                layer_id: LayerId(1),
+                message: stat("/etc/hostname"),
+            }),
+            queued(2, 7),
+            queued(1, 5),
+        ]);
+        let mut session = SessionTimings::new(label());
+
+        let last = take_queued_snapshots(&mut queue, LayerId(1)).expect("two were queued");
+        session.layer_snapshot(LayerId(1), last);
+        session.layer_closed(LayerId(1));
+
         assert_eq!(
             session
                 .summary()
@@ -903,9 +1142,25 @@ mod tests {
                 .iter()
                 .map(|kind| kind.calls)
                 .collect::<Vec<_>>(),
-            [3],
-            "a closed layer keeps the same numbers"
+            [5],
+            "the layer's last snapshot, once"
         );
+        let left = queue
+            .iter()
+            .map(|message| match message {
+                ProxyMessage::FromLayer(from_layer) => (
+                    from_layer.layer_id,
+                    matches!(from_layer.message, LayerToProxyMessage::CallTimings(_)),
+                ),
+                other => panic!("unexpected message in the queue: {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            left,
+            [(LayerId(1), false), (LayerId(2), true)],
+            "nothing of the closed layer's timings is left to replay, the rest is untouched"
+        );
+        assert_eq!(take_queued_snapshots(&mut queue, LayerId(3)), None);
     }
 
     /// Every process keeps its own short list. The session's list is the slowest of all of them,
@@ -1040,6 +1295,60 @@ mod tests {
         assert_eq!(dir0.lookups, 2);
     }
 
+    /// A file opened by a path relative to a directory the application has open belongs to no
+    /// directory of the tally. Counting it as untracked is what keeps that directory from
+    /// looking like one where nothing is ever found.
+    #[test]
+    fn a_lookup_relative_to_an_open_directory_is_counted_as_untracked() {
+        let mut session = SessionTimings::new(label());
+        let now = Instant::now();
+        let layer = LayerId(1);
+
+        session.layer_request(layer, 1, &stat("/app/vendor/missing"), now);
+        session.layer_response(layer, 1, &not_found(), now);
+        let open_relative =
+            LayerToProxyMessage::File(FileRequest::OpenRelative(OpenRelativeFileRequest {
+                relative_fd: 7,
+                path: "plugin.yaml".into(),
+                open_options: Default::default(),
+            }));
+        session.layer_request(layer, 2, &open_relative, now);
+        let opened = ProxyToLayerMessage::File(FileResponse::Open(Ok(OpenFileResponse { fd: 8 })));
+        session.layer_response(layer, 2, &opened, now);
+
+        let summary = session.summary();
+        assert_eq!(summary.path_lookups.len(), 1);
+        assert_eq!(summary.untracked_path_lookups, 1);
+    }
+
+    /// The id becomes a file name, and it can come from an environment variable.
+    #[test]
+    fn a_session_whose_id_is_not_a_plain_name_is_not_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for id in [
+            "",
+            ".",
+            "..",
+            "../escape",
+            "a/b",
+            "/tmp/escape",
+            "a\\b",
+            "a:b",
+            "a\u{1b}b",
+        ] {
+            let session = SessionLabel {
+                session_id: id.to_owned(),
+                ..label()
+            };
+            assert!(
+                CallTimingsRecorder::start(dir.path().to_owned(), session).is_none(),
+                "`{id}` is not a file name"
+            );
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
     #[test]
     fn a_path_is_counted_under_its_parent_cut_to_the_key_depth() {
         let key = |path: &str| dir_key(Path::new(path));
@@ -1091,6 +1400,55 @@ mod tests {
         assert!(stale_summaries(files, 5, now).is_empty());
     }
 
+    /// The summary file is in the user's home directory, which can be a network mount that
+    /// stops answering. The proxy gives the last write two seconds and then exits. When the
+    /// write ran on one of the runtime's blocking threads, giving up on it was not enough: the
+    /// runtime waits for those threads when it shuts down, so the proxy stayed alive for as
+    /// long as the disk stayed silent.
+    #[test]
+    fn a_write_that_never_returns_holds_up_neither_the_last_wait_nor_the_runtime() {
+        // The stand-in for the silent disk tells the test when a write started, and then waits
+        // for the test to let go of `release_tx`.
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        // The thread that plays the proxy tells the test when its runtime is gone.
+        let (exited_tx, exited_rx) = mpsc::channel::<()>();
+
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .start_paused(true)
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let mut recorder = CallTimingsRecorder::start_with(
+                    PathBuf::from("/nowhere"),
+                    label(),
+                    move |_, _, _| {
+                        let _ = started_tx.send(());
+                        let _ = release_rx.recv();
+                        Ok(())
+                    },
+                )
+                .unwrap();
+                recorder.publish();
+                while started_rx.try_recv().is_err() {
+                    tokio::task::yield_now().await;
+                }
+
+                recorder.finish().await;
+            });
+            drop(runtime);
+            let _ = exited_tx.send(());
+        });
+
+        assert!(
+            exited_rx.recv_timeout(Duration::from_secs(30)).is_ok(),
+            "the proxy's runtime shut down while the write was still stuck"
+        );
+        drop(release_tx);
+    }
+
     /// The recorder end to end: a published summary reaches the session's file, a later one
     /// replaces it, and the oldest of too many other sessions' files is removed.
     #[tokio::test]
@@ -1108,7 +1466,8 @@ mod tests {
                 .unwrap();
         }
 
-        let mut recorder = CallTimingsRecorder::start(dir.path().to_owned(), label());
+        let mut recorder = CallTimingsRecorder::start(dir.path().to_owned(), label())
+            .expect("the label's session id is a file name");
         recorder.timings().layer_snapshot(
             LayerId(1),
             snapshot(vec![timings(CallKind::NameLookup, 1, 100, 100)]),
@@ -1122,9 +1481,16 @@ mod tests {
         let expected = recorder.timings().summary();
         recorder.finish().await;
 
-        let written = fs::read(dir.path().join(format!("session.{SUMMARY_EXTENSION}"))).unwrap();
+        let summary_path = dir.path().join(format!("session.{SUMMARY_EXTENSION}"));
+        let written = fs::read(&summary_path).unwrap();
         let written: TimingsSummary = serde_json::from_slice(&written).unwrap();
         assert_eq!(written, expected);
+        #[cfg(unix)]
+        {
+            let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&summary_path), 0o600, "summaries name paths and hosts");
+            assert_eq!(mode(dir.path()), 0o700);
+        }
 
         let mut left = fs::read_dir(dir.path())
             .unwrap()

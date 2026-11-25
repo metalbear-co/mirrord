@@ -50,7 +50,7 @@ use crate::{
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
-    timings::{CallTimingsRecorder, WRITE_INTERVAL},
+    timings::{CallTimingsRecorder, WRITE_INTERVAL, take_queued_snapshots},
 };
 
 pub mod agent_conn;
@@ -792,6 +792,15 @@ impl IntProxy {
                 self.connected_layers.remove(&LayerId(id));
                 self.pending_layers.retain(|(layer_id, _)| layer_id.0 != id);
                 if let Some(recorder) = &mut self.call_timings {
+                    // A snapshot the layer sent during a reconnect is its last word, so it
+                    // counts now and does not stay behind to be replayed after the close.
+                    let queued = self
+                        .reconnect_task_queue
+                        .as_mut()
+                        .and_then(|queue| take_queued_snapshots(queue, LayerId(id)));
+                    if let Some(snapshot) = queued {
+                        recorder.timings().layer_snapshot(LayerId(id), snapshot);
+                    }
                     recorder.timings().layer_closed(LayerId(id));
                     recorder.publish_now();
                 }
