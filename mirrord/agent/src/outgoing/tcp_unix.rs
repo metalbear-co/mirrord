@@ -14,6 +14,7 @@ use mirrord_protocol::{
         tcp::{DaemonTcpOutgoing, LayerTcpOutgoing},
     },
 };
+use nix::fcntl::OFlag;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpStream, UnixStream, tcp, unix},
@@ -26,7 +27,10 @@ use crate::{
         GenericInMessage, GenericOutMessage, OutgoingKind,
         router::{ConnectionKind, NewConnection},
     },
-    util::{io::throttle::IoVecThrottledSink, path_resolver::InTargetPathResolver},
+    util::{
+        io::throttle::IoVecThrottledSink,
+        target_root::{TargetRoot, proc_fd_path},
+    },
 };
 
 pub struct TcpOrUnixConnection;
@@ -43,7 +47,7 @@ impl ConnectionKind for TcpOrUnixConnection {
 
     async fn connect(
         addr: &SocketAddress,
-        target_pid: Option<u64>,
+        target_root: &TargetRoot,
     ) -> io::Result<NewConnection<Self>> {
         let (reader, writer) = match addr {
             SocketAddress::Ip(addr) => {
@@ -62,14 +66,8 @@ impl ConnectionKind for TcpOrUnixConnection {
             }
 
             SocketAddress::Unix(UnixAddr::Pathname(path)) => {
-                // In order to connect to a unix socket on the target pod, instead of connecting to
-                // /the/target/path we connect to /proc/<PID>/root/the/target/path.
-                let path = if let Some(pid) = target_pid {
-                    InTargetPathResolver::from_pid(pid).resolve(path)?
-                } else {
-                    path.clone()
-                };
-                let stream = UnixStream::connect(path).await?;
+                let socket = target_root.open_from_root(path, OFlag::O_PATH)?;
+                let stream = UnixStream::connect(proc_fd_path(&socket)).await?;
                 let (read, write) = stream.into_split();
                 (Reader::Unix(read), Writer::Unix(write))
             }

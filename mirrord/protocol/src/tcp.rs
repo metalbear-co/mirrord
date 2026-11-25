@@ -17,10 +17,6 @@ use hyper::{
     HeaderMap, Method, Request, Response, StatusCode, Uri, Version,
     body::{Body, Frame},
 };
-use jaq_core::{
-    Compiler,
-    load::{Arena, File, Loader},
-};
 use mirrord_macros::protocol_break;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
@@ -345,39 +341,12 @@ pub struct JqQuery(String);
 
 impl JqQuery {
     pub fn new(expr: &str) -> Result<Self, String> {
-        let inner = || {
-            let program = File {
-                code: expr,
-                path: (),
-            };
-            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
-            let arena = Arena::default();
-
-            let modules = loader.load(&arena, program).map_err(|errors| {
-                errors
-                    .into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })?;
-
-            Compiler::default()
-                .with_funs(jaq_std::funs().chain(jaq_json::funs()))
-                .compile(modules)
-                .map_err(|errors| {
-                    errors
-                        .into_iter()
-                        .map(|e| format!("{e:?}"))
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                })?;
-
-            Ok(JqQuery(expr.to_owned()))
-        };
-
-        inner().inspect_err(|fail| {
-            tracing::error!(
-                r"
+        mirrord_jaq::compile_jq(expr)
+            .map(|_| JqQuery(expr.to_owned()))
+            .map_err(|error| error.to_string())
+            .inspect_err(|fail| {
+                tracing::error!(
+                    r"
                 Something went wrong while compiling jaq query {expr:?}
 
                 >> Please check that the string supplied is a valid jaq expression according to
@@ -386,8 +355,8 @@ impl JqQuery {
                 > Error:
                 {fail:#?}
                 "
-            )
-        })
+                )
+            })
     }
 }
 
