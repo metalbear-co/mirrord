@@ -118,10 +118,7 @@ impl OperatorLogin {
     /// The host the developer logged in to, with the port when it is not the scheme's default:
     /// how messages and `mirrord whoami` name the operator.
     pub fn host(&self) -> &str {
-        self.url
-            .split_once("://")
-            .map(|(_, rest)| rest)
-            .unwrap_or(&self.url)
+        host_of(&self.url)
     }
 
     /// Whether the token is still accepted at `now`.
@@ -139,6 +136,11 @@ impl OperatorLogin {
         config.default_retry = false;
         Ok(config)
     }
+}
+
+/// The host and port of an operator URL, how messages name the operator.
+pub fn host_of(url: &str) -> &str {
+    url.split_once("://").map(|(_, rest)| rest).unwrap_or(url)
 }
 
 /// A login to one operator as `~/.mirrord/auth.json` stores it, keyed there by the operator URL.
@@ -252,6 +254,16 @@ impl OperatorLoginStore {
         let Some(url) = &self.active_operator else {
             return Ok(None);
         };
+        self.login(url, now)
+    }
+
+    /// The saved login to the operator at `url`, whether or not it is the selected one: `None`
+    /// when there is none, an error when it expired.
+    pub fn login(
+        &self,
+        url: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Option<OperatorLogin>, LoginExpired> {
         let Some(login) = self.operators.get(url) else {
             return Ok(None);
         };

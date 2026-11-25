@@ -28,7 +28,7 @@ use crate::{data::AuthStore, login::callback::LoginCallbackServer};
 
 /// First operator version that serves the login routes. An operator with SSO on but without them
 /// answers the login info route with the identity middleware's 401.
-pub(super) const MIN_OPERATOR_VERSION: &str = "3.237.0";
+pub(super) const MIN_OPERATOR_VERSION: &str = "3.238.0";
 
 /// Bound on the login info request, which runs before anything is shown to the developer.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -239,7 +239,7 @@ mod tests {
             &format!("/{SSO_PATH}/{INFO_PATH}"),
             get(|| async {
                 Json(SsoLoginInfo {
-                    operator_version: "3.237.0".to_owned(),
+                    operator_version: "3.238.0".to_owned(),
                     issuer_url: "https://login.example.com".to_owned(),
                 })
             }),
@@ -247,7 +247,7 @@ mod tests {
         .await;
 
         let info = probe(&url).await.unwrap().unwrap();
-        assert_eq!(info.operator_version, "3.237.0");
+        assert_eq!(info.operator_version, "3.238.0");
         assert_eq!(info.issuer_url, "https://login.example.com");
     }
 
