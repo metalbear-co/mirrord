@@ -1660,31 +1660,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
-"const-random-macro",
-"getrandom 0.2.17",
-"once_cell",
-"tiny-keccak",
-name = "const_format"
-version = "0.2.36"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4481a617ad9a412be3b97c5d403fef8ed023103368908b9c50af598ff467cc1e"
-dependencies = [
- "const_format_proc_macros",
- "konst 0.2.20",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d57c2eccfb16dbac1f4e61e206105db5820c9d26c3c472bc17c774259ef7744"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
-]
-
-[[package]]
 name = "const_panic"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5033,7 +5008,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-cli"
-version = "3.290.0"
+version = "3.291.2"
 dependencies = [
  "actix-codec",
  "atomic-write-file",
@@ -5062,7 +5037,6 @@ dependencies = [
  "itertools 0.14.0",
  "k8s-openapi",
  "kube",
- "local-ip-address",
  "mid",
  "miette",
  "mime_guess",
@@ -5111,8 +5085,8 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
- "sha2 0.10.9",
- "shlex 1.3.0",
+ "sha2 0.11.0",
+ "shlex 2.0.1",
  "socket2 0.5.10",
  "stork",
  "strum 0.27.2",
@@ -5730,7 +5704,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-runfiles"
-version = "3.290.0"
+version = "3.291.2"
 dependencies = [
  "runfiles",
 ]
@@ -5874,7 +5848,7 @@ dependencies = [
 
 [[package]]
 name = "mirrord-tests"
-version = "3.290.0"
+version = "3.291.2"
 dependencies = [
  "fancy-regex 0.14.0",
  "futures",

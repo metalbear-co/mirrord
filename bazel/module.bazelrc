@@ -164,6 +164,11 @@ common:ci --show_progress_rate_limit=60
 common:ci --show_timestamps
 build:ci --keep_going
 build:ci --verbose_failures
+
+# Use line tables to speed up compilation and linking compared with full debug info, while keeping
+# file names and line numbers in backtraces.
+build:ci --@rules_rust//rust/settings:extra_rustc_flags=-Cdebuginfo=line-tables-only
+
 test:ci --test_output=errors
 test:ci --test_env=NEXTEST_PROFILE=ci
 
