@@ -637,36 +637,41 @@ impl OutgoingSelector {
         }
     }
 
-    /// Helper function that looks into
+    /// Chooses the address for a connection that the outgoing filter routes locally.
+    ///
+    /// Loopback addresses, including IPv4-mapped loopback, are returned unchanged. Otherwise,
+    /// this looks up the raw IP, then its canonical IP when different, in
     /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING)
-    /// for `address`, so we can
-    /// retrieve the hostname and resolve it locally (when applicable).
+    /// to retrieve the hostname and resolve it locally. A cache miss returns `address` unchanged.
+    /// When an IPv4-mapped IPv6 request resolves to IPv4, the result is mapped back to IPv6 so it
+    /// remains compatible with the original socket; every other resolved address is returned as
+    /// resolved.
     ///
     /// - `address`: the [`SocketAddr`] that was passed to `connect`;
     ///
     /// We only get here when the [`OutgoingSelector::Remote`] matched nothing, or when the
     /// [`OutgoingSelector::Local`] matched on something.
     ///
-    /// Returns 1 of 2 possibilities:
-    ///
-    /// 1. `address` is in
-    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING):
-    ///    resolves the hostname locally, then
-    /// return the first result
-    /// 2. `address` is **NOT** in
-    /// [`reverse_dns::REMOTE_DNS_REVERSE_MAPPING`](crate::socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING):
-    ///    return the `address` as is;
     #[mirrord_layer_macro::instrument(level = "trace", ret)]
     fn get_local_address_to_connect(address: SocketAddr) -> HookResult<SocketAddr> {
         // Aviram: I think this whole function and logic is weird but I really need to get
         // https://github.com/metalbear-co/mirrord/issues/2389 fixed and I don't have time to
         // fully understand or refactor, and the logic is sound (if it's loopback, just connect to
         // it)
-        if address.ip().is_loopback() {
+        let requested_ip = address.ip();
+        let canonical_ip = requested_ip.to_canonical();
+
+        if canonical_ip.is_loopback() {
             return Ok(address);
         }
 
-        let cached = get_hostname_for_ip(address.ip());
+        let cached = get_hostname_for_ip(requested_ip).or_else(|| {
+            if canonical_ip != requested_ip {
+                get_hostname_for_ip(canonical_ip)
+            } else {
+                None
+            }
+        });
         let Some(hostname) = cached else {
             return Ok(address);
         };
@@ -677,7 +682,10 @@ impl OutgoingSelector {
         dns_lookup::lookup_host(&hostname)
             .map_err(|_| HookError::DNSNoName)?
             .next()
-            .map(|resolved| SocketAddr::new(resolved, address.port()))
+            .map(|resolved_ip| {
+                let resolved_address = SocketAddr::new(resolved_ip, address.port());
+                ops::address_for_mapped_ipv6_request(address, resolved_address)
+            })
             .ok_or(HookError::DNSNoName)
     }
 
@@ -816,6 +824,7 @@ mod outgoing_selector_tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::socket::dns::reverse_dns::update_dns_reverse_mapping_bulk;
 
     fn remote(filters: VecOrSingle<String>) -> OutgoingConfig {
         OutgoingConfig {
@@ -891,5 +900,51 @@ mod outgoing_selector_tests {
             .unwrap();
 
         assert!(matches!(connection, ConnectionThrough::Remote(actual) if actual == address));
+    }
+
+    #[test]
+    fn local_filter_resolves_mapped_ipv6_using_canonical_cache_entry() {
+        let cached_ip = "10.253.17.4".parse().unwrap();
+        update_dns_reverse_mapping_bulk(&vec![("127.0.0.1".to_owned(), cached_ip)]);
+
+        let requested_address = "[::ffff:10.253.17.4]:18080".parse().unwrap();
+        let expected_address = "[::ffff:127.0.0.1]:18080".parse().unwrap();
+        let config = OutgoingConfig {
+            tcp: true,
+            udp: true,
+            filter: Some(OutgoingFilterConfig::Local(VecOrSingle::Single(
+                "10.0.0.0/8".to_owned(),
+            ))),
+            ..Default::default()
+        };
+        let selector = OutgoingSelector::new(&config).unwrap();
+        let connection = selector
+            .get_connection_through(requested_address, NetProtocol::Stream)
+            .unwrap();
+
+        assert!(
+            matches!(connection, ConnectionThrough::Local(actual) if actual == expected_address),
+            "{connection:?}"
+        );
+    }
+
+    #[test]
+    fn remote_filter_fallthrough_uses_mapped_ipv6_loopback_guard() {
+        let cached_ip = "127.45.6.7".parse().unwrap();
+        update_dns_reverse_mapping_bulk(&vec![(
+            "mirrord-mapped-loopback.invalid".to_owned(),
+            cached_ip,
+        )]);
+
+        let requested_address = "[::ffff:127.45.6.7]:18080".parse().unwrap();
+        let selector =
+            OutgoingSelector::new(&remote(VecOrSingle::Single("10.0.0.0/8".to_owned()))).unwrap();
+        let connection = selector
+            .get_connection_through(requested_address, NetProtocol::Stream)
+            .unwrap();
+
+        assert!(
+            matches!(connection, ConnectionThrough::Local(local_address) if local_address == requested_address)
+        );
     }
 }

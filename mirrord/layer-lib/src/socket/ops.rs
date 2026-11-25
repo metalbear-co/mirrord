@@ -206,22 +206,23 @@ pub fn nop_connect_fn(_addr: SockAddr) -> ConnectResult {
     }
 }
 
-/// Returns the address to connect to when `requested_address` is served by a local listener.
+/// Returns `selected_address` in IPv4-mapped IPv6 form when an IPv4-mapped IPv6 request selects an
+/// IPv4 destination.
 ///
 /// An IPv4-mapped IPv6 request comes from an IPv6 (dual-stack) socket, which can't connect to an
-/// IPv4 sockaddr, so an IPv4 listener address is returned in its IPv4-mapped IPv6 form. Every
-/// other pair returns `listener_address` unchanged.
-fn address_for_local_listener(
+/// IPv4 sockaddr, so an IPv4 destination is returned in its IPv4-mapped IPv6 form. Every other pair
+/// is returned unchanged.
+pub(crate) fn address_for_mapped_ipv6_request(
     requested_address: SocketAddr,
-    listener_address: SocketAddr,
+    selected_address: SocketAddr,
 ) -> SocketAddr {
-    match (requested_address, listener_address) {
-        (SocketAddr::V6(requested), SocketAddr::V4(listener))
+    match (requested_address, selected_address) {
+        (SocketAddr::V6(requested), SocketAddr::V4(selected))
             if requested.ip().to_ipv4_mapped().is_some() =>
         {
-            SocketAddr::new(listener.ip().to_ipv6_mapped().into(), listener.port())
+            SocketAddr::new(selected.ip().to_ipv6_mapped().into(), selected.port())
         }
-        (_, listener_address) => listener_address,
+        (_, selected_address) => selected_address,
     }
 }
 
@@ -269,7 +270,7 @@ where
                         && address.port() == ip_address.port());
 
                 (is_same_target && socket.protocol == user_socket_info.protocol)
-                    .then(|| SockAddr::from(address_for_local_listener(ip_address, address)))
+                    .then(|| SockAddr::from(address_for_mapped_ipv6_request(ip_address, address)))
             }
             SocketState::Bound { .. } | SocketState::Initialized | SocketState::Connected(_) => {
                 None
@@ -871,13 +872,13 @@ mod tests {
     #[case("[::1]:18080", "[::1]:28080", "[::1]:28080")]
     #[case("[::1]:18080", "127.0.0.1:28080", "127.0.0.1:28080")]
     #[case("[::ffff:127.0.0.1]:18080", "[::1]:28080", "[::1]:28080")]
-    fn local_listener_address_preserves_the_requested_socket_family(
+    fn mapped_ipv6_request_gets_mapped_ipv4_destination(
         #[case] requested_address: SocketAddr,
         #[case] listener_address: SocketAddr,
         #[case] expected: SocketAddr,
     ) {
         assert_eq!(
-            address_for_local_listener(requested_address, listener_address),
+            address_for_mapped_ipv6_request(requested_address, listener_address),
             expected
         );
     }
