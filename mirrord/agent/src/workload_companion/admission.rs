@@ -19,14 +19,21 @@
 //! sessions-manager hands the task to the developer's watch, so no local process starts for a
 //! task the companion might still withdraw.
 //!
-//! While the task is held, the companion decides when its developer is gone: the session reports
-//! the local exit code with [`ClientMessage::ReplacedTaskExit`] on any client connection, and a
-//! task without client connections for [`LOST_SESSION_GRACE`] ends with
-//! [`LOST_SESSION_EXIT_CODE`].
+//! While the task is held, the companion decides when its developer is gone. The developer's
+//! `mirrord up` keeps an owner connection to the task, which it marks with
+//! [`ClientMessage::ReplacedTaskOwner`], and reports the local exit code with
+//! [`ClientMessage::ReplacedTaskExit`], which the companion takes from any client connection. A
+//! task without an owner connection for [`LOST_SESSION_GRACE`] ends with
+//! [`LOST_SESSION_EXIT_CODE`]: counted from when the task was held until the first owner
+//! connection arrives, and from when the last one closed after that. Only owner connections
+//! count. When `mirrord up` is killed without a chance to clean up, the local process and its
+//! intproxy can outlive it, and their connections must not keep a task held when nobody is left
+//! to report its exit code.
 //!
 //! [`ClientMessage::ReplacedTaskExit`]: mirrord_protocol::ClientMessage::ReplacedTaskExit
+//! [`ClientMessage::ReplacedTaskOwner`]: mirrord_protocol::ClientMessage::ReplacedTaskOwner
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashSet, ops::Not, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::future::OptionFuture;
 use mirrord_remote_layer_protocol::{
@@ -52,9 +59,9 @@ const DEADLINE_MARGIN: Duration = Duration::from_secs(1);
 /// bootstrap that already gave up, or hangs, takes longer.
 const HELD_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// How long a held task waits without any client connection before it ends with
-/// [`LOST_SESSION_EXIT_CODE`]. Long enough for the developer's connections to come back after a
-/// network blip or an operator restart.
+/// How long a held task waits without an owner connection before it ends with
+/// [`LOST_SESSION_EXIT_CODE`]. Long enough for the owner connection to come back after a network
+/// blip or an operator restart.
 const LOST_SESSION_GRACE: Duration = Duration::from_secs(30);
 
 /// The companion's connection to the admission gate of its task, waiting for a verdict.
@@ -101,7 +108,7 @@ impl Admission {
         })
     }
 
-    /// The handle client connections report to while the task is held.
+    /// The handle client connections report to.
     pub(crate) fn handle(&self) -> AdmissionHandle {
         self.clients.clone()
     }
@@ -242,8 +249,9 @@ fn admission_timeout() -> Duration {
 /// What the client connections of a gated companion tell its [`Admission`].
 #[derive(Debug, Default)]
 struct Clients {
-    /// Client connections being served.
-    connections: usize,
+    /// The open client connections that announced themselves as the task's owner with
+    /// [`ClientMessage::ReplacedTaskOwner`](mirrord_protocol::ClientMessage::ReplacedTaskOwner).
+    owners: HashSet<ClientId>,
     /// Whether the task is replaced and still waits for the local process's exit code. Cleared
     /// when it ends as lost.
     held: bool,
@@ -251,19 +259,32 @@ struct Clients {
     exit_code: Option<i32>,
 }
 
-/// Shared by a gated companion's client connections and its [`Admission`], which needs their
-/// count and the exit code they report while the task is held.
+/// Shared by a gated companion's client connections and its [`Admission`], which needs to know
+/// which of them own the task, and the exit code they report while the task is held.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct AdmissionHandle(
-    /// client connections --their count and the first local exit code--> [`AdmissionHandle::hold`]
+    /// client connections --the open owner connections and the first local exit code-->
+    /// [`AdmissionHandle::hold`]
     Arc<watch::Sender<Clients>>,
 );
 
 impl AdmissionHandle {
-    /// Counts a client connection until the returned value is dropped.
-    pub(crate) fn client_connected(&self) -> AdmissionConnection {
-        self.0.send_modify(|clients| clients.connections += 1);
-        AdmissionConnection(self.0.clone())
+    /// Tracks the client connection `client_id` until the returned value is dropped, so that it
+    /// stops counting as an owner connection once it closes.
+    pub(crate) fn client_connected(&self, client_id: ClientId) -> AdmissionConnection {
+        AdmissionConnection {
+            clients: self.0.clone(),
+            client_id,
+        }
+    }
+
+    /// Counts the client connection `client_id` as an owner connection of the task until it
+    /// closes. Also before the task is held: the owner connection can arrive while the companion
+    /// still registers the hold.
+    pub(crate) fn replaced_task_owner(&self, client_id: ClientId) {
+        self.0
+            .send_if_modified(|clients| clients.owners.insert(client_id));
+        tracing::debug!(client_id, "A client owns the replaced task");
     }
 
     /// Ends the held task with `code`, if it's the first code reported while held.
@@ -292,17 +313,17 @@ impl AdmissionHandle {
     }
 
     /// Marks the task held, and waits for the exit code it ends with: the first one a client
-    /// reports, or [`LOST_SESSION_EXIT_CODE`] once no client has been connected for
+    /// reports, or [`LOST_SESSION_EXIT_CODE`] once no owner connection has been open for
     /// [`LOST_SESSION_GRACE`].
     async fn hold(&self) -> u8 {
         self.0.send_modify(|clients| clients.held = true);
         let mut clients = self.0.subscribe();
-        let mut unconnected_since = None;
+        let mut unowned_since = None;
 
         loop {
-            let (connections, exit_code) = {
+            let (owned, exit_code) = {
                 let clients = clients.borrow_and_update();
-                (clients.connections, clients.exit_code)
+                (clients.owners.is_empty().not(), clients.exit_code)
             };
 
             if let Some(code) = exit_code {
@@ -310,13 +331,13 @@ impl AdmissionHandle {
                 return gate_exit_code(code);
             }
 
-            if connections == 0 {
-                unconnected_since.get_or_insert_with(Instant::now);
+            if owned {
+                unowned_since = None;
             } else {
-                unconnected_since = None;
+                unowned_since.get_or_insert_with(Instant::now);
             }
             let lost = OptionFuture::from(
-                unconnected_since.map(|since| sleep_until(since + LOST_SESSION_GRACE)),
+                unowned_since.map(|since| sleep_until(since + LOST_SESSION_GRACE)),
             );
 
             tokio::select! {
@@ -336,7 +357,8 @@ impl AdmissionHandle {
                     if ended {
                         tracing::warn!(
                             grace = ?LOST_SESSION_GRACE,
-                            "No developer connected to the replaced task in time, so it ends as lost"
+                            "No owner connection reached the replaced task in time, so it ends as \
+                             lost"
                         );
                         return LOST_SESSION_EXIT_CODE;
                     }
@@ -346,15 +368,16 @@ impl AdmissionHandle {
     }
 }
 
-/// One client connection counted by [`AdmissionHandle::client_connected`], until dropped.
-pub(crate) struct AdmissionConnection(
+/// One client connection tracked by [`AdmissionHandle::client_connected`], until dropped.
+pub(crate) struct AdmissionConnection {
     /// this client connection --its end--> [`AdmissionHandle::hold`]
-    Arc<watch::Sender<Clients>>,
-);
+    clients: Arc<watch::Sender<Clients>>,
+    client_id: ClientId,
+}
 
 impl Drop for AdmissionConnection {
     fn drop(&mut self) {
-        self.0
-            .send_modify(|clients| clients.connections = clients.connections.saturating_sub(1));
+        self.clients
+            .send_if_modified(|clients| clients.owners.remove(&self.client_id));
     }
 }
