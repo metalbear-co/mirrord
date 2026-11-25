@@ -3,7 +3,8 @@
 //!
 //! The operator keeps these in memory and serves them at `sessions/timings`. They are read
 //! leniently, because operators newer than this client add fields and phase names: unknown
-//! fields are dropped, and a phase is a name and a duration whatever the name is.
+//! fields are dropped, and a phase is a name, the operator's description of it and a duration,
+//! whatever the name is.
 
 use kube::Client;
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,10 @@ use crate::client::{
 #[serde(rename_all = "camelCase")]
 pub struct StartPhase {
     pub name: String,
+    /// What the phase covers, in the operator's words. The operator defines the phases, so it
+    /// is the one that describes them. Empty from an operator that sends none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     pub duration_ms: u64,
     /// Set on the phase a connect ended in without finishing it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

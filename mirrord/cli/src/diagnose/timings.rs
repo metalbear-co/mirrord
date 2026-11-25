@@ -249,23 +249,6 @@ struct Report {
     application: Option<Application>,
 }
 
-/// The operator's phase names in everyday words. A name this version does not know gets none.
-fn phase_meaning(phase: &str) -> &'static str {
-    match phase {
-        "target_lookup" => "finding the target",
-        "config_and_policies" => "reading the configuration and policies",
-        "session_acquire" => "registering the session",
-        "db_branches" => "preparing the database branches",
-        "queue_splits" => "waiting for the queue split",
-        "multi_cluster_setup" => "setting up the other clusters",
-        "agent_create" => "creating the agent",
-        "agent_wait_ready" => "waiting for the agent to be ready",
-        "agent_connect" => "connecting to the agent",
-        "agent_reused" => "using the agent that is already running",
-        _ => "",
-    }
-}
-
 fn millis_as_nanos(millis: u64) -> u64 {
     millis.saturating_mul(1_000_000)
 }
@@ -316,7 +299,7 @@ fn render_session_start(session_start: &SessionStart, output: &mut String) {
             table.add_row(row![
                 number,
                 phase.name,
-                phase_meaning(&phase.name),
+                phase.description,
                 r->if phase.failed {
                     format!("{duration} (did not finish)")
                 } else {
@@ -684,6 +667,7 @@ mod tests {
     fn phase(name: &str, duration_ms: u64) -> StartPhase {
         StartPhase {
             name: name.to_owned(),
+            description: String::new(),
             duration_ms,
             failed: false,
         }
@@ -787,16 +771,23 @@ mod tests {
     }
 
     /// Tests in the operator's repository match on the heading and on the operator's own phase
-    /// names, so both are printed as they are: the plain words go in a column of their own, and
-    /// a phase this version has never heard of still gets its row.
+    /// names, so both are printed as they are. The operator describes its phases itself, so a
+    /// phase this version has never heard of comes with its description, and a phase from an
+    /// operator that sends none still gets its row.
     #[test]
-    fn the_session_start_section_prints_the_operators_phase_names_as_they_come() {
+    fn the_session_start_section_prints_the_operators_phases_as_they_come() {
         let connects = vec![
             StartConnect {
                 started_at: "2026-11-25T01:11:54.660513Z".to_owned(),
                 phases: vec![
-                    phase("target_lookup", 1_293),
-                    phase("warp_drive_spinup", 7),
+                    StartPhase {
+                        description: "finding the target".to_owned(),
+                        ..phase("target_lookup", 1_293)
+                    },
+                    StartPhase {
+                        description: "spinning up the warp drive".to_owned(),
+                        ..phase("warp_drive_spinup", 7)
+                    },
                     StartPhase {
                         failed: true,
                         ..phase("queue_splits", 72_824)
@@ -829,19 +820,14 @@ mod tests {
                 [
                     vec!["Connect", "Phase", "What it is", "Duration"],
                     vec!["1", "target_lookup", "finding the target", "1.29 s"],
-                    vec!["1", "warp_drive_spinup", "", "7.0 ms"],
                     vec![
                         "1",
-                        "queue_splits",
-                        "waiting for the queue split",
-                        "72.82 s (did not finish)"
+                        "warp_drive_spinup",
+                        "spinning up the warp drive",
+                        "7.0 ms"
                     ],
-                    vec![
-                        "2",
-                        "agent_reused",
-                        "using the agent that is already running",
-                        "0 ns"
-                    ],
+                    vec!["1", "queue_splits", "", "72.82 s (did not finish)"],
+                    vec!["2", "agent_reused", "", "0 ns"],
                     vec!["3", "", "no phase finished yet", ""],
                 ]
                 .as_slice()

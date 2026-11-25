@@ -115,18 +115,18 @@ Started:  2026-11-25T01:11:54Z
 Session start
 What the operator did before your application could start. A session connects more than once while it starts, and connect 1 is the first.
 
-+---------+---------------------+----------------------------------------+----------+
-| Connect | Phase               | What it is                             | Duration |
-+---------+---------------------+----------------------------------------+----------+
-| 1       | target_lookup       | finding the target                     |   1.29 s |
-| 1       | config_and_policies | reading the configuration and policies | 686.0 ms |
-| 1       | session_acquire     | registering the session                | 977.0 ms |
-| 1       | queue_splits        | waiting for the queue split            |  72.82 s |
-| 1       | agent_create        | creating the agent                     | 705.0 ms |
-| 1       | agent_wait_ready    | waiting for the agent to be ready      |   1.45 s |
-| 1       | agent_connect       | connecting to the agent                | 177.0 ms |
-| all     |                     |                                        |  78.11 s |
-+---------+---------------------+----------------------------------------+----------+
++---------+---------------------+--------------------------------------------------------+----------+
+| Connect | Phase               | What it is                                             | Duration |
++---------+---------------------+--------------------------------------------------------+----------+
+| 1       | target_lookup       | finding the target and checking your permissions on it |   1.29 s |
+| 1       | config_and_policies | reading the configuration and policies of the target   | 686.0 ms |
+| 1       | session_acquire     | registering the session                                | 977.0 ms |
+| 1       | queue_splits        | waiting for the queue split to be ready                |  72.82 s |
+| 1       | agent_create        | creating the agent                                     | 705.0 ms |
+| 1       | agent_wait_ready    | waiting for the agent to start and accept connections  |   1.45 s |
+| 1       | agent_connect       | connecting to the agent                                | 177.0 ms |
+| all     |                     |                                                        |  78.11 s |
++---------+---------------------+--------------------------------------------------------+----------+
 
 Application calls
 What your application waited on mirrord for. Updated 2026-11-25T01:13:40Z (1s ago).
