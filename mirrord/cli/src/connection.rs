@@ -19,7 +19,10 @@ use mirrord_kube::{
     resolved::ResolvedTarget,
 };
 use mirrord_operator::{
-    client::{NoClientCert, OperatorApi, OperatorSessionConnection, error::OperatorApiError},
+    client::{
+        NoClientCert, OperatorApi, OperatorSessionConnection, active_operator_login,
+        error::OperatorApiError,
+    },
     crd::NewOperatorFeature,
 };
 use mirrord_progress::{
@@ -559,6 +562,9 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             },
             user_session_id,
             replica_filter: agent_replica_filter.map(Into::into),
+            // Captured now, so a `mirrord login --url` elsewhere during the run does not move
+            // the reconnect to another operator.
+            login_url: active_operator_login().await?.map(|login| login.url),
         };
         let standalone =
             standalone_sessions_manager(config).map_err(CliError::SessionsManagerUrl)?;

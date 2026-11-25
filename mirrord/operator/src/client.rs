@@ -545,11 +545,17 @@ impl OperatorApi<NoClientCert> {
 
     /// Builds a client for the operator-hosted sessions-manager routes, which kube-apiserver
     /// authenticates on its own. Unlike [`Self::connect_in_existing_session`], it carries no client
-    /// certificate.
+    /// certificate. `login_url` is the operator login the run started under, read from the store
+    /// as [`Self::session_client`] does; `None` is the kubeconfig.
     pub async fn serverless_sessions_manager_client(
         layer_config: &LayerConfig,
+        login_url: Option<&str>,
     ) -> OperatorApiResult<Client> {
-        let (config, _) = Self::base_client_config(layer_config).await?;
+        let login = match login_url {
+            Some(url) => Some(session_login(url).await?),
+            None => None,
+        };
+        let (config, _) = Self::client_config_with(layer_config, login).await?;
 
         Ok(ClientBuilder::try_from(config)
             .map_err(KubeApiError::from)
