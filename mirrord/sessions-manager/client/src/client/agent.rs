@@ -269,6 +269,7 @@ mod tests {
             &self,
             _scope: &ServiceScope,
             subscription: &AssignmentSubscription,
+            _subscription_options: Option<&str>,
         ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
             self.subscriptions
                 .lock()

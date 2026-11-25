@@ -82,6 +82,15 @@ impl ControlPlaneApi {
                 serde_json::from_str(&event.data)?,
             ))),
             Ok(ControlPlaneEventName::Superseded) => Ok(Some(ControlPlaneEvent::Superseded)),
+            Ok(ControlPlaneEventName::Matched) => Ok(Some(ControlPlaneEvent::Matched(
+                serde_json::from_str(&event.data)?,
+            ))),
+            Ok(ControlPlaneEventName::Ended) => Ok(Some(ControlPlaneEvent::Ended(
+                serde_json::from_str(&event.data)?,
+            ))),
+            Ok(ControlPlaneEventName::Admission) => Ok(Some(ControlPlaneEvent::Admission(
+                serde_json::from_str(&event.data)?,
+            ))),
             Err(_) => {
                 tracing::trace!(
                     event_name = event.event,

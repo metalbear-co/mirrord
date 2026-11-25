@@ -22,6 +22,63 @@ pub enum ControlPlaneEventName {
     Assignment,
     /// Carries an empty body; signals that a newer registration replaced this subscription.
     Superseded,
+    /// Carries a [`TaskMatch`] as its JSON body. Sent to a developer's watch
+    /// ([`crate::Watch`]).
+    Matched,
+    /// Carries a [`TaskEnded`] as its JSON body. Sent to a developer's watch
+    /// ([`crate::Watch`]).
+    Ended,
+    /// Carries an [`Admission`] as its JSON body. Sent to an agent that registered with
+    /// [`crate::GateState::Pending`].
+    Admission,
+}
+
+/// A task that matched a developer's watch.
+///
+/// Sent once per agent instance, and again when the watch registers again under the same
+/// `user_session_id`, so a client deduplicates by `(replica_id, agent_instance_id)`. The developer reaches the task by registering with
+/// `agent_replica_filter` set to [`Self::replica_id`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskMatch {
+    pub replica_id: ReplicaId,
+    pub agent_instance_id: Uuid,
+    /// The task was replaced for this watch: its own code won't run, and it waits for the
+    /// developer's exit code. Always `false` for a watch without [`crate::Watch::replace`].
+    #[serde(default)]
+    pub replace: bool,
+}
+
+/// A task that matched a developer's watch is gone: its agent instance stayed away past the
+/// sessions-manager's grace period, or another instance registered on its replica. The developer
+/// stops whatever it started for the task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskEnded {
+    pub replica_id: ReplicaId,
+    pub agent_instance_id: Uuid,
+}
+
+/// The sessions-manager's verdict on a gated task: whether its own code runs.
+///
+/// Sent to an agent registered with [`crate::GateState::Pending`] once the sessions-manager has
+/// decided. The agent relays it to the process holding the task's application, which decides on
+/// its own when no verdict comes in time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Admission {
+    pub verdict: AdmissionVerdict,
+}
+
+/// What a gated task does once admitted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdmissionVerdict {
+    /// A developer's watch took the task: its own code doesn't run, and it ends with the exit
+    /// code the developer reports over mirrord-protocol, or with
+    /// `mirrord_remote_layer_protocol::LOST_SESSION_EXIT_CODE` when none comes.
+    Replace,
+    /// The task runs its own code. A verdict this build doesn't know reads as this one, since
+    /// running its own code is what the task would have done without mirrord.
+    #[serde(other)]
+    Continue,
 }
 
 /// Query parameters used to attach to an assignment SSE stream.

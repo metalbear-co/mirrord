@@ -790,6 +790,16 @@ impl ClientConnectionHandler {
             ClientMessage::ShareLink(update) => {
                 self.share_links.update(update);
             }
+            // The agent replaces no task, so it has nothing to end with the code.
+            ClientMessage::ReplacedTaskExit(code) => {
+                debug!(
+                    client_id = self.id,
+                    code, "ignoring the exit code of a replaced task"
+                );
+            }
+            ClientMessage::ReplacedTaskOwner => {
+                debug!(client_id = self.id, "ignoring the owner of a replaced task");
+            }
         }
 
         Ok(true)

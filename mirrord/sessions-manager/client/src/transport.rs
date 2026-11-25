@@ -30,11 +30,18 @@ use crate::{control_plane::ControlPlaneEventStream, error::SessionsManagerClient
 pub trait SessionsManagerTransport: Clone + Send + Sync + 'static {
     /// Opens the assignments SSE stream for `subscription` within `scope`.
     ///
+    /// `subscription_options` is the value of
+    /// [`SUBSCRIPTION_OPTIONS_HEADER`](mirrord_sessions_manager_protocol::SUBSCRIPTION_OPTIONS_HEADER),
+    /// as [`SubscriptionOptions::encode`](mirrord_sessions_manager_protocol::SubscriptionOptions::encode)
+    /// produces it, or [`None`] for a registration that asks for nothing beyond its identity.
+    /// Only the operator-hosted sessions-manager reads it.
+    ///
     /// Called once per connection attempt, reconnects included.
     fn subscribe_assignments(
         &self,
         scope: &ServiceScope,
         subscription: &AssignmentSubscription,
+        subscription_options: Option<&str>,
     ) -> impl Future<Output = Result<ControlPlaneEventStream, SessionsManagerClientError>> + Send;
 
     /// Establishes the data-plane connection named by `assignment`.

@@ -32,16 +32,19 @@ impl ControlPlaneSubscription for AssignmentSubscription {
         transport: &T,
         scope: &ServiceScope,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-        transport.subscribe_assignments(scope, self).await
+        transport.subscribe_assignments(scope, self, None).await
     }
 
     fn extract(
         &self,
         event: ControlPlaneEvent,
-    ) -> Result<Self::Output, SessionsManagerClientError> {
+    ) -> Result<Option<Self::Output>, SessionsManagerClientError> {
         match event {
-            ControlPlaneEvent::Assignment(assignment) => Ok(assignment),
+            ControlPlaneEvent::Assignment(assignment) => Ok(Some(assignment)),
             ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
+            ControlPlaneEvent::Matched(_)
+            | ControlPlaneEvent::Ended(_)
+            | ControlPlaneEvent::Admission(_) => Ok(None),
         }
     }
 }

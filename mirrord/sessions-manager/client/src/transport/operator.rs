@@ -3,12 +3,15 @@
 use std::time::Duration;
 
 use http_body_util::BodyExt;
-use hyper::{Request, StatusCode, header::ACCEPT};
+use hyper::{
+    Request, StatusCode,
+    header::{ACCEPT, HeaderValue},
+};
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade::connect_ws};
 use mirrord_protocol_io::ProtocolEndpoint;
 use mirrord_sessions_manager_protocol::{
     AssignmentSubscription, ConnectionAssignment, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
-    ServiceScope,
+    SUBSCRIPTION_OPTIONS_HEADER, ServiceScope,
 };
 use tokio::time::Instant;
 
@@ -44,10 +47,14 @@ impl OperatorTransport {
 }
 
 impl SessionsManagerTransport for OperatorTransport {
+    /// Sends `subscription_options` in its header, and turns a 400 into
+    /// [`SessionsManagerClientError::SubscriptionRefused`] with the operator's message, which is
+    /// how the developer learns which filter it refused.
     async fn subscribe_assignments(
         &self,
         scope: &ServiceScope,
         subscription: &AssignmentSubscription,
+        subscription_options: Option<&str>,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
         let deadline = Instant::now() + RESPONSE_HEADER_TIMEOUT;
         let uri = operator_assignments_uri(scope, subscription)?;
@@ -55,17 +62,33 @@ impl SessionsManagerTransport for OperatorTransport {
             %uri,
             "requesting operator-hosted sessions-manager assignments"
         );
-        let request = Request::get(uri)
-            .header(ACCEPT, "text/event-stream")
-            .body(kube::client::Body::empty())?;
+        let mut request = Request::get(uri).header(ACCEPT, "text/event-stream");
+        if let Some(options) = subscription_options {
+            let mut options = HeaderValue::from_str(options)
+                .map_err(|_| SessionsManagerClientError::InvalidSubscriptionOptions)?;
+            // Filters and tags describe the customer's workload.
+            options.set_sensitive(true);
+            request = request.header(SUBSCRIPTION_OPTIONS_HEADER, options);
+        }
+        let request = request.body(kube::client::Body::empty())?;
         let response = with_deadline(Some(deadline), self.client.send(request)).await??;
-        if matches!(
-            response.status(),
-            StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED
-        ) {
-            return Err(
-                SessionsManagerClientError::ServerlessSessionsManagerNotServed(response.status()),
-            );
+        match response.status() {
+            StatusCode::NOT_FOUND | StatusCode::NOT_IMPLEMENTED => {
+                return Err(
+                    SessionsManagerClientError::ServerlessSessionsManagerNotServed(
+                        response.status(),
+                    ),
+                );
+            }
+            StatusCode::BAD_REQUEST => {
+                let body = with_deadline(Some(deadline), response.into_body().collect())
+                    .await??
+                    .to_bytes();
+                return Err(SessionsManagerClientError::SubscriptionRefused(
+                    refusal_message(&body),
+                ));
+            }
+            _ => {}
         }
         verify_event_stream(response.status(), response.headers())?;
 
@@ -87,6 +110,16 @@ impl SessionsManagerTransport for OperatorTransport {
 
         Ok(OperatorConnection::new(socket))
     }
+}
+
+/// The message of the Kubernetes `Status` the operator answers a refused subscription with, or
+/// the body as text when it isn't one.
+fn refusal_message(body: &[u8]) -> String {
+    serde_json::from_slice::<kube::core::Status>(body)
+        .ok()
+        .map(|status| status.message)
+        .filter(|message| !message.is_empty())
+        .unwrap_or_else(|| String::from_utf8_lossy(body).into_owned())
 }
 
 /// Builds the operator's per-role assignment request URI. The scope is slugified the same way
@@ -202,6 +235,7 @@ mod tests {
                     replica_id: "pod-a".to_owned().into(),
                     agent_instance_id: Uuid::nil(),
                 }),
+                None,
             )
             .await
     }

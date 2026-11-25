@@ -1,4 +1,4 @@
-use mirrord_sessions_manager_protocol::ConnectionAssignment;
+use mirrord_sessions_manager_protocol::{Admission, ConnectionAssignment, TaskEnded, TaskMatch};
 
 /// An event received from the sessions-manager assignment SSE stream.
 ///
@@ -23,4 +23,26 @@ pub(crate) enum ControlPlaneEvent {
     /// attachment and can make two clients repeatedly replace each other, so the subscriber must
     /// treat this event as terminal.
     Superseded,
+
+    /// A task matched this watching registration. Only a watch receives it.
+    #[expect(
+        dead_code,
+        reason = "decoded so a subscriber can receive it; no subscriber reads it yet"
+    )]
+    Matched(TaskMatch),
+
+    /// A task this watching registration matched is gone. Only a watch receives it.
+    #[expect(
+        dead_code,
+        reason = "decoded so a subscriber can receive it; no subscriber reads it yet"
+    )]
+    Ended(TaskEnded),
+
+    /// The verdict on this gated agent's task. Only an agent registered with a pending gate
+    /// receives it.
+    #[expect(
+        dead_code,
+        reason = "decoded so a subscriber can receive it; no subscriber reads it yet"
+    )]
+    Admission(Admission),
 }

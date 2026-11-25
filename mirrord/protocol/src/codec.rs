@@ -143,6 +143,11 @@ pub enum FileRequest {
 pub static CLIENT_READY_FOR_LOGS: LazyLock<VersionReq> =
     LazyLock::new(|| ">=1.3.1".parse().expect("Bad Identifier"));
 
+/// Minimal mirrord-protocol version that allows [`ClientMessage::ReplacedTaskExit`] and
+/// [`ClientMessage::ReplacedTaskOwner`].
+pub static REPLACED_TASK_EXIT_VERSION: LazyLock<VersionReq> =
+    LazyLock::new(|| ">=1.31.0".parse().expect("Bad Identifier"));
+
 /// `-layer` --> `-agent` messages.
 #[derive(Encode, BorrowDecode, Debug, PartialEq, Eq, Clone)]
 #[bincode(decode_context = "crate::codec::DecodeCtx")]
@@ -201,6 +206,44 @@ pub enum ClientMessage {
     /// Sent by the operator. Supported from
     /// [`SHARE_LINK_VERSION`](crate::share_link::SHARE_LINK_VERSION).
     ShareLink(ShareLinkRequest),
+
+    /// The exit code of the local process that ran in place of a serverless task's own code.
+    ///
+    /// A workload companion whose task was replaced holds the task's application before `main`
+    /// until a developer's local process has run with the task's environment and arguments. The
+    /// developer's `mirrord up` observes that process and sends its exit code here (`128 +
+    /// signal` for a process killed by a signal), and the companion has the task exit with the
+    /// same code, so the serverless platform sees the local result as the task's own. It
+    /// travels over mirrord-protocol rather than the sessions-manager's control plane, because
+    /// it then arrives on the same ordered stream as the connection's end, so the code and a
+    /// disconnect can't race, and only a session already paired with the task can send it.
+    ///
+    /// The code is the local process's exit status as an `i32`. A companion relays any value
+    /// outside `0..=255` as 1: `_exit` keeps only the low 8 bits, and on Windows
+    /// `ExitStatus::code()` can be 256 or an NTSTATUS, either of which could otherwise end the
+    /// task as a success.
+    ///
+    /// A client sends it only after [`ClientMessage::SwitchProtocolVersion`] settled on a version
+    /// that matches [`REPLACED_TASK_EXIT_VERSION`]. An agent that isn't a companion holding a
+    /// replaced task ignores it. The first one a companion receives on any of its connections
+    /// wins.
+    ReplacedTaskExit(i32),
+
+    /// Marks the connection it arrives on as the owner connection of a replaced serverless task.
+    ///
+    /// A companion ends its held task as lost once no owner connection has been open for a grace
+    /// period. The developer's `mirrord up` keeps one owner connection to each task it replaced,
+    /// from before the task's local process starts until the exit code is delivered, and sends
+    /// this on it right after [`ClientMessage::SwitchProtocolVersion`], every time it opens the
+    /// connection again. The companion counts only these connections, and not those of the
+    /// local process's own session: when `mirrord up` is killed without a chance to clean up,
+    /// the local process and its intproxy can keep running, and they must not keep the task held
+    /// when nobody is left to report its exit code.
+    ///
+    /// A client sends it only after [`ClientMessage::SwitchProtocolVersion`] settled on a version
+    /// that matches [`REPLACED_TASK_EXIT_VERSION`]. An agent that isn't a companion holding a
+    /// replaced task ignores it.
+    ReplacedTaskOwner,
 }
 
 /// Type alias for `Result`s that should be returned from mirrord-agent to mirrord-layer.
