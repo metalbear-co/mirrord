@@ -57,7 +57,7 @@ use crate::{
     data::{GlobalConfig, UserData},
     ui::{
         MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
-        error::ApiError, wizard::wizard_router,
+        error::ApiError, replay::replay_router, wizard::wizard_router,
     },
 };
 
@@ -1280,7 +1280,8 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/operator-previews", get(list_operator_previews))
         .route("/me", get(current_user))
         .route("/token", get(auth_token))
-        .nest("/chaos/rules", chaos_router(state.clone()));
+        .nest("/chaos/rules", chaos_router(state.clone()))
+        .nest("/replay", replay_router(state.clone()));
 
     let authenticated_routes = Router::new()
         .nest("/api/v1", wizard_router())

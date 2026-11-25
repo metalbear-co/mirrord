@@ -289,3 +289,46 @@ export interface SparkBucket {
   id: number
   value: number
 }
+
+export interface CapturedBody {
+  text: string
+  size: number
+  truncated: boolean
+}
+
+export interface CapturedResponse {
+  status: number
+  headers: [string, string][]
+  duration_ms: number
+}
+
+export interface ReplayRun {
+  number: number
+  at_ms: number
+  response: CapturedResponse
+  body: CapturedBody
+}
+
+export type NotReplayable = 'upgraded' | 'body_too_large' | 'body_incomplete'
+
+export interface CapturedRequestSummary {
+  id: number
+  captured_at_ms: number
+  mode: string
+  port: number
+  method: string
+  path: string
+  status: number | null
+  duration_ms: number | null
+  body_size: number
+  not_replayable: NotReplayable | null
+  replay_count: number
+}
+
+export interface CapturedRequest extends CapturedRequestSummary {
+  version: string
+  headers: [string, string][]
+  body: CapturedBody
+  response: CapturedResponse | null
+  replays: ReplayRun[]
+}

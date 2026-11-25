@@ -23,6 +23,7 @@ tags:
 ## What it shows
 
 - **Local sessions** - each `mirrord exec` you have running locally, with its target, port subscriptions, processes, mirrord version, and a live event stream (file ops, DNS, HTTP requests, outgoing connections).
+- **Replay** - the Replay tab of the session view lists the HTTP requests that each local session received, and [sends them to your application again](replay.md). Needs mirrord `3.292.0` or newer.
 - **Operator sessions** - a roll-up of every active mirrord session in your cluster, grouped by session key, with target, owner, namespace, and HTTP filter. Useful for seeing what your teammates have running before you start your own session, and for picking a session to ride on from the [mirrord browser extension](incoming-traffic/debug-from-browser.md).
 - **Events** - the interception events the operator publishes for [`mirrord subscribe`](subscribe.md), for every session in the selected context at once. Needs mirrord `3.262.0` and operator `3.210.0` or newer.
 
