@@ -60,7 +60,7 @@ operator: false can't be used while logged in to mirrord.corp.example.com. Run m
 
 A [MetalBear Cloud](beyond-kubernetes/metalbear-cloud.md) config selects Cloud with that same `operator: false`, so log out of the Operator before running one. With several Operator logins saved, logging out of one switches to the next, so log out of each until `mirrord whoami` shows no Operator login.
 
-Profiles work as before: the Operator reads the `MirrordClusterProfile` or `MirrordProfile` your config names on your behalf, because only the Operator's own API is reachable through its URL. That needs an Operator of version `3.238.0` or later; with an older one, a profile fails with ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator <version>.``
+Profiles work as before: the Operator reads the `MirrordClusterProfile` or `MirrordProfile` your config names on your behalf, because only the Operator's own API is reachable through its URL. That needs an Operator of version `3.239.0` or later; with an older one, a profile fails with ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator <version>.``
 
 If the Operator's license drops below Enterprise while you are logged in, the next command fails with the same message every paid feature gives, naming SSO and the Enterprise plan. Log out, or wait for the admin to restore the license.
 
@@ -130,6 +130,6 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | `kube_context is ignored while logged in to ...` | Your config names a kubeconfig or a context, and a login is in use. | Nothing, mirrord runs against the Operator. Log out of each Operator to use the kubeconfig again. |
 | `operator: false can't be used while logged in to ...` | Your config turns the Operator off while a login is in use. | Run `mirrord logout --url` with that URL, or drop `operator: false`. |
 | `Feature sso requires a mirrord Enterprise plan.` while running | The Operator's license dropped below Enterprise after you logged in. | Ask your admin about the license, or log out and use your kubeconfig. |
-| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.238.0` or later, or drop the profile. |
+| ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
 | `the login token was not issued by this operator or has expired` before the time `mirrord whoami` shows | The Operator stopped accepting your token, for example after its client secret was rotated. `mirrord login --url` alone reuses the saved token while it has not expired. | Run `mirrord logout --url <operator-url>`, then `mirrord login --url <operator-url>`. |
 | A command fails with `403` after a login | You are logged in, but RBAC grants your user or groups nothing in that namespace. | Ask your admin to bind your group, see [Granting a group access](../managing-mirrord/sso.md#granting-a-group-access-to-a-namespace). |
