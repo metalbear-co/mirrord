@@ -107,7 +107,7 @@ use mirrord_layer_lib::{
     detour::DetourGuard,
     error::{LayerError, Result},
     logging::init_tracing,
-    proxy_connection::{PROXY_CONNECTION, ProxyConnection, send_call_timings},
+    proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
     timings,
@@ -488,13 +488,6 @@ fn layer_start(config: LayerConfig) {
     // Before the first remote call, so fetching the remote environment below is counted too.
     if state.experimental().call_timings {
         timings::enable();
-        // SAFETY: `atexit` only stores the function pointer, and the function lives as long as
-        // the layer, which is never unloaded.
-        if unsafe { libc::atexit(send_call_timings_at_exit) } != 0 {
-            tracing::debug!(
-                "Could not register the exit handler, call timings are only sent periodically."
-            );
-        }
     }
 
     let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
@@ -537,17 +530,6 @@ fn layer_start(config: LayerConfig) {
             tracing::info!(count, "Finished reading Apple variables");
         }
     }
-}
-
-/// Sends the last call timings when the application exits normally.
-///
-/// The periodic snapshots only go out while the application keeps making remote calls, so the
-/// calls after the last one would otherwise be missing from `mirrord diagnose timings`. This does
-/// not run when the application is killed or calls `_exit`; the periodic snapshots cover those.
-extern "C" fn send_call_timings_at_exit() {
-    // The write to the proxy's socket must go straight to libc, not through the layer's hooks.
-    let _guard = DetourGuard::new();
-    send_call_timings();
 }
 
 /// Name of environment variable used to mark whether remote environment has already been fetched.

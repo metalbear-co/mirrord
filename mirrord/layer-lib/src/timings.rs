@@ -7,10 +7,16 @@
 //!
 //! This runs inside the user's application on every remote call, in release builds too, so
 //! measuring a call costs two clock reads and a few atomic updates: no allocation, no lock, no
-//! log line. Two things do allocate and take a lock, and both are rare: building and sending a
-//! snapshot, which happens at most once per [`SNAPSHOT_INTERVAL`] once a process is a few seconds
-//! old, and remembering what a call was for, which happens only for a call slow enough to enter
-//! the list of the slowest ones (see [`SLOW_CALL_THRESHOLD`]).
+//! log line. Two things do allocate and take a lock, and both are rare: building a snapshot,
+//! which happens at most once per [`SNAPSHOT_INTERVAL`] once a process is a few seconds old, and
+//! remembering what a call was for, which happens only for a call slow enough to enter the list
+//! of the slowest ones (see [`SLOW_CALL_THRESHOLD`]).
+//!
+//! A snapshot never gets a send of its own. It goes out in front of the next request the
+//! application makes (see [`take_ready_snapshot`]), so counting adds no moment at which a thread
+//! of the application waits on the connection for something the application did not ask for.
+//! The calls of a process that goes quiet or dies are still in the summary: the internal proxy
+//! counts every call itself.
 
 use std::{
     sync::{
@@ -31,11 +37,10 @@ use mirrord_intproxy_protocol::{
 /// are not lost: the internal proxy counts them too and reports its own, slightly shorter,
 /// measurement for whatever no snapshot covered. A snapshot is one small
 /// write to a local socket, so sending one every two seconds costs nothing next to the remote
-/// calls that trigger it.
+/// calls it travels with.
 ///
-/// No timer runs: a snapshot is sent by the first remote call that finishes once it is due, so
-/// the layer starts no thread of its own in the application. A process that stops making remote
-/// calls sends its last numbers when it exits.
+/// No timer runs: the first remote call that finishes once a snapshot is due marks it ready, and
+/// the next request carries it, so the layer starts no thread of its own in the application.
 pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(2);
 
 /// How long a process counts before its first snapshot.
@@ -43,9 +48,8 @@ pub const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(2);
 /// A young process sends snapshots more often than [`SNAPSHOT_INTERVAL`]: the first one after
 /// this long, and each next one after as long again as the process had been counting at the
 /// previous one, so the gaps double until they reach the interval. A process that dies without
-/// warning then loses about the last half of its run at most, however short the run was. Without
-/// this, everything that lives under two seconds and does not exit cleanly (a Go program never
-/// runs exit handlers) would report nothing. It costs a handful of extra snapshots per process.
+/// warning then loses about the last half of its own measurements at most, however short its
+/// run was. It costs a handful of extra snapshots per process.
 const FIRST_SNAPSHOT_AFTER: Duration = Duration::from_millis(50);
 
 /// The shortest wait that can put a call on the list of the slowest ones.
@@ -72,6 +76,9 @@ static STARTED_NANOS: AtomicU64 = AtomicU64::new(0);
 /// When the last snapshot was claimed, in nanoseconds since [`ORIGIN`]. Before the first
 /// snapshot, when this process started counting.
 static LAST_SNAPSHOT_NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// Set when a snapshot is due, until a request takes it along.
+static SNAPSHOT_READY: AtomicBool = AtomicBool::new(false);
 
 static TALLIES: [KindTally; CallKind::ALL.len()] =
     [const { KindTally::new() }; CallKind::ALL.len()];
@@ -182,6 +189,7 @@ pub fn reset() {
     let now_nanos = nanos_since_origin(Instant::now());
     STARTED_NANOS.store(now_nanos, Ordering::Relaxed);
     LAST_SNAPSHOT_NANOS.store(now_nanos, Ordering::Relaxed);
+    SNAPSHOT_READY.store(false, Ordering::Relaxed);
 }
 
 fn nanos_since_origin(now: Instant) -> u64 {
@@ -235,11 +243,9 @@ impl CallTimer {
     /// Adds the finished call to its kind's counters, and to the slowest calls when it is slow
     /// enough. `message` is the request the timer was started with.
     ///
-    /// # Returns
-    ///
-    /// `true` when this call is the one that should send a snapshot: one is due, and no other
-    /// thread claimed it first.
-    pub(crate) fn finish(self, message: &LayerToProxyMessage) -> bool {
+    /// When a snapshot is due this only marks it ready. The call was just answered, and its
+    /// thread must go back to the application without touching the connection again.
+    pub(crate) fn finish(self, message: &LayerToProxyMessage) {
         let now = Instant::now();
         let waited = saturating_nanos(now.saturating_duration_since(self.started));
         if let Some(tally) = TALLIES.get(self.kind as usize) {
@@ -258,11 +264,40 @@ impl CallTimer {
 
         let now_nanos = nanos_since_origin(now);
         let last_nanos = LAST_SNAPSHOT_NANOS.load(Ordering::Relaxed);
-        snapshot_due(STARTED_NANOS.load(Ordering::Relaxed), last_nanos, now_nanos)
+        if snapshot_due(STARTED_NANOS.load(Ordering::Relaxed), last_nanos, now_nanos)
             && LAST_SNAPSHOT_NANOS
                 .compare_exchange(last_nanos, now_nanos, Ordering::Relaxed, Ordering::Relaxed)
                 .is_ok()
+        {
+            SNAPSHOT_READY.store(true, Ordering::Relaxed);
+        }
     }
+}
+
+/// The snapshot to send in front of the request that is about to go out, when one is due.
+///
+/// Costs one atomic read for the requests that carry none, which is nearly all of them.
+pub(crate) fn take_ready_snapshot() -> Option<CallTimingsSnapshot> {
+    if !SNAPSHOT_READY.load(Ordering::Relaxed) || !SNAPSHOT_READY.swap(false, Ordering::Relaxed) {
+        return None;
+    }
+
+    snapshot()
+}
+
+/// Gives a test the counters to itself, switched off and empty.
+///
+/// The counters are process-wide, so tests that touch them take turns.
+#[cfg(test)]
+pub(crate) fn exclusive_for_test() -> MutexGuard<'static, ()> {
+    static TURN: Mutex<()> = Mutex::new(());
+
+    let turn = TURN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    ENABLED.store(false, Ordering::Relaxed);
+    reset();
+    turn
 }
 
 /// The counters of every kind this process made at least one call of.
@@ -270,7 +305,7 @@ impl CallTimer {
 /// # Returns
 ///
 /// [`None`] when counting is off or nothing was counted, so there is nothing worth sending.
-pub(crate) fn snapshot() -> Option<CallTimingsSnapshot> {
+fn snapshot() -> Option<CallTimingsSnapshot> {
     if !ENABLED.load(Ordering::Relaxed) {
         return None;
     }
@@ -331,10 +366,10 @@ mod tests {
         }))
     }
 
-    /// The counters are process-wide, so everything that touches them lives in this one test:
-    /// separate tests would run in parallel and see each other's calls.
     #[test]
     fn counts_remote_calls_per_kind_and_starts_over_after_a_fork() {
+        let _turn = exclusive_for_test();
+
         assert!(
             CallTimer::start(&lookup()).is_none(),
             "nothing is measured until the layer turns counting on"
@@ -377,6 +412,53 @@ mod tests {
             snapshot(),
             None,
             "a forked child reports only its own calls"
+        );
+    }
+
+    /// A finished call that finds a snapshot due only marks it, once, for a request to take
+    /// along. A forked child starts without one.
+    #[test]
+    fn a_due_snapshot_waits_to_be_taken_and_is_taken_once() {
+        let _turn = exclusive_for_test();
+        enable();
+        let message = stat();
+        let call = || {
+            CallTimer::start(&message)
+                .expect("a remote call is measured")
+                .finish(&message);
+        };
+
+        call();
+        assert_eq!(
+            take_ready_snapshot(),
+            None,
+            "a process younger than the first snapshot's delay has none ready"
+        );
+
+        std::thread::sleep(FIRST_SNAPSHOT_AFTER);
+        call();
+        let taken = take_ready_snapshot().expect("the call found the first snapshot due");
+        assert_eq!(
+            taken
+                .kinds
+                .iter()
+                .map(|kind| kind.calls)
+                .collect::<Vec<_>>(),
+            [2]
+        );
+        assert_eq!(
+            take_ready_snapshot(),
+            None,
+            "one request carries it, not two"
+        );
+
+        std::thread::sleep(FIRST_SNAPSHOT_AFTER * 2);
+        call();
+        reset();
+        assert_eq!(
+            take_ready_snapshot(),
+            None,
+            "a snapshot that was ready in the parent holds the parent's calls"
         );
     }
 

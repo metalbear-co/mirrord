@@ -96,8 +96,8 @@ pub struct FakeLayerConnection {
 impl FakeLayerConnection {
     /// Reads the next message of the layer. Gives [`None`] when the layer closed the connection.
     ///
-    /// Skips the layer's call timings: they arrive on the layer's own schedule, between the
-    /// requests a test expects, and no test answers them.
+    /// Skips the layer's call timings: they arrive on the layer's own schedule, in front of a
+    /// request a test expects, and no test answers them.
     pub async fn recv(&mut self) -> Option<LocalMessage<LayerToProxyMessage>> {
         loop {
             let message = self.rx.next().await.map(Result::unwrap)?;
