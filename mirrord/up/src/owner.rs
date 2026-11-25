@@ -10,9 +10,12 @@
 //! [`ClientMessage::Ping`] sent after it, and until it does, the code is sent again on new
 //! connections.
 //!
-//! The workload companion ends a held task with [`LOST_SESSION_EXIT_CODE`] once no client has been
-//! connected to it for 30 seconds. The owner connection keeps the task from ending so while the
-//! instance's own connection is set up or reconnects, and is opened again when it drops.
+//! The workload companion ends a held task with [`LOST_SESSION_EXIT_CODE`] once no owner
+//! connection has been open for 30 seconds. Every owner connection announces itself with
+//! [`ClientMessage::ReplacedTaskOwner`] as soon as it is open, and the companion counts only
+//! those, so that the instance's own connections can't keep the task held once `mirrord up` is
+//! gone, whatever way it ended. The owner connection keeps the task held while the instance runs,
+//! and is opened again when it drops.
 
 use std::{ops::Not, sync::Arc, time::Duration};
 
@@ -444,7 +447,8 @@ fn too_old(name: &str, version: &semver::Version) {
     );
 }
 
-/// One attempt of [`open`], with the version negotiation the intproxy does.
+/// One attempt of [`open`], with the version negotiation the intproxy does, after which the
+/// connection announces itself as the task's owner.
 async fn open_once(
     client: &IntproxyClient<OperatorTransport>,
     deadline: Instant,
@@ -472,9 +476,9 @@ async fn open_once(
     .await
     .map_err(|_| OpenError::Timeout)??;
 
-    if REPLACED_TASK_EXIT_VERSION.matches(&version) {
-        Ok(connection)
-    } else {
-        Err(OpenError::Version(version))
+    if REPLACED_TASK_EXIT_VERSION.matches(&version).not() {
+        return Err(OpenError::Version(version));
     }
+    connection.send(ClientMessage::ReplacedTaskOwner).await?;
+    Ok(connection)
 }
