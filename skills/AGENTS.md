@@ -8,4 +8,4 @@ Every fenced `json` or `yaml` block you add or edit in a Markdown file needs a t
 
 ## Plugin version
 
-A change to `skills/` must raise `version` in `.claude-plugin/plugin.json` above the version on `main`, because Claude Code updates an installed plugin only when its version changes. The `plan` job of the mirrord repository's CI checks this. [CONTRIBUTING.md](CONTRIBUTING.md#plugin-version) says which other manifests to leave alone and what to do when the check fails in the merge queue.
+A change to `skills/` or `.claude-plugin/`, the files that Claude Code installs, must raise `version` in `.claude-plugin/plugin.json` above the version on `main`, because Claude Code updates an installed plugin only when its version changes. The `plan` job of the mirrord repository's CI checks this. [CONTRIBUTING.md](CONTRIBUTING.md#plugin-version) says which other manifests to leave alone and what to do when the check fails in the merge queue.

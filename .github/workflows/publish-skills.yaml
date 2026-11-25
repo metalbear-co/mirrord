@@ -5,9 +5,9 @@ name: Publish skills
 # workflow copies `skills/` there on every merge to `main` that changes it, so those installs get a skill change without
 # waiting for a release. `npx skills add` and install.sh clone the repository, so they get every merge. Claude Code
 # updates an installed plugin only when the plugin's `version` changes, so the `plan` job of ci.yaml requires a
-# version bump with every change to the skills. `mirrord mcp` still embeds `skills/skills` when it's built, so it gets
-# the change with the next release. The docs and guides need no such workflow, because GitBook
-# syncs `docs/` and `guides/` on `main` itself.
+# version bump with every change to the files that Claude Code installs. `mirrord mcp` still embeds `skills/skills`
+# when it's built, so it gets the change with the next release. The docs and guides need no such workflow, because
+# GitBook syncs `docs/` and `guides/` on `main` itself.
 #
 # Each publish appends one commit on top of the tip of metalbear-co/skills `main`, whose tree is exactly `skills/` at
 # the tip of the run's ref when the run starts. That is the tip, not the commit that started the run, so a re-run of an

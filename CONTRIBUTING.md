@@ -1003,8 +1003,9 @@ the run starts, so the next publish replaces a change made in that repository di
 its history. A failed run posts to `#ci-alerts`.
 
 `npx skills add` and `install.sh` clone `metalbear-co/skills`, so they get every merge, but Claude Code updates an
-installed plugin only when the plugin's `version` changes. A pull request that changes `skills/skills/` must raise
-`version` in `skills/.claude-plugin/plugin.json`, and the `plan` job of `ci.yaml` fails one that doesn't.
+installed plugin only when the plugin's `version` changes. A pull request that changes `skills/skills/` or
+`skills/.claude-plugin/`, the files that Claude Code installs, must raise `version` in
+`skills/.claude-plugin/plugin.json`, and the `plan` job of `ci.yaml` fails one that doesn't.
 [`skills/CONTRIBUTING.md`](/skills/CONTRIBUTING.md#plugin-version) says what to do when that check fails in the merge
 queue.
 
