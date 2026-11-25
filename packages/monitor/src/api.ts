@@ -1,4 +1,6 @@
 import type {
+  CapturedRequest,
+  CapturedRequestSummary,
   ChaosRule,
   ChaosRuleRequest,
   CloudSessionsResponse,
@@ -7,6 +9,7 @@ import type {
   OperatorLicense,
   OperatorSessionsResponse,
   PreviewDetail,
+  ReplayRun,
   SessionInfo,
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
@@ -40,6 +43,11 @@ function contextParam(context: string | null): string {
 function chaosRulesPath(sessionId: string, ruleId?: string): string {
   const base = `/api/chaos/rules/${encodeURIComponent(sessionId)}`
   return ruleId ? `${base}/${encodeURIComponent(ruleId)}` : base
+}
+
+function replayPath(sessionId: string, requestId?: number): string {
+  const base = `/api/replay/${encodeURIComponent(sessionId)}`
+  return requestId === undefined ? base : `${base}/${requestId}`
 }
 
 async function chaosErrorMessage(r: Response): Promise<string> {
@@ -125,6 +133,53 @@ export const api = {
     if (unmatched) params.set('unmatched', 'true')
     const query = params.toString()
     return withToken(`/api/v2/operator/events${query ? `?${query}` : ''}`)
+  },
+
+  /** Returns null for a session that doesn't keep requests. */
+  listCapturedRequests: async (
+    sessionId: string,
+  ): Promise<CapturedRequestSummary[] | null> => {
+    const r = await fetch(withToken(replayPath(sessionId)), {
+      credentials: 'include',
+    })
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      // The session API of a mirrord version without replay answers with an empty 404.
+      if (r.status === HTTP_NOT_FOUND && body === '') return null
+      throw new Error(body || `${r.status} ${r.statusText}`)
+    }
+    return (await r.json()) as CapturedRequestSummary[]
+  },
+
+  getCapturedRequest: async (
+    sessionId: string,
+    requestId: number,
+  ): Promise<CapturedRequest> => {
+    const r = await fetch(withToken(replayPath(sessionId, requestId)), {
+      credentials: 'include',
+    })
+    if (!r.ok) throw new Error(await chaosErrorMessage(r))
+    return (await r.json()) as CapturedRequest
+  },
+
+  replayRequest: async (
+    sessionId: string,
+    requestId: number,
+  ): Promise<ReplayRun> => {
+    const r = await fetch(
+      withToken(`${replayPath(sessionId, requestId)}/replay`),
+      { method: 'POST', credentials: 'include' },
+    )
+    if (!r.ok) {
+      emitUserBlocked('replay_request_failed', { session_id: sessionId })
+      throw new Error(await chaosErrorMessage(r))
+    }
+    const run = (await r.json()) as ReplayRun
+    emitUserSucceeded('replay_request_sent', {
+      session_id: sessionId,
+      status: run.response.status,
+    })
+    return run
   },
 
   listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {

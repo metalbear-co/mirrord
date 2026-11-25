@@ -24,7 +24,7 @@ pub const BASE_INTPROXY_CHAOS_ROUTE: &str = "/chaos/rules";
 /// Without this, the [`get_session_client_middleware`] has to be manually inspected (via `HashMap`)
 /// for a `session_id` parameter in the url `Path`.
 #[derive(Deserialize)]
-pub(super) struct SessionPath {
+pub(in crate::ui) struct SessionPath {
     /// Required [`SessionId`] field to appear in [`Path`].
     session_id: SessionId,
 }
@@ -42,10 +42,10 @@ pub(super) struct RulePath {
 /// Checks if the `session_id` is available in our [`AppState`] (which means that there's some
 /// mirrord session running with this id), and then extracts the [`SessionClient`] that can be
 /// used to make requests to the session monitor server of this particular session. Puts
-/// this `SessionClient` as a request [`Extension`] and passes it along to the chaos route
-/// handlers.
+/// this `SessionClient` as a request [`Extension`] and passes it along to the route handlers of
+/// that session.
 #[tracing::instrument(level = Level::DEBUG, skip(state, request, next))]
-pub(super) async fn get_session_client_middleware(
+pub(in crate::ui) async fn get_session_client_middleware(
     State(state): State<AppState>,
     Path(SessionPath { session_id }): Path<SessionPath>,
     mut request: Request,

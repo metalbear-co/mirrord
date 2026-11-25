@@ -55,6 +55,7 @@ mod chaos;
 mod daemon;
 pub(crate) mod db_portforwards;
 mod error;
+mod replay;
 pub mod server;
 mod wizard;
 

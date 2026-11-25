@@ -79,6 +79,10 @@ mirrord replay show 1
 
 This prints the headers and body of the request, the status of the response to the original request, and the status of its latest replays. Values of headers and query parameters that usually carry secrets, such as `authorization`, `cookie`, and `token`, are printed as `[REDACTED]`. A replay still sends the original values. Bodies are printed as they are.
 
+## Replaying from the Local UI
+
+The session view of the [Local UI](local-ui.md) has a **Replay** tab. It lists the requests of the session, and shows each request with its replays and their responses. Select a request and press **Replay**.
+
 ## Choosing a session
 
 While one local session is running, `mirrord replay` uses it. When several are running, pass the session ID that `mirrord session list` prints:
