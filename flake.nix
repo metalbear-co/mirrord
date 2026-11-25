@@ -92,18 +92,6 @@
                 ];
               in
               rustPackages ++ uiPackages ++ testsPackages ++ miscPackages;
-
-            env =
-              with pkgs;
-              let
-                x86-gcc = lib.getExe pkgsCross.gnu64.stdenv.cc;
-              in
-              lib.optionalAttrs stdenv.hostPlatform.isDarwin {
-                # Tells bindgen/cargo which C/C++ toolchain to use when targetting linux
-                CC_x86_64_unknown_linux_gnu = x86-gcc;
-                CXX_x86_64_unknown_linux_gnu = x86-gcc;
-                CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = x86-gcc;
-              };
           };
         }
       );
