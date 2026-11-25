@@ -30,7 +30,17 @@ pub const APP_PID_ENV: &str = "MIRRORD_REMOTE_APP_PID";
 /// The companion reads it from `/proc/<pid>/cmdline` for the PID in [`APP_PID_ENV`], replacing
 /// bytes that aren't UTF-8, and leaves the variable out when it can't. The task's own
 /// environment never has it. The arguments can carry secrets, so nothing logs them.
+///
+/// The companion also leaves it out when its value is longer than [`APP_ARGV_MAX_LEN`].
 pub const APP_ARGV_ENV: &str = "MIRRORD_REMOTE_ARGV";
+
+/// The longest value of [`APP_ARGV_ENV`] the workload companion serves, in bytes.
+///
+/// A CLI that predates the variable doesn't remove it from the environment it starts the local
+/// process with, and Linux refuses an `execve` with `E2BIG` when one `NAME=value` string is
+/// longer than `MAX_ARG_STRLEN` (128 KiB). Half of that keeps the variable well clear of it, and
+/// of the limit on the whole of the arguments and environment.
+pub const APP_ARGV_MAX_LEN: usize = 64 * 1024;
 
 /// The exit code of a replaced task whose developer session was lost before it reported the
 /// local process's exit code.
