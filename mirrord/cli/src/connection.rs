@@ -28,7 +28,7 @@ use mirrord_progress::{
     utm_medium,
 };
 use mirrord_sessions_manager_client::{
-    EndpointSource, LoginTokenCredentials, ServiceScope, SessionsManagerClientError,
+    AgentSelector, EndpointSource, LoginTokenCredentials, ServiceScope, SessionsManagerClientError,
     SessionsManagerConnectInfo, SessionsManagerEndpoint,
 };
 use tracing::Level;
@@ -79,7 +79,9 @@ fn send_upgrade_ide_message<P: Progress>(
 ///
 /// Unlike [`try_connect_using_operator`], a missing operator, an invalid license, or an operator
 /// without sessions-manager support is an error rather than a fallback, since the user asked for
-/// the operator explicitly. The client carries only the user's kubeconfig credentials, with no
+/// the operator explicitly. So is an operator that can't select a task by its tags when
+/// `target.tag_filter` or `target.jq_filter` is set: an older one would pair the session with any
+/// task of the service. The client carries only the user's kubeconfig credentials, with no
 /// operator session certificate: the hosted routes are authorized by Kubernetes RBAC.
 #[mirrord_macros::boxed_future]
 async fn operator_sessions_manager_client<P, R>(
@@ -96,7 +98,18 @@ where
         .await?
         .ok_or(CliError::OperatorNotInstalled)?;
     api.check_license_validity(&subtask)?;
-    if let Err(error) = api.check_serverless_sessions_manager_served() {
+    let served = api
+        .check_serverless_sessions_manager_served()
+        .and_then(|()| {
+            if layer_config.target.has_task_selector() {
+                api.operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::ServerlessTaskSelection)
+            } else {
+                Ok(())
+            }
+        });
+    if let Err(error) = served {
         if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
             report_local_feature_gate(api, *feature, layer_config, progress, analytics).await;
         }
@@ -533,10 +546,18 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         return Err(LocalShareError::UnsupportedSessionsManagerTarget.into());
     }
     if let Some(Target::Serverless(target)) = &config.target.path {
+        // Verification already refuses the filters on the standalone and MetalBear Cloud
+        // sessions-managers, which would ignore them. Checked again on the path that reads them,
+        // so that no caller can skip it.
+        config.verify_task_selector()?;
         let service = target.sessions_manager_service()?;
         let user_session_id = std::env::var("MIRRORD_SESSION_ID")
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
         let agent_replica_filter = target.sessions_manager_target_replica_id();
+        let agent_selector = config.target.has_task_selector().then(|| AgentSelector {
+            tag_filter: config.target.tag_filter.clone(),
+            jq_filter: config.target.jq_filter.clone(),
+        });
         let connect_info = SessionsManagerConnectInfo {
             scope: ServiceScope {
                 service,
@@ -548,6 +569,8 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             },
             user_session_id,
             replica_filter: agent_replica_filter.map(Into::into),
+            agent_selector,
+            assigned_replica: None,
         };
         let standalone =
             standalone_sessions_manager(config).map_err(CliError::SessionsManagerUrl)?;
@@ -567,31 +590,43 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         };
         tracing::info!("{message}");
         let mut first_connect_progress = progress.subtask(&message);
-        let (route, agent_connect_info) = match standalone {
-            None => (
-                SessionsManagerRoute::Operator(
-                    operator_sessions_manager_client(config, progress, analytics).await?,
-                ),
-                AgentConnectInfo::OperatorSessionsManager(connect_info.clone()),
+        let route = match standalone {
+            None => SessionsManagerRoute::Operator(
+                operator_sessions_manager_client(config, progress, analytics).await?,
             ),
             Some(endpoint) => {
                 warn_without_login_token(progress, &endpoint).await?;
-                (
-                    SessionsManagerRoute::Standalone(endpoint),
-                    AgentConnectInfo::SessionsManager(connect_info.clone()),
-                )
+                SessionsManagerRoute::Standalone(endpoint)
             }
         };
+        if connect_info.agent_selector.is_some() {
+            first_connect_progress.info(
+                "waiting for a task whose AWS Batch job tags match the target's filters \
+                 (`target.tag_filter`, `target.jq_filter`). A task can match only when its \
+                 mirrord companion sends its job ID to the operator.",
+            );
+        }
         let mut connector = SessionsManagerConnector {
             connect_info,
             route,
             first_conn: None,
         };
-        let conn = connector.connect().await.map_err(|error| match error {
+        let (conn, assigned_replica) = connector.connect().await.map_err(|error| match error {
             SessionsManagerClientError::OperationTimeout => CliError::SessionsManagerConnectTimeout,
             error => CliError::SessionsManagerConnect(error),
         })?;
         connector.first_conn = Some(Box::new(conn));
+        // The intproxy's connections and the CLI's later ones register for the replica this one
+        // reached, so they share its task even when several tasks match the selector.
+        connector.connect_info.assigned_replica = assigned_replica;
+        let agent_connect_info = match &connector.route {
+            SessionsManagerRoute::Operator(_) => {
+                AgentConnectInfo::OperatorSessionsManager(connector.connect_info.clone())
+            }
+            SessionsManagerRoute::Standalone(_) => {
+                AgentConnectInfo::SessionsManager(connector.connect_info.clone())
+            }
+        };
         first_connect_progress.success(None);
 
         return Ok(ConnectData {

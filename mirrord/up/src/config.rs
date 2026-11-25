@@ -502,10 +502,7 @@ impl TargetConfig {
         kube_context: Option<Arc<str>>,
     ) -> Result<mirrord_config::target::TargetConfig, UnresolvedTarget> {
         match self {
-            Self::Targetless => Ok(mirrord_config::target::TargetConfig {
-                path: None,
-                namespace: None,
-            }),
+            Self::Targetless => Ok(mirrord_config::target::TargetConfig::default()),
 
             Self::Specified(SpecifiedTarget {
                 path: None,
@@ -522,6 +519,8 @@ impl TargetConfig {
             }) => Ok(mirrord_config::target::TargetConfig {
                 path: path.clone(),
                 namespace: namespace.as_deref().map(Into::into),
+                tag_filter: None,
+                jq_filter: None,
             }),
         }
     }
@@ -935,6 +934,8 @@ impl ServiceConfig {
                     mirrord_config::target::TargetConfig {
                         path: target.resolved.path,
                         namespace: target.resolved.namespace.as_deref().map(Into::into),
+                        tag_filter: None,
+                        jq_filter: None,
                     }
                 }
                 None => panic!(

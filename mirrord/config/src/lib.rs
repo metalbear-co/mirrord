@@ -25,7 +25,13 @@ pub mod target;
 pub mod template;
 pub mod util;
 
-use std::{collections::HashMap, ffi::OsStr, io::Read, ops::Not, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ffi::OsStr,
+    io::Read,
+    ops::Not,
+    path::Path,
+};
 
 use base64::prelude::*;
 use config::{ConfigContext, ConfigError, MirrordConfig};
@@ -1104,6 +1110,55 @@ impl LayerConfig {
         Ok(())
     }
 
+    /// Verifies `target.tag_filter` and `target.jq_filter`.
+    ///
+    /// Only the sessions-manager hosted by the operator selects tasks by their tags. The
+    /// standalone and MetalBear Cloud ones would pair the session with any task of the service,
+    /// so the filters are refused unless `operator` is `true`. Whether the regexes and the jq
+    /// program are valid is left to the operator, which compiles them and refuses the session
+    /// with a message naming the filter.
+    pub fn verify_task_selector(&self) -> Result<(), ConfigError> {
+        let TargetConfig {
+            path,
+            tag_filter,
+            jq_filter,
+            ..
+        } = &self.target;
+        let setting = match (tag_filter, jq_filter) {
+            (None, None) => return Ok(()),
+            (Some(_), _) => "target.tag_filter",
+            (None, Some(_)) => "target.jq_filter",
+        };
+
+        if matches!(path, Some(Target::Serverless(_))).not() {
+            return Err(ConfigError::ConflictAt {
+                setting: setting.into(),
+                message: format!("`{setting}` is supported only with serverless targets."),
+            });
+        }
+
+        if self.operator != Some(true) {
+            return Err(ConfigError::ConflictAt {
+                setting: "operator".into(),
+                message: format!(
+                    "`{setting}` needs the sessions-manager hosted by the mirrord operator, \
+                     selected with `operator` set to `true`."
+                ),
+            });
+        }
+
+        if tag_filter.as_ref().is_some_and(BTreeMap::is_empty) && jq_filter.is_none() {
+            return Err(ConfigError::ConflictAt {
+                setting: setting.into(),
+                message: "`target.tag_filter` is empty, so it would match every task: name at \
+                          least one tag, or remove it."
+                    .to_owned(),
+            });
+        }
+
+        Ok(())
+    }
+
     /// Verifies that there are no conflicting settings in this config.
     ///
     /// Fills the given [`ConfigContext`] with warnings.
@@ -1481,6 +1536,8 @@ impl LayerConfig {
                 ));
             }
         }
+
+        self.verify_task_selector()?;
 
         self.feature.split_queues.verify(context)?;
 
@@ -2340,6 +2397,8 @@ mod tests {
                     container: None,
                 })),
                 namespace: Some("default".to_owned()),
+                tag_filter: None,
+                jq_filter: None,
             }),
             skip_processes: None,
             skip_extra_build_tools: None,

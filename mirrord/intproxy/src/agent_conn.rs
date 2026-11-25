@@ -128,7 +128,8 @@ pub enum ReconnectFlow {
     ConnectInfo {
         /// Boxed due to large size.
         config: Box<LayerConfig>,
-        connect_info: AgentConnectInfo,
+        /// Boxed due to large size.
+        connect_info: Box<AgentConnectInfo>,
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     },
 
@@ -206,7 +207,7 @@ impl AgentConnection {
                     if session.allow_reconnect {
                         ReconnectFlow::ConnectInfo {
                             config: Box::new(config.clone()),
-                            connect_info: AgentConnectInfo::Operator(session),
+                            connect_info: Box::new(AgentConnectInfo::Operator(session)),
                             login_tokens,
                         }
                     } else {
@@ -270,6 +271,10 @@ impl AgentConnection {
                 (conn, ReconnectFlow::Break(kind))
             }
 
+            // The connection is made with the connect info as the CLI gave it, which names the
+            // replica the CLI's own connection reached, so both share a task. A reconnect clears
+            // it: the task may be gone, and a session with a selector then pairs with any task
+            // that matches, as a session without one pairs with any task.
             AgentConnectInfo::SessionsManager(connect_info) => {
                 let endpoint =
                     SessionsManagerEndpoint::resolve(config.sessions_manager.url.as_deref())?;
@@ -280,14 +285,17 @@ impl AgentConnection {
                 );
                 let proxy_client =
                     IntproxyClient::new(connect_info.clone(), endpoint, login_tokens.clone())?;
-                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
-                    .await
-                    .map(Connection::from_channel)?;
+                let (conn, _) = Box::pin(proxy_client.connect(Duration::from_secs(60))).await?;
                 (
-                    conn,
+                    Connection::from_channel(conn),
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
-                        connect_info: AgentConnectInfo::SessionsManager(connect_info),
+                        connect_info: Box::new(AgentConnectInfo::SessionsManager(
+                            SessionsManagerConnectInfo {
+                                assigned_replica: None,
+                                ..connect_info
+                            },
+                        )),
                         login_tokens,
                     },
                 )
@@ -298,14 +306,17 @@ impl AgentConnection {
                     OperatorApi::serverless_sessions_manager_client(config).await?,
                 );
                 let proxy_client = IntproxyClient::with_transport(connect_info.clone(), transport)?;
-                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
-                    .await
-                    .map(Connection::from_channel)?;
+                let (conn, _) = Box::pin(proxy_client.connect(Duration::from_secs(60))).await?;
                 (
-                    conn,
+                    Connection::from_channel(conn),
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
-                        connect_info: AgentConnectInfo::OperatorSessionsManager(connect_info),
+                        connect_info: Box::new(AgentConnectInfo::OperatorSessionsManager(
+                            SessionsManagerConnectInfo {
+                                assigned_replica: None,
+                                ..connect_info
+                            },
+                        )),
                         login_tokens,
                     },
                 )
@@ -318,7 +329,7 @@ impl AgentConnection {
 
                 let reconnect = ReconnectFlow::ConnectInfo {
                     config: Box::new(config.clone()),
-                    connect_info: AgentConnectInfo::Dummy(sender),
+                    connect_info: Box::new(AgentConnectInfo::Dummy(sender)),
                     login_tokens,
                 };
 
@@ -454,7 +465,7 @@ impl RestartableBackgroundTask for AgentConnection {
                             .closed_token()
                             .run_until_cancelled(AgentConnection::new(
                                 config,
-                                connect_info.clone(),
+                                AgentConnectInfo::clone(connect_info),
                                 login_tokens.clone(),
                                 &mut NullReporter::default(),
                             ))

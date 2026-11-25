@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt, str::FromStr, sync::LazyLock};
+use std::{borrow::Cow, collections::BTreeMap, fmt, str::FromStr, sync::LazyLock};
 
 use cron_job::CronJobTarget;
 use mirrord_analytics::CollectAnalytics;
@@ -67,6 +67,17 @@ pub enum TargetFileConfig {
         path: Option<Target>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         namespace: Option<String>,
+        /// Selects the task of a serverless target by the tags of its AWS Batch job: a mapping of
+        /// tag names to regexes, all of which the task's tags must match. Needs `operator: true`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Enterprise))]
+        tag_filter: Option<BTreeMap<String, String>>,
+        /// Selects the task of a serverless target with a jq program run on
+        /// `{"tags": {"<name>": "<value>", ...}}`, the tags of its AWS Batch job. The task matches
+        /// when the program outputs `true`. Needs `operator: true`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Enterprise))]
+        jq_filter: Option<String>,
     },
 }
 
@@ -196,7 +207,7 @@ pub fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Sche
 ///
 /// The setup above will result in a session without any target.
 /// Remote outgoing traffic and DNS will be done from the `bear-namespace` namespace.
-#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
     /// ### target.path {#target-path}
@@ -238,6 +249,72 @@ pub struct TargetConfig {
     /// Defaults to the Kubernetes user's default namespace (defined in Kubernetes context).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+
+    /// ### target.tag_filter {#target-tag_filter}
+    ///
+    /// Selects the task a [serverless](#target-path) session attaches to by the tags of its AWS
+    /// Batch job: a mapping of tag names to regexes. A task matches when its job has every named
+    /// tag, each with a value its regex matches.
+    ///
+    /// mirrord waits for a matching task when none runs yet. Among several matching tasks, it
+    /// attaches to the one with the lowest replica id, and the whole session stays on that task.
+    /// A task whose tags the operator could not read never matches.
+    ///
+    /// ```json
+    /// {
+    ///   "operator": true,
+    ///   "target": {
+    ///     "path": "serverless/report-generator",
+    ///     "tag_filter": { "company_id": "^1234$" }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Combined with [`target.jq_filter`](#target-jq_filter), a task must match both. An empty
+    /// mapping matches every task, so it is accepted only together with `jq_filter`.
+    ///
+    /// Needs `operator: true`, and an operator that hosts the sessions-manager and selects tasks
+    /// by their tags. The operator reads the tags with `batch:DescribeJobs` on its own role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_filter: Option<BTreeMap<String, String>>,
+
+    /// ### target.jq_filter {#target-jq_filter}
+    ///
+    /// Selects the task a [serverless](#target-path) session attaches to with a jq program, run
+    /// on the tags of the task's AWS Batch job, as `{"tags": {"<name>": "<value>", ...}}`. A task
+    /// matches when the program outputs `true`.
+    ///
+    /// ```json
+    /// {
+    ///   "operator": true,
+    ///   "target": {
+    ///     "path": "serverless/report-generator",
+    ///     "jq_filter": ".tags.company_id == \"1234\" and .tags.priority != \"low\""
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Combined with [`target.tag_filter`](#target-tag_filter), a task must match both. Otherwise
+    /// behaves as `tag_filter` does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jq_filter: Option<String>,
+}
+
+impl fmt::Debug for TargetConfig {
+    /// Leaves the filters out: they describe the customer's workload, and the whole config is
+    /// logged by the intproxy and the extproxy.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TargetConfig")
+            .field("path", &self.path)
+            .field("namespace", &self.namespace)
+            .field(
+                "tag_filter",
+                &self.tag_filter.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("jq_filter", &self.jq_filter.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl Default for TargetFileConfig {
@@ -254,6 +331,12 @@ impl TargetConfig {
     /// `true` when the session runs without a target: no `path`, or `path: "targetless"`.
     pub fn is_targetless(&self) -> bool {
         matches!(self.path, None | Some(Target::Targetless))
+    }
+
+    /// `true` when the session selects its serverless task by the task's tags, with
+    /// [`Self::tag_filter`] or [`Self::jq_filter`].
+    pub fn has_task_selector(&self) -> bool {
+        self.tag_filter.is_some() || self.jq_filter.is_some()
     }
 }
 
@@ -279,15 +362,25 @@ impl MirrordConfig for TargetFileConfig {
     /// Generate the final config object, out of the configuration parsed from a configuration file,
     /// factoring in environment variables (which are also set by the front end - CLI/IDE-plugin).
     fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
-        let (path_from_conf_file, namespace_from_conf_file) = match self {
-            TargetFileConfig::Simple(path) => (path, None),
-            TargetFileConfig::Advanced { path, namespace } => (path, namespace),
+        let (path_from_conf_file, namespace_from_conf_file, tag_filter, jq_filter) = match self {
+            TargetFileConfig::Simple(path) => (path, None, None, None),
+            TargetFileConfig::Advanced {
+                path,
+                namespace,
+                tag_filter,
+                jq_filter,
+            } => (path, namespace, tag_filter, jq_filter),
         };
 
         // Env overrides configuration if both there.
         let path = Self::get_target_path_from_env(context)?.or(path_from_conf_file);
         let namespace = Self::get_target_namespace_from_env(context)?.or(namespace_from_conf_file);
-        Ok(TargetConfig { path, namespace })
+        Ok(TargetConfig {
+            path,
+            namespace,
+            tag_filter,
+            jq_filter,
+        })
     }
 }
 
@@ -832,7 +925,8 @@ mod tests {
     #[case(None, None,
         TargetConfig {
             path: None,
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )] // Nothing specified - no target config (targetless mode).
     #[case(
@@ -840,7 +934,8 @@ mod tests {
         Some("ns"),
         TargetConfig{
             path: None,
-            namespace: Some("ns".to_owned())
+            namespace: Some("ns".to_owned()),
+            ..Default::default()
         }
     )] // Namespace without target - error.
     #[case(
@@ -848,7 +943,8 @@ mod tests {
         None,
         TargetConfig{
             path: Some(Target::Pod(PodTarget {pod: "foo".to_owned(), container: None})),
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )] // Only pod specified
     #[case(
@@ -859,7 +955,8 @@ mod tests {
                 pod: "foo".to_owned(),
                 container: Some("bar".to_owned())
             })),
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )] // Pod and container specified.
     #[case(
@@ -867,7 +964,8 @@ mod tests {
         Some("baz"),
         TargetConfig{
             path: Some(Target::Pod(PodTarget {pod: "foo".to_owned(), container: None})),
-            namespace: Some("baz".to_owned())
+            namespace: Some("baz".to_owned()),
+            ..Default::default()
         }
     )] // Pod and namespace specified.
     #[case(
@@ -878,7 +976,8 @@ mod tests {
                 rollout: "foo".to_owned(),
                 container: None
             })),
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )] // Rollout specified.
     #[case(
@@ -893,6 +992,7 @@ mod tests {
                 container: Some("zamek-w-besiekierach".to_owned()),
             })),
             namespace: None,
+            ..Default::default()
         }
     )] // Labels and container specified.
     fn default(
@@ -918,7 +1018,8 @@ mod tests {
         r#"{ "namespace": "my-test-namespace" }"#,
         TargetConfig {
             path: None,
-            namespace: Some("my-test-namespace".to_owned())
+            namespace: Some("my-test-namespace".to_owned()),
+            ..Default::default()
         }
     )]
     // simple variant of file config - path string, not an object.
@@ -926,7 +1027,8 @@ mod tests {
         r#""pod/my-cool-pod""#,
         TargetConfig{
             path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )]
     // advanced variant of file config.
@@ -934,7 +1036,8 @@ mod tests {
         r#"{ "path": "pod/my-cool-pod" }"#,
         TargetConfig{
             path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )]
     // advanced variant of file config, with object as path.
@@ -946,7 +1049,8 @@ mod tests {
         }"#,
         TargetConfig{
             path: Some(Target::Pod(PodTarget {pod: "my-cool-pod".to_owned(), container: None})),
-            namespace: None
+            namespace: None,
+            ..Default::default()
         }
     )]
     // advanced variant of file config with a label target.
@@ -968,6 +1072,7 @@ mod tests {
                 container: Some("php".to_owned()),
             })),
             namespace: None,
+            ..Default::default()
         }
     )]
     fn parse_target_config_from_json(
@@ -1013,6 +1118,8 @@ mod tests {
         let targetless = TargetFileConfig::Advanced {
             path: Some(Target::Targetless),
             namespace: Some("bear-namespace".to_owned()),
+            tag_filter: None,
+            jq_filter: None,
         };
         let pod = TargetFileConfig::Advanced {
             path: Some(Target::Pod(PodTarget {
@@ -1020,6 +1127,8 @@ mod tests {
                 container: None,
             })),
             namespace: None,
+            tag_filter: None,
+            jq_filter: None,
         };
 
         assert_eq!(

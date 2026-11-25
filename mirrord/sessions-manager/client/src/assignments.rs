@@ -49,6 +49,42 @@ impl ControlPlaneSubscription for AssignmentSubscription {
     }
 }
 
+/// An assignments subscription that sends options in
+/// [`SUBSCRIPTION_OPTIONS_HEADER`](mirrord_sessions_manager_protocol::SUBSCRIPTION_OPTIONS_HEADER)
+/// on every attempt, reconnects included.
+pub(crate) struct AssignmentSubscriptionWithOptions {
+    pub(crate) subscription: AssignmentSubscription,
+    /// The header value, as
+    /// [`SubscriptionOptions::encode`](mirrord_sessions_manager_protocol::SubscriptionOptions::encode)
+    /// produces it, or [`None`] to send no header.
+    pub(crate) options: Option<String>,
+}
+
+impl ControlPlaneSubscription for AssignmentSubscriptionWithOptions {
+    type Output = ConnectionAssignment;
+
+    fn name(&self) -> &'static str {
+        self.subscription.name()
+    }
+
+    async fn subscribe<T: SessionsManagerTransport>(
+        &self,
+        transport: &T,
+        scope: &ServiceScope,
+    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+        transport
+            .subscribe_assignments(scope, &self.subscription, self.options.as_deref())
+            .await
+    }
+
+    fn extract(
+        &self,
+        event: ControlPlaneEvent,
+    ) -> Result<Option<Self::Output>, SessionsManagerClientError> {
+        self.subscription.extract(event)
+    }
+}
+
 const COMPLETED_ASSIGNMENT_CAPACITY: usize = 1_024;
 const COMPLETED_ASSIGNMENT_TTL: Duration = Duration::from_secs(10 * 60);
 /// Bounds IDs left `Connecting` when a panicked upgrade task cannot report which assignment

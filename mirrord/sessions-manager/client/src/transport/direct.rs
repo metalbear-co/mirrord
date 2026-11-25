@@ -400,6 +400,8 @@ mod tests {
                 },
                 user_session_id: "session".to_owned(),
                 replica_filter: None,
+                agent_selector: None,
+                assigned_replica: None,
             },
             transport,
         )

@@ -70,6 +70,8 @@ async fn intproxy_presents_the_login_token_and_never_the_api_key() {
             },
             user_session_id: "session".to_owned(),
             replica_filter: None,
+            agent_selector: None,
+            assigned_replica: None,
         },
         transport,
     )
