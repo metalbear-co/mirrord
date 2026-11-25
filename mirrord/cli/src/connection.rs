@@ -48,6 +48,10 @@ use crate::{
 
 pub const AGENT_CONNECT_INFO_ENV_KEY: &str = "MIRRORD_AGENT_CONNECT_INFO";
 
+/// How long a session with task filters waits for the sessions-manager before it says that it
+/// waits for a matching task. Long enough for the operator to refuse an invalid filter first.
+const TASK_WAIT_HINT_DELAY: Duration = Duration::from_secs(2);
+
 /// Sends a "Sign up for mirrord for Teams" upgrade CTA to the IDE via the [`IdeMessage`] protocol.
 ///
 /// Only has an effect when running inside an IDE (`MIRRORD_PROGRESS_MODE=json`).
@@ -608,20 +612,37 @@ pub(crate) async fn create_and_connect<R: Reporter>(
                 SessionsManagerRoute::Standalone(endpoint)
             }
         };
-        if connect_info.agent_selector.is_some() {
-            first_connect_progress.info(
-                "waiting for a task whose AWS Batch job tags match the target's filters \
-                 (`target.tag_filter`, `target.jq_filter`). A task can match only when its \
-                 mirrord companion sends its job ID to the operator.",
-            );
-        }
+        let has_selector = connect_info.agent_selector.is_some();
         let mut connector = SessionsManagerConnector {
             connect_info,
             route,
             first_conn: None,
         };
-        let (conn, assigned_replica) = connector.connect().await.map_err(|error| match error {
+        let connected = {
+            let mut connect = std::pin::pin!(connector.connect());
+            if has_selector {
+                // The operator refuses an invalid filter as soon as the subscription opens, so
+                // the hint about waiting shows only once no refusal came in that time.
+                tokio::select! {
+                    connected = &mut connect => connected,
+                    () = tokio::time::sleep(TASK_WAIT_HINT_DELAY) => {
+                        first_connect_progress.info(
+                            "waiting for a task whose AWS Batch job tags match the target's \
+                             filters (`target.tag_filter`, `target.jq_filter`). A task can match \
+                             only when its mirrord companion sends its job ID to the operator.",
+                        );
+                        connect.await
+                    }
+                }
+            } else {
+                connect.await
+            }
+        };
+        let (conn, assigned_replica) = connected.map_err(|error| match error {
             SessionsManagerClientError::OperationTimeout => CliError::SessionsManagerConnectTimeout,
+            SessionsManagerClientError::SubscriptionRefused(message) => {
+                CliError::TaskSelectorRefused(message)
+            }
             error => CliError::SessionsManagerConnect(error),
         })?;
         connector.first_conn = Some(Box::new(conn));
