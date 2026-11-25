@@ -15,7 +15,9 @@
 //! which ends any hold the sessions-manager took on the task meanwhile. A `replace` written just
 //! before the bootstrap gave up can still sit unread in the socket, so the companion holds the
 //! task only once the bootstrap answered it with [`GateAck::Held`], and withdraws it the same way
-//! otherwise.
+//! otherwise. Only then does it register again with [`GateState::Held`], which is when the
+//! sessions-manager hands the task to the developer's watch, so no local process starts for a
+//! task the companion might still withdraw.
 //!
 //! While the task is held, the companion decides when its developer is gone: the session reports
 //! the local exit code with [`ClientMessage::ReplacedTaskExit`] on any client connection, and a
@@ -143,6 +145,7 @@ impl Admission {
                 }
                 tracing::info!("A developer's local process runs in place of the task's own code");
                 gate.set(Some(GateState::Held));
+                gate.resubscribe();
                 let code = self.clients.hold().await;
                 self.write(GateMessage::Exit(code)).await;
             }
