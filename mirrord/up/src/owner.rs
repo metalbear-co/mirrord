@@ -381,8 +381,11 @@ async fn deliver(
 ///
 /// The companion handles a connection's messages in order, so its [`DaemonMessage::Pong`] to
 /// the [`ClientMessage::Ping`] sent after the code proves that it took the code. The pongs of
-/// the pings that were still unanswered come before it. The companion closing the connection
-/// confirms the code too: it does so once it ended the task with it.
+/// the pings that were still unanswered come before it. The end of the connection confirms the
+/// code too: the companion hands the code it took to the bootstrap, which ends the task with it
+/// at once, the companion included, often before the last pong is out. The sessions-manager then
+/// closes this side of the room with its `peer-left` close, which [`OperatorConnection`] reports
+/// as the end of the stream.
 async fn report(mut link: Link, code: i32) -> Result<(), ReportError> {
     link.connection
         .send(ClientMessage::ReplacedTaskExit(code))
