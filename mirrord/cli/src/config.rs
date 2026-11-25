@@ -1307,11 +1307,13 @@ pub(super) enum DiagnoseCommand {
     /// phase. It is there for sessions that use an operator which records it.
     ///
     /// "Application calls" is what your application then waited on mirrord for. mirrord counts
-    /// every call it answers from the cluster: name lookups, file operations (open, read, write,
-    /// stat and the like), outgoing connections, port subscriptions and the fetch of the remote
-    /// environment. It prints how many there were of each kind, the total wait, the slowest one,
-    /// and what the slowest single calls were for. Calls that stay on your machine are not
-    /// counted, and neither is your application's own code.
+    /// every call it does not leave to your machine: name lookups, file operations (open, read,
+    /// write, stat and the like), outgoing connections, port subscriptions and the fetch of the
+    /// remote environment. Those go through mirrord to the cluster, except a read that mirrord
+    /// answers from data it already fetched, which is counted too and shows as a fast call. It
+    /// prints how many there were of each kind, the total wait, the slowest one, and what the
+    /// slowest single calls were for. Calls mirrord leaves to your machine are not counted, and
+    /// neither is your application's own code.
     ///
     /// The calls are counted where mirrord intercepts them, so the language of the application
     /// does not matter. Go programs are covered too: on Linux through the hooks on the Go

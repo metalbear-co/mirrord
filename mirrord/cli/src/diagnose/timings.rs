@@ -166,6 +166,23 @@ fn not_found_dirs(summary: &TimingsSummary) -> Vec<DirLookups> {
     dirs
 }
 
+/// `text` with its control characters written out as escapes.
+///
+/// Paths, host names, the summary file's fields and the operator's words come from outside this
+/// command, and one with a terminal control sequence in it would otherwise act on the terminal
+/// of whoever reads the text report. The JSON report escapes them by being JSON.
+fn printable(text: &str) -> String {
+    let mut printable = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() {
+            printable.extend(character.escape_default());
+        } else {
+            printable.push(character);
+        }
+    }
+    printable
+}
+
 /// What the user can change, for the cases the numbers alone settle. Empty when no rule is
 /// certain, which is the usual case.
 fn suggestions(summary: &TimingsSummary) -> Vec<String> {
@@ -175,14 +192,16 @@ fn suggestions(summary: &TimingsSummary) -> Vec<String> {
             // The pattern is printed as a JSON string, ready to paste into a `mirrord.json`.
             // `regex::escape` also escapes `-`, which only matters inside a character class and
             // would need a doubled backslash in JSON for nothing.
-            let pattern = format!("^{}/", regex::escape(&tree.dir).replace(r"\-", "-"));
+            // File patterns ignore case, and `(?-i)` turns that off for this one: the session
+            // says nothing about the same path in another case.
+            let pattern = format!("(?-i)^{}/", regex::escape(&tree.dir).replace(r"\-", "-"));
             format!(
                 "{lookups} file lookups under `{dir}` went to the cluster (about {wait}) and \
                 every one came back \"not found\". Add {pattern} to `feature.fs.not_found` to \
                 give the same answer without the round trip, or to `feature.fs.local` if those \
                 files are on your machine.",
                 lookups = tree.lookups,
-                dir = tree.dir,
+                dir = printable(&tree.dir),
                 wait = format_wait(tree.total_nanos),
                 pattern = serde_json::Value::from(pattern),
             )
@@ -274,7 +293,8 @@ fn render_session_start(session_start: &SessionStart, output: &mut String) {
         }
         SessionStart::Unavailable { reason } => {
             output.push_str(&format!(
-                "\n{SESSION_START_HEADING}\nCould not ask the operator: {reason}\n"
+                "\n{SESSION_START_HEADING}\nCould not ask the operator: {}\n",
+                printable(reason)
             ));
             return;
         }
@@ -298,8 +318,8 @@ fn render_session_start(session_start: &SessionStart, output: &mut String) {
             let duration = format_wait(millis_as_nanos(phase.duration_ms));
             table.add_row(row![
                 number,
-                phase.name,
-                phase.description,
+                printable(&phase.name),
+                printable(&phase.description),
                 r->if phase.failed {
                     format!("{duration} (did not finish)")
                 } else {
@@ -339,7 +359,7 @@ fn render_application(application: Option<&Application>, now: SystemTime, output
     ));
 
     if application.kinds.is_empty() {
-        output.push_str("The application made no calls that mirrord answered from the cluster.\n");
+        output.push_str("The application made no calls that mirrord handled for it.\n");
         return;
     }
 
@@ -348,7 +368,7 @@ fn render_application(application: Option<&Application>, now: SystemTime, output
     table.set_titles(row!["Kind", r->"Calls", r->"Total", r->"Slowest"]);
     for kind in &application.kinds {
         table.add_row(row![
-            kind.kind.replace('_', " "),
+            printable(&kind.kind.replace('_', " ")),
             r->kind.calls,
             r->format_wait(kind.total_nanos),
             r->format_wait(kind.slowest_nanos),
@@ -388,8 +408,8 @@ fn render_application(application: Option<&Application>, now: SystemTime, output
         for call in &application.slowest_calls {
             table.add_row(row![
                 r->format_wait(call.nanos),
-                call.kind.replace('_', " "),
-                slow_call_subject(call),
+                printable(&call.kind.replace('_', " ")),
+                printable(slow_call_subject(call)),
             ]);
         }
         output.push_str(&table.to_string());
@@ -407,9 +427,12 @@ fn render(report: &Report, now: SystemTime) -> String {
     let mut output = match &report.session {
         Some(session) => format!(
             "Session:  {} ({}, mirrord {})\nStarted:  {}\n",
-            session.session_id, session.target, session.mirrord_version, session.started_at,
+            printable(&session.session_id),
+            printable(&session.target),
+            printable(&session.mirrord_version),
+            printable(&session.started_at),
         ),
-        None => format!("Session:  {}\n", report.session_id),
+        None => format!("Session:  {}\n", printable(&report.session_id)),
     };
     render_session_start(&report.session_start, &mut output);
     render_application(report.application.as_ref(), now, &mut output);
@@ -421,6 +444,41 @@ fn render(report: &Report, now: SystemTime) -> String {
 /// that ever goes into the request to the operator.
 fn is_operator_session_id(session: &str) -> bool {
     (1..=16).contains(&session.len()) && session.chars().all(|char| char.is_ascii_hexdigit())
+}
+
+/// What decides which operator a request reaches: the kubeconfig, the context in it, and the
+/// `baggage` header that picks one of several operators in a cluster.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OperatorRoute {
+    kubeconfig: Option<String>,
+    kube_context: Option<String>,
+    baggage: Option<String>,
+}
+
+impl OperatorRoute {
+    /// The route to ask about a session: the one the session itself used, unless the user
+    /// passed `--config-file` to this command.
+    ///
+    /// `resolved` is what this command's own configuration says. Without `--config-file` that
+    /// is only defaults: the global configuration, the environment, the kubeconfig's current
+    /// context. Any of them can have moved on since the session started, and asking another
+    /// cluster would answer that the session is unknown. The session's kubeconfig and context
+    /// are taken together, also when one of them is not set, because a context only means
+    /// something in the kubeconfig it comes from.
+    fn for_session(
+        resolved: Self,
+        session: Option<&SessionLabel>,
+        config_file_given: bool,
+    ) -> Self {
+        match session {
+            Some(session) if !config_file_given => Self {
+                kubeconfig: session.kubeconfig.clone(),
+                kube_context: session.kube_context.clone(),
+                baggage: session.baggage.clone(),
+            },
+            _ => resolved,
+        }
+    }
 }
 
 /// Asks the operator about the session's start. Every way this can go wrong short of a broken
@@ -441,13 +499,18 @@ async fn ask_operator(
             });
         }
     };
-    // The session's own cluster and operator, unless the user points at one.
-    if config.kube_context.is_none() {
-        config.kube_context = label.and_then(|label| label.kube_context.clone());
-    }
-    if config.baggage.is_none() {
-        config.baggage = label.and_then(|label| label.baggage.clone());
-    }
+    let route = OperatorRoute::for_session(
+        OperatorRoute {
+            kubeconfig: config.kubeconfig.take(),
+            kube_context: config.kube_context.take(),
+            baggage: config.baggage.take(),
+        },
+        label,
+        config_file.is_some(),
+    );
+    config.kubeconfig = route.kubeconfig;
+    config.kube_context = route.kube_context;
+    config.baggage = route.baggage;
     if !config.use_proxy {
         remove_proxy_env();
     }
@@ -460,7 +523,13 @@ async fn ask_operator(
         let Some(api) = OperatorApi::try_new(&config, &mut analytics, &NullProgress).await? else {
             return Ok(None);
         };
-        api.session_start_timings(session_id, namespace.as_deref())
+        // A session without a namespace of its own ran in the kubeconfig's default one, which
+        // is also where a user whose role covers only that namespace may read it.
+        let namespace = match namespace {
+            Some(namespace) => namespace,
+            None => api.client().default_namespace().to_owned(),
+        };
+        api.session_start_timings(session_id, &namespace)
             .await
             .map(Some)
     })
@@ -534,6 +603,20 @@ pub(super) async fn diagnose_timings(
             (summary.session.session_id.clone(), Some((summary, updated)))
         }
         (None, Some(session)) => (session, None),
+        (None, None) if json => {
+            // A script that asked for JSON gets JSON: the report's keys, all `null` because
+            // there is no session to report on.
+            println!(
+                "{}",
+                serde_json::json!({
+                    "session_id": null,
+                    "session": null,
+                    "session_start": null,
+                    "application": null,
+                })
+            );
+            return Ok(());
+        }
         (None, None) => {
             println!(
                 "No timings yet. Run your application with `mirrord exec`: its session shows up \
@@ -565,11 +648,13 @@ pub(super) async fn diagnose_timings(
     let report = Report {
         session_id,
         session_start,
-        // The routing header is only there to find the session's operator again. It can carry
-        // tracing ids of whatever started the session, which have no place in a report people
+        // The routing header and the kubeconfig are only there to find the session's operator
+        // again. The header can carry tracing ids of whatever started the session and the
+        // kubeconfig names the user's home directory, which have no place in a report people
         // paste into tickets.
         session: label.cloned().map(|label| SessionLabel {
             baggage: None,
+            kubeconfig: None,
             ..label
         }),
         application: summary.map(|(summary, updated)| Application {
@@ -607,6 +692,7 @@ mod tests {
                 started_at: "2026-11-25T10:00:00Z".to_owned(),
                 operator: true,
                 kube_context: None,
+                kubeconfig: None,
                 namespace: None,
                 baggage: None,
             },
@@ -770,6 +856,39 @@ mod tests {
         assert!(!rendered.contains('|'));
     }
 
+    /// A path, a target name and the operator's words are chosen outside this command. One that
+    /// carries a terminal control sequence must reach the terminal as text.
+    #[test]
+    fn control_characters_from_outside_are_printed_as_escapes() {
+        let mut summary = summary(vec![dir("/app/\u{1b}[2Jvendor", 150, 150, 900_000_000)]);
+        summary.session.target = "deployment/\u{1b}[2Jorders".to_owned();
+        summary.slowest_calls = vec![SlowCallSummary {
+            kind: "file_open".to_owned(),
+            subject: Some("/app/\u{1b}[2Jconfig".to_owned()),
+            nanos: 1_000_000,
+        }];
+        let connects = vec![StartConnect {
+            started_at: "2026-11-25T01:11:54.660513Z".to_owned(),
+            phases: vec![StartPhase {
+                description: "finding the \u{1b}[2Jtarget".to_owned(),
+                ..phase("target_lookup", 1)
+            }],
+        }];
+        let recorded = report(summary.clone(), SessionStart::Recorded { connects });
+        let unavailable = report(
+            summary,
+            SessionStart::Unavailable {
+                reason: "no route to \u{1b}[2Jhost".to_owned(),
+            },
+        );
+
+        for report in [recorded, unavailable] {
+            let rendered = render(&report, SystemTime::now());
+            assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
+            assert!(rendered.contains("\\u{1b}[2J"), "{rendered:?}");
+        }
+    }
+
     /// Tests in the operator's repository match on the heading and on the operator's own phase
     /// names, so both are printed as they are. The operator describes its phases itself, so a
     /// phase this version has never heard of comes with its description, and a phase from an
@@ -897,6 +1016,43 @@ mod tests {
         assert_eq!(no_operator, serde_json::json!({ "status": "no_operator" }));
     }
 
+    /// A session started against one cluster must be asked about in that cluster. The command
+    /// used to keep its own resolved context whenever there was one, and there always is one
+    /// once the user has a global default: change that default after the session started, and
+    /// the command asked the new cluster, which answered that it never saw the session.
+    #[test]
+    fn the_sessions_own_route_is_asked_unless_a_config_file_is_passed() {
+        let mut session = summary(vec![]).session;
+        session.kubeconfig = Some("/home/dev/.kube/work".to_owned());
+        session.kube_context = Some("cluster-a".to_owned());
+        session.baggage = None;
+        let todays_defaults = OperatorRoute {
+            kubeconfig: None,
+            kube_context: Some("cluster-b".to_owned()),
+            baggage: Some("mirrord-session=someone-else".to_owned()),
+        };
+
+        assert_eq!(
+            OperatorRoute::for_session(todays_defaults.clone(), Some(&session), false),
+            OperatorRoute {
+                kubeconfig: Some("/home/dev/.kube/work".to_owned()),
+                kube_context: Some("cluster-a".to_owned()),
+                baggage: None,
+            },
+            "all three come from the session, also the one it did not set"
+        );
+        assert_eq!(
+            OperatorRoute::for_session(todays_defaults.clone(), Some(&session), true),
+            todays_defaults,
+            "`--config-file` is the user pointing this command somewhere else"
+        );
+        assert_eq!(
+            OperatorRoute::for_session(todays_defaults.clone(), None, false),
+            todays_defaults,
+            "a session this machine has no file for has no route of its own"
+        );
+    }
+
     #[test]
     fn only_a_hex_number_is_sent_to_the_operator_as_a_session_id() {
         assert!(is_operator_session_id("72972C26C9D0A943"));
@@ -930,10 +1086,27 @@ mod tests {
         };
         assert!(suggestion.contains("150 file lookups under `/app/vendor-1.2`"));
         assert!(
-            suggestion.contains(r#"Add "^/app/vendor-1\\.2/" to `feature.fs.not_found`"#),
-            "the pattern is a JSON string that matches the directory's name literally: {suggestion}"
+            suggestion.contains(r#"Add "(?-i)^/app/vendor-1\\.2/" to `feature.fs.not_found`"#),
+            "the pattern is a JSON string that matches the directory's name literally, in the \
+            case it was looked up in: {suggestion}"
         );
         assert!(suggestion.contains("about 900.0 ms"));
+
+        // File patterns are matched ignoring case, as `feature.fs` builds them.
+        let pattern = suggestion
+            .split_once("Add ")
+            .and_then(|(_, rest)| rest.split_once(" to `feature.fs.not_found`"))
+            .map(|(pattern, _)| serde_json::from_str::<String>(pattern).unwrap())
+            .expect("the suggestion names a pattern");
+        let filter = regex::RegexSetBuilder::new([pattern])
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+        assert!(filter.is_match("/app/vendor-1.2/lib.so"));
+        assert!(
+            !filter.is_match("/App/vendor-1.2/lib.so"),
+            "the session never looked the directory up in another case"
+        );
     }
 
     /// A pattern for a directory also covers everything below it, so a file found deeper down

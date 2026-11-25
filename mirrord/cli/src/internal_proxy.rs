@@ -187,6 +187,27 @@ pub(crate) fn install_ci_shutdown_handler(
     Ok(IntProxyShutdown { token, signal_task })
 }
 
+/// The kube context the session's client uses: the configured one, or the one that is current
+/// in the kubeconfig at this moment.
+///
+/// What records a session keeps this next to it, so the session's cluster can still be told
+/// after the current context has moved on.
+async fn session_kube_context(config: &LayerConfig) -> Option<String> {
+    match create_kube_config_with_context(
+        config.accept_invalid_certificates,
+        config.kubeconfig.as_deref(),
+        config.kube_context.clone(),
+    )
+    .await
+    {
+        Ok((_, context)) => context,
+        Err(error) => {
+            tracing::debug!(?error, "Failed to resolve the session's kube context");
+            config.kube_context.clone()
+        }
+    }
+}
+
 /// Starts the session monitor API server if enabled.
 ///
 /// `@reporter`: a reference to the reporter for chaos metrics which will not prevent the session
@@ -194,6 +215,7 @@ pub(crate) fn install_ci_shutdown_handler(
 /// [`Weak::new()`].
 async fn start_session_monitor(
     config: &LayerConfig,
+    context: Option<String>,
     is_operator: bool,
     reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
     session_id: String,
@@ -232,20 +254,6 @@ async fn start_session_monitor(
                 None
             }
         },
-    };
-
-    let context = match create_kube_config_with_context(
-        config.accept_invalid_certificates,
-        config.kubeconfig.as_deref(),
-        config.kube_context.clone(),
-    )
-    .await
-    {
-        Ok((_, context)) => context,
-        Err(error) => {
-            tracing::debug!(?error, "Failed to resolve the session's kube context");
-            config.kube_context.clone()
-        }
     };
 
     let config_value = config_as_diff(config);
@@ -390,8 +398,11 @@ pub(crate) async fn proxy(
     // Keep the only strong reference in the intproxy so analytics are flushed when the session
     // ends, while the session monitor receives a weak reference for chaos metrics.
     let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
+    // Resolved once, so everything that records the session names the same context.
+    let kube_context = session_kube_context(&config).await;
     let (monitor_tx, chaos_rx) = start_session_monitor(
         &config,
+        kube_context.clone(),
         is_operator,
         Arc::downgrade(&chaos_reporter),
         local_session_id.clone(),
@@ -439,30 +450,35 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    // In a container the proxy's home directory is the sidecar's own, so the file written there
-    // is out of reach of `mirrord diagnose timings` on the user's machine.
-    let call_timings = timings_dir()
-        .filter(|_| config.experimental.call_timings)
-        .map(|dir| {
-            CallTimingsRecorder::start(
-                dir,
-                SessionLabel {
-                    session_id: local_session_id.clone(),
-                    target: config
-                        .target
-                        .path
-                        .as_ref()
-                        .map(|target| target.to_string())
-                        .unwrap_or_else(|| "targetless".to_owned()),
-                    mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
-                    started_at: humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
-                    operator: is_operator,
-                    kube_context: config.kube_context.clone(),
-                    namespace: config.target.namespace.clone(),
-                    baggage: config.baggage.clone(),
-                },
-            )
-        });
+    // In a container the proxy's home directory is the sidecar's own, so a file written there
+    // is out of reach of `mirrord diagnose timings` on the user's machine. No summary is kept
+    // then.
+    let keep_call_timings = config.experimental.call_timings && container_mode.not();
+    let call_timings = match timings_dir().filter(|_| keep_call_timings) {
+        Some(dir) => CallTimingsRecorder::start(
+            dir,
+            SessionLabel {
+                session_id: local_session_id.clone(),
+                target: config
+                    .target
+                    .path
+                    .as_ref()
+                    .map(|target| target.to_string())
+                    .unwrap_or_else(|| "targetless".to_owned()),
+                mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+                started_at: humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
+                operator: is_operator,
+                kube_context,
+                kubeconfig: config
+                    .kubeconfig
+                    .clone()
+                    .or_else(|| env::var("KUBECONFIG").ok()),
+                namespace: config.target.namespace.clone(),
+                baggage: config.baggage.clone(),
+            },
+        ),
+        None => None,
+    };
 
     let proxy = IntProxy::new_with_connection(
         agent_conn,

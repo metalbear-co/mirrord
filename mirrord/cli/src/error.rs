@@ -1280,7 +1280,8 @@ pub(crate) enum CliError {
 
     #[error("Failed to read the call timings summary at `{}`: {error}", path.display())]
     #[diagnostic(help(
-        "mirrord writes this file while a session runs. If a different mirrord version wrote it,         run a session with this version and try again.{GENERAL_HELP}"
+        "mirrord writes this file while a session runs. If a different mirrord version wrote it, \
+        run a session with this version and try again.{GENERAL_HELP}"
     ))]
     CallTimingsSummary { path: PathBuf, error: io::Error },
 

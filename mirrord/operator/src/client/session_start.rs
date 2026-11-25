@@ -75,25 +75,24 @@ where
     /// session views print it) was starting.
     ///
     /// Tries the cluster-wide route first. A user whose role only covers some namespaces is
-    /// refused there, so the route under `namespace` is tried next when one is given.
+    /// refused there, so the route under `namespace`, the session's namespace, is tried next.
+    /// The namespace is not optional: a caller that knows none passes the client's default one,
+    /// which is where such a user's sessions run.
     pub async fn session_start_timings(
         &self,
         session_id: &str,
-        namespace: Option<&str>,
+        namespace: &str,
     ) -> OperatorApiResult<SessionStartTimings> {
         let cluster_wide =
             format!("/apis/operator.metalbear.co/v1/sessions/timings?sessionId={session_id}");
-        let answer = match (
-            request_timings(self.client(), cluster_wide).await,
-            namespace,
-        ) {
-            (Err(kube::Error::Api(status)), Some(namespace)) if status.code == 403 => {
+        let answer = match request_timings(self.client(), cluster_wide).await {
+            Err(kube::Error::Api(status)) if status.code == 403 => {
                 let namespaced = format!(
                     "/apis/operator.metalbear.co/v1/namespaces/{namespace}/sessions/timings?sessionId={session_id}"
                 );
                 request_timings(self.client(), namespaced).await
             }
-            (answer, _) => answer,
+            answer => answer,
         };
 
         match answer {
