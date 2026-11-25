@@ -204,12 +204,15 @@ pub async fn start_api_server(
         fs::set_permissions(&sessions_dir, fs::Permissions::from_mode(0o700))?;
     }
 
+    // The API serves what the session monitor records, so it can't run with a disabled one.
+    let replay_store = monitor_tx
+        .replay_store()
+        .cloned()
+        .ok_or("the session monitor is disabled")?;
+
     let state = AppState {
         session_info: Arc::new(RwLock::new(session_info)),
-        replay_store: monitor_tx
-            .replay_store()
-            .cloned()
-            .expect("monitor_tx should be enabled when API server is running"),
+        replay_store,
         monitor_tx,
         shutdown: shutdown.clone(),
         chaos_tx,
