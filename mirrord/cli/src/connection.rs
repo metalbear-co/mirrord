@@ -566,7 +566,8 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         // sessions-managers, which would ignore them. Checked again on the path that reads them,
         // so that no caller can skip it.
         config.verify_task_selector()?;
-        let user_session_id = std::env::var("MIRRORD_SESSION_ID")
+        let user_session_id = std::env::var(mirrord_up::TASK_SESSION_ID_ENV)
+            .or_else(|_| std::env::var("MIRRORD_SESSION_ID"))
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
         let agent_replica_filter = target.sessions_manager_target_replica_id();
         let agent_selector = config.target.has_task_selector().then(|| AgentSelector {

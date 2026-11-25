@@ -4,7 +4,6 @@ use std::{collections::HashMap, io::ErrorKind, ops::Not, sync::Arc, time::Durati
 
 use futures::StreamExt;
 use miette::Diagnostic;
-use mirrord_analytics::NullReporter;
 use mirrord_analytics::{
     AnalyticValue, Analytics, AnalyticsReporter, CollectAnalytics, Reporter, SanitizedString,
     UpSessionDbBranch,
@@ -12,7 +11,9 @@ use mirrord_analytics::{
 use mirrord_config::{config::EnvKey, target::Target};
 use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_progress::NullProgress;
-use mirrord_sessions_manager_client::{AgentSelector, OperatorTransport, TaskWatcher};
+use mirrord_sessions_manager_client::{
+    AgentSelector, OperatorTransport, SessionsManagerClientError, TaskWatcher,
+};
 use mirrord_up::{
     InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, SubprocessCfg, TaskOwners, TaskWatch,
     UpConfig, UpError, UpListing, load_up_config, run_wizard,
@@ -166,13 +167,23 @@ pub enum UpCliError {
         message: String,
     },
 
-    /// The watch for a task-driven service's tasks couldn't be opened: the operator can't select
-    /// tasks, or refused the filters. Shown as a session would show it, prefixed with the service.
+    /// The operator of a task-driven service can't be used to watch for its tasks: it is
+    /// missing, or can't select tasks by their tags. Shown as a session would show it, prefixed
+    /// with the service.
     #[error("{service}: {error}")]
     #[diagnostic(forward(error))]
-    TaskWatch {
+    TaskWatchSetup {
         service: Arc<str>,
         error: Box<CliError>,
+    },
+
+    /// The operator-hosted sessions-manager didn't accept the watch for a task-driven service's
+    /// tasks. When it refused the filters, the message names the one it refused.
+    #[error("{service}: failed to watch for the tasks that match the service's target filters")]
+    TaskWatch {
+        service: Arc<str>,
+        #[source]
+        error: Box<SessionsManagerClientError>,
     },
 
     #[error("failed to acquire OS username for key")]
@@ -329,7 +340,7 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .map(|service| (service.service_name.clone(), service.mode.clone()))
         .collect::<Vec<_>>();
 
-    let watches = open_task_watches(&services).await?;
+    let watches = open_task_watches(&services, analytics).await?;
 
     let result = mirrord_up::launch(
         services,
@@ -361,35 +372,38 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 /// tags, or that refuses a service's filters, stops the run.
 async fn open_task_watches(
     services: &[SubprocessCfg],
+    analytics: &mut AnalyticsReporter,
 ) -> Result<HashMap<Arc<str>, TaskWatch>, UpCliError> {
     let mut watches = HashMap::new();
     for service in services.iter().filter(|service| service.task_driven) {
-        let watch = open_task_watch(service)
-            .await
-            .map_err(|error| UpCliError::TaskWatch {
-                service: service.service_name.clone(),
-                error: Box::new(error),
-            })?;
+        let watch = open_task_watch(service, analytics).await?;
         watches.insert(service.service_name.clone(), watch);
     }
     Ok(watches)
 }
 
-async fn open_task_watch(service: &SubprocessCfg) -> Result<TaskWatch, CliError> {
+async fn open_task_watch(
+    service: &SubprocessCfg,
+    analytics: &mut AnalyticsReporter,
+) -> Result<TaskWatch, UpCliError> {
     let config = &service.config;
     let Some(Target::Serverless(target)) = &config.target.path else {
         unreachable!("`resolve_services` accepts filters only on a serverless target");
     };
+    let setup_error = |error: CliError| UpCliError::TaskWatchSetup {
+        service: service.service_name.clone(),
+        error: Box::new(error),
+    };
     // Requires the operator to select tasks, since the config holds the filters.
-    let client =
-        operator_sessions_manager_client(config, &NullProgress, &mut NullReporter::default())
-            .await?;
+    let client = operator_sessions_manager_client(config, &NullProgress, analytics)
+        .await
+        .map_err(setup_error)?;
+    let scope = serverless_scope(config, target).map_err(setup_error)?;
     let session_id = Uuid::new_v4().to_string();
     let selector = AgentSelector {
         tag_filter: config.target.tag_filter.clone(),
         jq_filter: config.target.jq_filter.clone(),
     };
-    let scope = serverless_scope(config, target)?;
     let transport = OperatorTransport::new(client);
     let watcher = TaskWatcher::open(
         transport.clone(),
@@ -399,7 +413,10 @@ async fn open_task_watch(service: &SubprocessCfg) -> Result<TaskWatch, CliError>
         service.replace_task,
     )
     .await
-    .map_err(CliError::SessionsManagerConnect)?;
+    .map_err(|error| UpCliError::TaskWatch {
+        service: service.service_name.clone(),
+        error: Box::new(error),
+    })?;
     let owners = service.replace_task.then(|| {
         TaskOwners::new(
             transport,
@@ -502,7 +519,17 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::TaskDrivenContainer { .. })
             | UpCliError::Up(UpError::TaskSelector { .. })
             | UpCliError::Up(UpError::ReplaceWithoutSelector { .. })
+            | UpCliError::Up(UpError::TaskDrivenPreview { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
+            // The operator refused the filters.
+            UpCliError::TaskWatch { error, .. }
+                if matches!(
+                    error.as_ref(),
+                    SessionsManagerClientError::SubscriptionRefused(_)
+                ) =>
+            {
+                Self::ConfigValidation
+            }
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,
             UpCliError::Up(UpError::ServiceFailedToStart { .. }) => Self::ServiceStartFailed,
             UpCliError::DbBranches { .. }
@@ -525,6 +552,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::YamlQuery(_))
             | UpCliError::Up(UpError::TaskWatch { .. })
             | UpCliError::TaskWatch { .. }
+            | UpCliError::TaskWatchSetup { .. }
             | UpCliError::Init(_)
             | UpCliError::ListOutput(_) => Self::InternalError,
         }

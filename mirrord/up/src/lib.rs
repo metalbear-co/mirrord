@@ -116,9 +116,10 @@ pub const SERVICE_NAME_ENV: &str = "MIRRORD_UP_SERVICE";
 /// to append the task's arguments to the command it runs.
 pub const APPEND_REMOTE_ARGV_ENV: &str = "MIRRORD_UP_APPEND_REMOTE_ARGV";
 
-/// Environment variable holding the sessions-manager session a `mirrord exec` session registers
-/// under. All sessions of a task-driven service share the session of its watch.
-const SESSION_ID_ENV: &str = "MIRRORD_SESSION_ID";
+/// Environment variable holding the sessions-manager session that the session of a task-driven
+/// service's task registers under: the session of the service's watch, which all of the service's
+/// sessions share. Each of them still gets a local session of its own.
+pub const TASK_SESSION_ID_ENV: &str = "MIRRORD_UP_TASK_SESSION_ID";
 
 /// The watch for a task-driven service's tasks, which the caller of [`launch`] opened.
 pub struct TaskWatch {
@@ -195,7 +196,9 @@ pub enum UpError {
         source: Box<ConfigError>,
     },
 
-    /// The watch for a task-driven service's tasks failed for good.
+    /// The watch for a task-driven service's tasks failed for good, with an error that
+    /// reconnecting can't fix. Like a crash of a service that isn't task-driven, it ends the run
+    /// and stops every other service.
     #[error("lost the watch for the tasks of service {name}")]
     TaskWatch {
         /// Name of the task-driven service.
@@ -203,6 +206,17 @@ pub enum UpError {
         /// Why the watch ended.
         #[source]
         source: Box<SessionsManagerClientError>,
+    },
+
+    /// `mirrord preview up` or `mirrord preview sync` was asked to preview a task-driven service,
+    /// which has no single task for a preview to run against.
+    #[error(
+        "service `{service}` can't be previewed: `target.tag_filter` and `target.jq_filter` \
+         are only supported with `mirrord up`"
+    )]
+    TaskDrivenPreview {
+        /// Name of the task-driven service.
+        service: Arc<str>,
     },
 
     /// A container service configured an exec-only working directory.
@@ -1020,6 +1034,17 @@ pub async fn resolve_preview_services(
         common_context: up_config.common.context.clone(),
     };
 
+    if let Some((service, _)) = up_config
+        .services
+        .iter()
+        .filter(|(_, service)| service.is_task_driven())
+        .min_by_key(|(service, _)| *service)
+    {
+        return Err(UpError::TaskDrivenPreview {
+            service: service.clone(),
+        });
+    }
+
     let mut resolved_targets =
         resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), false).await?;
 
@@ -1127,14 +1152,8 @@ fn task_commands(
         run,
         ..
     } = config;
-    config
-        .verify_task_selector()
-        .map_err(|source| UpError::TaskSelector {
-            service: service_name.clone(),
-            source: Box::new(source),
-        })?;
     let Some(Target::Serverless(target)) = config.target.path.clone() else {
-        unreachable!("`verify_task_selector` accepts the filters only on a serverless target");
+        unreachable!("`resolve_services` accepts the filters only on a serverless target");
     };
     config.target.tag_filter = None;
     config.target.jq_filter = None;
@@ -1154,7 +1173,7 @@ fn task_commands(
         }));
         let mut session = session_command(&config, &service_name, &run, correlation_id, false)?;
         session
-            .env(SESSION_ID_ENV, &session_id)
+            .env(TASK_SESSION_ID_ENV, &session_id)
             .env(APPEND_REMOTE_ARGV_ENV, "1");
         Ok(session)
     };

@@ -13,14 +13,16 @@ const REGION_ENVS: [&str; 2] = ["AWS_REGION", "AWS_DEFAULT_REGION"];
 
 /// The Batch job of this task, or [`None`] when it doesn't run in one, or its region is unknown.
 ///
-/// The region comes from [`REGION_ENVS`], and then from `replica_id` when it is an ECS task ARN,
-/// which is what [`resolve_replica_id`](super::resolve_replica_id) reports on ECS.
+/// The region comes from `replica_id` when it is an ECS task ARN, which is what
+/// [`resolve_replica_id`](super::resolve_replica_id) reports on ECS, and only then from
+/// [`REGION_ENVS`]. The ARN names the region the task runs in, while those variables configure
+/// the application's AWS SDK and often name another region. The ARN is also the only replica id
+/// the operator looks tags up for.
 pub(crate) fn aws_batch_job(replica_id: &str) -> Option<AwsBatchJob> {
     let job_id = non_empty_env(JOB_ID_ENV)?;
-    let region = REGION_ENVS
-        .into_iter()
-        .find_map(non_empty_env)
-        .or_else(|| ecs_task_region(replica_id).map(str::to_owned));
+    let region = ecs_task_region(replica_id)
+        .map(str::to_owned)
+        .or_else(|| REGION_ENVS.into_iter().find_map(non_empty_env));
     let Some(region) = region else {
         tracing::debug!(
             "Running in an AWS Batch job of an unknown region, so the job's tags can't be looked up"
