@@ -6,7 +6,9 @@
 //! exit status. So `mirrord up` keeps a mirrord-protocol connection of its own to each such task,
 //! the owner connection, from before the instance starts until it exits, and sends the code on it
 //! with [`ClientMessage::ReplacedTaskExit`]. The code travels on the same ordered stream as the
-//! connection's end, so the two can't race.
+//! connection's end, so the two can't race. The companion confirms the code by answering the
+//! [`ClientMessage::Ping`] sent after it, and until it does, the code is sent again on new
+//! connections.
 //!
 //! The workload companion ends a held task with [`LOST_SESSION_EXIT_CODE`] once no client has been
 //! connected to it for 30 seconds. The owner connection keeps the task from ending so while the
@@ -26,15 +28,23 @@ use thiserror::Error;
 use tokio::{
     sync::oneshot::{self, error::TryRecvError},
     task::JoinHandle,
-    time::Instant,
+    time::{Instant, MissedTickBehavior},
 };
 
-/// How long an owner connection is tried each time it's opened: as long as the companion keeps
-/// a held task without connections.
+/// How long an owner connection is tried when it's first opened, and how long an exit code is
+/// tried to be delivered: as long as the companion keeps a held task without connections.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The pause between two attempts to open an owner connection.
+/// The pause between two attempts to open an owner connection, and the first pause while one
+/// is reopened.
 const OPEN_RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// The longest pause between two attempts to reopen an owner connection while the instance runs.
+const REOPEN_MAX_DELAY: Duration = Duration::from_secs(10);
+
+/// How long the companion has to confirm an exit code, by answering the [`ClientMessage::Ping`]
+/// sent after it, or by closing the connection.
+const CONFIRM_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How `mirrord up` reaches the tasks that the watch of a `replace_task` service matched: through
 /// the operator-hosted sessions-manager, under the session of the watch, which the
@@ -153,8 +163,8 @@ enum Event {
     Exit(i32),
     /// The supervision dropped the connection without a code.
     Withdrawn,
-    /// The connection broke.
-    Dropped,
+    /// The connection broke, for this reason.
+    Dropped(&'static str),
 }
 
 /// Why an owner connection couldn't be opened.
@@ -173,10 +183,49 @@ enum OpenError {
     Version(semver::Version),
 }
 
-/// Runs the owner connection of one task until it sent the code of `exit`, or `exit` is dropped.
+/// Why an exit code wasn't confirmed.
+#[derive(Debug, Error)]
+enum ReportError {
+    #[error("the connection failed: {0}")]
+    Connection(#[from] OperatorConnectionError),
+    #[error("the companion didn't confirm it in time")]
+    Timeout,
+}
+
+/// An open owner connection, with the count of its [`ClientMessage::Ping`]s that the companion
+/// hasn't answered yet.
+struct Link {
+    connection: OperatorConnection,
+    awaiting_pongs: usize,
+}
+
+impl Link {
+    fn new(connection: OperatorConnection) -> Self {
+        Self {
+            connection,
+            awaiting_pongs: 0,
+        }
+    }
+
+    /// Handles a message of the companion that is neither a [`DaemonMessage::Pong`] nor the end
+    /// of the connection. Fails when the answer can't be sent.
+    async fn handle(&mut self, message: DaemonMessage) -> Result<(), OperatorConnectionError> {
+        if let DaemonMessage::OperatorPing(id) = message {
+            self.connection
+                .send(ClientMessage::OperatorPong(id))
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+/// Runs the owner connection of one task until it delivered the code of `exit`, or `exit` is
+/// dropped.
 ///
 /// Reports on `opened` once the first connection is open. When it can't be opened, no instance
-/// starts, and the companion ends the task as lost.
+/// starts, and the companion ends the task as lost. Once open, a connection that drops is
+/// reopened for as long as the instance runs: the instance's own connection keeps the task alive
+/// meanwhile, and the code needs a connection of ours.
 async fn own(
     connect_info: SessionsManagerConnectInfo,
     transport: OperatorTransport,
@@ -192,34 +241,39 @@ async fn own(
             return;
         }
     };
-    let Some(connection) = open(&client, &name).await else {
+    let Some(link) = open(&client, &name, Instant::now() + OPEN_TIMEOUT).await else {
         return;
     };
     // The receiver is gone only when the task ended meanwhile.
     let _ = opened.send(());
 
-    let mut connection = Some(connection);
+    let mut link = Some(link);
     loop {
-        let event = match connection.as_mut() {
-            Some(connection) => keep_alive(connection, &mut exit, ping).await,
-            None => match (&mut exit).await {
-                Ok(code) => Event::Exit(code),
-                Err(_) => Event::Withdrawn,
-            },
+        let Some(current) = link.as_mut() else {
+            tokio::select! {
+                code = &mut exit => {
+                    if let Ok(code) = code {
+                        deliver(None, code, &client, &name).await;
+                    }
+                    return;
+                }
+                reopened = reopen(&client, &name) => match reopened {
+                    Some(reopened) => {
+                        println!("{name}: reconnected to the task");
+                        link = Some(reopened);
+                        continue;
+                    }
+                    None => return,
+                },
+            }
         };
-        match event {
-            Event::Dropped => {
-                eprintln!("{name}: lost the connection to the task, reconnecting");
-                connection = open(&client, &name).await;
+        match keep_alive(current, &mut exit, ping).await {
+            Event::Dropped(reason) => {
+                eprintln!("{name}: {reason}, reconnecting");
+                link = None;
             }
             Event::Exit(code) => {
-                let connection = match connection {
-                    Some(connection) => Some(connection),
-                    None => open(&client, &name).await,
-                };
-                if let Some(connection) = connection {
-                    report(connection, code, &name).await;
-                }
+                deliver(link.take(), code, &client, &name).await;
                 return;
             }
             Event::Withdrawn => return,
@@ -227,64 +281,124 @@ async fn own(
     }
 }
 
-/// Keeps `connection` alive with [`ClientMessage::Ping`], and reads and drops whatever the
-/// companion sends, so that its stream doesn't back up, until the instance exits or the
-/// connection breaks.
-async fn keep_alive(
-    connection: &mut OperatorConnection,
-    exit: &mut oneshot::Receiver<i32>,
-    ping: Duration,
-) -> Event {
+/// Keeps `link` alive with [`ClientMessage::Ping`], as the intproxy's ping-pong does, and reads
+/// and drops whatever else the companion sends, so that its stream doesn't back up, until the
+/// instance exits or the connection breaks. A ping still unanswered when the next one is due
+/// counts as the connection breaking: through the operator, a connection can stall without
+/// closing.
+async fn keep_alive(link: &mut Link, exit: &mut oneshot::Receiver<i32>, ping: Duration) -> Event {
     let mut ticks = tokio::time::interval_at(Instant::now() + ping, ping);
+    ticks.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             code = &mut *exit => return code.map_or(Event::Withdrawn, Event::Exit),
             _ = ticks.tick() => {
-                if connection.send(ClientMessage::Ping).await.is_err() {
-                    return Event::Dropped;
+                if link.awaiting_pongs > 0 {
+                    return Event::Dropped("the task didn't answer a ping in time");
                 }
-            }
-            message = connection.next() => {
-                if matches!(message, Some(Ok(_))).not() {
-                    return Event::Dropped;
+                if link.connection.send(ClientMessage::Ping).await.is_err() {
+                    return Event::Dropped("lost the connection to the task");
                 }
+                link.awaiting_pongs += 1;
             }
+            message = link.connection.next() => match message {
+                Some(Ok(DaemonMessage::Pong)) => {
+                    link.awaiting_pongs = link.awaiting_pongs.saturating_sub(1);
+                }
+                Some(Ok(DaemonMessage::Close(_))) | Some(Err(_)) | None => {
+                    return Event::Dropped("lost the connection to the task");
+                }
+                Some(Ok(message)) => {
+                    if link.handle(message).await.is_err() {
+                        return Event::Dropped("lost the connection to the task");
+                    }
+                }
+            },
         }
     }
 }
 
-/// Sends the instance's exit code to the task, then closes the connection.
-async fn report(mut connection: OperatorConnection, code: i32, name: &str) {
-    let sent = async {
-        connection
-            .send(ClientMessage::ReplacedTaskExit(code))
-            .await?;
-        SinkExt::<ClientMessage>::close(&mut connection).await
-    }
-    .await;
-    if let Err(error) = sent {
-        eprintln!("{name}: failed to report the exit code to the task: {error}");
+/// Delivers the instance's exit code to the task, on `link` or on connections opened for it,
+/// until the companion confirms it or [`OPEN_TIMEOUT`] passes. Sending a code again is safe: the
+/// companion keeps the first one it receives.
+async fn deliver(
+    mut link: Option<Link>,
+    code: i32,
+    client: &IntproxyClient<OperatorTransport>,
+    name: &str,
+) {
+    let deadline = Instant::now() + OPEN_TIMEOUT;
+    loop {
+        let current = match link.take() {
+            Some(current) => current,
+            None => match open(client, name, deadline).await {
+                Some(opened) => opened,
+                None => {
+                    eprintln!("{name}: failed to report the exit code to the task");
+                    return;
+                }
+            },
+        };
+        let error = match report(current, code).await {
+            Ok(()) => return,
+            Err(error) => error,
+        };
+        if Instant::now() + OPEN_RETRY_DELAY >= deadline {
+            eprintln!("{name}: failed to report the exit code to the task: {error}");
+            return;
+        }
+        eprintln!("{name}: failed to report the exit code to the task, retrying: {error}");
+        tokio::time::sleep(OPEN_RETRY_DELAY).await;
     }
 }
 
-/// Opens a connection to the task, pinned, trying for up to [`OPEN_TIMEOUT`], and settles its
-/// mirrord-protocol version. [`None`] when it can't, or when the companion is too old to take
-/// the exit code.
+/// Sends the instance's exit code on `link`, and waits for the companion to confirm it, then
+/// closes the connection.
+///
+/// The companion handles a connection's messages in order, so its [`DaemonMessage::Pong`] to
+/// the [`ClientMessage::Ping`] sent after the code proves that it took the code. The pongs of
+/// the pings that were still unanswered come before it. The companion closing the connection
+/// confirms the code too: it does so once it ended the task with it.
+async fn report(mut link: Link, code: i32) -> Result<(), ReportError> {
+    link.connection
+        .send(ClientMessage::ReplacedTaskExit(code))
+        .await?;
+    link.connection.send(ClientMessage::Ping).await?;
+    let mut awaiting_pongs = link.awaiting_pongs + 1;
+    tokio::time::timeout(CONFIRM_TIMEOUT, async {
+        loop {
+            match link.connection.next().await {
+                Some(Ok(DaemonMessage::Pong)) => {
+                    awaiting_pongs = awaiting_pongs.saturating_sub(1);
+                    if awaiting_pongs == 0 {
+                        return Ok(());
+                    }
+                }
+                Some(Ok(DaemonMessage::Close(_))) | None => return Ok(()),
+                Some(Ok(message)) => link.handle(message).await?,
+                Some(Err(error)) => return Err(ReportError::Connection(error)),
+            }
+        }
+    })
+    .await
+    .map_err(|_| ReportError::Timeout)??;
+    let _ = SinkExt::<ClientMessage>::close(&mut link.connection).await;
+    Ok(())
+}
+
+/// Opens a connection to the task, pinned, trying until `deadline`, and settles its
+/// mirrord-protocol version. [`None`] when it can't, and early when the companion is too old to
+/// take the exit code.
 async fn open(
     client: &IntproxyClient<OperatorTransport>,
     name: &str,
-) -> Option<OperatorConnection> {
-    let deadline = Instant::now() + OPEN_TIMEOUT;
+    deadline: Instant,
+) -> Option<Link> {
     loop {
         let error = match open_once(client, deadline).await {
-            Ok(connection) => return Some(connection),
+            Ok(connection) => return Some(Link::new(connection)),
             Err(OpenError::Version(version)) => {
-                eprintln!(
-                    "{name}: the task's mirrord companion is too old to take the exit code of a \
-                     local process (mirrord-protocol {version}), so no local process runs for \
-                     it, and it ends as a lost session. Update the task's mirrord remote \
-                     bootstrap."
-                );
+                too_old(name, &version);
                 return None;
             }
             Err(error) => error,
@@ -295,6 +409,39 @@ async fn open(
         }
         tokio::time::sleep(OPEN_RETRY_DELAY).await;
     }
+}
+
+/// Reopens a dropped connection to the task, pinned, with a backoff capped at
+/// [`REOPEN_MAX_DELAY`], for as long as it takes. [`None`] only when the companion is too old to
+/// take the exit code. The caller stops it once the instance exits.
+async fn reopen(client: &IntproxyClient<OperatorTransport>, name: &str) -> Option<Link> {
+    let mut delay = OPEN_RETRY_DELAY;
+    let mut reported = false;
+    loop {
+        match open_once(client, Instant::now() + OPEN_TIMEOUT).await {
+            Ok(connection) => return Some(Link::new(connection)),
+            Err(OpenError::Version(version)) => {
+                too_old(name, &version);
+                return None;
+            }
+            Err(error) if reported.not() => {
+                reported = true;
+                eprintln!("{name}: failed to reconnect to the task, still trying: {error}");
+            }
+            Err(_) => {}
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(REOPEN_MAX_DELAY);
+    }
+}
+
+/// Says that the task's companion is too old to take the exit code of a local process.
+fn too_old(name: &str, version: &semver::Version) {
+    eprintln!(
+        "{name}: the task's mirrord companion is too old to take the exit code of a local \
+         process (mirrord-protocol {version}), so no local process runs for it, and it ends as \
+         a lost session. Update the task's mirrord remote bootstrap."
+    );
 }
 
 /// One attempt of [`open`], with the version negotiation the intproxy does.

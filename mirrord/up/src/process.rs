@@ -23,6 +23,7 @@ use futures::{
 };
 use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
+use mirrord_remote_layer_protocol::LOST_SESSION_EXIT_CODE;
 use mirrord_sessions_manager_client::{ReplicaId, SessionsManagerClientError, TaskEvent};
 #[cfg(unix)]
 use nix::sys::signal::killpg;
@@ -131,9 +132,25 @@ struct Service {
     stdout_closed: Option<oneshot::Receiver<()>>,
 }
 
+/// What forwarding a child's stdout watches for.
+#[derive(Clone, Copy)]
+enum StdoutWatch<'a> {
+    /// Nothing: a pre-command.
+    Nothing,
+    /// The lines of a service's session, whose readiness marker counts toward the run's
+    /// readiness.
+    Session(&'a Arc<Readiness>),
+    /// The lines of an instance of a task-driven service. Its readiness marker counts for the
+    /// instance only: it tells the exit of the developer's program from the session failing
+    /// before it ran it.
+    Instance,
+}
+
 /// What forwarding a session's stdout (not a pre-command's) reports back.
 struct SessionOutput {
-    readiness: Arc<Readiness>,
+    /// [`None`] for an instance of a task-driven service, which doesn't count toward the run's
+    /// readiness.
+    readiness: Option<Arc<Readiness>>,
     started: Arc<AtomicBool>,
     held: Arc<AtomicBool>,
     /// Dropped when forwarding ends, which resolves [`Service::stdout_closed`].
@@ -143,15 +160,13 @@ struct SessionOutput {
 impl Service {
     /// Spawns `command` in its own process tree and forwards its output.
     ///
-    /// `session` is the readiness a session child's stdout reports its readiness marker to.
-    /// [`None`] for a process that doesn't count toward readiness: a pre-command, or an instance
-    /// of a task-driven service.
+    /// `watch` says what the child's stdout is read for.
     fn spawn(
         name: Arc<str>,
         debugged: bool,
         command: Command,
         then: Option<Command>,
-        session: Option<&Arc<Readiness>>,
+        watch: StdoutWatch<'_>,
         output: &mut JoinSet<()>,
     ) -> io::Result<Self> {
         // Terminal Ctrl-C must reach the supervisor first so child signal exits
@@ -172,11 +187,16 @@ impl Service {
         let held = Arc::new(AtomicBool::new(false));
         let mut stdout_closed = None;
         if let Some(stdout) = child.stdout().take() {
-            let session = session.map(|readiness| {
+            let readiness = match watch {
+                StdoutWatch::Nothing => None,
+                StdoutWatch::Session(readiness) => Some(Some(readiness.clone())),
+                StdoutWatch::Instance => Some(None),
+            };
+            let session = readiness.map(|readiness| {
                 let (closed, receiver) = oneshot::channel();
                 stdout_closed = Some(receiver);
                 SessionOutput {
-                    readiness: readiness.clone(),
+                    readiness,
                     started: started.clone(),
                     held: held.clone(),
                     _closed: closed,
@@ -414,12 +434,94 @@ pub(super) type InstanceCommand = Box<dyn Fn(&ReplicaId) -> Result<Command, UpEr
 /// A task, as its watch names it: the agent instance on a replica.
 type TaskKey = (ReplicaId, Uuid);
 
-/// The instances of ended tasks while they are stopped, each with its name and how its stop went.
+/// The instances of ended tasks while they are stopped, and the trees of instances that exited
+/// while they are killed, each with its name and how its stop went. Also the owner connections of
+/// the tasks of a service whose `run.pre_command` failed, while they end the tasks as lost.
 ///
 /// Stopped apart from the supervision loop, which would otherwise wait out each one's grace
 /// period before it reads the next event. Each future owns its instance, so dropping one kills
 /// the instance's tree at once (`KillOnDrop`).
 type Stopping = FuturesUnordered<LocalBoxFuture<'static, (Arc<str>, io::Result<()>)>>;
+
+/// Kills what is left of the tree of `instance`, whose leader exited, as a future of
+/// `stopping`. A failure is reported and leaves the run going.
+fn force_stop_instance(stopping: &mut Stopping, mut instance: Service) {
+    stopping.push(
+        async move {
+            let result = instance.force_stop().await;
+            (instance.name.clone(), result)
+        }
+        .boxed_local(),
+    );
+}
+
+/// Waits, as a future of `stopping`, for `owners` to end their tasks with the code they were
+/// given, bounded by `grace` as on teardown.
+fn wait_for_owners(stopping: &mut Stopping, name: Arc<str>, owners: Vec<Owner>, grace: Duration) {
+    if owners.is_empty() {
+        return;
+    }
+    stopping.push(
+        async move {
+            let _ = tokio::time::timeout(
+                grace,
+                futures::future::join_all(owners.into_iter().map(Owner::closed)),
+            )
+            .await;
+            (name, Ok(()))
+        }
+        .boxed_local(),
+    );
+}
+
+/// A running instance of a task-driven service.
+struct Instance {
+    task: TaskKey,
+    service: Service,
+    /// The exit status of the instance's leader, and when it was seen, while its stdout is still
+    /// read for the readiness marker.
+    exited: Option<(ExitStatus, Instant)>,
+}
+
+impl Instance {
+    /// The code the instance's task ends with, once the instance's leader exited. [`None`] while
+    /// it runs, and while it's unknown whether it ran the developer's program.
+    ///
+    /// The readiness marker says the session got as far as running the developer's program, so
+    /// the exit is that program's. Without it, the session failed before, and the task ends as
+    /// lost rather than with mirrord's own exit code. The exit can be seen before the forwarding
+    /// of stdout read the marker, so that is waited for, up to [`STDOUT_DRAIN`]. Never waits
+    /// itself: the code is decided in one go, so that a run that ends meanwhile can't lose it.
+    fn exit_code(&mut self) -> io::Result<Option<i32>> {
+        let (status, exited_at) = match self.exited {
+            Some(exited) => exited,
+            None => {
+                let Some(status) = self.service.child.try_wait()? else {
+                    return Ok(None);
+                };
+                *self.exited.insert((status, Instant::now()))
+            }
+        };
+        let name = &self.service.name;
+        if self.service.started.load(Ordering::Relaxed) {
+            println!("{name}: exited with {status}");
+            return Ok(Some(replaced_task_exit_code(status)));
+        }
+        let drained = self.service.stdout_closed.as_mut().is_none_or(|closed| {
+            matches!(closed.try_recv(), Err(oneshot::error::TryRecvError::Empty)).not()
+        });
+        if drained.not() && exited_at.elapsed() < STDOUT_DRAIN {
+            return Ok(None);
+        }
+        if self.service.started.load(Ordering::Relaxed) {
+            println!("{name}: exited with {status}");
+            Ok(Some(replaced_task_exit_code(status)))
+        } else {
+            eprintln!("{name}: exited with {status} before it ran the local process");
+            Ok(Some(LOST_SESSION_EXIT_CODE.into()))
+        }
+    }
+}
 
 /// Stops `instance` with `grace`, as a future of `stopping`.
 fn stop_instance(stopping: &mut Stopping, mut instance: Service, grace: Duration) {
@@ -440,8 +542,8 @@ struct TaskService {
     /// Every task an instance was started or queued for, also after the instance exited, so
     /// that a task the watch reports again starts no second instance.
     seen: HashSet<TaskKey>,
-    /// The running instances, by their tasks.
-    instances: Vec<(TaskKey, Service)>,
+    /// The running instances.
+    instances: Vec<Instance>,
     /// Set for a service with `replace_task`: how it reaches the tasks it replaces.
     replace: Option<TaskOwners>,
     /// The owner connection of each replaced task (see [`crate::owner`]), from the match until it
@@ -486,7 +588,7 @@ impl TaskService {
             return Ok(service);
         };
         println!("{name}: running `run.pre_command`");
-        match Service::spawn(name.clone(), false, pre, None, None, output) {
+        match Service::spawn(name.clone(), false, pre, None, StdoutWatch::Nothing, output) {
             Ok(pre) => {
                 service.phase = TaskPhase::Preparing {
                     pre: Box::new(pre),
@@ -506,10 +608,15 @@ impl TaskService {
     fn run(&mut self, readiness: &Arc<Readiness>) {
         self.phase = TaskPhase::Running;
         readiness.mark();
+        let replace = if self.replace.is_some() {
+            " A task is replaced only when it sets `MIRRORD_REMOTE_ADMISSION`."
+        } else {
+            ""
+        };
         println!(
             "{}: waiting for tasks whose AWS Batch job tags match `target.tag_filter` and \
              `target.jq_filter`. A task can match only when its mirrord companion is new enough \
-             to send its job ID to the operator.",
+             to send its job ID to the operator.{replace}",
             self.name
         );
     }
@@ -524,12 +631,23 @@ impl TaskService {
     /// A replaced task gets its owner connection first, also while `run.pre_command` runs, so
     /// that the task isn't lost meanwhile. Its instance starts in [`Self::reap_instances`], once
     /// the connection is open and the service runs.
-    fn matched(&mut self, task: TaskKey, output: &mut JoinSet<()>) {
+    ///
+    /// `replace` is whether the sessions-manager replaced the task for the watch. A service with
+    /// `replace_task` starts nothing for a task that wasn't: the task runs its own code.
+    fn matched(&mut self, task: TaskKey, replace: bool, output: &mut JoinSet<()>) {
         if self.seen.insert(task.clone()).not() || self.is_dropped() {
             return;
         }
-        if let Some(replace) = &self.replace {
-            let owner = replace.open(&task.0, self.instance_name(&task.0));
+        if let Some(owners) = &self.replace {
+            let name = self.instance_name(&task.0);
+            if replace.not() {
+                eprintln!(
+                    "{name}: a task matched, but the operator didn't replace it, so nothing starts \
+                     for it. Replacing tasks needs an operator that supports `replace_task`."
+                );
+                return;
+            }
+            let owner = owners.open(&task.0, name);
             self.owners.insert(task, owner);
             return;
         }
@@ -554,8 +672,11 @@ impl TaskService {
         if let TaskPhase::Preparing { pending, .. } = &mut self.phase {
             pending.retain(|pending| pending != task);
         }
-        let position = self.instances.iter().position(|(key, _)| key == task)?;
-        let (_, instance) = self.instances.swap_remove(position);
+        let position = self
+            .instances
+            .iter()
+            .position(|instance| &instance.task == task)?;
+        let instance = self.instances.swap_remove(position).service;
         println!("{}: the task ended, stopping", instance.name);
         Some(instance)
     }
@@ -566,10 +687,22 @@ impl TaskService {
         let name = self.instance_name(&task.0);
         println!("{name}: a task matched, starting");
         let spawned = (self.instance)(&task.0).and_then(|command| {
-            Service::spawn(name.clone(), false, command, None, None, output).map_err(UpError::Io)
+            Service::spawn(
+                name.clone(),
+                false,
+                command,
+                None,
+                StdoutWatch::Instance,
+                output,
+            )
+            .map_err(UpError::Io)
         });
         match spawned {
-            Ok(instance) => self.instances.push((task, instance)),
+            Ok(service) => self.instances.push(Instance {
+                task,
+                service,
+                exited: None,
+            }),
             Err(error) => {
                 eprintln!("{name}: failed to start: {error}");
                 if let Some(owner) = self.owners.get_mut(&task) {
@@ -586,8 +719,11 @@ impl TaskService {
 
     /// Starts the instances of the replaced tasks whose owner connections opened, and reaps the
     /// instances that exited, reporting their exit codes to replaced tasks. Their exit doesn't
-    /// end the run.
-    async fn reap_instances(&mut self, output: &mut JoinSet<()>) -> io::Result<()> {
+    /// end the run, and neither does a failure to reap one: its task ends as lost.
+    ///
+    /// Never waits, so that a run that ends meanwhile can't lose a code. What is left of an
+    /// exited instance's tree is killed in `stopping`.
+    fn reap_instances(&mut self, output: &mut JoinSet<()>, stopping: &mut Stopping) {
         if matches!(self.phase, TaskPhase::Running) {
             let opened: Vec<_> = self
                 .owners
@@ -605,27 +741,48 @@ impl TaskService {
         self.owners.retain(|_, owner| owner.is_done().not());
 
         let mut index = 0;
-        while let Some((_, instance)) = self.instances.get_mut(index) {
-            let Some(status) = instance.child.try_wait()? else {
-                index += 1;
-                continue;
+        while let Some(instance) = self.instances.get_mut(index) {
+            let code = match instance.exit_code() {
+                Ok(Some(code)) => code,
+                Ok(None) => {
+                    index += 1;
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "{}: failed to check whether it exited, stopping: {error}",
+                        instance.service.name
+                    );
+                    LOST_SESSION_EXIT_CODE.into()
+                }
             };
-            // Only the leader has exited, as with a pre-command.
-            instance.force_stop().await?;
-            println!("{}: exited with {status}", instance.name);
-            let (task, _) = self.instances.swap_remove(index);
+            let Instance { task, service, .. } = self.instances.swap_remove(index);
             if let Some(owner) = self.owners.get_mut(&task) {
-                owner.report_exit(replaced_task_exit_code(status));
+                owner.report_exit(code);
             }
+            // Only the leader has exited, as with a pre-command.
+            force_stop_instance(stopping, service);
         }
-        Ok(())
     }
 
     /// Ends every task the service replaces as lost, rather than after the companion's 30
     /// seconds without connections, and hands over their owner connections to wait for. For a
     /// run that is ending, before its instances are stopped, and for a service that won't
     /// start.
+    ///
+    /// An instance that exited after it ran the developer's program, while its stdout was still
+    /// read, ends its task with its own code.
     fn lose_tasks(&mut self) -> Vec<Owner> {
+        for instance in &self.instances {
+            let Some((status, _)) = instance.exited else {
+                continue;
+            };
+            if instance.service.started.load(Ordering::Relaxed)
+                && let Some(owner) = self.owners.get_mut(&instance.task)
+            {
+                owner.report_exit(replaced_task_exit_code(status));
+            }
+        }
         self.owners
             .drain()
             .map(|(_, mut owner)| {
@@ -641,8 +798,11 @@ impl TaskService {
             TaskPhase::Preparing { pre, .. } => Some(pre.as_mut()),
             TaskPhase::Running | TaskPhase::Dropped => None,
         };
-        pre.into_iter()
-            .chain(self.instances.iter_mut().map(|(_, instance)| instance))
+        pre.into_iter().chain(
+            self.instances
+                .iter_mut()
+                .map(|instance| &mut instance.service),
+        )
     }
 }
 
@@ -656,7 +816,7 @@ fn replaced_task_exit_code(status: ExitStatus) -> i32 {
     if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
         return 128 + signal;
     }
-    mirrord_remote_layer_protocol::LOST_SESSION_EXIT_CODE.into()
+    LOST_SESSION_EXIT_CODE.into()
 }
 
 /// A few characters that tell a task's instance apart in the output: the start of the last
@@ -765,7 +925,7 @@ async fn wait_for_first_exit(
                     service.debugged,
                     session,
                     None,
-                    Some(readiness),
+                    StdoutWatch::Session(readiness),
                     output,
                 )?;
                 index += 1;
@@ -782,7 +942,7 @@ async fn wait_for_first_exit(
             let Some(task) = tasks.get_mut(index) else {
                 break;
             };
-            task.reap_instances(output).await?;
+            task.reap_instances(output, stopping);
             let TaskPhase::Preparing { pre, .. } = &mut task.phase else {
                 continue;
             };
@@ -805,8 +965,8 @@ async fn wait_for_first_exit(
                 continue;
             }
             watches.remove(&index);
-            // Nothing will start for the tasks it held.
-            drop(task.lose_tasks());
+            // Nothing will start for the tasks it held, so they end as lost.
+            wait_for_owners(stopping, name.clone(), task.lose_tasks(), grace);
             if services.is_empty() && tasks.iter().all(TaskService::is_dropped) {
                 return Err(UpError::PreCommandFailed { name, status });
             }
@@ -827,6 +987,7 @@ async fn wait_for_first_exit(
                 match event {
                     Ok(TaskEvent::Matched(task_match)) => task.matched(
                         (task_match.replica_id, task_match.agent_instance_id),
+                        task_match.replace,
                         output,
                     ),
                     Ok(TaskEvent::Ended(ended)) => {
@@ -877,16 +1038,17 @@ async fn forward_output(
                     if counted.not() && line.trim() == SESSION_READY_MESSAGE {
                         counted = true;
                         session.started.store(true, Ordering::Relaxed);
-                        session.readiness.mark();
+                        if let Some(readiness) = &session.readiness {
+                            readiness.mark();
+                        }
                     } else if let Some(report) = line.strip_prefix(UP_DB_BRANCHES_REPORT_PREFIX) {
                         // Only analytics read the report, so one that doesn't parse is dropped
                         // rather than shown.
-                        if let Ok(branches) = serde_json::from_str::<Vec<UpSessionDbBranch>>(report)
-                        {
-                            session
-                                .readiness
-                                .tracker
-                                .record_db_branches(name.clone(), branches);
+                        if let (Some(readiness), Ok(branches)) = (
+                            &session.readiness,
+                            serde_json::from_str::<Vec<UpSessionDbBranch>>(report),
+                        ) {
+                            readiness.tracker.record_db_branches(name.clone(), branches);
                         }
                         continue;
                     } else if line.starts_with(DEBUG_HOLD_LINE_PREFIX) {
@@ -960,7 +1122,7 @@ async fn supervise_with_second_signal(
                     debugged,
                     pre,
                     Some(session),
-                    None,
+                    StdoutWatch::Nothing,
                     &mut output,
                 ) {
                     Err(error) => {
@@ -974,7 +1136,14 @@ async fn supervise_with_second_signal(
                     spawned => spawned,
                 }
             }
-            None => Service::spawn(name, debugged, session, None, Some(&readiness), &mut output),
+            None => Service::spawn(
+                name,
+                debugged,
+                session,
+                None,
+                StdoutWatch::Session(&readiness),
+                &mut output,
+            ),
         };
         match spawned {
             Ok(service) => services.push(service),
@@ -1154,7 +1323,7 @@ mod output_tests {
             output.as_slice(),
             Arc::from("shop"),
             Some(SessionOutput {
-                readiness: readiness.clone(),
+                readiness: Some(readiness.clone()),
                 started: started.clone(),
                 held: Arc::new(AtomicBool::new(false)),
                 _closed: closed,
