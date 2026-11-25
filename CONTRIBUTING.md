@@ -989,8 +989,51 @@ When a submission warns or fails:
     --skip-pr-check --submit
   ```
 
-## Publishing docs and guides
+## Publishing docs, guides and skills
 
 GitBook's Documentation and Guides spaces sync `docs/` and `guides/` on `main`, so every merge publishes them, including
 pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing) says how to check that
 GitBook imported a merge, and what to do when an import fails.
+
+The [Publish skills workflow](/.github/workflows/publish-skills.yaml) copies `skills/` to
+[metalbear-co/skills](https://github.com/metalbear-co/skills) on every merge to `main` that changes it, because the
+Claude Code and Codex marketplaces, `npx skills add` and `install.sh` install the skills from that repository.
+`npx skills add` and `install.sh` clone it, so they get every merge. Claude Code updates an installed plugin only when
+the plugin's `version` changes. Each publish adds one commit to `main` of `metalbear-co/skills`, whose content is
+exactly `skills/` at the tip of `main` when the run starts, so the next publish replaces a change made in that
+repository directly, and the change stays only in its history. A failed run posts to `#ci-alerts`.
+
+To publish again, for example after a failed run, re-run that run, or run the workflow from `main` with `dry_run` off.
+Either one publishes the current tip of `main`, not the commit that started the failed run. The first command below is
+a dry run: it lists the files that would change in the run's summary, and pushes nothing. The second command
+publishes:
+
+```bash
+gh workflow run publish-skills.yaml --repo metalbear-co/mirrord --ref main
+gh workflow run publish-skills.yaml --repo metalbear-co/mirrord --ref main --field dry_run=false
+```
+
+The setup that the Publish skills workflow relies on:
+
+- The Cubby GitHub App is installed on `metalbear-co/skills` with write access to its contents. The workflow creates its
+  token from the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets, as the other workflows that use Cubby do.
+- Cubby is a bypass actor of the `default` ruleset of `metalbear-co/skills`, with the bypass mode **Always**, so that
+  its push doesn't need a pull request. The mode **For pull requests only** doesn't exempt a direct push. The ruleset
+  still refuses force pushes and deletion of `main`, and the workflow needs neither.
+- `metalbear-co/skills` has no `.github/workflows`, because the Cubby token has no Workflows permission, so a publish
+  that would delete them fails. That means removing all three old workflows: `check-fence-tags.yml`, which the
+  `content_check` job of mirrord replaces, and `docs-sync.yml` and `update-references.yml`, which open weekly pull
+  requests that the next publish would replace. Without `update-references.yml`, nothing refreshes the reference
+  snapshots under `skills/*/references/`.
+
+When a run fails:
+
+- If the error names `.github/workflows`, the workflows in `metalbear-co/skills` differ from `skills/.github/workflows`,
+  which mirrord doesn't have. Delete (or change) the files that the error lists with a pull request in
+  `metalbear-co/skills`, then re-run the failed run.
+- If git rejected the push as non-fast-forward, someone pushed to `metalbear-co/skills` during the run. Re-run the
+  failed run.
+- If a ruleset rejected the push, check that Cubby is still a bypass actor of the `default` ruleset, with the bypass
+  mode **Always**.
+- If creating the token failed, check that Cubby is still installed on `metalbear-co/skills`, and that the
+  `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set.

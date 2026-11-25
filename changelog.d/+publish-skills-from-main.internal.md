@@ -1,0 +1,1 @@
+Copy `skills/` to `metalbear-co/skills` on every merge to `main` that changes it, so `npx skills add` and `install.sh`, which install from that repository, get skill changes as they merge. Claude Code plugin installs get them when the plugin version changes.

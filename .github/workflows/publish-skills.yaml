@@ -1,0 +1,204 @@
+name: Publish skills
+
+# Users install the mirrord skills from metalbear-co/skills, not from this repository: the Claude Code and Codex
+# marketplaces, `npx skills add` and that repository's install.sh all read it, and expect the plugin at its root. This
+# workflow copies `skills/` there on every merge to `main` that changes it, so those installs get a skill change without
+# waiting for a release. `npx skills add` and install.sh clone the repository, so they get every merge. Claude Code
+# updates an installed plugin only when the plugin's `version` changes. `mirrord mcp` still embeds `skills/skills` when
+# it's built, so it gets the change with the next release. The docs and guides need no such workflow, because GitBook
+# syncs `docs/` and `guides/` on `main` itself.
+#
+# Each publish appends one commit on top of the tip of metalbear-co/skills `main`, whose tree is exactly `skills/` at
+# the tip of the run's ref when the run starts. That is the tip, not the commit that started the run, so a re-run of an
+# earlier run never puts older skills back. The branch is never force-pushed: its ruleset refuses that, and appending
+# keeps the history that the skills had before they moved into this repository. Nothing but this workflow should push
+# to that branch, so the push isn't retried: a push that loses a race fails the run, and a re-run, or a dispatch from
+# `main` with `dry_run` off, publishes on top of the new tip. A dispatch is a dry run by default, which lists the files
+# that differ. CONTRIBUTING.md ("Publishing docs, guides and skills") has the setup in metalbear-co/skills that this
+# workflow relies on, and what to check when a run fails.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skills/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build the publish commit and list the files it changes, without pushing.'
+        required: false
+        type: boolean
+        default: true
+
+# The job only reads this repository. It pushes to metalbear-co/skills with a token of the Cubby GitHub App.
+permissions:
+  contents: read
+
+# Only the runs that can push share the group, so that two of them never push at the same time. GitHub keeps one
+# pending run per group and cancels the older one when another run joins. Each run publishes the tip of `main` when it
+# starts, so the run that replaces a pending one publishes everything that the pending one would have. A dry run, or a
+# run from another branch, pushes nothing, so it gets a group of its own and can't replace a pending publish. A run in
+# progress is never cancelled, so it isn't stopped between its push and its summary.
+concurrency:
+  group: ${{ (inputs.dry_run == true || github.ref != 'refs/heads/main') && format('publish-skills-no-push-{0}', github.run_id) || 'publish-skills' }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      SKILLS_URL: https://github.com/metalbear-co/skills.git
+      GIT_AUTHOR_NAME: cubby-mb[bot]
+      GIT_AUTHOR_EMAIL: 273354325+cubby-mb[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: cubby-mb[bot]
+      GIT_COMMITTER_EMAIL: 273354325+cubby-mb[bot]@users.noreply.github.com
+    # Each step that calls the network has its own timeout, so that a stalled API call or git transfer fails that step
+    # instead of holding the runner for the job's default 6 hours. A job timeout would cancel the job instead, which
+    # skips the notify step.
+    steps:
+      # Only a merged `main` is reviewed, so a dispatch from another branch may only dry-run.
+      - name: Check the ref to publish
+        if: ${{ github.ref != 'refs/heads/main' && inputs.dry_run != true }}
+        shell: bash
+        run: |
+          echo "::error::This run is for $GITHUB_REF, and only refs/heads/main is published. Run the workflow from main, or turn on dry_run."
+          exit 1
+
+      # GITHUB_TOKEN can only write to this repository, so the push to metalbear-co/skills uses Cubby, which is
+      # installed there with write access to its contents. The token has no Workflows permission, so it can't change
+      # `.github/workflows` there, which the Publish step checks before it pushes.
+      - name: Create GitHub App token (skills repo)
+        id: app-token
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: skills
+          permission-contents: write
+
+      # `ref` makes the checkout fetch the current tip of the run's ref. Without it, the checkout takes `github.sha`,
+      # which a re-run keeps from the event that started the first attempt.
+      #
+      # Most of the repository's size is the images under docs/ and guides/, and the job mostly reads trees, so the
+      # checkout fetches no blobs up front (`filter`). Git fetches a blob from this repository when a command needs it,
+      # such as the push, which sends the blobs that metalbear-co/skills doesn't have. Writing the full working tree
+      # would fetch every blob, so the checkout is sparse. The `sparse-checkout` input needs at least one path to turn
+      # sparse checkout on, so it names skills/.github, a small directory that no step reads, and cone mode adds the
+      # root files. The checkout keeps no credentials, because the job never pushes to this repository.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        timeout-minutes: 10
+        with:
+          ref: ${{ github.ref }}
+          filter: blob:none
+          sparse-checkout: skills/.github
+          persist-credentials: false
+
+      - name: Publish
+        id: publish
+        timeout-minutes: 10
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          tree=$(git rev-parse "$sha:skills")
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          heading="## Publish of skills/ from $sha"
+          if [ "$DRY_RUN" = true ]; then
+            heading+=", dry run"
+          fi
+
+          # Git reads this header from the environment rather than from the command line or a file in the checkout, so
+          # it shows in no log and no later step reads it. The URL in the key limits it to metalbear-co/skills, so the
+          # fetches of missing blobs from this repository don't send it.
+          basic=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$basic"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.$SKILLS_URL.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic"
+
+          # The step only compares trees and object IDs of the tip, and the push leaves out the objects that the tip
+          # already has, so the fetch takes no blobs either.
+          git fetch --no-tags --depth=1 --filter=blob:none "$SKILLS_URL" +refs/heads/main:refs/remotes/skills/main
+          tip=$(git rev-parse refs/remotes/skills/main)
+          if [ "$tree" = "$(git rev-parse "$tip^{tree}")" ]; then
+            printf '%s\n\n%s\n' "$heading" "metalbear-co/skills already matches skills/, nothing to publish." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # GitHub rejects a push that creates, changes or deletes a file under .github/workflows/ unless its token
+          # has the Workflows permission, which the Cubby token doesn't have. Such a publish would otherwise fail at
+          # the push, with GitHub's error instead of one that names the files. The workflows of metalbear-co/skills
+          # are changed there by hand instead.
+          if ! git diff --quiet "$tip" "$tree" -- .github/workflows; then
+            git diff --name-status --no-renames "$tip" "$tree" -- .github/workflows
+            echo "::error::The workflow files listed above differ between metalbear-co/skills and skills/ at $sha, and the Cubby token can't push workflow files. A D line is a file that skills/ doesn't have, which the publish would delete. Add, change or delete the listed files in metalbear-co/skills with a pull request there, then re-run this run, or run the workflow from main with dry_run off."
+            exit 1
+          fi
+
+          commit=$(git commit-tree "$tree" -p "$tip" \
+            -m "Publish skills from $GITHUB_REPOSITORY@$sha" \
+            -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$sha")
+          {
+            echo "$heading"
+            echo
+            if [ "$DRY_RUN" = true ]; then
+              echo "### Files that would change on metalbear-co/skills"
+            else
+              echo "### Files that change on metalbear-co/skills"
+            fi
+            echo
+            echo '```'
+            # Listing names and statuses compares object IDs only, so it fetches none of the blobs, unlike --stat.
+            git diff --name-status --no-renames "$tip" "$commit"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DRY_RUN" = true ]; then
+            printf '\n%s\n' "Dry run: nothing was pushed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Without a leading `+`, the refspec only fast-forwards the branch.
+          if ! git push "$SKILLS_URL" "$commit:refs/heads/main"; then
+            echo "::error::git rejected the push to metalbear-co/skills main, for the reason it gives above. If someone pushed to that branch after this run fetched it, re-run this run, or run the workflow from main with dry_run off. Either one builds on the new tip. For any other rejection, see the failure steps in CONTRIBUTING.md (\"Publishing docs, guides and skills\")."
+            exit 1
+          fi
+          printf '\n%s\n' "Pushed $commit on top of $tip." >> "$GITHUB_STEP_SUMMARY"
+
+      # Only a failed publish of `main` alerts #ci-alerts. A dry run, or a run from another branch, pushes nothing, and
+      # whoever started it sees its result.
+      - name: 'Notify #ci-alerts'
+        if: ${{ failure() && inputs.dry_run != true && github.ref == 'refs/heads/main' }}
+        timeout-minutes: 2
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+          # Empty when the run failed before the Publish step, so before it knew the tip that it would publish.
+          SHA: ${{ steps.publish.outputs.sha }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$SHA" ]; then
+            commit_line="• *Commit:* \`$SHA\`"
+          else
+            commit_line="• *Commit:* unknown, because the run failed before the Publish step"
+          fi
+          text=$(printf '%s\n' \
+            ":rotating_light: *Publishing \`skills/\` of \`$GITHUB_REPOSITORY\` to \`metalbear-co/skills\` failed*" \
+            "$commit_line" \
+            "• *Run:* <$run_url|Open GitHub Actions>")
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"

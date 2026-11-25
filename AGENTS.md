@@ -156,9 +156,10 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
   released yet. A pull request into `main` from a branch of this repository gets a GitBook preview. `mirrord mcp`
   embeds `docs/docs` when it's built, so an edit there reaches it only with the next release. `docs/AGENTS.md` says how
   to check that GitBook imported a merge, and what to do when an import fails.
-- `skills/` came from `metalbear-co/skills`, which keeps its earlier history. `mirrord mcp` embeds `skills/skills` when
-  it's built (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release. Nothing copies `skills/` to
-  `metalbear-co/skills` yet, so an edit doesn't reach that repository.
+- `skills/` came from `metalbear-co/skills`, which keeps its earlier history. Users install the skills from that
+  repository, so `publish-skills.yaml` copies `skills/` there on every merge to `main` that changes it, and the next
+  copy replaces a change made in that repository directly. `mirrord mcp` embeds `skills/skills` when it's built
+  (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release.
 - `metalbear-co/mirrord-vscode` and `metalbear-co/mirrord-intellij` drive the CLI; `ci.yaml` runs their end-to-end
   tests on release branches.
 - `metalbear-co/test-images` builds the app images the end-to-end tests deploy.
