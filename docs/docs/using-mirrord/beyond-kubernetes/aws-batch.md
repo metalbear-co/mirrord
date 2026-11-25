@@ -27,7 +27,7 @@ At a glance, the setup is:
 
 ## Prerequisites
 
-1. The [Operator-hosted sessions-manager](operator-hosted.md) enabled on an EKS cluster, with an IAM role for the Operator's ServiceAccount, set with the `sa.roleArn` Helm value.
+1. The [Operator-hosted sessions-manager](operator-hosted.md) enabled on an EKS cluster, with an IAM role for the Operator's ServiceAccount, set with the `sa.roleArn` Helm value. To create the role, follow AWS's [IAM roles for service accounts](https://docs.aws.amazon.com/eks/latest/userguide/associate-service-account-role.html): the cluster needs an IAM OIDC provider, and the role's trust policy must allow `system:serviceaccount:mirrord:mirrord-operator`, the Operator's ServiceAccount.
 2. An AWS Batch compute environment on Fargate or EC2. Batch on EKS and multi-node parallel jobs aren't supported.
 3. An application image based on glibc 2.30 or later, and not on musl, such as Alpine. See [Application container requirements](README.md#application-container-requirements).
 4. A job role on the job definition: `jobRoleArn` with `containerProperties`, or `taskRoleArn` with `ecsProperties`.
@@ -40,6 +40,8 @@ Throughout this guide, replace:
 | `<YOUR_ENVIRONMENT>` | A name for the environment the jobs run in, e.g. `staging` |
 | `<YOUR_APPLICATION_IMAGE>` | Your job's existing image |
 | `<JOB_ROLE_ARN>` | The ARN of the job definition's job role |
+| `<EXECUTION_ROLE_ARN>` | The ARN of the job definition's execution role, which Fargate uses to pull images and send logs |
+| `<CLUSTER_ENDPOINT>`, `<CLUSTER_NAME>`, `<CLUSTER_CA_DATA>` | The EKS cluster's endpoint, name and certificate authority, collected as in [Add the connection variables](ecs-operator-hosted.md#add-the-connection-variables) |
 | `<OPERATOR_ROLE_NAME>` | The name of the IAM role in the Operator's `sa.roleArn` |
 
 ---
@@ -69,7 +71,7 @@ A Batch job definition has one of two forms. Use the section for yours.
 
 ### With `ecsProperties`
 
-A job definition with `ecsProperties` holds several containers, so a setup container copies the bootstrap into a shared volume, as in [Amazon ECS](ecs.md#add-the-remote-bootstrap). Merge the example into your existing job definition, keeping its other settings:
+A job definition with `ecsProperties` holds several containers, so a setup container copies the bootstrap into a shared volume, as in [Amazon ECS](ecs.md#add-the-remote-bootstrap). Unlike an ECS task definition, a Batch container has no `entryPoint`, so the shell goes into its `command`. Merge the example into your existing job definition, keeping its other settings:
 
 ```json
 {
@@ -85,8 +87,9 @@ A job definition with `ecsProperties` holds several containers, so a setup conta
             "name": "install-mirrord-remote-bootstrap",
             "image": "ghcr.io/metalbear-co/mirrord-remote-bootstrap:3.239.0",
             "essential": false,
-            "entryPoint": ["/bin/sh", "-c"],
             "command": [
+              "/bin/sh",
+              "-c",
               "cp /opt/mirrord/lib/libmirrord_remote_bootstrap.so /mirrord/libmirrord_remote_bootstrap.so"
             ],
             "mountPoints": [
@@ -160,14 +163,48 @@ A job authenticates as its job role, the way an ECS task authenticates as its ta
 
 1. [Grant the ECS task access](ecs-operator-hosted.md#grant-the-ecs-task-access), once per cluster.
 2. [Map the job role into the cluster](ecs-operator-hosted.md#map-the-ecs-task-role-into-the-cluster), with `--principal-arn <JOB_ROLE_ARN>`.
-3. [Make the EKS API server reachable](ecs-operator-hosted.md#make-the-eks-api-server-reachable-from-ecs) from the compute environment's subnets.
-4. [Add the connection variables](ecs-operator-hosted.md#add-the-connection-variables) to the application container's `environment`, and register the new job definition revision.
+3. Make the EKS API server reachable from the compute environment's subnets. When the cluster's endpoint is public, the jobs need only a route to the internet: on Fargate, `"assignPublicIp": "ENABLED"` in the job definition's `networkConfiguration`, with the compute environment in subnets that route to an internet gateway, or else a NAT gateway for the compute environment's subnets. The same route lets them pull images from Amazon ECR. If the endpoint limits public access to some CIDR ranges, include the jobs' public addresses. When the jobs must use the private endpoint, follow [Make the EKS API server reachable from ECS](ecs-operator-hosted.md#make-the-eks-api-server-reachable-from-ecs).
+4. Add the connection variables, whose values [Add the connection variables](ecs-operator-hosted.md#add-the-connection-variables) shows how to collect, to the application container's `environment`: `containerProperties.environment`, or the `environment` of the application container in `ecsProperties`. Then register the new job definition revision.
+
+### A complete job definition
+
+This job definition, for Fargate and with `containerProperties`, has everything mirrord needs: the job and execution roles, the bootstrap's variables and the connection variables, and a route to a public EKS endpoint. Add your own command and settings, and register it with `aws batch register-job-definition --cli-input-json file://job-definition.json`:
+
+```json
+{
+  "jobDefinitionName": "<YOUR_SERVICE_NAME>",
+  "type": "container",
+  "platformCapabilities": ["FARGATE"],
+  "containerProperties": {
+    "image": "<YOUR_IMAGE_WITH_THE_BOOTSTRAP>",
+    "jobRoleArn": "<JOB_ROLE_ARN>",
+    "executionRoleArn": "<EXECUTION_ROLE_ARN>",
+    "resourceRequirements": [
+      { "type": "VCPU", "value": "1" },
+      { "type": "MEMORY", "value": "2048" }
+    ],
+    "networkConfiguration": { "assignPublicIp": "ENABLED" },
+    "environment": [
+      { "name": "LD_PRELOAD", "value": "/opt/mirrord/lib/libmirrord_remote_bootstrap.so" },
+      { "name": "MIRRORD_REMOTE_SERVICE", "value": "<YOUR_SERVICE_NAME>" },
+      { "name": "MIRRORD_REMOTE_ENVIRONMENT", "value": "<YOUR_ENVIRONMENT>" },
+      { "name": "MIRRORD_OPERATOR_API_URL", "value": "<CLUSTER_ENDPOINT>" },
+      { "name": "MIRRORD_OPERATOR_EKS_CLUSTER_NAME", "value": "<CLUSTER_NAME>" },
+      { "name": "MIRRORD_OPERATOR_API_CA_DATA", "value": "<CLUSTER_CA_DATA>" }
+    ]
+  }
+}
+```
+
+Fargate needs the execution role to pull the image from Amazon ECR and to send the job's logs to CloudWatch Logs; the AWS managed policy `AmazonECSTaskExecutionRolePolicy` covers both. Size `resourceRequirements` for your job: mirrord's companion runs inside the application container and needs little of it. With a private EKS endpoint, leave out `networkConfiguration`, or set `assignPublicIp` to `DISABLED`, and reach the endpoint as in step 3.
 
 ---
 
 ## Selecting jobs by their tags
 
-A serverless target selects jobs by their tags, as `DescribeJobs` returns them, with two settings:
+A serverless target selects jobs by their tags: the tags given to the job when it was submitted, with `--tags` of `aws batch submit-job` (`tags` in `SubmitJob`), as `DescribeJobs` returns them. Select jobs with two settings:
+
+<!-- TODO(INT-1093): verify on AWS whether a job definition's tags, alone or with `propagateTags`, also show up in a job's tags in `DescribeJobs`, and document the answer here. -->
 
 * `target.tag_filter`: a mapping of tag names to regexes. A job matches when it has every named tag, each with a value its regex matches. A regex matches anywhere in the value, so anchor it with `^` and `$` to match the whole value.
 * `target.jq_filter`: a jq program run on `{"tags": {"<name>": "<value>", ...}}`. A job matches when the program outputs `true`.
@@ -189,7 +226,7 @@ With `mirrord exec` or an IDE extension, set the filter in `mirrord.json`:
 }
 ```
 
-mirrord waits for a matching job when none runs yet. Among several, it attaches to one. The whole session stays on that job, reconnects included, and ends when the job ends. The job runs its own code. See [`target.tag_filter`](https://metalbear.com/mirrord/docs/config/options#target-tag_filter) and [`target.jq_filter`](https://metalbear.com/mirrord/docs/config/options#target-jq_filter).
+mirrord waits for a matching job when none runs yet. Among several, it attaches to one. The whole session stays on that job, reconnects included. When the job ends, the session ends too, at most about 30 seconds later: once the job's mirrord companion has been gone for that long, the Operator tells the session that the job is gone, as a session ends when its target pod is gone. The job runs its own code. See [`target.tag_filter`](https://metalbear.com/mirrord/docs/config/options#target-tag_filter) and [`target.jq_filter`](https://metalbear.com/mirrord/docs/config/options#target-jq_filter).
 
 ### A local process for every matching job
 
@@ -256,8 +293,9 @@ A `replace_task` service replaces only the jobs that start while `mirrord up` ru
 | Exits with a code | That code. A code outside `0` to `255` becomes `1`. |
 | Killed by a signal | `128` plus the signal's number, e.g. `137` for `SIGKILL`. `137` can also mean that mirrord ended the local process. |
 | mirrord fails before it starts the local process | `214` |
-| The run ends while the job is held, for any reason: another service exits, a watch fails, or you press Ctrl-C | `214` |
-| Session lost: `mirrord up` is killed, or no connection from the developer reaches the job for 30 seconds | `214` |
+| The run ends while the job is held, for any reason: another service exits, a watch fails, or you press Ctrl-C | `214`, at once |
+| Session lost: `mirrord up` is killed without a chance to stop, such as with `kill -9`, or its connection to the job doesn't come back within 30 seconds | `214`, within 30 seconds. A local process that outlives a killed `mirrord up` doesn't keep the job held. |
+| The job is stopped with `aws batch terminate-job` | `143`, as for `SIGTERM`. Its local process is stopped about 30 seconds later. |
 
 To submit a lost job again, retry on `214` in the job definition's retry strategy. Each attempt goes through admission again:
 
@@ -273,7 +311,7 @@ To submit a lost job again, retry on `214` in the job definition's retry strateg
 }
 ```
 
-A replaced job counts the time its local process runs against its attempt duration, so give jobs used in development a long `timeout`, such as `{ "attemptDurationSeconds": 86400 }`. `aws batch terminate-job` stops a replaced job, and its local process with it.
+A replaced job counts the time its local process runs against its attempt duration, so give jobs used in development a long `timeout`, such as `{ "attemptDurationSeconds": 86400 }`. `aws batch terminate-job` stops a replaced job, which ends with `143`, and about 30 seconds later, `mirrord up` stops its local process.
 
 ---
 
@@ -283,7 +321,7 @@ A replaced job counts the time its local process runs against its attempt durati
 * **Replacing is `mirrord up` only.** `mirrord exec` and the IDE extensions attach to a job without replacing it.
 * **No limit on matched jobs.** A `mirrord up` service starts a local process for every job its filters match.
 * **No reason for a miss.** When no job matches, mirrord says that it waits, and the Operator logs a warning when it can't read a job's tags.
-* **Operator restarts.** A replaced job survives an Operator restart only if mirrord connects to it again within 30 seconds, and ends with `214` otherwise. `mirrord up` registers again on its own.
+* **Operator restarts.** A replaced job survives an Operator restart only if mirrord connects to it again within 30 seconds. Otherwise, it ends with `214`, and `mirrord up` says that the job was lost and stops its local process. `mirrord up` registers again on its own.
 * **No `--debug`.** `mirrord up --debug` can't name a service with a filter.
 * **Not shown in `mirrord ui`.** The matched jobs aren't listed there.
 * All the [limitations of workloads outside Kubernetes](README.md#limitations) also apply.
@@ -294,7 +332,10 @@ A replaced job counts the time its local process runs against its attempt durati
 | --- | --- |
 | mirrord waits, and no job matches | The job's tags don't match the filters, the job's bootstrap is older than 3.239.0, or the Operator's role lacks `batch:DescribeJobs` ([Let the Operator read job tags](#let-the-operator-read-job-tags)). |
 | A matched job runs its own code with `replace_task` | The job definition doesn't set `MIRRORD_REMOTE_ADMISSION`, or the job started before `mirrord up`. |
-| Every job waits 5 seconds before it starts | Admission is on, but the job can't reach the Operator, or the Operator is older than 3.239.0. |
+| Every job with admission on waits about 4 seconds before it starts | Admission is on, but the job can't reach the Operator, or the Operator is older than 3.239.0. mirrord gives up on the answer a second before `MIRRORD_REMOTE_ADMISSION_TIMEOUT`. |
+| Every job runs without mirrord, and its log shows an error of the mirrord companion right after the job starts | The companion failed at once, for example because of a typo in the host of `MIRRORD_OPERATOR_API_URL`, or a `MIRRORD_OPERATOR_API_CA_DATA` of another cluster. The job then starts its application without mirrord, at once, whether admission is on or not. [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting) lists the companion's errors. |
 | A replaced job ends with `214` | The session was lost before the local process exited ([Exit codes](#exit-codes)). |
+
+A job whose image has no CA certificates, for example without the `ca-certificates` package, logs `no native root CA certificates found!` as a warning when it starts. The warning is harmless: the companion verifies the API server's certificate with `MIRRORD_OPERATOR_API_CA_DATA`, not with the image's certificates.
 
 For connection and authentication problems, see [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting).
