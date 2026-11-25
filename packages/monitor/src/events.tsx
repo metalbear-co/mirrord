@@ -12,7 +12,7 @@ import {
 } from './eventsStore'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import ContextNamespacePicker from './components/ContextNamespacePicker'
-import { useNamespaces } from './hooks/useNamespaces'
+import { useNamespaces } from './namespacesStore'
 import SubscribeEventsTable from './components/SubscribeEventsTable'
 import { strings } from './strings'
 

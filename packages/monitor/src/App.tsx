@@ -25,7 +25,7 @@ import {
 import { api } from './api'
 import { selectKubeContext, useKubeContexts } from './contextStore'
 import { collectEvents } from './eventsStore'
-import { useNamespaces } from './hooks/useNamespaces'
+import { useNamespaces } from './namespacesStore'
 import { useTelemetryPref } from './hooks/useTelemetryPref'
 import { strings } from './strings'
 import {
