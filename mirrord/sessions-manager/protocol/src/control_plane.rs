@@ -44,6 +44,9 @@ pub struct TaskMatch {
     pub agent_instance_id: Uuid,
     /// The task was replaced for this watch: its own code won't run, and it waits for the
     /// developer's exit code. Always `false` for a watch without [`crate::Watch::replace`].
+    ///
+    /// Sent only once the task's agent registered with [`crate::GateState::Held`], so a developer
+    /// starts its local process only for a task whose own code is sure not to run.
     #[serde(default)]
     pub replace: bool,
 }

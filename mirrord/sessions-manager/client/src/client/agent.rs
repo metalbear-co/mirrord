@@ -42,7 +42,10 @@ pub struct AgentClient {
 /// The agent decides what its gate is, and this handle is how it tells the sessions-manager and
 /// hears the verdict. The sessions-manager reads the gate state only when the agent registers, so
 /// [`Self::set`] applies from the next subscription on, and [`Self::resubscribe`] makes that
-/// happen at once when the sessions-manager has to learn the new state.
+/// happen at once when the sessions-manager has to learn the new state: when the agent withdraws
+/// its gate, so that a hold the sessions-manager took on the task ends, and when the task is held,
+/// since the sessions-manager tells the developer's watch that it replaced the task only once the
+/// agent registers with [`GateState::Held`].
 pub struct AgentGate {
     options: SharedAgentOptions,
     /// [`AgentGate`] --requests to register again--> [`AgentClient::run_loop`]
