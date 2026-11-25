@@ -9,7 +9,7 @@ tags:
 
 When your team's mirrord Operator has [single sign-on](../managing-mirrord/sso.md) turned on, you log in to it through your company's identity provider instead of a kubeconfig. One login lasts 24 hours, and mirrord uses it for every command that talks to that Operator until it expires or you log out.
 
-You need mirrord `3.292.0` or later and an Operator of version `3.238.0` or later with an Enterprise license. Your admin gives you the Operator's URL, the `sso.url` value of its Helm chart.
+You need mirrord `3.292.0` or later and an Operator of version `3.239.0` or later with an Enterprise license. Your admin gives you the Operator's URL, the `sso.url` value of its Helm chart.
 
 ## Logging in
 
@@ -23,7 +23,7 @@ mirrord opens your browser at your identity provider. Once you have signed in th
 Logged in to mirrord.corp.example.com as dev@corp.example.com. The login is valid until 2026-11-20 09:12. mirrord uses this operator now.
 ```
 
-Before the browser opens, mirrord checks the URL. An Operator without SSO, or one older than `3.238.0`, is refused with a message naming what is missing. An Operator whose license does not include SSO is refused with the same error every paid feature gives, naming SSO and the Enterprise plan. A URL that is neither an Operator nor mirrord Cloud is refused too, so a typo never sends you to a login page it should not.
+Before the browser opens, mirrord checks the URL. An Operator without SSO, or one older than `3.239.0`, is refused with a message naming what is missing. An Operator whose license does not include SSO is refused with the same error every paid feature gives, naming SSO and the Enterprise plan. A URL that is neither an Operator nor mirrord Cloud is refused too, so a typo never sends you to a login page it should not.
 
 If your browser does not open, the command prints the link to open by hand. The login finishes when the browser reaches mirrord's page on your machine, so both must run on the same computer.
 
@@ -88,7 +88,7 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 
 | Message | Why | What to do |
 | --- | --- | --- |
-| `the operator at ... does not support mirrord login yet` | The Operator predates the login flow. | Ask your admin to upgrade the Operator to `3.238.0` or later. |
+| `the operator at ... does not support mirrord login yet` | The Operator predates the login flow. | Ask your admin to upgrade the Operator to `3.239.0` or later. |
 | `Feature sso requires a mirrord Enterprise plan.` | The Operator's license is Teams. | Ask your admin about the Enterprise plan. |
 | `... is not a mirrord operator with SSO enabled, and it is not mirrord Cloud` | The URL answered, but not as an Operator with SSO or as mirrord Cloud does. | Check the URL with your admin: it is the chart's `sso.url`. |
 | `could not reach ...` | The Operator's URL is not reachable from your machine. | Check your network, VPN and the URL. |
