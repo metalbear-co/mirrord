@@ -161,6 +161,6 @@ Suggestions:
 
 **Suggestions:** printed only when the numbers alone settle what to change, so most sessions show none.
 
-The application's numbers are kept in `~/.mirrord/timings`, one file per session, and never leave your machine. The 10 newest are kept, and older ones are removed once they are a day old. A process that is killed loses at most its last two seconds of calls. Sessions started with `mirrord container` leave no file. To turn the counting off, set [`experimental.call_timings`](https://metalbear.com/mirrord/docs/config#experimental-call_timings) to `false`.
+The application's numbers are kept in `~/.mirrord/timings`, one file per session, and never leave your machine. The 10 newest are kept, and older ones are removed once they are a day old. They follow the application within about a second, and a process that is killed keeps its calls in the summary. Sessions started with `mirrord container` leave no file. To turn the counting off, set [`experimental.call_timings`](https://metalbear.com/mirrord/docs/config#experimental-call_timings) to `false`.
 
 The operator keeps the start of recent sessions in memory, so a session it no longer remembers, or an operator that does not record this yet, shows one line under "Session start" and the application's numbers below it.

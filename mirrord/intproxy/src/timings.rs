@@ -7,20 +7,26 @@
 //! one that keeps the numbers: [`SessionTimings`] adds the layers up and [`CallTimingsRecorder`]
 //! writes the result to `<timings directory>/<session id>.json`.
 //!
+//! A layer only sends a snapshot when one of its calls finishes, so an application that makes a
+//! few calls and then sits idle would keep its last calls to itself until it exits. The proxy
+//! sees every request and its answer too, so it keeps its own count per layer and the summary
+//! uses whichever of the two has seen more calls of a kind: the layer's numbers, which are the
+//! application's real waits, once they are complete, and the proxy's until then.
+//!
 //! The proxy also sees every file request with its path, which the layers' counters leave out to
 //! stay cheap. It tallies path lookups per directory and how many of them the cluster answered
 //! with "not found", which is what the command's suggestions are built on.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs, io,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
 
 use mirrord_intproxy_protocol::{
-    CallKind, CallTimingsSnapshot, KindTimings, LayerId, MAX_SLOW_CALLS, MessageId,
-    ProxyToLayerMessage, SlowCall,
+    CallKind, CallTimingsSnapshot, KindTimings, LayerId, LayerToProxyMessage, MAX_SLOW_CALLS,
+    MessageId, ProxyToLayerMessage, SlowCall,
 };
 use mirrord_protocol::{
     ErrorKindInternal, FileRequest, FileResponse, RemoteIOError, ResponseError,
@@ -64,7 +70,7 @@ const DIR_KEY_DEPTH: usize = 4;
 ///
 /// Every layer sends a snapshot every couple of seconds, and a session can have many layers.
 /// One write per second keeps the file fresh enough for a person to read while the session runs.
-const WRITE_INTERVAL: Duration = Duration::from_secs(1);
+pub(crate) const WRITE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How long the proxy waits for the last write of the summary file when it exits.
 ///
@@ -157,11 +163,51 @@ struct KindTotals {
 }
 
 impl KindTotals {
-    fn add(&mut self, timings: &KindTimings) {
-        self.calls = self.calls.saturating_add(timings.calls);
-        self.total_nanos = self.total_nanos.saturating_add(timings.total_nanos);
-        self.slowest_nanos = self.slowest_nanos.max(timings.slowest_nanos);
+    fn add(&mut self, other: Self) {
+        self.calls = self.calls.saturating_add(other.calls);
+        self.total_nanos = self.total_nanos.saturating_add(other.total_nanos);
+        self.slowest_nanos = self.slowest_nanos.max(other.slowest_nanos);
     }
+
+    fn add_call(&mut self, nanos: u64) {
+        self.add(Self {
+            calls: 1,
+            total_nanos: nanos,
+            slowest_nanos: nanos,
+        });
+    }
+}
+
+impl From<&KindTimings> for KindTotals {
+    fn from(timings: &KindTimings) -> Self {
+        Self {
+            calls: timings.calls,
+            total_nanos: timings.total_nanos,
+            slowest_nanos: timings.slowest_nanos,
+        }
+    }
+}
+
+/// One layer's totals per kind, from its own latest snapshot and from what the proxy saw it wait
+/// for.
+///
+/// For each kind the side that counted more calls wins. The layer measures the application's
+/// real wait, so it wins a tie; the proxy is ahead whenever the layer has made calls it has not
+/// reported yet.
+fn layer_totals(
+    snapshot: Option<&CallTimingsSnapshot>,
+    seen_by_proxy: Option<&HashMap<CallKind, KindTotals>>,
+) -> HashMap<CallKind, KindTotals> {
+    let mut totals = seen_by_proxy.cloned().unwrap_or_default();
+    for timings in snapshot.into_iter().flat_map(|snapshot| &snapshot.kinds) {
+        let reported = KindTotals::from(timings);
+        let seen = totals.entry(timings.kind).or_default();
+        if reported.calls >= seen.calls {
+            *seen = reported;
+        }
+    }
+
+    totals
 }
 
 #[derive(Default)]
@@ -171,9 +217,12 @@ struct DirTally {
     total_nanos: u64,
 }
 
-struct PendingLookup {
-    dir: String,
+/// A call the proxy has not answered yet.
+struct PendingCall {
+    kind: CallKind,
     received: Instant,
+    /// The directory the call looks a path up in, when it is such a call.
+    lookup_dir: Option<String>,
 }
 
 /// The session's numbers, as a plain state machine with no IO.
@@ -187,8 +236,12 @@ pub struct SessionTimings {
     closed_layers: HashMap<CallKind, KindTotals>,
     /// The slowest calls of the layers that are gone, at most [`MAX_SLOW_CALLS`].
     closed_slowest: Vec<SlowCall>,
-    /// Path lookups the cluster has not answered yet.
-    pending_lookups: HashMap<(LayerId, MessageId), PendingLookup>,
+    /// What the proxy itself saw each connected layer wait for.
+    seen_by_proxy: HashMap<LayerId, HashMap<CallKind, KindTotals>>,
+    /// Calls the proxy has not answered yet.
+    pending_calls: HashMap<(LayerId, MessageId), PendingCall>,
+    /// Whether the numbers moved since the summary was last handed out for writing.
+    changed: bool,
     dirs: BTreeMap<String, DirTally>,
     untracked_path_lookups: u64,
 }
@@ -200,7 +253,9 @@ impl SessionTimings {
             live_layers: HashMap::new(),
             closed_layers: HashMap::new(),
             closed_slowest: Vec::new(),
-            pending_lookups: HashMap::new(),
+            seen_by_proxy: HashMap::new(),
+            pending_calls: HashMap::new(),
+            changed: false,
             dirs: BTreeMap::new(),
             untracked_path_lookups: 0,
         }
@@ -208,41 +263,53 @@ impl SessionTimings {
 
     pub fn layer_snapshot(&mut self, layer_id: LayerId, snapshot: CallTimingsSnapshot) {
         self.live_layers.insert(layer_id, snapshot);
+        self.changed = true;
     }
 
-    /// Keeps the numbers of a layer whose process is gone, and forgets its unanswered lookups.
+    /// Keeps the numbers of a layer whose process is gone, and forgets its unanswered calls.
     pub fn layer_closed(&mut self, layer_id: LayerId) {
-        if let Some(snapshot) = self.live_layers.remove(&layer_id) {
-            for timings in &snapshot.kinds {
-                self.closed_layers
-                    .entry(timings.kind)
-                    .or_default()
-                    .add(timings);
-            }
+        let snapshot = self.live_layers.remove(&layer_id);
+        let seen_by_proxy = self.seen_by_proxy.remove(&layer_id);
+        for (kind, totals) in layer_totals(snapshot.as_ref(), seen_by_proxy.as_ref()) {
+            self.closed_layers.entry(kind).or_default().add(totals);
+        }
+        if let Some(snapshot) = snapshot {
             self.closed_slowest.extend(snapshot.slowest);
             keep_slowest(&mut self.closed_slowest);
         }
-        self.pending_lookups
+        self.pending_calls
             .retain(|(pending_layer, _), _| *pending_layer != layer_id);
+        self.changed = true;
     }
 
-    /// Remembers a path lookup until [`Self::layer_response`] sees its answer.
-    pub fn file_request(
+    /// Remembers a call the application waits on the cluster for until
+    /// [`Self::layer_response`] sees its answer.
+    pub fn layer_request(
         &mut self,
         layer_id: LayerId,
         message_id: MessageId,
-        request: &FileRequest,
+        request: &LayerToProxyMessage,
         now: Instant,
     ) {
-        let Some(dir) = looked_up_path(request).and_then(dir_key) else {
+        let Some(kind) = CallKind::of(request) else {
             return;
         };
+        let lookup_dir = match request {
+            LayerToProxyMessage::File(request) => looked_up_path(request).and_then(dir_key),
+            _ => None,
+        };
 
-        self.pending_lookups
-            .insert((layer_id, message_id), PendingLookup { dir, received: now });
+        self.pending_calls.insert(
+            (layer_id, message_id),
+            PendingCall {
+                kind,
+                received: now,
+                lookup_dir,
+            },
+        );
     }
 
-    /// Counts the answer to a path lookup under its directory.
+    /// Counts the answer to a call, and a path lookup under its directory.
     pub fn layer_response(
         &mut self,
         layer_id: LayerId,
@@ -250,15 +317,29 @@ impl SessionTimings {
         response: &ProxyToLayerMessage,
         now: Instant,
     ) {
-        let Some(lookup) = self.pending_lookups.remove(&(layer_id, message_id)) else {
+        let Some(call) = self.pending_calls.remove(&(layer_id, message_id)) else {
             return;
         };
 
-        if !self.dirs.contains_key(&lookup.dir) && self.dirs.len() >= MAX_TRACKED_DIRS {
+        let waited = now.saturating_duration_since(call.received);
+        let waited = u64::try_from(waited.as_nanos()).unwrap_or(u64::MAX);
+        self.seen_by_proxy
+            .entry(layer_id)
+            .or_default()
+            .entry(call.kind)
+            .or_default()
+            .add_call(waited);
+        self.changed = true;
+
+        let Some(dir) = call.lookup_dir else {
+            return;
+        };
+
+        if !self.dirs.contains_key(&dir) && self.dirs.len() >= MAX_TRACKED_DIRS {
             if self.untracked_path_lookups == 0 {
                 tracing::debug!(
                     tracked = MAX_TRACKED_DIRS,
-                    dir = lookup.dir,
+                    dir,
                     "Path lookups in more directories than the timings summary tracks, \
                     the rest are only counted."
                 );
@@ -267,25 +348,29 @@ impl SessionTimings {
             return;
         }
 
-        let waited = now.saturating_duration_since(lookup.received);
-        let tally = self.dirs.entry(lookup.dir).or_default();
+        let tally = self.dirs.entry(dir).or_default();
         tally.lookups = tally.lookups.saturating_add(1);
         tally.not_found = tally
             .not_found
             .saturating_add(u64::from(is_not_found(response)));
-        tally.total_nanos = tally
-            .total_nanos
-            .saturating_add(u64::try_from(waited.as_nanos()).unwrap_or(u64::MAX));
+        tally.total_nanos = tally.total_nanos.saturating_add(waited);
     }
 
     pub fn summary(&self) -> TimingsSummary {
         let mut totals = self.closed_layers.clone();
-        for timings in self
+        let connected = self
             .live_layers
-            .values()
-            .flat_map(|snapshot| &snapshot.kinds)
-        {
-            totals.entry(timings.kind).or_default().add(timings);
+            .keys()
+            .chain(self.seen_by_proxy.keys())
+            .collect::<HashSet<_>>();
+        for layer_id in connected {
+            let layer = layer_totals(
+                self.live_layers.get(layer_id),
+                self.seen_by_proxy.get(layer_id),
+            );
+            for (kind, layer) in layer {
+                totals.entry(kind).or_default().add(layer);
+            }
         }
 
         let mut kinds = totals
@@ -450,15 +535,26 @@ impl CallTimingsRecorder {
 
     /// Hands the current summary to the writer task, which writes it once [`WRITE_INTERVAL`] has
     /// passed since its last write. Only the newest summary is kept when the writer is behind.
-    pub fn publish(&self) {
+    pub fn publish(&mut self) {
+        self.timings.changed = false;
         self.latest.send_replace(Some(self.timings.summary()));
+    }
+
+    /// [`Self::publish`], when the numbers moved since the last one.
+    ///
+    /// The proxy calls this on a timer, so the file follows the application within about
+    /// [`WRITE_INTERVAL`] without a summary being built for every single call.
+    pub fn publish_if_changed(&mut self) {
+        if self.timings.changed {
+            self.publish();
+        }
     }
 
     /// Like [`Self::publish`], but the summary is written right away.
     ///
     /// For when a process of the session has just exited: that is the moment a person runs
     /// `mirrord diagnose timings`, and the file must already hold the process's last numbers.
-    pub fn publish_now(&self) {
+    pub fn publish_now(&mut self) {
         self.publish();
         self.write_now.send_replace(());
     }
@@ -648,12 +744,12 @@ mod tests {
         }
     }
 
-    fn stat(path: &str) -> FileRequest {
-        FileRequest::Xstat(XstatRequest {
+    fn stat(path: &str) -> LayerToProxyMessage {
+        LayerToProxyMessage::File(FileRequest::Xstat(XstatRequest {
             path: Some(path.into()),
             fd: None,
             follow_symlink: true,
-        })
+        }))
     }
 
     fn not_found() -> ProxyToLayerMessage {
@@ -729,6 +825,89 @@ mod tests {
         );
     }
 
+    /// On a cluster a millisecond away, an application's first calls are over before its layer
+    /// is due to send anything, and an application that then waits for traffic sends nothing
+    /// more. CI showed exactly that: a session whose application had read a file had an empty
+    /// summary for as long as it ran. The proxy answered those calls, so it counts them itself.
+    #[test]
+    fn calls_the_layer_has_not_reported_yet_are_counted_by_the_proxy() {
+        let mut session = SessionTimings::new(label());
+        let start = Instant::now();
+        let layer = LayerId(1);
+
+        session.layer_request(layer, 1, &stat("/etc/hostname"), start);
+        session.layer_response(layer, 1, &found(), start + Duration::from_millis(2));
+        session.layer_request(layer, 2, &stat("/etc/hosts"), start);
+        session.layer_response(layer, 2, &found(), start + Duration::from_millis(5));
+
+        assert_eq!(
+            session.summary().kinds,
+            [KindSummary {
+                kind: "file_stat".to_owned(),
+                calls: 2,
+                total_nanos: 7_000_000,
+                slowest_nanos: 5_000_000,
+            }]
+        );
+    }
+
+    /// The layer's numbers are the application's real waits, a little longer than what the
+    /// proxy measures between a request arriving and its answer leaving. Once a snapshot covers
+    /// every call the proxy saw, it replaces the proxy's numbers, and it is counted once, not on
+    /// top of them. A snapshot that is behind for a kind leaves that kind to the proxy.
+    #[test]
+    fn a_layers_snapshot_replaces_the_proxys_count_once_it_has_caught_up() {
+        let mut session = SessionTimings::new(label());
+        let start = Instant::now();
+        let layer = LayerId(1);
+        for message_id in 1..=3 {
+            session.layer_request(layer, message_id, &stat("/etc/hostname"), start);
+            session.layer_response(
+                layer,
+                message_id,
+                &found(),
+                start + Duration::from_millis(1),
+            );
+        }
+
+        session.layer_snapshot(
+            layer,
+            snapshot(vec![timings(CallKind::FileStat, 2, 2_400_000, 1_300_000)]),
+        );
+        let behind = session.summary().kinds;
+        assert_eq!(
+            behind.iter().map(|kind| kind.calls).collect::<Vec<_>>(),
+            [3],
+            "the snapshot has seen two of three calls, so the proxy's count stands"
+        );
+
+        session.layer_snapshot(
+            layer,
+            snapshot(vec![timings(CallKind::FileStat, 3, 3_600_000, 1_300_000)]),
+        );
+        assert_eq!(
+            session.summary().kinds,
+            [KindSummary {
+                kind: "file_stat".to_owned(),
+                calls: 3,
+                total_nanos: 3_600_000,
+                slowest_nanos: 1_300_000,
+            }]
+        );
+
+        session.layer_closed(layer);
+        assert_eq!(
+            session
+                .summary()
+                .kinds
+                .iter()
+                .map(|kind| kind.calls)
+                .collect::<Vec<_>>(),
+            [3],
+            "a closed layer keeps the same numbers"
+        );
+    }
+
     /// Every process keeps its own short list. The session's list is the slowest of all of them,
     /// and a process that has exited keeps its place in it.
     #[test]
@@ -781,24 +960,24 @@ mod tests {
         let start = Instant::now();
         let layer = LayerId(1);
 
-        session.file_request(layer, 1, &stat("/app/config/settings.yaml"), start);
+        session.layer_request(layer, 1, &stat("/app/config/settings.yaml"), start);
         session.layer_response(layer, 1, &not_found(), start + Duration::from_millis(3));
-        session.file_request(layer, 2, &stat("/app/config/local.yaml"), start);
+        session.layer_request(layer, 2, &stat("/app/config/local.yaml"), start);
         session.layer_response(layer, 2, &found(), start + Duration::from_millis(2));
 
-        let access = FileRequest::Access(AccessFileRequest {
+        let access = LayerToProxyMessage::File(FileRequest::Access(AccessFileRequest {
             pathname: "/data/cache".into(),
             mode: 0,
-        });
-        session.file_request(layer, 3, &access, start);
+        }));
+        session.layer_request(layer, 3, &access, start);
         session.layer_response(layer, 3, &not_found(), start + Duration::from_millis(1));
 
         // A read has no path, so its answer is not a lookup.
-        let read = FileRequest::Read(ReadFileRequest {
+        let read = LayerToProxyMessage::File(FileRequest::Read(ReadFileRequest {
             remote_fd: 4,
             buffer_size: 16,
-        });
-        session.file_request(layer, 4, &read, start);
+        }));
+        session.layer_request(layer, 4, &read, start);
         session.layer_response(layer, 4, &found(), start);
 
         assert_eq!(
@@ -827,12 +1006,12 @@ mod tests {
         let mut session = SessionTimings::new(label());
         let now = Instant::now();
 
-        session.file_request(LayerId(1), 1, &stat("/app/a"), now);
-        session.file_request(LayerId(2), 1, &stat("/app/b"), now);
+        session.layer_request(LayerId(1), 1, &stat("/app/a"), now);
+        session.layer_request(LayerId(2), 1, &stat("/app/b"), now);
         session.layer_closed(LayerId(1));
 
-        assert_eq!(session.pending_lookups.len(), 1);
-        assert!(session.pending_lookups.contains_key(&(LayerId(2), 1)));
+        assert_eq!(session.pending_calls.len(), 1);
+        assert!(session.pending_calls.contains_key(&(LayerId(2), 1)));
     }
 
     #[test]
@@ -843,11 +1022,11 @@ mod tests {
 
         for index in 0..=MAX_TRACKED_DIRS {
             let message_id = index as MessageId;
-            session.file_request(layer, message_id, &stat(&format!("/dir{index}/file")), now);
+            session.layer_request(layer, message_id, &stat(&format!("/dir{index}/file")), now);
             session.layer_response(layer, message_id, &not_found(), now);
         }
         // A directory that is already tracked keeps counting after the cap is reached.
-        session.file_request(layer, 1_000, &stat("/dir0/other"), now);
+        session.layer_request(layer, 1_000, &stat("/dir0/other"), now);
         session.layer_response(layer, 1_000, &not_found(), now);
 
         let summary = session.summary();

@@ -50,7 +50,7 @@ use crate::{
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
-    timings::CallTimingsRecorder,
+    timings::{CallTimingsRecorder, WRITE_INTERVAL},
 };
 
 pub mod agent_conn;
@@ -164,6 +164,9 @@ pub struct IntProxy {
     /// Keeps the session's call timings and writes them to a file. [`None`] when nobody asked
     /// for the file, in which case the layers' snapshots are dropped.
     call_timings: Option<CallTimingsRecorder>,
+
+    /// When to hand the call timings out for writing if they changed.
+    call_timings_tick: Interval,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -435,6 +438,11 @@ impl IntProxy {
         let mut process_logging_interval = time::interval(intervals.process_logging);
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
+        // A proxy busy with traffic may miss ticks; the next one still writes the newest numbers,
+        // so there is nothing to catch up on.
+        let mut call_timings_tick = time::interval(WRITE_INTERVAL);
+        call_timings_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         Self {
             any_connection_accepted: false,
             background_tasks,
@@ -462,6 +470,7 @@ impl IntProxy {
             agent_tx,
             monitor_tx,
             call_timings: None,
+            call_timings_tick,
         }
     }
 
@@ -585,6 +594,12 @@ impl IntProxy {
                     );
                 }
 
+                _ = proxy.call_timings_tick.tick(), if proxy.call_timings.is_some() => {
+                    if let Some(recorder) = &mut proxy.call_timings {
+                        recorder.publish_if_changed();
+                    }
+                }
+
                 result = idle.expired(proxy.any_connection_accepted) => break Some(result),
             }
         };
@@ -664,7 +679,7 @@ impl IntProxy {
                     .insert(new_layer.id, new_layer.process_info);
                 // The session's file exists from the moment its application starts, before the
                 // first numbers arrive, so the command can tell "no calls yet" from "no session".
-                if let Some(recorder) = &self.call_timings {
+                if let Some(recorder) = &mut self.call_timings {
                     recorder.publish();
                 }
                 let tx = self.background_tasks.register(
@@ -949,17 +964,18 @@ impl IntProxy {
             message,
         } = message;
 
+        if let Some(recorder) = &mut self.call_timings {
+            recorder
+                .timings()
+                .layer_request(layer_id, message_id, &message, Instant::now());
+        }
+
         match message {
             LayerToProxyMessage::File(req) => {
                 self.monitor_tx.emit(MonitorEvent::FileOp {
                     path: file_request_path(&req),
                     operation: <&str>::from(&req).to_owned(),
                 });
-                if let Some(recorder) = &mut self.call_timings {
-                    recorder
-                        .timings()
-                        .file_request(layer_id, message_id, &req, Instant::now());
-                }
                 self.task_txs
                     .files
                     .send(FilesProxyMessage::FileReq(message_id, layer_id, req))

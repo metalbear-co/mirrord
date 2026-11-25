@@ -27,7 +27,9 @@ use mirrord_intproxy_protocol::{
 /// The longest a process goes between two snapshots while it keeps making remote calls.
 ///
 /// The application can be killed at any moment, and whatever it measured since its last snapshot
-/// is lost with it, so this is the most a long-running process can lose. A snapshot is one small
+/// is lost with it, so this is the most a long-running process can lose. The calls themselves
+/// are not lost: the internal proxy counts them too and reports its own, slightly shorter,
+/// measurement for whatever no snapshot covered. A snapshot is one small
 /// write to a local socket, so sending one every two seconds costs nothing next to the remote
 /// calls that trigger it.
 ///

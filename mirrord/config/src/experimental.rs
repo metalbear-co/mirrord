@@ -231,7 +231,8 @@ pub struct ExperimentalConfig {
     /// file operations, outgoing connections), with the total and the longest wait per kind.
     /// `mirrord diagnose timings` prints the summary of the latest session.
     ///
-    /// Counting costs two clock reads per remote call. Set this to `false` to turn it off.
+    /// Counting costs two clock reads per remote call. Set this to `false` to turn it off: the
+    /// session then keeps no summary at all.
     #[config(default = true)]
     pub call_timings: bool,
 }

@@ -441,26 +441,28 @@ pub(crate) async fn proxy(
 
     // In a container the proxy's home directory is the sidecar's own, so the file written there
     // is out of reach of `mirrord diagnose timings` on the user's machine.
-    let call_timings = timings_dir().map(|dir| {
-        CallTimingsRecorder::start(
-            dir,
-            SessionLabel {
-                session_id: local_session_id.clone(),
-                target: config
-                    .target
-                    .path
-                    .as_ref()
-                    .map(|target| target.to_string())
-                    .unwrap_or_else(|| "targetless".to_owned()),
-                mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
-                started_at: humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
-                operator: is_operator,
-                kube_context: config.kube_context.clone(),
-                namespace: config.target.namespace.clone(),
-                baggage: config.baggage.clone(),
-            },
-        )
-    });
+    let call_timings = timings_dir()
+        .filter(|_| config.experimental.call_timings)
+        .map(|dir| {
+            CallTimingsRecorder::start(
+                dir,
+                SessionLabel {
+                    session_id: local_session_id.clone(),
+                    target: config
+                        .target
+                        .path
+                        .as_ref()
+                        .map(|target| target.to_string())
+                        .unwrap_or_else(|| "targetless".to_owned()),
+                    mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    started_at: humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
+                    operator: is_operator,
+                    kube_context: config.kube_context.clone(),
+                    namespace: config.target.namespace.clone(),
+                    baggage: config.baggage.clone(),
+                },
+            )
+        });
 
     let proxy = IntProxy::new_with_connection(
         agent_conn,

@@ -3260,7 +3260,7 @@
         },
         "call_timings": {
           "title": "_experimental_ call_timings {#experimental-call_timings}",
-          "description": "Keeps a running count of the calls your application waits on mirrord for (name lookups,\nfile operations, outgoing connections), with the total and the longest wait per kind.\n`mirrord diagnose timings` prints the summary of the latest session.\n\nCounting costs two clock reads per remote call. Set this to `false` to turn it off.",
+          "description": "Keeps a running count of the calls your application waits on mirrord for (name lookups,\nfile operations, outgoing connections), with the total and the longest wait per kind.\n`mirrord diagnose timings` prints the summary of the latest session.\n\nCounting costs two clock reads per remote call. Set this to `false` to turn it off: the\nsession then keeps no summary at all.",
           "type": [
             "boolean",
             "null"
