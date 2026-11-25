@@ -4,7 +4,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     ops::ControlFlow,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
@@ -50,6 +50,7 @@ use crate::{
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
+    timings::CallTimingsRecorder,
 };
 
 pub mod agent_conn;
@@ -66,6 +67,7 @@ mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
 pub mod sidecar_protocol;
+pub mod timings;
 
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
 ///
@@ -158,6 +160,10 @@ pub struct IntProxy {
 
     /// Session monitor event sender
     monitor_tx: MonitorTx,
+
+    /// Keeps the session's call timings and writes them to a file. [`None`] when nobody asked
+    /// for the file, in which case the layers' snapshots are dropped.
+    call_timings: Option<CallTimingsRecorder>,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -455,7 +461,14 @@ impl IntProxy {
             process_logging_interval,
             agent_tx,
             monitor_tx,
+            call_timings: None,
         }
+    }
+
+    /// Makes the proxy keep the session's call timings in `recorder`'s file.
+    pub fn with_call_timings(mut self, recorder: CallTimingsRecorder) -> Self {
+        self.call_timings = Some(recorder);
+        self
     }
 
     /// Check if any layer connections are still alive
@@ -594,6 +607,10 @@ impl IntProxy {
 
         std::mem::drop(proxy.task_txs);
 
+        if let Some(recorder) = proxy.call_timings.take() {
+            recorder.finish().await;
+        }
+
         tracing::info!("Collecting background task results before exiting");
         let results = proxy.background_tasks.results().await;
 
@@ -645,6 +662,11 @@ impl IntProxy {
                 });
                 self.connected_layers
                     .insert(new_layer.id, new_layer.process_info);
+                // The session's file exists from the moment its application starts, before the
+                // first numbers arrive, so the command can tell "no calls yet" from "no session".
+                if let Some(recorder) = &self.call_timings {
+                    recorder.publish();
+                }
                 let tx = self.background_tasks.register(
                     LayerConnection::new(new_layer.stream, new_layer.id),
                     MainTaskId::LayerConnection(new_layer.id),
@@ -678,6 +700,7 @@ impl IntProxy {
                     msg.message,
                     LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
                         | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+                        | LayerToProxyMessage::CallTimings(_)
                 ) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
@@ -690,6 +713,14 @@ impl IntProxy {
                     layer_id,
                 } = msg;
                 self.pending_layers.remove(&(layer_id, message_id));
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder.timings().layer_response(
+                        layer_id,
+                        message_id,
+                        &message,
+                        Instant::now(),
+                    );
+                }
                 if let Some(tx) = self.task_txs.layers.get(&layer_id) {
                     tx.send(LocalMessage {
                         message_id,
@@ -745,6 +776,10 @@ impl IntProxy {
                 self.task_txs.layers.remove(&LayerId(id));
                 self.connected_layers.remove(&LayerId(id));
                 self.pending_layers.retain(|(layer_id, _)| layer_id.0 != id);
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder.timings().layer_closed(LayerId(id));
+                    recorder.publish_now();
+                }
             }
 
             (task_id, TaskUpdate::Finished(res)) => match res {
@@ -920,6 +955,11 @@ impl IntProxy {
                     path: file_request_path(&req),
                     operation: <&str>::from(&req).to_owned(),
                 });
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder
+                        .timings()
+                        .file_request(layer_id, message_id, &req, Instant::now());
+                }
                 self.task_txs
                     .files
                     .send(FilesProxyMessage::FileReq(message_id, layer_id, req))
@@ -962,6 +1002,12 @@ impl IntProxy {
                     .simple
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
+            }
+            LayerToProxyMessage::CallTimings(snapshot) => {
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder.timings().layer_snapshot(layer_id, snapshot);
+                    recorder.publish();
+                }
             }
             other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }

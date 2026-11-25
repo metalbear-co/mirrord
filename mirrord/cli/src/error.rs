@@ -1277,6 +1277,19 @@ pub(crate) enum CliError {
 
     #[error("agent connection dropped: {0}")]
     AgentConnectionDropped(#[from] crate::connector::ConnectionError),
+
+    #[error("Failed to read the call timings summary at `{}`: {error}", path.display())]
+    #[diagnostic(help(
+        "mirrord writes this file while a session runs. If a different mirrord version wrote it,         run a session with this version and try again.{GENERAL_HELP}"
+    ))]
+    CallTimingsSummary { path: PathBuf, error: io::Error },
+
+    #[error("Nothing is known about session `{session}`: {reason}")]
+    #[diagnostic(help(
+        "`mirrord exec` prints the id as \"session ID\" when it starts. Without `--session`, \
+        `mirrord diagnose timings` shows the latest session of this machine.{GENERAL_HELP}"
+    ))]
+    CallTimingsSessionUnknown { session: String, reason: String },
 }
 
 impl CliError {

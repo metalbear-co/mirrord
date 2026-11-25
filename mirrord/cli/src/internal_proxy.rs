@@ -20,7 +20,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
     sync::{Arc, Weak},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use mirrord_analytics::{
@@ -39,6 +39,7 @@ use mirrord_intproxy::{
         MonitorTx,
         chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
+    timings::{CallTimingsRecorder, SessionLabel},
 };
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
@@ -61,6 +62,7 @@ use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     data::{StoredLogin, UserData},
+    diagnose::timings::timings_dir,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     kube::kube_client_from_layer_config,
@@ -437,7 +439,30 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let res = IntProxy::new_with_connection(
+    // In a container the proxy's home directory is the sidecar's own, so the file written there
+    // is out of reach of `mirrord diagnose timings` on the user's machine.
+    let call_timings = timings_dir().map(|dir| {
+        CallTimingsRecorder::start(
+            dir,
+            SessionLabel {
+                session_id: local_session_id.clone(),
+                target: config
+                    .target
+                    .path
+                    .as_ref()
+                    .map(|target| target.to_string())
+                    .unwrap_or_else(|| "targetless".to_owned()),
+                mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+                started_at: humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
+                operator: is_operator,
+                kube_context: config.kube_context.clone(),
+                namespace: config.target.namespace.clone(),
+                baggage: config.baggage.clone(),
+            },
+        )
+    });
+
+    let proxy = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -455,14 +480,19 @@ pub(crate) async fn proxy(
         &config.experimental,
         monitor_tx,
         chaos_rx,
-    )
-    .run_with_shutdown(
-        first_connection_timeout,
-        consecutive_connection_timeout,
-        shutdown,
-    )
-    .await
-    .map_err(From::from);
+    );
+    let proxy = match call_timings {
+        Some(recorder) => proxy.with_call_timings(recorder),
+        None => proxy,
+    };
+    let res = proxy
+        .run_with_shutdown(
+            first_connection_timeout,
+            consecutive_connection_timeout,
+            shutdown,
+        )
+        .await
+        .map_err(From::from);
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {

@@ -29,6 +29,7 @@ pub enum OperatorOperation {
     MongodbBranching,
     PreparingClientCertificate,
     ReadShareLink,
+    ReadingSessionStartTimings,
 }
 
 impl fmt::Display for OperatorOperation {
@@ -48,6 +49,7 @@ impl fmt::Display for OperatorOperation {
             Self::MongodbBranching => "MongoDB branching",
             Self::PreparingClientCertificate => "preparing client certificate",
             Self::ReadShareLink => "reading the share link",
+            Self::ReadingSessionStartTimings => "reading the session's start timings",
         };
 
         f.write_str(as_str)

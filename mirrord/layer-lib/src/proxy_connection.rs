@@ -22,6 +22,7 @@ use crate::{
     error::{HookError, HookResult},
     mutex::Mutex,
     proxy_connection::responses::ResponseManager,
+    timings::{self, CallTimer},
 };
 
 mod responses;
@@ -128,17 +129,23 @@ impl ProxyConnection {
     }
 
     pub fn send(&self, message: LayerToProxyMessage) -> Result<MessageId> {
-        let message_id = self.next_message_id();
         let message = LocalMessage {
-            message_id,
+            message_id: self.next_message_id(),
             inner: message,
         };
+        self.send_message(&message)?;
 
+        Ok(message.message_id)
+    }
+
+    /// Sends a message the caller keeps, so a request can still be described after its response
+    /// arrived.
+    fn send_message(&self, message: &LocalMessage<LayerToProxyMessage>) -> Result<()> {
         let mut guard = self.sender.lock()?;
-        guard.send(&message)?;
+        guard.send(message)?;
         guard.flush()?;
 
-        Ok(message_id)
+        Ok(())
     }
 
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
@@ -162,11 +169,33 @@ impl ProxyConnection {
         T: IsLayerRequestWithResponse + Debug,
         T::Response: Debug,
     {
-        let response_id = self.send(request.wrap())?;
-        let response = self.receive(response_id)?;
-        T::try_unwrap_response(response)
+        let message = LocalMessage {
+            message_id: self.next_message_id(),
+            inner: request.wrap(),
+        };
+        let timer = CallTimer::start(&message.inner);
+        let response = self
+            .send_message(&message)
+            .and_then(|()| self.receive(message.message_id));
+        // A call that failed or timed out kept the application waiting just the same.
+        if timer.is_some_and(|timer| timer.finish(&message.inner)) {
+            self.send_call_timings();
+        }
+
+        T::try_unwrap_response(response?)
             .map_err(Box::new)
             .map_err(ProxyError::UnexpectedResponse)
+    }
+
+    /// Sends this process's call timings to the internal proxy, when there are any.
+    ///
+    /// A failed send is dropped: the numbers are a diagnostic aid, and losing a snapshot must
+    /// never fail or slow down the application's own call. The next snapshot carries the same
+    /// totals anyway.
+    pub fn send_call_timings(&self) {
+        if let Some(snapshot) = timings::snapshot() {
+            let _ = self.send(snapshot.wrap());
+        }
     }
 
     #[mirrord_layer_macro::instrument(level = "trace", skip(self), ret)]
@@ -638,6 +667,16 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     proxy_connection()?
         .make_request_no_response(request)
         .map_err(Into::into)
+}
+
+/// Sends this process's call timings to the internal proxy over the global
+/// [`PROXY_CONNECTION`], for when the process is about to exit and will make no more calls.
+#[allow(static_mut_refs)]
+pub fn send_call_timings() {
+    // Read directly, because a process on its way out must not wait for a connection.
+    if let Some(connection) = unsafe { PROXY_CONNECTION.get() } {
+        connection.send_call_timings();
+    }
 }
 
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]
