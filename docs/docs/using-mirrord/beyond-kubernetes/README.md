@@ -57,7 +57,6 @@ Start with MetalBear Cloud. On the Enterprise plan, if you already run the Opera
 | Platform | MetalBear Cloud | Operator-hosted |
 | --- | --- | --- |
 | [Amazon ECS](ecs.md) | [Supported](ecs-metalbear-cloud.md) | [Supported](ecs-operator-hosted.md) |
-| [AWS Batch](aws-batch.md) | Not supported | [Supported](aws-batch.md#connect-the-jobs-to-the-operator) |
 | [Cloudflare Containers](cloudflare-containers.md) | [Supported](cloudflare-containers.md) | Not covered |
 
 ## Setting Up
@@ -65,7 +64,7 @@ Start with MetalBear Cloud. On the Enterprise plan, if you already run the Opera
 Setup is split by what it touches, so you only redo the parts that change:
 
 1. **Set up your deployment mode, once.** See [Operator-Hosted Sessions-Manager](operator-hosted.md) or [MetalBear Cloud Sessions-Manager](metalbear-cloud.md).
-2. **Add the remote bootstrap to each workload.** For ECS, see [Amazon ECS](ecs.md). For AWS Batch, see [AWS Batch](aws-batch.md), which also covers the next step. For Cloudflare Containers, see [Cloudflare Containers](cloudflare-containers.md), which also covers the next step.
+2. **Add the remote bootstrap to each workload.** For ECS, see [Amazon ECS](ecs.md). For Cloudflare Containers, see [Cloudflare Containers](cloudflare-containers.md), which also covers the next step.
 3. **Connect each workload to your deployment mode.** For ECS, see [Connecting ECS to the Operator](ecs-operator-hosted.md) or [Connecting ECS to MetalBear Cloud](ecs-metalbear-cloud.md).
 
 ### Required versions
@@ -195,7 +194,7 @@ In the Operator-hosted mode, every connection goes through your cluster's API se
 ## Limitations
 
 * **No `replace` mode.** A serverless target can't be copied, so services run in `split` or `mirror` mode only. See [Serverless targets](../multiple-concurrent-sessions.md#serverless-targets).
-* **One replica per session.** Your session is served by one registered replica of the service, such as one ECS task. If the service runs several, only requests that land on that replica can be stolen or mirrored. For testing, scale the service to one replica or route your test traffic to a specific one. For AWS Batch jobs, the target's tag filters pick the replica ([AWS Batch](aws-batch.md#selecting-jobs-by-their-tags)).
+* **One replica per session.** Your session is served by one registered replica of the service, such as one ECS task. If the service runs several, only requests that land on that replica can be stolen or mirrored. For testing, scale the service to one replica or route your test traffic to a specific one.
 * **No queue splitting, DB branching, or copied targets.** [`feature.split_queues`](../../sharing-the-cluster/queue-splitting.md), [`feature.kafka_branch`](../../sharing-the-cluster/queue-splitting/kafka.md#kafka-branching), [`feature.db_branches`](../../sharing-the-cluster/db-branching.md), and [`feature.copy_target`](../copy-target.md) aren't supported with a `serverless/` target. `mirrord up` runs the service without them and prints a warning, even when its mode asks for queue splitting or DB branching. If a service's `config_patch` sets any of them, mirrord refuses to start the session, for example with `` `feature.db_branches` is not supported with serverless targets.`` Your local process uses the same databases and queues as the workload outside Kubernetes, so its writes reach the shared data.
 * **Application container only.** Remote files and environment variables come from the application container the remote bootstrap is loaded into, not from the workload's other containers. Environment variables are read when the container starts, including those the platform injects from secrets; variables your application sets while running aren't included.
 * **Operator-hosted mode:**

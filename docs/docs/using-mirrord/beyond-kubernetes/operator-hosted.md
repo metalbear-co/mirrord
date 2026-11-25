@@ -124,9 +124,6 @@ Enabling sessions-manager also creates the `mirrord-operator-sessions-manager-ag
 Each workload authenticates as a Kubernetes identity bound to this role. How its identity is mapped, and how it reaches the API server, depends on the platform:
 
 * [Connecting ECS to the Operator](ecs-operator-hosted.md)
-* [AWS Batch](aws-batch.md#connect-the-jobs-to-the-operator)
-
-To let developers select AWS Batch jobs by their tags, the Operator's IAM role also needs `batch:DescribeJobs`; see [Let the Operator read job tags](aws-batch.md#let-the-operator-read-job-tags).
 
 ### Connection variables
 

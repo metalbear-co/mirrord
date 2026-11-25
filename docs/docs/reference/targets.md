@@ -59,8 +59,6 @@ When targeting Labels, mirrord will target all pods that match the label selecto
 
 mirrord can also target workloads that run outside Kubernetes, such as Amazon ECS tasks, with a `serverless/<SERVICE_NAME>` target. This is in alpha; see [Beyond Kubernetes](../using-mirrord/beyond-kubernetes/README.md).
 
-For AWS Batch jobs, a serverless target can select the job by its tags with [`target.tag_filter`](https://metalbear.com/mirrord/docs/config/options#target-tag_filter) and [`target.jq_filter`](https://metalbear.com/mirrord/docs/config/options#target-jq_filter). mirrord waits for a matching job, and the session stays on the job it attached to. See [AWS Batch](../using-mirrord/beyond-kubernetes/aws-batch.md#selecting-jobs-by-their-tags).
-
 Both in mirrord OSS and mirrord for Teams, if you don't name any specific container to be targeted, mirrord will pick the first container from the pod spec. Some containers, like service mesh proxies, will be automatically ignored.
 
 You can specify a target namespace if the target should be found in that namespace instead of the namespace that is currently used by `kubectl`. See the different interfaces below for possible ways of specifying the target and its namespace.
