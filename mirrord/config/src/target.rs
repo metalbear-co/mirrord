@@ -32,7 +32,7 @@ pub mod serverless;
 pub mod service;
 pub mod stateful_set;
 
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, JsonSchema)]
 #[serde(untagged, rename_all = "lowercase", deny_unknown_fields)]
 #[schemars(
     description = "The Kubernetes workload mirrord runs against: a target path such as \
@@ -79,6 +79,28 @@ pub enum TargetFileConfig {
         #[schemars(extend("x-mirrord-plan" = crate::plan::Plan::Enterprise))]
         jq_filter: Option<String>,
     },
+}
+
+impl fmt::Debug for TargetFileConfig {
+    /// Leaves the filters out, as [`TargetConfig`]'s does. `LayerFileConfig` prints its target
+    /// with this.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Simple(path) => formatter.debug_tuple("Simple").field(path).finish(),
+            Self::Advanced {
+                path,
+                namespace,
+                tag_filter,
+                jq_filter,
+            } => formatter
+                .debug_struct("Advanced")
+                .field("path", path)
+                .field("namespace", namespace)
+                .field("tag_filter", &tag_filter.as_ref().map(|_| "[REDACTED]"))
+                .field("jq_filter", &jq_filter.as_ref().map(|_| "[REDACTED]"))
+                .finish(),
+        }
+    }
 }
 
 fn serialize_target_file_path<S>(target: &Option<Target>, serializer: S) -> Result<S::Ok, S::Error>
@@ -257,8 +279,9 @@ pub struct TargetConfig {
     /// tag, each with a value its regex matches.
     ///
     /// mirrord waits for a matching task when none runs yet. Among several matching tasks, it
-    /// attaches to the one with the lowest replica id, and the whole session stays on that task.
-    /// A task whose tags the operator could not read never matches.
+    /// attaches to the one with the lowest replica id. The whole session stays on that task,
+    /// reconnects included: when the task ends, the session ends with it. A task whose tags the
+    /// operator could not read never matches.
     ///
     /// ```json
     /// {
