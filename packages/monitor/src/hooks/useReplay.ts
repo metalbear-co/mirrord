@@ -175,17 +175,19 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         setUnsupported(listed === null)
         setLoadError(false)
 
-        // The open request can change after it was loaded, for example when the application
-        // answers it. A fetch of it that still waits for its answer covers the change.
+        // The open request is loaded again when it changed after it was loaded, for example
+        // when the application answers it, and when loading it failed. A fetch of it that still
+        // waits for its answer covers both.
+        const openId = selectedIdRef.current
         const detail = selectedRef.current
-        const summary = next.find((request) => request.id === detail?.id)
+        const summary = next.find((request) => request.id === openId)
         if (
-          detail &&
+          openId !== null &&
           summary &&
-          isStale(detail, summary) &&
+          (detail === null || isStale(detail, summary)) &&
           detailFetchRef.current === null
         ) {
-          void loadSelected(detail.id)
+          void loadSelected(openId)
         }
       } catch {
         if (!cancelled) setLoadError(true)
