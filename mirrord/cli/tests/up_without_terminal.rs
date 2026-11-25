@@ -6,8 +6,10 @@ use axum::{Json, Router};
 use mirrord_command::resolve_tokio_command;
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, time::timeout};
+
+/// The Windows process creation flag that gives the child a console no one sees.
 #[cfg(windows)]
-use winapi::um::winbase::CREATE_NO_WINDOW;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const MISSING_TARGET: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),

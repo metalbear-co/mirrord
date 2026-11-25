@@ -322,10 +322,6 @@ use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
-// Suppressor for the `unused-crate-dependencies` lint: only `tests/up_without_terminal.rs` uses
-// `winapi`, to start `mirrord up` without a window, as IDEs do.
-#[cfg(all(test, windows))]
-use winapi as _;
 
 #[cfg(windows)]
 mod attach;
