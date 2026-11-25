@@ -130,3 +130,9 @@ More examples of similar buggy loops:
 1. Reading from a connection that already returned EOF.
 2. Receiving from an `mpsc` channel that already returned `None`.
 3. Polling an empty `FuturesUnordered`/`FuturesOrdered`/`JoinSet`.
+
+# Security
+
+## Access to target's filesystem
+
+Always do it with the [target_root.rs](./src/util/target_root.rs) module.

@@ -11,7 +11,10 @@ use crate::{
     error::AgentError,
     outgoing::router::{ConnEvent, ConnectionKind, OutgoingRouter, RouterUpdate},
     task::BgTaskRuntime,
-    util::io::throttle::{Throttle, ThrottlePermit},
+    util::{
+        io::throttle::{Throttle, ThrottlePermit},
+        target_root::TargetRoot,
+    },
 };
 
 pub mod router;
@@ -44,15 +47,22 @@ impl<O: OutgoingKind> OutgoingApi<O> {
     ///
     /// * `network_runtime` - [`tokio`] runtime where connections will be made. If this agent has a
     ///   target, this runtime has to run in its network namespace.
+    /// * `target_root` - where the paths of Unix socket addresses are.
     /// * `inbound_throttle` - will be used to throttle traffic *from* the peers.
     /// * `outbound_throttle` - will be used to throttle traffic *to* the peers.
     pub fn new(
         network_runtime: Arc<BgTaskRuntime>,
+        target_root: TargetRoot,
         inbound_throttle: Throttle,
         outbound_throttle: Throttle,
     ) -> Self {
         Self {
-            router: OutgoingRouter::new(network_runtime, inbound_throttle, outbound_throttle),
+            router: OutgoingRouter::new(
+                network_runtime,
+                target_root,
+                inbound_throttle,
+                outbound_throttle,
+            ),
             queued_connects: Default::default(),
         }
     }
@@ -250,4 +260,116 @@ pub enum GenericOutMessage {
         Bytes,
     ),
     Close(ConnectionId),
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        fs,
+        os::unix::{fs::symlink, net::UnixListener},
+        path::{Path, PathBuf},
+    };
+
+    use mirrord_protocol::outgoing::{SocketAddress, UnixAddr};
+    use rstest::rstest;
+    use tokio_seqpacket::UnixSeqpacketListener;
+
+    use crate::{
+        outgoing::{
+            router::ConnectionKind, seqpacket::SeqpacketConnection, tcp_unix::TcpOrUnixConnection,
+        },
+        util::target_root::{Resolver, TargetRoot, proc_fd_path},
+    };
+
+    #[derive(Debug, Clone, Copy)]
+    enum Kind {
+        Stream,
+        Seqpacket,
+    }
+
+    /// Binds a listening socket at `name` in `dir`.
+    ///
+    /// Goes through the directory's [`proc_fd_path`], since the full path may not fit in a Unix
+    /// socket address.
+    fn listen(kind: Kind, dir: &Path, name: &str) -> Box<dyn std::any::Any> {
+        let dir = fs::File::open(dir).unwrap();
+        let path = proc_fd_path(&dir).join(name);
+
+        match kind {
+            Kind::Stream => Box::new(UnixListener::bind(path).unwrap()),
+            Kind::Seqpacket => Box::new(UnixSeqpacketListener::bind(path).unwrap()),
+        }
+    }
+
+    async fn connect(kind: Kind, root: &Path, resolver: Resolver, path: PathBuf) -> bool {
+        let address = SocketAddress::Unix(UnixAddr::Pathname(path));
+        let root = TargetRoot::with_resolver(root.to_path_buf(), resolver);
+
+        match kind {
+            Kind::Stream => TcpOrUnixConnection::connect(&address, &root).await.is_ok(),
+            Kind::Seqpacket => SeqpacketConnection::connect(&address, &root).await.is_ok(),
+        }
+    }
+
+    /// A Unix socket address is a path in the target root, and reaches no socket outside it:
+    ///
+    /// ```text
+    /// outside/s.sock                  a socket outside the target root
+    /// root/run/s.sock                 a socket
+    /// root/<long>/s.sock              a socket whose path doesn't fit in a socket address
+    /// root/linked                  -> /run/s.sock
+    /// root/escaped                 -> <outside>/s.sock
+    /// root/rel_escaped             -> ../outside/s.sock
+    /// ```
+    #[rstest]
+    #[tokio::test]
+    async fn unix_socket_paths_stay_in_target_root(
+        #[values(Kind::Stream, Kind::Seqpacket)] kind: Kind,
+        #[values(Resolver::detect(), Resolver::Userspace)] resolver: Resolver,
+    ) {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("root");
+        let outside = parent.path().join("outside");
+        let long = Path::new("/").join("d".repeat(60)).join("e".repeat(60));
+        for dir in [
+            root.join("run"),
+            root.join(long.strip_prefix("/").unwrap()),
+            outside.clone(),
+        ] {
+            fs::create_dir_all(dir).unwrap();
+        }
+
+        let _listeners = [
+            listen(kind, &root.join("run"), "s.sock"),
+            listen(kind, &root.join(long.strip_prefix("/").unwrap()), "s.sock"),
+            listen(kind, &outside, "s.sock"),
+        ];
+        symlink("/run/s.sock", root.join("linked")).unwrap();
+        symlink(outside.join("s.sock"), root.join("escaped")).unwrap();
+        symlink("../outside/s.sock", root.join("rel_escaped")).unwrap();
+
+        for path in [
+            PathBuf::from("/run/s.sock"),
+            PathBuf::from("run/s.sock"),
+            PathBuf::from("/linked"),
+            long.join("s.sock"),
+        ] {
+            assert!(
+                connect(kind, &root, resolver, path.clone()).await,
+                "{path:?}"
+            );
+        }
+
+        for path in [
+            outside.join("s.sock"),
+            PathBuf::from("/escaped"),
+            PathBuf::from("/rel_escaped"),
+            PathBuf::from("/../outside/s.sock"),
+        ] {
+            assert!(
+                !connect(kind, &root, resolver, path.clone()).await,
+                "{path:?}"
+            );
+        }
+    }
 }

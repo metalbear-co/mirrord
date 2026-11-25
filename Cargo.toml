@@ -72,7 +72,7 @@ ignored-paths = [
 # latest commits on rustls suppress certificate verification
 [workspace.package]
 edition = "2024"
-version = "3.291.0"
+version = "3.291.1"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/metalbear/mirrord"
@@ -189,7 +189,6 @@ kube = { git = "https://github.com/metalbear-co/kube.git", rev = "2f2b38d13e9a09
     "http-proxy",
 ] }
 libc = "0.2"
-local-ip-address = "0.6"
 log = { version = "0.4", features = ["std"] }
 mid = "3.0.0"
 miette = "7"
@@ -210,7 +209,6 @@ null-terminated = { git = "https://github.com/metalbear-co/null-terminated.rs", 
 num-traits = "0.2"
 objc2-core-foundation = "0.3"
 object = "0.36"
-oci-spec = "0.10"
 once_cell = "1"
 opener = "0.8.3"
 pem = "3"
@@ -223,7 +221,7 @@ process-wrap = { version = "10.0.0", default-features = false, features = ["toki
 proc-macro2 = "1"
 proc-macro2-diagnostics = "0.10"
 procfs = "0.17.0"
-prometheus = { version = "0.14", features = ["process"] }
+prometheus = { version = "0.14", default-features = false, features = ["process"] }
 prost = "0.14"
 prost-reflect = "0.16"
 slug = "0.1.6"
@@ -231,7 +229,7 @@ protox = "0.9"
 quote = "1"
 rand = "0.10"
 ratatui = "0.30.2"
-rcgen = { version = "0.14", features = ["x509-parser"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
 rdkafka = { git = "https://github.com/metalbear-co/rust-rdkafka.git", rev = "4e84de5dcb5d3cbe2b7036b21f016581445e445c", features = [
     "cmake-build",
     "ssl-vendored",
@@ -270,9 +268,9 @@ serde_urlencoded = "0.7"
 serde_with = "3.18"
 serde_yaml = "0.9"
 secrecy = "0.10"
-sha2 = "0.10"
+sha2 = "0.11"
 shellexpand = "3"
-shlex = "1.3"
+shlex = "2"
 socket2 = { version = "0.5", features = ["all"] }
 stork = { git = "https://github.com/metalbear-co/stork.git", rev = "a88686e764145be5d1d8f81d4be5bfb4ed217d89" }
 strsim = "0.11"
