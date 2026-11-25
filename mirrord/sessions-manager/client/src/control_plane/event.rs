@@ -40,9 +40,5 @@ pub(crate) enum ControlPlaneEvent {
 
     /// The verdict on this gated agent's task. Only an agent registered with a pending gate
     /// receives it.
-    #[expect(
-        dead_code,
-        reason = "decoded so a subscriber can receive it; no subscriber reads it yet"
-    )]
     Admission(Admission),
 }

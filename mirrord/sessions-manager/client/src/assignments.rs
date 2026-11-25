@@ -1,12 +1,12 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
 
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AgentSubscriptionOptions, AssignmentId, AssignmentSubscription,
-    ConnectionAssignment, ServiceScope, SubscriptionOptions,
+    AdmissionVerdict, AgentIdentity, AgentSubscriptionOptions, AssignmentId,
+    AssignmentSubscription, ConnectionAssignment, GateState, ServiceScope, SubscriptionOptions,
 };
 
 use crate::{
@@ -78,15 +78,25 @@ impl SharedAgentOptions {
     pub(crate) fn new(options: AgentSubscriptionOptions) -> Self {
         Self(Arc::new(Mutex::new(options)))
     }
+
+    /// Sets the gate state that every later subscription sends. A subscription already open keeps
+    /// the registration it made.
+    pub(crate) fn set_gate(&self, gate: Option<GateState>) {
+        self.lock().gate = gate;
+    }
+
+    fn lock(&self) -> MutexGuard<'_, AgentSubscriptionOptions> {
+        // The options are plain data, replaced whole or field by field, so a panic while they
+        // were locked can't leave them in a state worse than any other.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// [`None`] when the options say nothing, so that such an agent subscribes exactly as agents that
 /// predate the header do.
 impl OptionsHeader for SharedAgentOptions {
     fn header(&self) -> Option<String> {
-        // The options are plain data, replaced whole or field by field, so a panic while they
-        // were locked can't leave them in a state worse than any other.
-        let options = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let options = self.lock();
         (*options != AgentSubscriptionOptions::default()).then(|| options.encode())
     }
 }
@@ -100,7 +110,20 @@ pub(crate) struct AssignmentSubscriptionWithOptions<O = Option<String>> {
     pub(crate) options: O,
 }
 
-impl<O: OptionsHeader> ControlPlaneSubscription for AssignmentSubscriptionWithOptions<O> {
+impl<O: OptionsHeader> AssignmentSubscriptionWithOptions<O> {
+    async fn subscribe_with_options<T: SessionsManagerTransport>(
+        &self,
+        transport: &T,
+        scope: &ServiceScope,
+    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+        let options = self.options.header();
+        transport
+            .subscribe_assignments(scope, &self.subscription, options.as_deref())
+            .await
+    }
+}
+
+impl ControlPlaneSubscription for AssignmentSubscriptionWithOptions {
     type Output = ConnectionAssignment;
 
     fn name(&self) -> &'static str {
@@ -112,10 +135,7 @@ impl<O: OptionsHeader> ControlPlaneSubscription for AssignmentSubscriptionWithOp
         transport: &T,
         scope: &ServiceScope,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
-        let options = self.options.header();
-        transport
-            .subscribe_assignments(scope, &self.subscription, options.as_deref())
-            .await
+        self.subscribe_with_options(transport, scope).await
     }
 
     fn extract(
@@ -123,6 +143,45 @@ impl<O: OptionsHeader> ControlPlaneSubscription for AssignmentSubscriptionWithOp
         event: ControlPlaneEvent,
     ) -> Result<Option<Self::Output>, SessionsManagerClientError> {
         self.subscription.extract(event)
+    }
+}
+
+/// What an agent's assignments subscription yields: its assignments, and the verdict on its
+/// task's admission gate, which only an agent registered with [`GateState::Pending`] receives.
+#[derive(Debug)]
+pub(crate) enum AgentEvent {
+    Assignment(ConnectionAssignment),
+    Admission(AdmissionVerdict),
+}
+
+impl ControlPlaneSubscription for AssignmentSubscriptionWithOptions<SharedAgentOptions> {
+    type Output = AgentEvent;
+
+    fn name(&self) -> &'static str {
+        self.subscription.name()
+    }
+
+    async fn subscribe<T: SessionsManagerTransport>(
+        &self,
+        transport: &T,
+        scope: &ServiceScope,
+    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+        self.subscribe_with_options(transport, scope).await
+    }
+
+    fn extract(
+        &self,
+        event: ControlPlaneEvent,
+    ) -> Result<Option<Self::Output>, SessionsManagerClientError> {
+        match event {
+            ControlPlaneEvent::Admission(admission) => {
+                Ok(Some(AgentEvent::Admission(admission.verdict)))
+            }
+            event => Ok(self
+                .subscription
+                .extract(event)?
+                .map(AgentEvent::Assignment)),
+        }
     }
 }
 
@@ -257,18 +316,25 @@ impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
         }
     }
 
-    pub(crate) async fn next(
-        &mut self,
-    ) -> Result<ConnectionAssignment, SessionsManagerClientError> {
+    /// The next assignment this agent hasn't acted on yet, or the next admission verdict.
+    pub(crate) async fn next(&mut self) -> Result<AgentEvent, SessionsManagerClientError> {
         loop {
-            let assignment = self.subscriber.next(None).await?;
-            if self
-                .assignments
-                .try_accept(assignment.assignment_id.clone())
-            {
-                return Ok(assignment);
+            match self.subscriber.next(None).await? {
+                AgentEvent::Assignment(assignment)
+                    if !self
+                        .assignments
+                        .try_accept(assignment.assignment_id.clone()) => {}
+                event => return Ok(event),
             }
         }
+    }
+
+    /// Registers again, with the options as they are now.
+    ///
+    /// For an option the sessions-manager reads only when the agent registers, such as the gate
+    /// state.
+    pub(crate) async fn resubscribe(&mut self) {
+        self.subscriber.reset().await;
     }
 
     pub(crate) async fn retry_assignment(&mut self, assignment_id: &AssignmentId) {

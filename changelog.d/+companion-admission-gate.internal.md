@@ -1,0 +1,1 @@
+A workload companion whose task waits for admission relays the sessions-manager's verdict to the bootstrap, and for a replaced task, the exit code of the local process, or 214 when no developer is connected for 30 seconds.

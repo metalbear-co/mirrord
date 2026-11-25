@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use bincode::{Decode, Encode};
 
@@ -12,12 +12,24 @@ pub const CONNECTION_HANDOFF_SOCKET_ENV: &str = "MIRRORD_REMOTE_HANDOFF_SOCKET";
 /// bootstrap for the workload companion.
 ///
 /// A task opted in to admission holds its application before `main`, in the bootstrap, until it
-/// knows whether a developer replaces the task. The bootstrap binds this socket before it spawns
-/// the companion, and the companion connects to it and writes [`GateMessage`] lines: first the
-/// sessions-manager's verdict, and for a replaced task, later the exit code. Without the variable
-/// the companion doesn't gate the task, and the application starts as it would without
-/// admission.
+/// knows whether a developer replaces the task. The bootstrap binds this socket (a stream socket)
+/// before it spawns the companion, and the companion connects to it and writes [`GateMessage`]
+/// lines: first the sessions-manager's verdict, and for a replaced task, later the exit code.
+/// Without the variable the companion doesn't gate the task, and the application starts as it
+/// would without admission.
 pub const ADMISSION_SOCKET_ENV: &str = "MIRRORD_REMOTE_ADMISSION_SOCKET";
+
+/// Environment variable carrying how long, in whole seconds, a task opted in to admission waits
+/// for a verdict, counted from the companion connecting to [`ADMISSION_SOCKET_ENV`]. When it's
+/// missing or isn't a number of seconds, the wait is [`DEFAULT_ADMISSION_TIMEOUT`].
+///
+/// The bootstrap starts the application once the wait is over without a verdict. The companion
+/// reads the same variable and gives up a second earlier, closing the socket, so that a verdict
+/// can't reach the bootstrap after it started the application.
+pub const ADMISSION_TIMEOUT_ENV: &str = "MIRRORD_REMOTE_ADMISSION_TIMEOUT";
+
+/// The wait for a verdict when [`ADMISSION_TIMEOUT_ENV`] doesn't set one.
+pub const DEFAULT_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Environment variable carrying the PID of the application process the bootstrap runs in, set
 /// by the bootstrap for the workload companion.

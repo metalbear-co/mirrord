@@ -1,7 +1,7 @@
 mod agent;
 mod intproxy;
 
-pub use agent::AgentClient;
+pub use agent::{AgentClient, AgentGate};
 pub use intproxy::{IntproxyClient, SessionsManagerConnectInfo};
 use mirrord_sessions_manager_protocol::ServiceScope;
 
