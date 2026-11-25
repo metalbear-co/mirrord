@@ -12,7 +12,7 @@ With single sign-on (SSO), developers log in to the mirrord Operator with your c
 
 This is useful when developers have no cluster access of their own, when your clusters are reachable only through a bastion or VPN that developer machines are not on, or when you want one login for mirrord across clusters.
 
-SSO setup needs Operator `3.232.0` or later. Older versions ignore the `sso` Helm values. The browser login developers run, `mirrord login --url`, needs Operator `3.237.0` or later, mirrord `3.292.0` or later and an Enterprise license. This page covers the setup an admin does once: registering mirrord at the identity provider, turning SSO on in the Helm chart, and granting groups access. What developers do afterwards is on [Logging in with SSO](../using-mirrord/sso-login.md).
+SSO setup needs Operator `3.235.0` or later. Older versions ignore the `sso` Helm values. The browser login developers run, `mirrord login --url`, needs Operator `3.238.0` or later, mirrord `3.292.0` or later and an Enterprise license. This page covers the setup an admin does once: registering mirrord at the identity provider, turning SSO on in the Helm chart, and granting groups access. What developers do afterwards is on [Logging in with SSO](../using-mirrord/sso-login.md).
 
 ## 1. Register mirrord at your identity provider
 
@@ -22,7 +22,7 @@ Create an OIDC application (sometimes called a client, an app registration or an
 - The **client ID**.
 - The **client secret**. Register mirrord as a confidential (web) application, so the provider issues one.
 
-Register the Operator's callback as the application's redirect URI (also called a sign-in redirect or reply URL): `<sso.url>/apis/operator.metalbear.co/sso/callback`, for example `https://mirrord.example.com/apis/operator.metalbear.co/sso/callback`. The Operator exchanges the authorization code itself, so developers' machines never need to be registered. Grant the application the authorization code flow; mirrord uses it with PKCE.
+Register the Operator's callback as the application's redirect URI (also called a sign-in redirect or reply URL): `<sso.url>/apis/operator.metalbear.co/sso/callback`, for example `https://mirrord.example.com/apis/operator.metalbear.co/sso/callback`. The Operator exchanges the authorization code itself, so developers' machines never need to be registered. Grant the application the authorization code flow. The Operator sends the provider a `state` and a `nonce` and no PKCE code challenge; PKCE is used only between the mirrord CLI and the Operator.
 
 Make sure the ID token carries the claims you want to use for usernames and groups:
 
@@ -78,7 +78,7 @@ The chart's Ingress sends the `/apis/operator.metalbear.co/` path of the host in
 
 If you use the Gateway API, a cloud load balancer or a service mesh instead, set `sso.ingress.enabled: false` and route the host to the `mirrord-operator` Service on port `443` (the `operator.port` value) over HTTPS yourself. Forward the `/apis/operator.metalbear.co/` path only.
 
-The Operator tells the two paths apart by the client certificate the API server presents, not by the route. A request arriving through the SSO URL is accepted only with a login token the Operator issued at the end of `mirrord login`, or a valid ID token from your provider; any `X-Remote-User` or `X-Remote-Group` header it carries is dropped. A login token is valid for 24 hours and carries the username and groups the ID token mapped to at login time, as the API server freezes an ID token's groups for its lifetime. Rotating the client secret at the provider ends every login at once. The Operator then asks the cluster's RBAC, with a `SubjectAccessReview`, whether that user may perform the request, the same check the API server does before it forwards a kubectl call to the Operator. A user without a matching RoleBinding gets a `403`.
+The Operator tells the two paths apart by the client certificate the API server presents, not by the route. A request arriving through the SSO URL is accepted only with a login token the Operator issued at the end of `mirrord login`, or a valid ID token from your provider; any `X-Remote-User` or `X-Remote-Group` header it carries is dropped. A login token is valid for 24 hours and carries the username and groups the ID token mapped to at login time, as the API server freezes an ID token's groups for its lifetime. Rotating the client secret ends every login at once, once the Kubernetes Secret holds the new value and every Operator replica has restarted: the key that signs login tokens derives from the secret at startup, so a replica still running on the old one keeps accepting the old tokens. Developers then run `mirrord logout --url` before `mirrord login --url`, because `mirrord login` reuses a saved token until it expires. The Operator then asks the cluster's RBAC, with a `SubjectAccessReview`, whether that user may perform the request, the same check the API server does before it forwards a kubectl call to the Operator. A user without a matching RoleBinding gets a `403`.
 
 ## Usernames and groups
 
