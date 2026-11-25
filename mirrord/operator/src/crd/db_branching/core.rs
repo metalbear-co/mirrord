@@ -844,7 +844,7 @@ mod null_free_spec_tests {
     use serde_json::json;
 
     use super::*;
-    use crate::crd::db_branching::mysql::TableCopyConfig;
+    use crate::crd::db_branching::{branch_database::ItemCopyConfig, mysql::TableCopyConfig};
 
     /// Regression test: unset branch options used to be stored as explicit `null`
     /// (`"tables": {"t": {}}` became `copy.items.t.filter: null`). The CRD rule that freezes
@@ -866,6 +866,8 @@ mod null_free_spec_tests {
 
         let table = TableCopyConfig { filter: None };
         assert_eq!(serde_json::to_value(&table).unwrap(), json!({}));
+        let item = ItemCopyConfig { filter: None };
+        assert_eq!(serde_json::to_value(&item).unwrap(), json!({}));
 
         let stored: ConnectionSourceKind =
             serde_json::from_value(json!({"envFrom": {"container": null, "variable": "X"}}))
@@ -878,6 +880,9 @@ mod null_free_spec_tests {
             }
         );
         let stored: TableCopyConfig = serde_json::from_value(json!({"filter": null}))
+            .expect("a branch stored with explicit null still deserializes");
+        assert!(stored.filter.is_none());
+        let stored: ItemCopyConfig = serde_json::from_value(json!({"filter": null}))
             .expect("a branch stored with explicit null still deserializes");
         assert!(stored.filter.is_none());
     }
