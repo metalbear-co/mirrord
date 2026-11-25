@@ -358,6 +358,10 @@ pub(super) enum Commands {
     /// Manage per-session chaos rules for local chaos testing.
     Chaos(ChaosArgs),
 
+    /// List the HTTP requests that a local session received, and send them to your application
+    /// again.
+    Replay(Box<ReplayArgs>),
+
     /// Manage local mirrord sessions.
     #[command(visible_alias = "sessions")]
     Session(Box<SessionArgs>),
@@ -2431,6 +2435,66 @@ pub(crate) enum ChaosFormat {
 
     /// Don't print anything to `stdout` (still prints errors to `stderr`).
     Silent,
+}
+
+/// Arguments for the `mirrord replay` command.
+#[derive(Args, Debug)]
+pub struct ReplayArgs {
+    /// Subcommand to use with `mirrord replay`.
+    #[command(subcommand)]
+    pub command: ReplaySubcommand,
+
+    /// Local session to use, as `mirrord session list` prints it. Can be omitted while exactly
+    /// one local session is running.
+    #[arg(short = 's', long, global = true)]
+    pub session_id: Option<String>,
+
+    /// Format to print output in.
+    #[arg(long, default_value_t, global = true)]
+    pub format: ReplayFormat,
+}
+
+/// `mirrord replay` subcommands.
+#[derive(Subcommand, Debug)]
+pub enum ReplaySubcommand {
+    /// List the HTTP requests that the session received.
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Show one request with its headers and body, the response to it and its latest replays.
+    #[command(visible_alias = "get")]
+    Show {
+        /// Id of the request, as `mirrord replay list` prints it.
+        id: u64,
+    },
+
+    /// Send one request to your application again and print the response.
+    ///
+    /// The request goes straight to your application, so the client that made the original
+    /// request is not involved.
+    Send {
+        /// Id of the request, as `mirrord replay list` prints it.
+        id: u64,
+
+        /// Header to set on the replayed request, replacing its original value. Can be repeated.
+        #[arg(short = 'H', long = "header", value_name = "NAME: VALUE")]
+        headers: Vec<String>,
+
+        /// Header to leave out of the replayed request. Can be repeated.
+        #[arg(long = "remove-header", value_name = "NAME")]
+        remove_headers: Vec<String>,
+    },
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(crate) enum ReplayFormat {
+    /// Print output for reading in a terminal. For output that a script can parse, use `json`.
+    #[default]
+    Pretty,
+
+    /// Print output in JSON.
+    Json,
 }
 
 /// Arguments for the `mirrord session` command.

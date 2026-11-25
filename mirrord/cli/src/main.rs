@@ -372,6 +372,7 @@ mod preview;
 mod profile;
 mod queue_splitting;
 mod queues;
+mod replay;
 mod session;
 mod subscribe;
 mod teams;
@@ -1400,6 +1401,7 @@ fn main() -> miette::Result<()> {
                 tui,
             } => ui::wizard_command(args, no_telemetry, tui, watch, &user_data).await?,
             Commands::Chaos(args) => ui::chaos_command(args).await?,
+            Commands::Replay(args) => replay::replay_command(*args).await?,
             Commands::Session(args) => session::session_command(*args).await?,
             Commands::Kill(args) => session::kill_command(*args).await?,
             #[cfg(unix)]

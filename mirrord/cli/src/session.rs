@@ -267,7 +267,7 @@ async fn merged_sessions(
     Ok((rows, operator_not_found))
 }
 
-async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
+pub(crate) async fn load_sessions() -> Result<Vec<SessionConnection>, CliError> {
     let sessions_dir = sessions_dir()
         .ok_or_else(|| CliError::Session("could not determine home directory".to_owned()))?;
     let mut sessions = Vec::new();

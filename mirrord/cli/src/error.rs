@@ -1252,6 +1252,10 @@ pub(crate) enum CliError {
     #[error("Session command failed with: {0}")]
     Session(String),
 
+    /// Errors produced by the `mirrord replay` command.
+    #[error("Replay command failed with: {0}")]
+    Replay(String),
+
     #[error("Failed to read credentials file: {0}")]
     #[diagnostic(help(
         "Check that `~/.mirrord/credentials` exists and is readable.{GENERAL_HELP}"
