@@ -51,11 +51,19 @@ pub(super) async fn get_session_client_middleware(
     mut request: Request,
     next: Next,
 ) -> ChaosResult<Response> {
-    let sessions = state.sessions.read().await;
+    // The lock is released before the handler runs, because the handler waits for the session to
+    // answer, and a writer that waits for the lock meanwhile would block every other reader of
+    // the sessions.
+    let client = state
+        .sessions
+        .read()
+        .await
+        .get(&session_id.to_string())
+        .map(|session| session.client.clone());
 
-    match sessions.get(&session_id.to_string()) {
-        Some(session) => {
-            request.extensions_mut().insert(session.client.clone());
+    match client {
+        Some(client) => {
+            request.extensions_mut().insert(client);
             Ok(next.run(request).await)
         }
         None => Err(ChaosApiError::SessionNotFound(session_id.to_string())),
