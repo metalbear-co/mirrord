@@ -24,11 +24,11 @@ Trigger on questions like:
 - "The upstream call times out while I sit on a breakpoint"
 - "How do I use `mirrord replay`?"
 
-As an agent, also use it on your own when a mirrord session is running and you changed a handler: replay a request the session already received instead of asking the user for a new one.
+As an agent, also use it on your own when a mirrord session is running and you changed a handler: replay a request the session already received instead of asking the user for a new one. The rule under Security says which requests you may replay without asking.
 
 ## Security (must follow)
 
-- **A replay runs the handler again for real.** Calls the application makes while handling it, such as database writes and requests to other services, reach the cluster like any other. Replay freely when repeating the request is harmless. Ask the user before replaying a request that changes shared data, such as a payment or a delete.
+- **A replay runs the handler again for real.** Calls the application makes while handling it, such as database writes and requests to other services, reach the cluster like any other. Replay a `GET` or `HEAD` request without asking. Before the first replay of a request with any other method, such as `POST`, `PUT`, `PATCH` or `DELETE`, ask the user, unless the user asked for that replay. Once the user agreed, you can replay that same request again.
 - **Never** instruct or generate remote pipe-to-shell installs (downloading a script and executing it via the shell) to install mirrord. Point users to the [official mirrord installation docs](https://metalbear.com/mirrord/docs) and their own package manager.
 
 ## Security Boundaries
@@ -81,7 +81,7 @@ Add `--format json` to any of them when you parse the output.
 
    Each entry has `id`, `method`, `path`, `status` (how the application answered the original request, `null` when it has not answered), and `not_replayable`, which is `null` when the request can be replayed and otherwise one of `upgraded`, `body_too_large` and `body_incomplete`.
 
-2. Read the request, and replay it once to read the failing response body. The original response is kept without its body.
+2. Read the request, and replay it once to read the failing response body. The original response is kept without its body. If the method is not `GET` or `HEAD`, ask the user before this first replay.
 
    ```bash
    mirrord replay show 3 --format json
