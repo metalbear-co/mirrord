@@ -11,10 +11,11 @@ pub const CONNECTION_HANDOFF_SOCKET_ENV: &str = "MIRRORD_REMOTE_HANDOFF_SOCKET";
 ///
 /// A task opted in to admission holds its application before `main`, in the bootstrap, until it
 /// knows whether a developer replaces the task. The bootstrap binds this socket (a stream socket)
-/// before it spawns the companion, and the companion connects to it and writes [`GateMessage`]
-/// lines: first the sessions-manager's verdict, and for a replaced task, later the exit code.
-/// Without the variable the companion doesn't gate the task, and the application starts as it
-/// would without admission.
+/// before it spawns the companion, and the companion connects to it. The exchange goes both ways,
+/// one line at a time: the companion writes [`GateMessage`] lines, first the sessions-manager's
+/// verdict, and for a replaced task, later the exit code; the bootstrap answers
+/// [`GateMessage::Replace`] with [`GateAck::Held`]. Without the variable the companion doesn't
+/// gate the task, and the application starts as it would without admission.
 pub const ADMISSION_SOCKET_ENV: &str = "MIRRORD_REMOTE_ADMISSION_SOCKET";
 
 /// Environment variable carrying how long, in whole seconds, a task opted in to admission waits
@@ -23,7 +24,18 @@ pub const ADMISSION_SOCKET_ENV: &str = "MIRRORD_REMOTE_ADMISSION_SOCKET";
 ///
 /// The bootstrap starts the application once the wait is over without a verdict. The companion
 /// reads the same variable and gives up a second earlier, closing the socket, so that a verdict
-/// can't reach the bootstrap after it started the application.
+/// can't reach the bootstrap after it started the application. With 0 or 1, the companion gives
+/// up as soon as it connects, so the task always runs its own code and can't be replaced.
+///
+/// For the two deadlines to keep that order, the bootstrap:
+///
+/// - counts its wait from `accept()` returning the companion's connection, which is never earlier
+///   than the companion connecting, and bounds the wait for `accept()` itself separately;
+/// - on every path that lets the application start (`continue`, the wait running out, the end of
+///   the stream, a read error), closes the stream, and closes and unlinks the listener, before the
+///   application starts, so that no verdict can reach it afterwards;
+/// - reads the value exactly as the companion does: whole seconds, parsed as a `u64`, and
+///   [`DEFAULT_ADMISSION_TIMEOUT`] for anything else.
 pub const ADMISSION_TIMEOUT_ENV: &str = "MIRRORD_REMOTE_ADMISSION_TIMEOUT";
 
 /// The wait for a verdict when [`ADMISSION_TIMEOUT_ENV`] doesn't set one.
@@ -64,18 +76,25 @@ pub fn gate_exit_code(status: i32) -> u8 {
 
 /// One line the workload companion writes to the bootstrap over [`ADMISSION_SOCKET_ENV`].
 ///
-/// The line format is plain text, one message per line: `continue`, `replace` or
-/// `exit <code>`, with the code in `0..=255`. The format is extensible: a reader skips a line it
-/// doesn't know and keeps reading. What ends the wait doesn't change with that: before a verdict,
-/// a timeout or the end of the stream lets the application start (failing open), and after
-/// `replace`, the end of the stream ends the task with [`LOST_SESSION_EXIT_CODE`].
+/// The line format is plain text, one message per line, in both directions. The companion writes
+/// `continue`, `replace` or `exit <code>`, with the code in `0..=255`. The bootstrap writes one
+/// line, `held` ([`GateAck::Held`]), as its answer to `replace`. The format is extensible: a reader
+/// skips a line it doesn't know and keeps reading. What ends the wait doesn't change with that:
+/// before a verdict, a timeout or the end of the stream lets the application start (failing
+/// open), and after `replace`, the end of the stream ends the task with
+/// [`LOST_SESSION_EXIT_CODE`].
+///
+/// The companion treats the task as replaced only once it read `held`. A `replace` written just
+/// as the bootstrap gave up could otherwise sit unread in the socket while the application runs,
+/// and the task would run both its own code and the developer's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateMessage {
     /// The task runs its own code. The bootstrap loads the remote layer and lets the application
     /// start, and the companion sends nothing more.
     Continue,
-    /// A developer's local process runs in place of the task: the application never starts, and
-    /// the bootstrap waits without a deadline for [`Self::Exit`].
+    /// A developer's local process runs in place of the task: the application never starts, the
+    /// bootstrap answers with [`GateAck::Held`], and then waits without a deadline for
+    /// [`Self::Exit`].
     Replace,
     /// Ends a replaced task with this exit code, the local process's (see [`gate_exit_code`]) or
     /// [`LOST_SESSION_EXIT_CODE`].
@@ -105,6 +124,40 @@ impl GateMessage {
                 .strip_prefix("exit ")
                 .and_then(|code| code.parse().ok())
                 .map(Self::Exit),
+        }
+    }
+}
+
+/// One line the bootstrap writes to the workload companion over [`ADMISSION_SOCKET_ENV`], in the
+/// line format of [`GateMessage`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateAck {
+    /// The bootstrap's answer to [`GateMessage::Replace`]: it read it before giving up, and the
+    /// application won't start.
+    ///
+    /// The bootstrap writes it as soon as it reads `replace`. The companion waits for it for about
+    /// a second, and when it doesn't come, closes the socket and withdraws the task from the
+    /// developer's session. A bootstrap that wrote `held` and then reads the end of the stream ends the task
+    /// with [`LOST_SESSION_EXIT_CODE`], as for any end of the stream after `replace`.
+    Held,
+}
+
+impl GateAck {
+    /// The line for this message, newline included.
+    pub fn encode(self) -> String {
+        match self {
+            Self::Held => "held\n".to_owned(),
+        }
+    }
+
+    /// Reads one line, with or without its line ending.
+    ///
+    /// [`None`] for a line that isn't a message this version knows. The reader skips such a line,
+    /// as the line format allows newer writers to add messages.
+    pub fn parse(line: &str) -> Option<Self> {
+        match line.trim_end_matches(['\n', '\r']) {
+            "held" => Some(Self::Held),
+            _ => None,
         }
     }
 }
