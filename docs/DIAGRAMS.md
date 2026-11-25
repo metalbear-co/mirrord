@@ -48,7 +48,7 @@ Two diagrams show the style well. Copy from them when you start a new one:
 
 The Kubernetes logo shows what runs in the cluster. Use it in two places:
 
-- **On a Kubernetes cluster.** On a cloud, center the logo on the top of the right corner bump, at `x + 0.9w` and `y + a/2 - c/2`, where `c` is the chord of that bump: `sqrt((0.2w)² + a²)`. On a boundary, center a 36px logo on the top-right corner, at `x + width - 18`, `y - 18`. Do not put it on a broker boundary, such as "Kafka cluster". A broker boundary gets the broker logo (see below).
+- **On a Kubernetes cluster.** On a cloud, center the logo on the top-right corner bump, 24px in from the top of the bump. On a boundary, center a 36px logo on the top-right corner, at `x + width - 18`, `y - 18`. Do not put it on a broker boundary, such as "Kafka cluster". A broker boundary gets the broker logo (see below).
 - **On a box that runs in the cluster, when the diagram has no Kubernetes cluster boundary.** Center a 36px logo on the bottom-right corner of the box, at `x + width - 18`, `y + height - 18`. Examples: the mirrord operator, a forwarder, the deployed app, a preview pod. Do not put it on brokers or managed services.
 
 Define the symbol once in `<defs>`, and place it with `<use href="#k8s" x="..." y="..." width="36" height="36"/>`. The logo half covers the corner, so make sure it does not cover an arrow or text, and grow the canvas when it goes past the edge:
@@ -110,11 +110,14 @@ Calculate the numbers. The laptop reaches 20 beyond the frame on each side and 1
 
 ### Cluster
 
-Draw a Kubernetes cluster as a cloud when the diagram shows one cluster. The cloud holds the whole rect `x, y, w, h` that you plan for its content: the two top corners are half circles, and three bumps sit on the top edge. The bumps reach about 0.12 of `w` above the rect, and the corner bumps reach about 0.05 of `w` beside it, so leave that space free. Copy the path from `operator-architecture.svg` and scale it, or calculate it:
+Draw a Kubernetes cluster as a cloud when the diagram shows one cluster. A cloud has bumps on all four sides. Do not draw straight sides with bumps only on the top, because that shape looks like a loaf of bread. The cloud holds the whole rect `x, y, w, h` that you plan for its content. The top bumps reach about 0.12 of `w` above the rect, the side bumps about 16px beside it, and the bottom bumps about 0.05 of `w` below it. Keep that space free of laptops, labels, and other boxes. Copy the path from `operator-architecture.svg` and scale it, or calculate it:
 
-- `a = min(0.32 h, 0.22 w)`
-- Points on the rect: `(x, y+a)`, `(x+0.17w, y)`, `(x+0.5w, y)`, `(x+0.8w, y)`, `(x+w, y+a)`.
-- Join the points with clockwise arcs (`A r r 0 0 1`). The two corner arcs have a radius of half their chord, and the three top arcs have a radius of 0.56 of their chord. The sides go straight down to rounded bottom corners (`r = 22`).
+- `a = min(0.30 h, 0.20 w)`, `cb = min(0.16 h, 0.09 w)`.
+- Go clockwise from `(x, y+h-cb)`. Join the points with clockwise arcs (`A r r 0 0 1`).
+- Left side: points about every 90px up to `(x, y+a)`. Each arc bulges `min(0.18 chord, 16)` px.
+- Top-left corner: `(x+0.16w, y)`, a half circle. Top: `(x+0.43w, y)`, `(x+0.66w, y)`, `(x+0.88w, y)`, with a radius of 0.56 of the chord.
+- Top-right corner: `(x+w, y+0.8a)`, a half circle. Right side: points about every 90px down to `(x+w, y+h-cb)`, as on the left.
+- Bottom-right corner: `(x+w-cb, y+h)`, a half circle. Bottom: `(x+0.62w, y+h)`, `(x+0.30w, y+h)`, `(x+cb, y+h)`, with a radius of 1.1 of the chord. Bottom-left corner: back to the start, a half circle.
 
 Use `fill="#F5F4FE" stroke="#756DF3" stroke-width="2"`. Put the cluster label inside the rect, clear of the arcs. When the diagram shows several clusters side by side, such as the multi-cluster diagrams, draw each cluster as a boundary: there is no space for the bumps.
 

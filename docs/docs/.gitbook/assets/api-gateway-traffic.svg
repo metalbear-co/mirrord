@@ -36,7 +36,7 @@
   <rect x="0" y="-25" width="960" height="445" fill="#ffffff"/>
 
   <!-- Cluster boundary -->
-  <path d="M252.0 330.0 A22 22 0 0 1 230.0 308.0 L230.0 126.0 A62.4 62.4 0 0 1 309.9 30.0 A86.9 86.9 0 0 1 465.0 30.0 A79.0 79.0 0 0 1 606.0 30.0 A67.2 67.2 0 0 1 700.0 126.0 L700.0 308.0 A22 22 0 0 1 678.0 330.0 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M230.0 288.6 A66.1 66.1 0 0 1 230.0 204.3 A66.1 66.1 0 0 1 230.0 120.0 A58.1 58.1 0 0 1 303.6 30.0 A69.6 69.6 0 0 1 427.8 30.0 A59.2 59.2 0 0 1 533.6 30.0 A56.7 56.7 0 0 1 634.8 30.0 A45.4 45.4 0 0 1 690.0 102.0 A76.0 76.0 0 0 1 690.0 195.3 A76.0 76.0 0 0 1 690.0 288.6 A29.3 29.3 0 0 1 648.6 330.0 A146.7 146.7 0 0 1 515.2 330.0 A161.9 161.9 0 0 1 368.0 330.0 A106.3 106.3 0 0 1 271.4 330.0 A29.3 29.3 0 0 1 230.0 288.6 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
   <text x="250" y="58" font-size="15" font-weight="700" fill="#4a44b8">Kubernetes cluster</text>
 
   <!-- Caller -->
@@ -84,5 +84,5 @@
   <text x="480" y="372" font-size="14" fill="#333344" text-anchor="middle">mirrord intercepts at the service pod, after the gateway. A request that reaches your local</text>
   <text x="480" y="394" font-size="14" fill="#333344" text-anchor="middle">process has already been authenticated, routed, and transformed by the real gateway.</text>
   <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="635" y="-7" width="36" height="36"/>
+  <use href="#k8s" x="661" y="35" width="36" height="36"/>
 </svg>

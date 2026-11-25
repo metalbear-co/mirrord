@@ -43,7 +43,7 @@
   <rect x="0" y="-47" width="1200" height="767" fill="#ffffff"/>
 
   <!-- Cluster boundary -->
-  <path d="M262.0 600.0 A22 22 0 0 1 240.0 578.0 L240.0 149.8 A82.0 82.0 0 0 1 340.3 20.0 A109.0 109.0 0 0 1 535.0 20.0 A99.1 99.1 0 0 1 712.0 20.0 A87.7 87.7 0 0 1 830.0 149.8 L830.0 578.0 A22 22 0 0 1 808.0 600.0 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M240.0 546.9 A64.2 64.2 0 0 1 240.0 465.1 A64.2 64.2 0 0 1 240.0 383.3 A64.2 64.2 0 0 1 240.0 301.6 A64.2 64.2 0 0 1 240.0 219.8 A64.2 64.2 0 0 1 240.0 138.0 A75.6 75.6 0 0 1 334.4 20.0 A89.2 89.2 0 0 1 493.7 20.0 A76.0 76.0 0 0 1 629.4 20.0 A72.7 72.7 0 0 1 759.2 20.0 A59.0 59.0 0 0 1 830.0 114.4 A67.9 67.9 0 0 1 830.0 200.9 A67.9 67.9 0 0 1 830.0 287.4 A67.9 67.9 0 0 1 830.0 373.9 A67.9 67.9 0 0 1 830.0 460.4 A67.9 67.9 0 0 1 830.0 546.9 A37.5 37.5 0 0 1 776.9 600.0 A188.2 188.2 0 0 1 605.8 600.0 A207.7 207.7 0 0 1 417.0 600.0 A136.3 136.3 0 0 1 293.1 600.0 A37.5 37.5 0 0 1 240.0 546.9 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
   <text x="260" y="48" font-size="15" font-weight="700" fill="#4a44b8">Shared Kubernetes cluster</text>
 
   <!-- Developer D -->
@@ -154,5 +154,5 @@
   <text x="622" y="687" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
   <text x="644" y="687" font-size="14" fill="#232141">DB branching gives a developer a personal, isolated database.</text>
   <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="753" y="-21" width="36" height="36"/>
+  <use href="#k8s" x="805" y="28" width="36" height="36"/>
 </svg>
