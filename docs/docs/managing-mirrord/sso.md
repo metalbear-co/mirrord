@@ -2,7 +2,6 @@
 title: Single Sign-On
 description: Connect the mirrord Operator to your OIDC identity provider so developers log in without a kubeconfig.
 tags:
-  - team
   - enterprise
 ---
 
