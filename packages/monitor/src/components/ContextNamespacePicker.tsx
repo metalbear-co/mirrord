@@ -261,6 +261,12 @@ interface ContextNamespacePickerProps {
   onSelectNamespace: (namespace: string | null) => void
   namespacesLoading: boolean
   namespacesError: boolean
+  /**
+   * Keeps the pickers on screen in windows narrower than the `md` breakpoint, where they are
+   * hidden by default. A view whose pickers are its only way to choose what it shows needs them
+   * at every width.
+   */
+  alwaysVisible?: boolean
 }
 
 interface ContextPickerProps {
@@ -311,9 +317,15 @@ export default function ContextNamespacePicker({
   onSelectNamespace,
   namespacesLoading,
   namespacesError,
+  alwaysVisible = false,
 }: ContextNamespacePickerProps) {
   return (
-    <div className="hidden min-w-0 items-center gap-2 md:flex">
+    <div
+      className={cn(
+        'min-w-0 items-center gap-2',
+        alwaysVisible ? 'flex' : 'hidden md:flex',
+      )}
+    >
       <ContextPicker
         contexts={contexts}
         currentContext={currentContext}

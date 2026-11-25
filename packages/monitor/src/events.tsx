@@ -53,6 +53,7 @@ function Events({ active }: EventsProps) {
         onSelectNamespace={setNamespace}
         namespacesLoading={namespacesLoading}
         namespacesError={namespacesError}
+        alwaysVisible
       />,
       slot,
     )
