@@ -482,7 +482,7 @@ impl ReplayStore {
     /// Waits for the response headers as long as the local application takes, so that a developer
     /// can hold the request on a breakpoint.
     async fn replay(&self, id: u64, options: ReplayOptions) -> Result<ReplayRun, ReplayError> {
-        let mut header_changes = Vec::with_capacity(options.headers.len());
+        let mut header_changes = Vec::new();
         for (name, value) in options.headers {
             let invalid = || ReplayError::InvalidHeader(name.clone());
 
