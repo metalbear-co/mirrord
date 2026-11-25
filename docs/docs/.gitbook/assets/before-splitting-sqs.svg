@@ -13,6 +13,10 @@
       </g>
       <circle cx="16" cy="16" r="2.4" fill="#ffffff"/>
     </symbol>
+    <symbol id="envelope" viewBox="0 0 28 20">
+      <rect x="1" y="1" width="26" height="18" rx="3" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+      <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
   </defs>
   <rect x="0" y="0" width="1200" height="190" fill="#ffffff"/>
 
@@ -20,7 +24,8 @@
   <rect x="20" y="70" width="180" height="64" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
   <text x="110" y="108" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Producer</text>
   <line x1="200" y1="102" x2="366" y2="102" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="283" y="92" font-size="12.5" fill="#333344" text-anchor="middle">send messages</text>
+  <text x="283" y="86" font-size="12.5" fill="#333344" text-anchor="middle">send messages</text>
+  <use href="#envelope" x="269" y="92" width="28" height="20"/>
 
   <!-- Message queue -->
   <rect x="370" y="70" width="300" height="64" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>

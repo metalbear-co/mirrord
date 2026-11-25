@@ -79,6 +79,62 @@ A boundary for a message broker cluster, such as "Kafka cluster" or "RabbitMQ cl
     </symbol>
 ```
 
+## Symbols
+
+Use a symbol, not only a label, when a symbol shows what a thing is. A reader recognizes a laptop or a database faster than they read a box title.
+
+### mirrord logo
+
+Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, 22 wide and 40 high, and move the title to the right to make space:
+
+```xml
+<use href="#mirrord" x="..." y="..." width="22" height="40"/>
+```
+
+The symbol is the mirror from `images/logo.svg` at the repository root, without the wordmark. Copy the `<symbol id="mirrord" viewBox="97 61 391 696">` definition from `docs/.gitbook/assets/operator-architecture.svg`. Do not change it.
+
+### Laptop
+
+Draw a developer machine, a local process, or a CI runner as a laptop. The box is the screen. Add the keyboard as a dark bar under it, 16 wider on each side:
+
+```xml
+<rect x="X" y="Y" width="W" height="H" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+<path d="M X-16 Y+H h W+32 l -8 12 h -(W+16) z" fill="#232141"/>
+```
+
+Calculate the path numbers. The screen keeps the fill of its role, for example `#756DF3` for a local process. When the laptop holds other boxes, such as `mirrord-layer` or a terminal, the screen is a boundary (`#F5F4FE`).
+
+### Stack
+
+Draw more than one of a thing as a stack: two copies of the box behind it, each one 8 up and 8 to the right. Use it for "other services", replicas, workers, consumers, and publishers. Draw the back copies first:
+
+```xml
+<rect x="X+16" y="Y-16" width="W" height="H" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+<rect x="X+8" y="Y-8" width="W" height="H" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+<rect x="X" y="Y" width="W" height="H" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+```
+
+Do not use a stack when the diagram shows the copies one by one, for example three pods with one agent each.
+
+### Database
+
+Draw a database as a cylinder, with the role fill. A database branch is a temporary resource, so its cylinder is white with a dashed `#756DF3` outline.
+
+### Message
+
+Put an envelope on the arrow from a producer or publisher to a queue, topic, or subscription, to show that messages move there. Center it on the arrow, 28 wide and 20 high, and keep the arrow label next to it:
+
+```xml
+<symbol id="envelope" viewBox="0 0 28 20">
+  <rect x="1" y="1" width="26" height="18" rx="3" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+</symbol>
+```
+
+### Code and cloud
+
+The dev loop diagram uses a laptop with code (`#code`) for local work and a cloud (`#cloud`) for a remote environment. Copy them from `docs/.gitbook/assets/devloop.svg` when another diagram needs the same meaning.
+
 ## Text
 
 - Box title: `font-size="16" font-weight="700"`. Smaller boxes may use 14.
