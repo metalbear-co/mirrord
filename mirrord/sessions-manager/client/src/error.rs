@@ -127,6 +127,10 @@ pub enum SessionsManagerClientError {
     WebSocketUpgradeTimeout,
     #[error("sessions-manager control-plane subscription was superseded")]
     Superseded,
+    /// The sessions-manager said that the agent replica this connection is pinned to is gone,
+    /// and no reconnect can reach it again.
+    #[error("the serverless task this session is attached to is gone")]
+    PinnedReplicaGone,
     #[error("sessions-manager control-plane subscription is closed")]
     SubscriptionClosed,
     #[error("Missing required env var: {0}")]

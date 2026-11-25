@@ -200,7 +200,7 @@ struct State {
     /// to every request the agent redirects, whichever client is stealing it.
     share_links: ShareLinkKeys,
     /// Set in a workload companion whose task waits for admission, so that its client
-    /// connections are counted and can end a replaced task.
+    /// connections can own and end a replaced task.
     admission: Option<AdmissionHandle>,
 }
 
@@ -364,7 +364,7 @@ impl State {
         let _admission_connection = self
             .admission
             .as_ref()
-            .map(AdmissionHandle::client_connected);
+            .map(|admission| admission.client_connected(client_id));
 
         let connection = ClientConnection::from_protocol_connection(connection, client_id);
         let result = ClientConnectionHandler::new(client_id, connection, tasks, self)
@@ -816,6 +816,12 @@ impl ClientConnectionHandler {
                     client_id = self.id,
                     code, "ignoring the exit code of a replaced task"
                 ),
+            },
+            ClientMessage::ReplacedTaskOwner => match &self.state.admission {
+                Some(admission) => admission.replaced_task_owner(self.id),
+                // Only a workload companion whose task waits for admission can have its task
+                // replaced, so there is no task to own.
+                None => debug!(client_id = self.id, "ignoring the owner of a replaced task"),
             },
         }
 
