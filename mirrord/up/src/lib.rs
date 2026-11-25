@@ -26,7 +26,7 @@ pub use config::{
     UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
-use futures::TryStreamExt;
+use futures::{TryStreamExt, stream::BoxStream};
 pub use init::{
     InitError, PickedService, PickedWorkload, RenderError, SkeletonError, detect_ports,
     list_workloads_for_mode, render_skeleton, run_wizard, service_name_for,
@@ -39,10 +39,10 @@ use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
-    MIRRORD_DEBUG_HOLD,
+    LayerConfig, MIRRORD_DEBUG_HOLD,
     config::{ConfigContext, ConfigError, EnvKey},
     debug_hold,
-    target::{Target, TargetType},
+    target::{Target, TargetType, serverless::ServerlessTarget},
     util::GIT_BRANCH,
 };
 use mirrord_kube::{
@@ -50,10 +50,11 @@ use mirrord_kube::{
     error::KubeApiError,
 };
 use mirrord_progress::MIRRORD_PROGRESS_ENV;
+use mirrord_sessions_manager_client::{ReplicaId, SessionsManagerClientError, TaskEvent};
 use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
-use tokio::task::JoinError;
+use tokio::{process::Command, task::JoinError};
 use uuid::Uuid;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
@@ -108,6 +109,23 @@ pub const RESOLVED_CONFIG_ENV: &str = "MIRRORD_UP_RESOLVED_CONFIG";
 /// session can name the service on the branch databases it creates.
 pub const SERVICE_NAME_ENV: &str = "MIRRORD_UP_SERVICE";
 
+/// Environment variable set on the session of a task-driven service's task, asking `mirrord exec`
+/// to append the task's arguments to the command it runs.
+pub const APPEND_REMOTE_ARGV_ENV: &str = "MIRRORD_UP_APPEND_REMOTE_ARGV";
+
+/// Environment variable holding the sessions-manager session a `mirrord exec` session registers
+/// under. All sessions of a task-driven service share the session of its watch.
+const SESSION_ID_ENV: &str = "MIRRORD_SESSION_ID";
+
+/// The watch for a task-driven service's tasks, which the caller of [`launch`] opened.
+pub struct TaskWatch {
+    /// The sessions-manager session the watch registered under, shared by the sessions of the
+    /// service's tasks.
+    pub session_id: String,
+    /// What the watch reports. Ends only after an error.
+    pub tasks: BoxStream<'static, Result<TaskEvent, SessionsManagerClientError>>,
+}
+
 /// Errors produced by `mirrord up` command.
 #[derive(Debug, Error, Diagnostic)]
 pub enum UpError {
@@ -133,6 +151,37 @@ pub enum UpError {
         service: Arc<str>,
         /// Resolved directory path.
         directory: PathBuf,
+    },
+
+    /// A task-driven service runs in a container. Each of its local processes gets its task's
+    /// arguments appended to the command, which only `mirrord exec` does.
+    #[error(
+        "invalid `run.type` for service `{service}`: `target.tag_filter` and `target.jq_filter` \
+         are only supported with `type: exec`"
+    )]
+    TaskDrivenContainer {
+        /// Name of the task-driven service.
+        service: Arc<str>,
+    },
+
+    /// A task-driven service's target filters can't be used as the service is configured.
+    #[error("invalid `target` for service `{service}`")]
+    TaskSelector {
+        /// Name of the task-driven service.
+        service: Arc<str>,
+        /// What the check refused.
+        #[source]
+        source: Box<ConfigError>,
+    },
+
+    /// The watch for a task-driven service's tasks failed for good.
+    #[error("lost the watch for the tasks of service {name}")]
+    TaskWatch {
+        /// Name of the task-driven service.
+        name: Arc<str>,
+        /// Why the watch ended.
+        #[source]
+        source: Box<SessionsManagerClientError>,
     },
 
     /// A container service configured an exec-only working directory.
@@ -394,10 +443,22 @@ impl UpConfig {
             .map(|service| UpError::ContainerRunDirectory {
                 service: service.clone(),
             });
+        let task_driven_containers = self
+            .services
+            .iter()
+            .filter(|(_, service)| {
+                service.is_task_driven() && matches!(service.run.r#type, config::RunType::Container)
+            })
+            .map(|(service, _)| service)
+            .sorted()
+            .map(|service| UpError::TaskDrivenContainer {
+                service: service.clone(),
+            });
 
         builtin_names
             .chain(unknown_modes)
             .chain(container_directories)
+            .chain(task_driven_containers)
             .collect()
     }
 }
@@ -552,6 +613,7 @@ async fn resolve_unresolved_workloads(
                     resolved: SpecifiedTarget {
                         path: Some(Target::from_str(path)?),
                         namespace: unresolved_target.namespace.clone(),
+                        ..Default::default()
                     },
                 }
             }
@@ -699,6 +761,7 @@ async fn prompt_for_target(
         resolved: SpecifiedTarget {
             path: Some(target),
             namespace: Some(namespace.into()),
+            ..Default::default()
         },
     })
 }
@@ -894,6 +957,18 @@ pub async fn resolve_services(
 
     validate_targets(&service_configs).map_err(UpError::Mode)?;
 
+    // A task-driven service's sessions run without the filters, so their own verification
+    // doesn't see them.
+    for service in service_configs.iter().filter(|service| service.task_driven) {
+        service
+            .config
+            .verify_task_selector()
+            .map_err(|source| UpError::TaskSelector {
+                service: service.service_name.clone(),
+                source: Box::new(source),
+            })?;
+    }
+
     Ok(service_configs)
 }
 
@@ -930,21 +1005,40 @@ pub async fn resolve_preview_services(
 /// children will be printed to the console, prefixed with the name of
 /// the session.
 ///
+/// A task-driven service ([`SubprocessCfg::task_driven`]) gets no child at startup. It gets one
+/// for every task its watch in `watches` reports, which the caller opened for every such
+/// service, under the service's name.
+///
 /// `ready` is filled with the time-to-ready once every session has signalled
 /// readiness, and with the branch databases the sessions report (see [`ReadyTracker`]).
 ///
 /// `debug` names the services whose programs are held for a debugger (see [`MIRRORD_DEBUG_HOLD`]).
 /// [`UpConfig::select_services`] has checked that each is one of the services launched.
 ///
-/// Returns when the user stops the session or one of the child sessions exits.
+/// Returns when the user stops the session or one of the child sessions of a service that isn't
+/// task-driven exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
     debug: &[String],
     ready: ReadyTracker,
+    mut watches: HashMap<Arc<str>, TaskWatch>,
 ) -> Result<(), UpError> {
-    let commands = service_commands(service_configs, correlation_id, debug)?;
-    process::run(commands, ready).await
+    let (task_driven, plain): (Vec<_>, Vec<_>) = service_configs
+        .into_iter()
+        .partition(|config| config.task_driven);
+    let commands = service_commands(plain, correlation_id, debug)?;
+    let task_commands = task_driven
+        .into_iter()
+        .map(|config| {
+            // Documented as the caller's duty above.
+            let watch = watches
+                .remove(&config.service_name)
+                .expect("the caller of `launch` opens a watch for every task-driven service");
+            task_commands(config, correlation_id, watch)
+        })
+        .collect::<Result<_, _>>()?;
+    process::run(commands, task_commands, ready).await
 }
 
 /// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
@@ -968,58 +1062,122 @@ fn service_commands(
                 incoming: _,
                 db_branches_origin: _,
                 queues_origin: _,
+                task_driven: _,
             } = config;
-            let config::RunConfig {
-                r#type,
-                directory,
-                command,
-                pre_command,
-            } = run;
 
-            let encoded_cfg = config.encode()?;
-
-            let mut cmd = resolve_tokio_command(std::env::current_exe()?);
             let debugged = debug.iter().any(|name| **name == *service_name);
-            if debugged {
-                cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED);
-            } else {
-                cmd.env_remove(MIRRORD_DEBUG_HOLD);
-            }
-            cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
-                .env(MIRRORD_PROGRESS_ENV, "simple")
-                .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
-                .env(SERVICE_NAME_ENV, &*service_name)
-                .arg(Into::<&'static str>::into(r#type))
-                .arg("--")
-                .args(command)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            let pre = pre_command.split_first().map(|(program, args)| {
-                let mut pre = resolve_tokio_command(program);
-                pre.args(args)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .kill_on_drop(true);
-                if let Some(directory) = &directory {
-                    pre.current_dir(directory);
-                }
-                pre
-            });
-            if let Some(directory) = directory {
-                cmd.current_dir(directory);
-            }
+            let session = session_command(&config, &service_name, &run, correlation_id, debugged)?;
 
             Ok(process::ServiceCommands {
+                pre: pre_command(&run),
                 name: service_name,
                 debugged,
-                pre,
-                session: cmd,
+                session,
             })
         })
         .collect()
+}
+
+/// What runs a task-driven service: its `run.pre_command`, the watch for its tasks, and the
+/// session of each task.
+///
+/// A task's session runs the service's config with the filters removed and the target pinned to
+/// the task's replica, under the watch's sessions-manager session. It appends the task's
+/// arguments to `run.command`.
+fn task_commands(
+    config: SubprocessCfg,
+    correlation_id: Uuid,
+    watch: TaskWatch,
+) -> Result<process::TaskServiceCommands, UpError> {
+    let SubprocessCfg {
+        mut config,
+        service_name,
+        run,
+        ..
+    } = config;
+    config
+        .verify_task_selector()
+        .map_err(|source| UpError::TaskSelector {
+            service: service_name.clone(),
+            source: Box::new(source),
+        })?;
+    let Some(Target::Serverless(target)) = config.target.path.clone() else {
+        unreachable!("`verify_task_selector` accepts the filters only on a serverless target");
+    };
+    config.target.tag_filter = None;
+    config.target.jq_filter = None;
+
+    let TaskWatch { session_id, tasks } = watch;
+    let pre = pre_command(&run);
+    let name = service_name.clone();
+    let instance = move |replica: &ReplicaId| {
+        let mut config = config.clone();
+        config.target.path = Some(Target::Serverless(ServerlessTarget {
+            serverless: target.serverless.clone(),
+            container: Some(replica.to_string()),
+        }));
+        let mut session = session_command(&config, &service_name, &run, correlation_id, false)?;
+        session
+            .env(SESSION_ID_ENV, &session_id)
+            .env(APPEND_REMOTE_ARGV_ENV, "1");
+        Ok(session)
+    };
+
+    Ok(process::TaskServiceCommands {
+        name,
+        pre,
+        instance: Box::new(instance),
+        tasks,
+    })
+}
+
+/// The `mirrord exec`/`mirrord container` child that runs `run.command` under `config`.
+fn session_command(
+    config: &LayerConfig,
+    service_name: &str,
+    run: &RunConfig,
+    correlation_id: Uuid,
+    debugged: bool,
+) -> Result<Command, UpError> {
+    let encoded_cfg = config.encode()?;
+
+    let mut cmd = resolve_tokio_command(std::env::current_exe()?);
+    if debugged {
+        cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED);
+    } else {
+        cmd.env_remove(MIRRORD_DEBUG_HOLD);
+    }
+    cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
+        .env(MIRRORD_PROGRESS_ENV, "simple")
+        .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
+        .env(SERVICE_NAME_ENV, service_name)
+        .arg(<&'static str>::from(&run.r#type))
+        .arg("--")
+        .args(&run.command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    if let Some(directory) = &run.directory {
+        cmd.current_dir(directory);
+    }
+    Ok(cmd)
+}
+
+/// The service's `run.pre_command`, run to completion without mirrord, if it has one.
+fn pre_command(run: &RunConfig) -> Option<Command> {
+    run.pre_command.split_first().map(|(program, args)| {
+        let mut pre = resolve_tokio_command(program);
+        pre.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        if let Some(directory) = &run.directory {
+            pre.current_dir(directory);
+        }
+        pre
+    })
 }
 
 #[cfg(test)]

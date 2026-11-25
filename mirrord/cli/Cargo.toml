@@ -103,6 +103,7 @@ mime_guess.workspace = true
 mirrord-session-monitor-protocol.workspace = true
 mirrord-session-monitor-client.workspace = true
 mirrord-sessions-manager-client.workspace = true
+mirrord-remote-layer-protocol.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 hyper.workspace = true
 bytes.workspace = true

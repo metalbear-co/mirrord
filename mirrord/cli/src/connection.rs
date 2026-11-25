@@ -7,7 +7,7 @@ use mirrord_config::{
     LayerConfig,
     agent::AgentFileConfig,
     config::MirrordConfig,
-    target::{Target, TargetDisplay},
+    target::{Target, TargetDisplay, serverless::ServerlessTarget},
 };
 use mirrord_intproxy::agent_conn::AgentConnectInfo;
 use mirrord_kube::{
@@ -84,7 +84,7 @@ fn send_upgrade_ide_message<P: Progress>(
 /// task of the service. The client carries only the user's kubeconfig credentials, with no
 /// operator session certificate: the hosted routes are authorized by Kubernetes RBAC.
 #[mirrord_macros::boxed_future]
-async fn operator_sessions_manager_client<P, R>(
+pub(crate) async fn operator_sessions_manager_client<P, R>(
     layer_config: &LayerConfig,
     progress: &P,
     analytics: &mut R,
@@ -118,6 +118,22 @@ where
     subtask.success(Some("operator sessions-manager available"));
 
     Ok(api.client().clone())
+}
+
+/// The sessions-manager scope of the serverless `target`: its service, in the environment named
+/// by `target.namespace`, `default` when not set.
+pub(crate) fn serverless_scope(
+    config: &LayerConfig,
+    target: &ServerlessTarget,
+) -> CliResult<ServiceScope> {
+    Ok(ServiceScope {
+        service: target.sessions_manager_service()?,
+        environment: config
+            .target
+            .namespace
+            .clone()
+            .unwrap_or_else(|| "default".to_owned()),
+    })
 }
 
 /// Operations using Kubernetes credentials directly need a mirrord certificate only to
@@ -550,7 +566,6 @@ pub(crate) async fn create_and_connect<R: Reporter>(
         // sessions-managers, which would ignore them. Checked again on the path that reads them,
         // so that no caller can skip it.
         config.verify_task_selector()?;
-        let service = target.sessions_manager_service()?;
         let user_session_id = std::env::var("MIRRORD_SESSION_ID")
             .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
         let agent_replica_filter = target.sessions_manager_target_replica_id();
@@ -559,14 +574,7 @@ pub(crate) async fn create_and_connect<R: Reporter>(
             jq_filter: config.target.jq_filter.clone(),
         });
         let connect_info = SessionsManagerConnectInfo {
-            scope: ServiceScope {
-                service,
-                environment: config
-                    .target
-                    .namespace
-                    .clone()
-                    .unwrap_or_else(|| "default".to_owned()),
-            },
+            scope: serverless_scope(config, target)?,
             user_session_id,
             replica_filter: agent_replica_filter.map(Into::into),
             agent_selector,

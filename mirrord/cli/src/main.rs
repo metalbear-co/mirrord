@@ -534,6 +534,7 @@ async fn exec_process(
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
         .chain(args.binary_args.iter())
+        .chain(execution_info.remote_args.iter())
         .map(Clone::clone)
         .collect::<Vec<_>>();
 

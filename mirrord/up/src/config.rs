@@ -338,7 +338,7 @@ impl CommonConfig {
 /// The target workload of a service.
 // Separate from [`mirrord_config::target::TargetConfig`] because we use custom serde attributes
 // for this that we don't want on the other one.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
+#[derive(Clone, PartialEq, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SpecifiedTarget {
     /// The workload to target, e.g. `deployment/my-app` or `pod/my-pod/container/my-container`.
@@ -360,6 +360,49 @@ pub struct SpecifiedTarget {
     /// when not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) namespace: Option<Arc<str>>,
+
+    /// Makes the service task-driven: instead of one local process, `mirrord up` starts one for
+    /// every task of a serverless `path` whose AWS Batch job tags match, each with that task's
+    /// environment and arguments. A mapping of tag names to regexes, all of which a task's tags
+    /// must match. For example:
+    ///
+    /// ```yaml
+    /// target:
+    ///   path: serverless/report-generator
+    ///   tag_filter:
+    ///     company_id: "^1234$"
+    /// ```
+    ///
+    /// Each local process gets the task's arguments appended to `run.command`, and is stopped
+    /// when its task ends. A local process exiting doesn't stop the other services. Combined with
+    /// `jq_filter`, a task must match both. Needs `common.operator: true`, and can't be named by
+    /// `mirrord up --debug`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) tag_filter: Option<BTreeMap<String, String>>,
+
+    /// Makes the service task-driven, as `tag_filter` does, with a jq program run on
+    /// `{"tags": {"<name>": "<value>", ...}}`, the tags of a task's AWS Batch job. A task matches
+    /// when the program outputs `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
+    pub(crate) jq_filter: Option<String>,
+}
+
+impl std::fmt::Debug for SpecifiedTarget {
+    /// Leaves the filters out: they describe the customer's workload.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SpecifiedTarget")
+            .field("path", &self.path)
+            .field("namespace", &self.namespace)
+            .field(
+                "tag_filter",
+                &self.tag_filter.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("jq_filter", &self.jq_filter.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 /// The three states a service's `target` field can be in.
@@ -473,6 +516,8 @@ impl TargetConfig {
     pub const UNSPECIFIED: Self = Self::Specified(SpecifiedTarget {
         path: None,
         namespace: None,
+        tag_filter: None,
+        jq_filter: None,
     });
 
     #[cfg(test)]
@@ -507,6 +552,7 @@ impl TargetConfig {
             Self::Specified(SpecifiedTarget {
                 path: None,
                 namespace,
+                ..
             }) => Err(UnresolvedTarget {
                 workload_name: Arc::clone(name),
                 namespace: namespace.clone(),
@@ -516,6 +562,7 @@ impl TargetConfig {
             Self::Specified(SpecifiedTarget {
                 path: path @ Some(_),
                 namespace,
+                ..
             }) => Ok(mirrord_config::target::TargetConfig {
                 path: path.clone(),
                 namespace: namespace.as_deref().map(Into::into),
@@ -885,6 +932,23 @@ impl ServiceConfig {
         &self.default_mode
     }
 
+    /// Whether the service is task-driven: it runs no local process of its own, and starts one
+    /// for every serverless task that matches its target's `tag_filter` or `jq_filter` instead.
+    ///
+    /// The one place that decides it. A filter that `config_patch` sets doesn't count: the
+    /// service then runs one session, which attaches to one matching task as `mirrord exec`
+    /// does.
+    pub(crate) fn is_task_driven(&self) -> bool {
+        matches!(
+            &self.target,
+            TargetConfig::Specified(SpecifiedTarget {
+                tag_filter,
+                jq_filter,
+                ..
+            }) if tag_filter.is_some() || jq_filter.is_some()
+        )
+    }
+
     /// Build a ([`LayerConfig`], [`RunConfig`]) pair for this service, on top of `base` from
     /// [`CommonConfig::base_config`].
     ///
@@ -908,6 +972,7 @@ impl ServiceConfig {
         kind: SessionKind,
     ) -> Result<SubprocessCfg, ConfigPatchErrorKind> {
         let preview = kind == SessionKind::Preview;
+        let task_driven = self.is_task_driven();
         if preview {
             self.default_mode = ServiceMode::Split.into();
             self.env = EnvConfig::default();
@@ -944,6 +1009,10 @@ impl ServiceConfig {
                 ),
             },
         };
+        if let TargetConfig::Specified(target) = &self.target {
+            cfg.target.tag_filter = target.tag_filter.clone();
+            cfg.target.jq_filter = target.jq_filter.clone();
+        }
 
         // Every service of a run shares the key, so services pointing at one entry land on one
         // branch. Branches set in the base config, or by `config_patch` below, take precedence.
@@ -1059,6 +1128,7 @@ impl ServiceConfig {
             incoming: mode.incoming(),
             db_branches_origin,
             queues_origin,
+            task_driven,
         })
     }
 
@@ -1290,6 +1360,11 @@ pub struct SubprocessCfg {
     /// are the `"*"` splits `mirrord up` adds, which a preview session asks its operator to drop
     /// where it can't serve them rather than failing.
     pub queues_origin: RequestOrigin,
+    /// Whether the service is task-driven (see [`ServiceConfig::is_task_driven`]): `config` then
+    /// holds the target's filters, which select the tasks `mirrord up` watches for, and each
+    /// task gets a session of its own, with the filters removed and the target pinned to the
+    /// task.
+    pub task_driven: bool,
 }
 
 /// Whether `target` is one workload. The operator resolves a DB branching request against the
@@ -1536,6 +1611,7 @@ impl UpConfig {
                             container: None,
                         })),
                         namespace: unresolved.namespace.clone(),
+                        ..Default::default()
                     },
                 };
                 (unresolved, resolved)
@@ -1692,6 +1768,21 @@ impl UpConfig {
         if in_containers.is_empty().not() {
             return Err(SelectError::DebugNotExec {
                 services: in_containers,
+            });
+        }
+
+        let task_driven: Vec<String> = debug
+            .iter()
+            .filter(|name| {
+                self.services
+                    .get(name.as_str())
+                    .is_some_and(ServiceConfig::is_task_driven)
+            })
+            .cloned()
+            .collect();
+        if task_driven.is_empty().not() {
+            return Err(SelectError::DebugTaskDriven {
+                services: task_driven,
             });
         }
 
@@ -2029,6 +2120,18 @@ pub enum SelectError {
     ))]
     DebugNotExec {
         /// The services named by `--debug` that run with `type: container`.
+        services: Vec<String>,
+    },
+
+    /// Services named by `--debug` are task-driven. They start their local processes only when
+    /// tasks match, so there is no program to hold when the debugger attaches.
+    #[error("cannot debug task-driven service(s): {}", services.join(", "))]
+    #[diagnostic(help(
+        "Services with `target.tag_filter` or `target.jq_filter` start a local process for each \
+         matching task, and can't be held for a debugger. Drop these from `--debug`."
+    ))]
+    DebugTaskDriven {
+        /// The task-driven services named by `--debug`.
         services: Vec<String>,
     },
 }
@@ -3325,11 +3428,13 @@ mod tests {
             SpecifiedTarget {
                 path: Some(Target::from_str("deployment/web").unwrap()),
                 namespace: Some("staging".into()),
+                ..Default::default()
             }
             .into(),
             SpecifiedTarget {
                 path: None,
                 namespace: Some("staging".into()),
+                ..Default::default()
             }
             .into(),
         ] {
@@ -3423,6 +3528,7 @@ mod tests {
             resolved: SpecifiedTarget {
                 path: Some(Target::from_str(path).unwrap()),
                 namespace: namespace.map(Into::into),
+                ..Default::default()
             },
         }
     }
@@ -3646,6 +3752,7 @@ mod tests {
                 resolved: SpecifiedTarget {
                     path: None,
                     namespace: None,
+                    ..Default::default()
                 },
             },
         )]);
