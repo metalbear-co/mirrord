@@ -86,7 +86,9 @@ A keyed subscription only receives its session's events if the session's target 
 
 ## Who sees which events
 
-With operator `3.237.0` or newer, you only receive the events of targets that you could run `mirrord exec` against. The operator checks that your Kubernetes user may `get` each event's target workload, the same check that it makes when a session starts. For a `targetless` session it checks `get` on the namespace, and for a label target it checks `list` on the namespace's pods. Subscribing also needs `watch` on `events.operator.metalbear.co`.
+With operator `3.237.0` or newer, you only receive the events of targets that your Kubernetes user may `get`. The operator checks this for each event's target workload, with the same check that `mirrord exec` makes when a session starts. For a `targetless` session it checks `get` on the namespace, and for a label target it checks `list` on the namespace's pods. Subscribing also needs `watch` on `events.operator.metalbear.co`.
+
+Being allowed to `get` a target isn't the same as being able to run `mirrord exec` against it, because `mirrord exec` also needs `proxy` on the operator's `targets`. A per-target Role, such as the ones that the map form of the chart's `roleNamespaces` creates, grants `proxy` only on the targets that it lists. So a user who also has broader read access, such as the `view` ClusterRole, sees the events of workloads that they can't run `mirrord exec` against.
 
 A user who may `create` `mirrordclustersessions` in the whole cluster, such as a cluster administrator, receives the events of every target.
 
