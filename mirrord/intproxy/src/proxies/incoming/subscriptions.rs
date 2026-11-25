@@ -192,6 +192,13 @@ impl SubscriptionsManager {
             .map(|sub| &sub.active_source.request)
     }
 
+    /// Returns where the local application listens for each subscribed [`Port`].
+    pub fn listeners(&self) -> impl Iterator<Item = (Port, &ListeningOn)> + '_ {
+        self.subscriptions
+            .iter()
+            .map(|(port, subscription)| (*port, &subscription.active_source.request.listening_on))
+    }
+
     pub fn hit_count(&self, port: Port) -> Option<u64> {
         self.subscriptions.get(&port).map(Subscription::hit_count)
     }

@@ -52,6 +52,13 @@ impl StreamingBody {
             idx: 0,
         }
     }
+
+    /// Calls `read` with the frames of this body that were read from its stream so far, starting
+    /// with the frames it was created with.
+    pub fn buffered<R>(&self, read: impl FnOnce(&[InternalHttpBodyFrame]) -> R) -> R {
+        // No holder of this lock panics, so it is never poisoned.
+        read(&self.shared_state.lock().unwrap().1)
+    }
 }
 
 impl Clone for StreamingBody {
