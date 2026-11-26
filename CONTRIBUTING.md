@@ -1030,8 +1030,9 @@ The setup that the Publish skills workflow relies on:
 - `metalbear-co/skills` has no `.github/workflows`, because the Cubby token has no Workflows permission, so a publish
   that would delete them fails. That means removing all three old workflows: `check-fence-tags.yml`, which the
   `content_check` job of mirrord replaces, and `docs-sync.yml` and `update-references.yml`, which open weekly pull
-  requests that the next publish would replace. Without `update-references.yml`, nothing refreshes the reference
-  snapshots under `skills/*/references/`.
+  requests that the next publish would replace. The [Sync skills with docs workflow](#syncing-the-skills-with-the-docs)
+  takes over from `docs-sync.yml` in this repository. Without `update-references.yml`, nothing refreshes the
+  reference snapshots under `skills/*/references/`.
 
 When a run fails:
 
@@ -1045,3 +1046,80 @@ When a run fails:
   makes.
 - If creating the token failed, check that Cubby is still installed on `metalbear-co/skills`, and that the
   `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set.
+
+### Syncing the skills with the docs
+
+The skills restate what the docs say, so a docs change can leave a skill wrong. Every Tuesday at 09:00 UTC, the
+[Sync skills with docs workflow](/.github/workflows/docs-sync.yaml) gives Claude the changes to the Markdown pages under
+`docs/docs/` since the last sync, and Claude updates `skills/skills/` with the prompt in
+`skills/.github/docs-sync-prompt.md`. Cubby then opens a pull request from the `auto/docs-sync` branch. CI checks it
+like any other pull request, and its description lists the skills that changed. When a skill changed, the workflow also
+raises the patch level of `version` in `skills/.claude-plugin/plugin.json`, so that the pull request passes the plugin
+version check.
+
+`skills/.github/docs-sync-sha`, the marker, holds the commit of `main` up to which the skills are synced. A run diffs
+the pages from that commit to the tip of `main`, and its pull request writes the tip into the file, so merging it starts
+the next sync there. A pull request that is closed without merging leaves the marker where it was, so the next run
+gives the same commits to Claude again, together with the new ones. When Claude changes no skill, the run still opens a
+pull request, which only moves the marker, so merge that one too.
+
+A run opens no pull request when no page changed. It also opens none while a docs-sync pull request is open, and the
+sync waits until that pull request merges or closes. Any pull request from this repository's `auto/docs-sync` stops
+the sync, whoever opened it, but a fork's pull request from a branch of the same name doesn't. The workflow requests no
+reviewer for a docs-sync pull request, so the summary of a run that found one open links it with its age.
+
+Every run that opens a pull request pushes the same branch, `auto/docs-sync`, and replaces what an earlier run left
+there. A pull request that is closed without merging keeps its branch until the next run that opens a pull request,
+but because every run uses the same branch, there is at most one docs-sync branch. Keep no work on that branch once its
+pull request is closed.
+
+Review a docs-sync pull request like any other: check each edit against the current pages, and push fixes to its
+branch. When `content_check` fails, a code block that Claude added or edited has a wrong fence tag or holds config that
+doesn't match the schema, as [`skills/CONTRIBUTING.md`](/skills/CONTRIBUTING.md) describes.
+
+Merging the pull request publishes `skills/` to `metalbear-co/skills`, including when the pull request only moves the
+marker.
+
+To run a sync outside the schedule, run the workflow from `main`. The first command below is a dry run: it runs Claude,
+shows the changes and Claude's full output in the run, and pushes nothing. The second command opens the pull request:
+
+```bash
+gh workflow run docs-sync.yaml --repo metalbear-co/mirrord --ref main
+gh workflow run docs-sync.yaml --repo metalbear-co/mirrord --ref main --field dry_run=false
+```
+
+A dry run from another branch, such as one that changes the workflow, only lists the docs commits that a run would
+give to Claude, because only `main` can read the Anthropic API key.
+
+The setup that the Sync skills with docs workflow relies on:
+
+- The repository has an environment named `docs-sync` with a secret named `ANTHROPIC_API_KEY`, an Anthropic API key
+  that the Claude step uses. The environment's deployment branches are limited to `main`, so no other branch can read
+  the key.
+- The Cubby GitHub App is installed on this repository with write access to its contents and pull requests, as the
+  release pull requests need. The workflow creates its token from the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY`
+  secrets.
+
+A failed run of `main` that could open a pull request posts to `#ci-alerts`; a dry run doesn't. When a run fails:
+
+- If the error names `skills/.github/docs-sync-sha`, the file holds no commit in the history of `main`. Set it, with a
+  pull request, to the commit that the last merged docs-sync pull request moved it to, which its description names
+  after "moves `skills/.github/docs-sync-sha` to". If none has merged yet, set it to
+  `3a843d8d473b3bda5be3408998a01b261bf3d7e0`, the commit that imported the docs.
+- If the Claude step failed, run a dry run from `main`, and read Claude's full output in the log of that step. The
+  Claude step fails on a missing `ANTHROPIC_API_KEY` too, for example when the `docs-sync` environment lost it.
+- If the step that puts back the git config failed, a file under `.git/` changed while Claude ran, for example HEAD
+  moved. If the check of Claude's changes failed, Claude changed a file outside `skills/skills/` or one of the four
+  exempt files that the prompt says never to edit. The run pushed nothing. Run a dry run from `main` to see why, and
+  change the prompt if it needs to say more.
+- If the error says that a pull request from `auto/docs-sync` is open, or that the marker on `main` changed, the run
+  started from an older state than the repository has now, for example because only its failed jobs were re-run. It
+  pushed nothing. Merge or close that pull request if there is one, then start a new run.
+- If creating the token, listing the pull requests, the push or opening the pull request failed, check that Cubby is
+  still installed on this repository, and that the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set. The fetch
+  of `main` before the push uses no token, so its failure has nothing to do with Cubby.
+
+To re-run a failed run, use **Re-run all jobs**, not **Re-run failed jobs**. Re-running all jobs finds the commits to
+sync again, up to the current tip of `main`. A re-run of the failed jobs syncs the commits that the first attempt found,
+which can be days old, and the step that opens the pull request fails it if a docs-sync pull request has opened or
+merged since.
