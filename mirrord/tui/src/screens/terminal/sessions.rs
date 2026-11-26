@@ -344,6 +344,7 @@ mod tests {
             target: "deployment/api".to_owned(),
             namespace: None,
             context: None,
+            kubeconfig: None,
             started_at: "2020-01-01T00:00:00Z".to_owned(),
             mirrord_version: "3.249.0".to_owned(),
             is_operator: true,

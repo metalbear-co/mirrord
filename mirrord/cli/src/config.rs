@@ -2484,6 +2484,18 @@ pub enum ReplaySubcommand {
         #[arg(long = "remove-header", value_name = "NAME")]
         remove_headers: Vec<String>,
     },
+
+    /// List the SQS and Kafka messages that the operator kept for the session.
+    ///
+    /// The operator keeps them only when the `operator.queueReplay` value of its chart is set.
+    Messages,
+
+    /// Publish one queue message to the session's output queue again, so that your application
+    /// consumes it once more.
+    SendMessage {
+        /// Id of the message, as `mirrord replay messages` prints it.
+        id: u64,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default, Display)]

@@ -277,6 +277,7 @@ fn a_session_under_the_shell_brings_the_panel_in() {
             target: "deployment/api".to_owned(),
             namespace: Some("staging".to_owned()),
             context: None,
+            kubeconfig: None,
             started_at: k8s_openapi::jiff::Timestamp::now().to_string(),
             mirrord_version: "3.249.0".to_owned(),
             is_operator: true,

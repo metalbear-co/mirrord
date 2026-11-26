@@ -1,0 +1,1 @@
+Added `mirrord replay messages` and `mirrord replay send-message`, which list the SQS and Kafka messages that the operator routed to a session and publish one to the session's queue again. Needs an operator with the `operator.queueReplay` chart value set.

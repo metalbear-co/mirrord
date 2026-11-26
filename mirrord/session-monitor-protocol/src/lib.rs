@@ -47,6 +47,10 @@ pub struct SessionInfo {
     /// context/namespace. `None` when it couldn't be resolved from the kubeconfig.
     #[serde(default)]
     pub context: Option<String>,
+    /// Kubeconfig this session reads: the `kubeconfig` option, else the `KUBECONFIG` variable it
+    /// started with, which can list several files. `None` means the default `~/.kube/config`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kubeconfig: Option<String>,
     pub started_at: String,
     pub mirrord_version: String,
     pub is_operator: bool,

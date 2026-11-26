@@ -256,6 +256,10 @@ async fn start_session_monitor(
         target: target_name,
         namespace,
         context,
+        kubeconfig: config
+            .kubeconfig
+            .clone()
+            .or_else(|| std::env::var("KUBECONFIG").ok()),
         started_at: humantime::format_rfc3339(std::time::SystemTime::now()).to_string(),
         mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
         is_operator,

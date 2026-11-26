@@ -178,6 +178,7 @@ mod tests {
             target: target.to_owned(),
             namespace: Some("staging".to_owned()),
             context: None,
+            kubeconfig: None,
             started_at: (Timestamp::now() - std::time::Duration::from_secs(65)).to_string(),
             mirrord_version: "3.249.0".to_owned(),
             is_operator: true,
