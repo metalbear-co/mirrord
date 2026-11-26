@@ -76,7 +76,6 @@ strum.workspace = true
 strum_macros.workspace = true
 clap_complete.workspace = true
 rustls.workspace = true
-local-ip-address.workspace = true
 tokio-rustls.workspace = true
 tokio-stream = { workspace = true, features = ["io-util", "net"] }
 regex.workspace = true
@@ -132,12 +131,13 @@ kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tower-test.workspace = true
+# The tests of `preview sync` and `preview wake` script the operator's end of their websockets.
+tokio-tungstenite.workspace = true
 
 # Only the tests of `preview sync`, which runs on Unix alone, use these.
 [target.'cfg(unix)'.dev-dependencies]
 flate2.workspace = true
 tar.workspace = true
-tokio-tungstenite.workspace = true
 
 [features]
 windows_build = []

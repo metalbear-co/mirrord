@@ -15,6 +15,7 @@ use mirrord_protocol::{
         seqpacket::{DaemonSeqpacket, LayerSeqpacket},
     },
 };
+use nix::fcntl::OFlag;
 use tokio::io;
 use tokio_seqpacket::UnixSeqpacket;
 
@@ -24,7 +25,10 @@ use crate::{
         GenericInMessage, GenericOutMessage, OutgoingKind,
         router::{ConnectionKind, NewConnection},
     },
-    util::{io::throttle::Throttled, path_resolver::InTargetPathResolver},
+    util::{
+        io::throttle::Throttled,
+        target_root::{TargetRoot, proc_fd_path},
+    },
 };
 
 pub struct SeqpacketConnection;
@@ -37,15 +41,13 @@ impl ConnectionKind for SeqpacketConnection {
 
     async fn connect(
         addr: &SocketAddress,
-        target_pid: Option<u64>,
+        target_root: &TargetRoot,
     ) -> io::Result<NewConnection<Self>> {
+        // Holds the socket until the connection is made through its `proc_fd_path`.
+        let mut socket = None;
         let path = match addr {
             SocketAddress::Unix(UnixAddr::Pathname(path)) => {
-                if let Some(pid) = target_pid {
-                    InTargetPathResolver::from_pid(pid).resolve(path)?
-                } else {
-                    path.clone()
-                }
+                proc_fd_path(socket.insert(target_root.open_from_root(path, OFlag::O_PATH)?))
             }
             SocketAddress::Unix(UnixAddr::Abstract(name)) => {
                 let mut name = name.clone();

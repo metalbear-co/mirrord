@@ -25,7 +25,33 @@ jobs:
                     echo "skip=false" >> $GITHUB_OUTPUT
                   fi
 
-            - uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
+            # Events made with the default token start no workflow runs, so `linear-loop-pr` would miss stale closes.
+            # The app has no issues permission, so issues stay on the default token.
+            - id: app-token
+              if: steps.holiday.outputs.skip != 'true'
+              uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+              with:
+                  app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+                  private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+                  permission-pull-requests: write
+
+            - name: Handle stale pull requests
+              uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
+              if: steps.holiday.outputs.skip != 'true'
+              with:
+                  repo-token: ${{ steps.app-token.outputs.token }}
+                  days-before-issue-stale: -1
+                  days-before-issue-close: -1
+                  days-before-pr-stale: 7
+                  days-before-pr-close: 7
+                  stale-pr-message: "This PR hasn't seen activity in a week! Should it be merged, closed, or further worked on? If you want to keep it open, post a comment or remove the `stale` label – otherwise this will be closed in another week."
+                  close-pr-message: "This PR was closed due to lack of activity. Feel free to reopen if it's still relevant."
+                  stale-pr-label: stale
+                  remove-pr-stale-when-updated: true
+                  operations-per-run: 250
+
+            - name: Handle stale issues
+              uses: actions/stale@eb5cf3af3ac0a1aa4c9c45633dd1ae542a27a899 # v10.3.0
               if: steps.holiday.outputs.skip != 'true'
               with:
                   days-before-issue-stale: 365
@@ -34,10 +60,6 @@ jobs:
                   close-issue-message: "This issue was closed due to lack of activity. Feel free to reopen if it's still relevant."
                   stale-issue-label: stale
                   remove-issue-stale-when-updated: true
-                  days-before-pr-stale: 7
-                  days-before-pr-close: 7
-                  stale-pr-message: "This PR hasn't seen activity in a week! Should it be merged, closed, or further worked on? If you want to keep it open, post a comment or remove the `stale` label – otherwise this will be closed in another week."
-                  close-pr-message: "This PR was closed due to lack of activity. Feel free to reopen if it's still relevant."
-                  stale-pr-label: stale
-                  remove-pr-stale-when-updated: true
+                  days-before-pr-stale: -1
+                  days-before-pr-close: -1
                   operations-per-run: 250

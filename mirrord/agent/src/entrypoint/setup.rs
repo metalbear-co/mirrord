@@ -13,7 +13,7 @@ use crate::{
     },
     steal::{StealerCommand, TcpStealerTask},
     task::{BgTaskRuntime, status::IntoStatus},
-    util::path_resolver::InTargetPathResolver,
+    util::target_root::TargetRoot,
 };
 
 /// Starts a [`RedirectorTask`] on the given `runtime`.
@@ -21,7 +21,7 @@ use crate::{
 /// Returns the [`StealHandle`] that can be used to steal incoming traffic.
 pub(super) async fn start_traffic_redirector(
     runtime: &BgTaskRuntime,
-    target_pid: u64,
+    target_root: TargetRoot,
     with_mesh_exclusion: Option<u16>,
     share_links: ShareLinkKeys,
 ) -> AgentResult<(StealHandle, MirrorHandle)> {
@@ -32,8 +32,7 @@ pub(super) async fn start_traffic_redirector(
     let flush_connections = envs::STEALER_FLUSH_CONNECTIONS.from_env_or_default();
     let pod_ips = envs::POD_IPS.from_env_or_default();
     let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
-    let tls_handler_store =
-        StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::from_pid(target_pid));
+    let tls_handler_store = StealTlsHandlerStore::new(tls_steal_config, target_root);
 
     let redirector_task_config = RedirectorTaskConfig::from_env();
 
@@ -86,6 +85,7 @@ pub(super) fn start_stealer(
 
 pub(super) fn start_dns(
     runtime: &BgTaskRuntime,
+    target_root: TargetRoot,
     cancellation_token: CancellationToken,
 ) -> BackgroundTask<DnsCommand> {
     // IMPORTANT: this makes tokio tasks spawn on `runtime`.
@@ -94,10 +94,9 @@ pub(super) fn start_dns(
 
     let (command_tx, command_rx) = mpsc::channel::<DnsCommand>(1000);
 
-    let task_status = tokio::spawn(
-        DnsWorker::new(runtime.target_pid(), command_rx).run(cancellation_token.clone()),
-    )
-    .into_status("DnsTask");
+    let task_status =
+        tokio::spawn(DnsWorker::new(target_root, command_rx).run(cancellation_token.clone()))
+            .into_status("DnsTask");
 
     BackgroundTask::Running(task_status, command_tx)
 }

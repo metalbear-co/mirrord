@@ -81,11 +81,11 @@ Example output:
     ✓ configuration loaded
     ✓ connected to operator
     ✓ preview session resource created
-    ✓ preview pod is ready
+    ✓ preview session is ready
   info:
     * key: <key>
     * namespace: <namespace>
-    * session: preview-session-<target>-<id>
+    * session: <target>-<key>-<id>
     * preview URL: https://<slug>.<shareDomain>
 ```
 

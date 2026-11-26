@@ -1894,6 +1894,7 @@ mod tests {
                 http_filter: None,
                 created_at: None,
                 share: None,
+                auth_method: None,
             }
         }
 

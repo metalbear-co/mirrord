@@ -1725,6 +1725,10 @@ impl LayerConfig {
             if self.feature.preview.replicas != default.feature.preview.replicas {
                 context.add_warning(ignored("feature.preview.replicas"));
             }
+
+            if self.feature.preview.autoscale_range().is_some() {
+                context.add_warning(ignored("feature.preview.autoscale"));
+            }
         } else if self.feature.preview.cronjob.schedule.is_some() {
             context.add_warning(
                 "`feature.preview.cronjob.schedule` only applies to `cronjob/<name>` targets \
@@ -1835,6 +1839,13 @@ impl LayerConfig {
         if self.feature.preview.replicas != default.feature.preview.replicas {
             context.add_warning(ignored_without_target(
                 "feature.preview.replicas",
+                "to scale",
+            ));
+        }
+
+        if self.feature.preview.autoscale_range().is_some() {
+            context.add_warning(ignored_without_target(
+                "feature.preview.autoscale",
                 "to scale",
             ));
         }
