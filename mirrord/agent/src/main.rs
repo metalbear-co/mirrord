@@ -9,7 +9,10 @@
 use std::process::ExitCode;
 
 #[cfg(target_os = "linux")]
-use crate::{entrypoint::IPTABLES_DIRTY_EXIT_CODE, error::AgentError};
+use crate::{
+    entrypoint::{IPTABLES_DIRTY_EXIT_CODE, IPTABLES_LOCKED_EXIT_CODE},
+    error::AgentError,
+};
 
 #[cfg(target_os = "linux")]
 mod cli;
@@ -60,6 +63,7 @@ async fn main() -> ExitCode {
     match crate::entrypoint::main().await {
         Ok(_) => ExitCode::SUCCESS,
         Err(AgentError::IPTablesDirty) => ExitCode::from(IPTABLES_DIRTY_EXIT_CODE),
+        Err(AgentError::IPTablesLocked) => ExitCode::from(IPTABLES_LOCKED_EXIT_CODE),
         _ => ExitCode::FAILURE,
     }
 }

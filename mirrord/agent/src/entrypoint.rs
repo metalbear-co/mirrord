@@ -52,6 +52,7 @@ use crate::{
     client_connection::{self, ClientConnection},
     container_handle::ContainerHandle,
     dns::{self, DnsApi},
+    entrypoint::iptables_lock::IptablesLock,
     env,
     error::{AgentError, AgentResult},
     file::FileManager,
@@ -75,22 +76,35 @@ use crate::{
     workload_companion::{WorkloadCompanionIngress, resolve_replica_id},
 };
 
+pub(crate) mod iptables_lock;
 mod setup;
 
 /// [`ExitCode`](std::process::ExitCode) returned from the child agent process
 /// when dirty iptables are detected.
 pub(crate) const IPTABLES_DIRTY_EXIT_CODE: u8 = 99;
 
+/// [`ExitCode`](std::process::ExitCode) returned when another agent holds the
+/// [`IptablesLock`].
+pub(crate) const IPTABLES_LOCKED_EXIT_CODE: u8 = 98;
+
 /// Env var that gets checked when a new agent is started.
 /// If var is false or not set, the agent starts as an IP table guard which itself starts another
 /// agent. The child agent performs normal agent behaviour.
 const CHILD_PROCESS_ENV: &str = "MIRRORD_AGENT_CHILD_PROCESS";
+
+/// Env var that the guard process sets on the child when another agent holds the
+/// [`IptablesLock`]. The child then only reports the error to its first client and exits.
+const IPTABLES_LOCKED_OUT_ENV: &str = "MIRRORD_AGENT_IPTABLES_LOCKED_OUT";
 
 /// Error message to display when dirty IP tables are detected.
 const DIRTY_IPTABLES_ERROR_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
 or the previous agent failed to clean up before exit. \
 If no other mirrord agent is targeting this pod, please delete the pod. \
 To allow concurrent sessions, consider using the operator available in mirrord for Teams: https://app.metalbear.com/?utm_source=dirtyiptables&utm_medium=agent";
+
+/// Error message to display when another agent holds the [`IptablesLock`].
+const IPTABLES_LOCKED_ERROR_MESSAGE: &str =
+    "Another mirrord agent holds the iptables lock of the target container";
 
 /// Warning when dirty IP tables were detected and cleaned.
 const DIRTY_IPTABLES_CLEANUP_WARNING_MESSAGE: &str = "Detected dirty iptables. Either some other mirrord agent is running \
@@ -782,12 +796,13 @@ impl ClientConnectionHandler {
     }
 }
 
-/// Upon first client connection, immediately sends [`DaemonMessage::Close`] to the client due to
-/// the presence of dirty IP tables.
-pub async fn notify_client_about_dirty_iptables(
+/// Upon first client connection, immediately sends [`DaemonMessage::Close`] with `message` to the
+/// client, because the agent cannot use the iptables of the target.
+pub async fn notify_client_about_iptables_error(
     listener: TcpListener,
     communication_timeout: u16,
     tls_connector: Option<AgentTlsConnector>,
+    message: &str,
 ) -> AgentResult<()> {
     // WARNING: `wait_for_agent_startup` in `mirrord/kube/src/api/container.rs` expects a line
     // containing "agent_ready" to be printed. If you change this then mirrord fails to
@@ -807,23 +822,21 @@ pub async fn notify_client_about_dirty_iptables(
         Ok(Ok((stream, ..))) => {
             let mut connection = ClientConnection::new(stream, 0, tls_connector).await?;
             connection
-                .send(Buffered::new(DaemonMessage::Close(
-                    DIRTY_IPTABLES_ERROR_MESSAGE.to_owned(),
-                )))
+                .send(Buffered::new(DaemonMessage::Close(message.to_owned())))
                 .await?;
         }
 
         Ok(Err(error)) => {
             tracing::warn!(
                 ?error,
-                "notify_client_about_dirty_iptables -> Failed to accept first connection"
+                "notify_client_about_iptables_error -> Failed to accept first connection"
             );
             Err(error)?
         }
 
         Err(..) => {
             tracing::warn!(
-                "notify_client_about_dirty_iptables -> Failed to accept first connection: timeout"
+                "notify_client_about_iptables_error -> Failed to accept first connection: timeout"
             );
             Err(AgentError::FirstConnectionTimeout)?
         }
@@ -1036,6 +1049,19 @@ async fn start_agent(args: Args) -> AgentResult<()> {
     // If we don't have any target, the agent should be running in a fresh network namespace,
     // and you should **not** expect that it can access iptables.
     if let Some(target_pid) = state.container_pid() {
+        // The guard process could not acquire the iptables lock, so this process only reports the
+        // error to the client, without touching iptables.
+        if std::env::var(IPTABLES_LOCKED_OUT_ENV).is_ok() {
+            let _ = notify_client_about_iptables_error(
+                listener,
+                args.communication_timeout,
+                state.tls_connector.clone(),
+                IPTABLES_LOCKED_ERROR_MESSAGE,
+            )
+            .await;
+            return Err(AgentError::IPTablesLocked);
+        }
+
         // check legacy rules
         match check_leftover_rules(
             &state,
@@ -1062,10 +1088,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         {
             Ok(_) => (),
             Err(AgentError::IPTablesDirty) => {
-                let _ = notify_client_about_dirty_iptables(
+                let _ = notify_client_about_iptables_error(
                     listener,
                     args.communication_timeout,
                     state.tls_connector.clone(),
+                    DIRTY_IPTABLES_ERROR_MESSAGE,
                 )
                 .await;
                 return Err(AgentError::IPTablesDirty);
@@ -1522,17 +1549,24 @@ async fn clear_iptable_chain(
 /// using the exact same command line.
 ///
 /// When this future is aborted before completion, the child process is automatically killed.
-async fn run_child_agent() -> AgentResult<()> {
+///
+/// `lock_acquired` tells whether this guard process acquired the [`IptablesLock`]. If not, the
+/// child only reports [`AgentError::IPTablesLocked`] to its first client and exits.
+async fn run_child_agent(lock_acquired: bool) -> AgentResult<()> {
     let command_args = std::env::args().collect::<Vec<_>>();
     let (command, args) = command_args
         .split_first()
         .expect("cannot spawn child agent: command missing from program arguments");
 
-    let mut child_agent = Command::new(command)
+    let mut command = Command::new(command);
+    command
         .env(CHILD_PROCESS_ENV, "true")
         .args(args)
-        .kill_on_drop(true)
-        .spawn()?;
+        .kill_on_drop(true);
+    if !lock_acquired {
+        command.env(IPTABLES_LOCKED_OUT_ENV, "true");
+    }
+    let mut child_agent = command.spawn()?;
 
     let status = child_agent.wait().await?;
     if !status.success() {
@@ -1554,8 +1588,41 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
 
     let state = State::new(&args).await?;
     let with_mesh_exclusion = state.is_with_mesh_exclusion();
+    let identifier = IPTABLES_IDENTIFIER
+        .get()
+        .expect("Should be set during state initialization!")
+        .clone();
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
+
+    // Held until this process exits, after the iptables cleanup.
+    let lock = state
+        .network_runtime
+        .handle()
+        .spawn({
+            let identifier = identifier.clone();
+            async move { IptablesLock::try_acquire(&identifier) }
+        })
+        .await
+        .map_err(|error| AgentError::BackgroundTaskFailed {
+            task: "IPTablesLock",
+            error: Arc::new(error),
+        })?;
+    let _lock = match lock {
+        Ok(lock) => lock,
+        Err(error) => {
+            error!(
+                %error,
+                iptables_identifier = %identifier,
+                "Failed to acquire the iptables lock, the agent only reports the error",
+            );
+            tokio::select! {
+                _ = sigterm.recv() => {}
+                _ = run_child_agent(false) => {}
+            }
+            return Err(error);
+        }
+    };
 
     let result = tokio::select! {
         _ = sigterm.recv() => {
@@ -1563,7 +1630,7 @@ async fn start_iptable_guard(args: Args) -> AgentResult<()> {
             Ok(())
         }
 
-        result = run_child_agent() => match result {
+        result = run_child_agent(true) => match result {
             Err(AgentError::AgentFailed(status)) if status.code() == Some(IPTABLES_DIRTY_EXIT_CODE as i32) => {
                 // Err status `IPTABLES_DIRTY_EXIT_CODE` means dirty IP tables detected, skip cleanup
                 tracing::warn!("dirty IP tables, cleanup skipped");
