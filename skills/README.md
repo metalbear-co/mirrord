@@ -2,7 +2,7 @@
 
 # mirrord Agent Skills
 
-Thirteen [Agent Skills](https://agentskills.io/home) that close the AI agent feedback loop on Kubernetes and beyond it: real env vars, real DNS, real network, real traffic, real databases, real Kafka, real Temporal task queues, real preview environments, multi-service local sessions, real failure conditions, the header propagation that lets a session follow a request across services and queues, the discovery of what your cluster already propagates so a filter can use it, and the same local workflow for services running outside Kubernetes, such as Amazon ECS. Built by [MetalBear](https://metalbear.com/) to be used with [mirrord](https://metalbear.com/mirrord/).
+Fourteen [Agent Skills](https://agentskills.io/home) that close the AI agent feedback loop on Kubernetes and beyond it: real env vars, real DNS, real network, real traffic, real databases, real Kafka, real Temporal task queues, real preview environments, multi-service local sessions, real failure conditions, replays of the requests that a session received, the header propagation that lets a session follow a request across services and queues, the discovery of what your cluster already propagates so a filter can use it, and the same local workflow for services running outside Kubernetes, such as Amazon ECS. Built by [MetalBear](https://metalbear.com/) to be used with [mirrord](https://metalbear.com/mirrord/).
 
 AI coding agents work from what's in their context window. Your Kubernetes cluster is full of state that isn't. These skills teach your agent how and when to use mirrord so the code it writes against your live infrastructure stops being informed guessing.
 
@@ -21,7 +21,7 @@ AI coding agents work from what's in their context window. Your Kubernetes clust
 codex plugin marketplace add metalbear-co/skills
 ```
 
-Then install the `mirrord` plugin from `/plugins`. All thirteen skills come with it.
+Then install the `mirrord` plugin from `/plugins`. All fourteen skills come with it.
 
 ### OpenCode
 
@@ -31,7 +31,7 @@ OpenCode loads skills natively, so there's nothing to register — the skills ju
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/skills/main/install.sh | sh
 ```
 
-That writes the thirteen skill folders into `~/.config/opencode/skills/`. Restart OpenCode and they're available. Re-run it any time to update — it replaces the `mirrord-*` folders and leaves your other skills alone.
+That writes the fourteen skill folders into `~/.config/opencode/skills/`. Restart OpenCode and they're available. Re-run it any time to update — it replaces the `mirrord-*` folders and leaves your other skills alone.
 
 The same script serves any agent that reads a skills directory:
 
@@ -52,7 +52,7 @@ npx skills add metalbear-co/skills
 
 The [`ports/`](./ports/) directory carries the same core content as drop-in rules files: copy [`ports/github-copilot/copilot-instructions.md`](./ports/github-copilot/copilot-instructions.md) into your repo's `.github/`, or [`ports/cline/.clinerules`](./ports/cline/.clinerules) into your repo root. Want another format? [Open an issue](https://github.com/metalbear-co/skills/issues) with the target you'd like next.
 
-## The thirteen skills
+## The fourteen skills
 
 | Skill | What it does |
 |-------|--------------|
