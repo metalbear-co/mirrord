@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
     fmt,
+    fs::File,
+    io::BufReader,
     ops::Not,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -13,8 +15,10 @@ use mirrord_agent_env::steal_tls::{
     TlsClientVerification, TlsServerVerification,
 };
 use mirrord_tls_util::{
-    CertIdentity, DangerousNoVerifierClient, DangerousNoVerifierServer, best_effort_root_store,
+    CertIdentity, DangerousNoVerifierClient, DangerousNoVerifierServer, FromPemError,
+    ParsePemError, add_pem_certs, parse_cert_chain, parse_key_der,
 };
+use nix::fcntl::OFlag;
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, ServerName},
@@ -22,7 +26,7 @@ use rustls::{
 };
 use tracing::Level;
 
-use crate::util::path_resolver::InTargetPathResolver;
+use crate::util::target_root::{TargetRoot, proc_fd_path};
 
 pub mod error;
 pub mod handler;
@@ -48,7 +52,8 @@ enum MaybeBuilt {
 /// Extracted into a separate struct for a nice [`Arc`] wrap.
 struct State {
     by_port: Mutex<HashMap<u16, MaybeBuilt>>,
-    path_resolver: InTargetPathResolver,
+    /// Where the paths in the configs are.
+    target_root: TargetRoot,
 }
 
 /// Holds [`StealPortTlsConfig`]s for all relevant ports and caches built [`StealTlsHandler`]s.
@@ -57,7 +62,7 @@ pub struct StealTlsHandlerStore(Arc<State>);
 
 impl StealTlsHandlerStore {
     #[tracing::instrument(level = Level::DEBUG, ret)]
-    pub fn new(configs: Vec<StealPortTlsConfig>, path_resolver: InTargetPathResolver) -> Self {
+    pub fn new(configs: Vec<StealPortTlsConfig>, target_root: TargetRoot) -> Self {
         let by_port = configs
             .into_iter()
             .map(|config| (config.port, MaybeBuilt::Config(config)))
@@ -65,7 +70,7 @@ impl StealTlsHandlerStore {
 
         Self(Arc::new(State {
             by_port: Mutex::new(by_port),
-            path_resolver,
+            target_root,
         }))
     }
 
@@ -139,13 +144,110 @@ impl StealTlsHandlerStore {
         Ok(Some(handler))
     }
 
-    /// Resolves the given path in the target container filesystem.
-    #[tracing::instrument(level = Level::DEBUG, ret, err(level = Level::DEBUG))] // errors are already logged on `ERROR` level in `get`
-    fn resolve_path(&self, path: PathBuf) -> Result<PathBuf, StealTlsSetupErrorInner> {
-        self.0
-            .path_resolver
-            .resolve(&path)
-            .map_err(|error| StealTlsSetupErrorInner::PathResolutionError { error, path })
+    /// Runs `read` on the target's filesystem, in a blocking task like [`mirrord_tls_util`] reads
+    /// its files in.
+    async fn in_target<T: Send + 'static>(
+        &self,
+        read: impl FnOnce(&TargetRoot) -> Result<T, StealTlsSetupErrorInner> + Send + 'static,
+    ) -> Result<T, StealTlsSetupErrorInner> {
+        let target_root = self.0.target_root.clone();
+
+        tokio::task::spawn_blocking(move || read(&target_root)).await?
+    }
+
+    /// Reads the PEM file at `path` in the target's filesystem, and parses it with `parse`.
+    fn read_pem<T>(
+        target_root: &TargetRoot,
+        path: PathBuf,
+        parse: impl FnOnce(BufReader<File>) -> Result<T, ParsePemError>,
+    ) -> Result<T, FromPemError> {
+        match target_root.open_from_root(&path, OFlag::O_RDONLY) {
+            Ok(file) => {
+                parse(BufReader::new(File::from(file))).map_err(|error| error.in_file(path))
+            }
+            Err(error) => Err(FromPemError::OpenFileError { error, path }),
+        }
+    }
+
+    /// Builds a [`RootCertStore`] from the PEM files at `paths` in the target's filesystem, and
+    /// from the files directly in the directories among them, like
+    /// [`mirrord_tls_util::best_effort_root_store`] does on the agent's own filesystem.
+    ///
+    /// Logs the files it can't read and skips them.
+    fn root_store(target_root: &TargetRoot, paths: Vec<PathBuf>) -> RootCertStore {
+        let mut root_store = RootCertStore::empty();
+
+        for path in paths {
+            let file = match target_root.open_from_root(&path, OFlag::O_RDONLY) {
+                Ok(file) => File::from(file),
+                Err(error) => {
+                    tracing::error!(
+                        %error,
+                        ?path,
+                        "Failed to open a file when building a root cert store."
+                    );
+                    continue;
+                }
+            };
+
+            if file
+                .metadata()
+                .is_ok_and(|metadata| metadata.is_dir())
+                .not()
+            {
+                add_pem_certs(&mut root_store, BufReader::new(file), &path);
+                continue;
+            }
+
+            let entries = match std::fs::read_dir(proc_fd_path(&file)) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    tracing::error!(
+                        %error,
+                        ?path,
+                        "Failed to list a directory when building a root cert store."
+                    );
+                    continue;
+                }
+            };
+
+            for entry in entries {
+                let name = match entry {
+                    Ok(entry) => entry.file_name(),
+                    Err(error) => {
+                        tracing::error!(
+                            %error,
+                            ?path,
+                            "Failed to list a directory when building a root cert store."
+                        );
+                        continue;
+                    }
+                };
+                let entry_path = path.join(&name);
+
+                let file = match target_root.open_from_root(&entry_path, OFlag::O_RDONLY) {
+                    Ok(file) => File::from(file),
+                    Err(error) => {
+                        tracing::error!(
+                            %error,
+                            path = ?entry_path,
+                            "Failed to open a file when building a root cert store."
+                        );
+                        continue;
+                    }
+                };
+
+                if file
+                    .metadata()
+                    .is_ok_and(|metadata| metadata.is_dir())
+                    .not()
+                {
+                    add_pem_certs(&mut root_store, BufReader::new(file), &entry_path);
+                }
+            }
+        }
+
+        root_store
     }
 
     /// Builds [`ServerConfig`] for the mirrord-agent's TLS acceptor.
@@ -160,11 +262,9 @@ impl StealTlsHandlerStore {
                 accept_any_cert,
                 trust_roots,
             }) => {
-                let trust_roots = trust_roots
-                    .into_iter()
-                    .map(|root| self.resolve_path(root))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let mut root_store = best_effort_root_store(trust_roots).await?;
+                let mut root_store = self
+                    .in_target(move |target_root| Ok(Self::root_store(target_root, trust_roots)))
+                    .await?;
 
                 if root_store.is_empty() && accept_any_cert.not() {
                     if allow_anonymous {
@@ -229,11 +329,9 @@ impl StealTlsHandlerStore {
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(DangerousNoVerifierServer))
         } else {
-            let trust_roots = trust_roots
-                .into_iter()
-                .map(|root| self.resolve_path(root))
-                .collect::<Result<Vec<_>, _>>()?;
-            let root_store = best_effort_root_store(trust_roots).await?;
+            let root_store = self
+                .in_target(move |target_root| Ok(Self::root_store(target_root, trust_roots)))
+                .await?;
 
             if root_store.is_empty() {
                 return Err(StealTlsSetupErrorInner::NoGoodRoot);
@@ -295,16 +393,13 @@ impl StealTlsHandlerStore {
         TlsAuthentication { cert_pem, key_pem }: TlsAuthentication,
     ) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), StealTlsSetupErrorInner>
     {
-        let cert_chain = {
-            let path = self.resolve_path(cert_pem)?;
-            mirrord_tls_util::read_cert_chain(path).await?
-        };
-        let key_der = {
-            let path = self.resolve_path(key_pem)?;
-            mirrord_tls_util::read_key_der(path).await?
-        };
+        self.in_target(move |target_root| {
+            let cert_chain = Self::read_pem(target_root, cert_pem, parse_cert_chain)?;
+            let key_der = Self::read_pem(target_root, key_pem, parse_key_der)?;
 
-        Ok((cert_chain, key_der))
+            Ok((cert_chain, key_der))
+        })
+        .await
     }
 
     /// Adds a dummy self-signed certificate to the given [`RootCertStore`].
@@ -327,7 +422,7 @@ impl Default for StealTlsHandlerStore {
         Self(Arc::new(State {
             by_port: Default::default(),
             // Does not matter, will never be used.
-            path_resolver: InTargetPathResolver::from_pid(0),
+            target_root: TargetRoot::for_target(None),
         }))
     }
 }
@@ -335,7 +430,7 @@ impl Default for StealTlsHandlerStore {
 impl fmt::Debug for StealTlsHandlerStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StealTlsHandlerStore")
-            .field("path_resolver", &self.0.path_resolver)
+            .field("target_root", &self.0.target_root)
             .field("by_port", &self.0.by_port.lock())
             .finish()
     }

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mirrord-skills",
+  "version": "1.0.0",
+  "description": "Skills for working with mirrord - Kubernetes development tool by MetalBear",
+  "owner": {
+    "name": "MetalBear",
+    "email": "support@metalbear.com"
+  },
+  "plugins": [
+    {
+      "name": "mirrord",
+      "description": "Connect your agent to a live Kubernetes cluster with mirrord, so it tests code changes against real services. Covers setup, config, CI, database branching, queue splitting, and preview environments.",
+      "source": "./",
+      "version": "1.2.0",
+      "category": "development",
+      "keywords": ["mirrord", "kubernetes", "config", "k8s", "ecs"],
+      "skills": [
+        "./skills/mirrord-config",
+        "./skills/mirrord-quickstart",
+        "./skills/mirrord-operator",
+        "./skills/mirrord-ci",
+        "./skills/mirrord-db-branching",
+        "./skills/mirrord-kafka",
+        "./skills/mirrord-temporal",
+        "./skills/mirrord-prev-env",
+        "./skills/mirrord-up",
+        "./skills/mirrord-beyond",
+        "./skills/mirrord-chaos",
+        "./skills/mirrord-header-propagation",
+        "./skills/mirrord-propagation-discovery"
+      ]
+    }
+  ]
+}

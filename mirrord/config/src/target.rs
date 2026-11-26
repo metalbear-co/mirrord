@@ -291,6 +291,9 @@ impl MirrordConfig for TargetFileConfig {
     }
 }
 
+/// Parses the segments after a target path's type prefix: the target's name and an optional
+/// `container/{name}` pair. Implementations stop there, and [`Target::from_str`] rejects any
+/// segment left over, so every kind gets the same end-of-path check.
 trait FromSplit {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self>
     where
@@ -463,7 +466,7 @@ impl FromStr for Target {
             return Ok(Target::Targetless);
         }
         let mut split = target.split('/');
-        match split.next() {
+        let parsed = match split.next() {
             Some("deployment") | Some("deploy") => {
                 deployment::DeploymentTarget::from_split(&mut split).map(Target::Deployment)
             }
@@ -478,7 +481,9 @@ impl FromStr for Target {
             Some("replicaset") => {
                 replica_set::ReplicaSetTarget::from_split(&mut split).map(Target::ReplicaSet)
             }
-            Some("label") => target.parse::<label::LabelTarget>().map(Target::Label),
+            // Label keys can contain `/` (`app.kubernetes.io/name`), so `LabelTarget` parses the
+            // whole path, including its end, and skips the leftover-segment check below.
+            Some("label") => return target.parse::<label::LabelTarget>().map(Target::Label),
             Some("serverless") => {
                 serverless::ServerlessTarget::from_split(&mut split).map(Target::Serverless)
             }
@@ -486,6 +491,14 @@ impl FromStr for Target {
                 "Provided target: {target} is unsupported. Did you remember to add a prefix, e.g. pod/{target}? \n{}",
                 *FAIL_PARSE_DEPLOYMENT_OR_POD
             ))),
+        }?;
+
+        if split.next().is_some() {
+            Err(ConfigError::InvalidTargetPath(
+                FAIL_PARSE_DEPLOYMENT_OR_POD.to_owned(),
+            ))
+        } else {
+            Ok(parsed)
         }
     }
 }
@@ -1035,5 +1048,16 @@ mod tests {
         assert!(target.requires_operator());
         assert_eq!(target.to_string().parse::<Target>().unwrap(), target);
         assert!(TargetType::all().all(|target_type| target_type != TargetType::Label));
+    }
+
+    #[rstest]
+    #[case("pod/foo/container/bar/baz")]
+    #[case("deployment/foo/container/bar/baz")]
+    #[case("serverless/foo/container/bar/baz")]
+    fn target_path_rejects_trailing_segments(#[case] path: &str) {
+        assert!(matches!(
+            Target::from_str(path),
+            Err(ConfigError::InvalidTargetPath(_))
+        ));
     }
 }

@@ -1,8 +1,8 @@
 use core::fmt;
 use std::{
     fs::{self, File},
-    io::BufReader,
-    path::PathBuf,
+    io::{BufRead, BufReader},
+    path::{Path, PathBuf},
 };
 
 use rustls::RootCertStore;
@@ -74,34 +74,41 @@ pub async fn best_effort_root_store<P: IntoIterator<Item = PathBuf> + fmt::Debug
                     continue;
                 };
 
-                let mut file = BufReader::new(file);
-                let certs = rustls_pemfile::certs(&mut file).filter_map(|result| {
-                    result
-                        .inspect_err(|error| {
-                            tracing::error!(
-                                %error,
-                                ?path,
-                                "Failed to parse a file when building a root cert store.",
-                            )
-                        })
-                        .ok()
-                });
-
-                let (added, ignored) = root_store.add_parsable_certificates(certs);
-
-                if ignored > 0 {
-                    tracing::warn!(
-                        ?path,
-                        added,
-                        "Ignored {ignored} invalid certificate(s) when building a root cert store."
-                    );
-                }
+                add_pem_certs(&mut root_store, BufReader::new(file), &path);
             }
         }
 
         root_store
     })
     .await
+}
+
+/// Adds the certificates in `pem`, the contents of the file at `path`, to `root_store`.
+///
+/// Logs the certificates it can't parse or add, as [`best_effort_root_store`] does, for callers
+/// that open the files themselves.
+pub fn add_pem_certs(root_store: &mut RootCertStore, mut pem: impl BufRead, path: &Path) {
+    let certs = rustls_pemfile::certs(&mut pem).filter_map(|result| {
+        result
+            .inspect_err(|error| {
+                tracing::error!(
+                    %error,
+                    ?path,
+                    "Failed to parse a file when building a root cert store.",
+                )
+            })
+            .ok()
+    });
+
+    let (added, ignored) = root_store.add_parsable_certificates(certs);
+
+    if ignored > 0 {
+        tracing::warn!(
+            ?path,
+            added,
+            "Ignored {ignored} invalid certificate(s) when building a root cert store."
+        );
+    }
 }
 
 #[cfg(test)]

@@ -258,6 +258,11 @@ mod traffic_tests {
         let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
         assert_eq!(logs.unwrap(), ""); // Assert that the target service did not get the message.
 
+        // The first agent holds the iptables lock of the target until it exits.
+        target_service
+            .wait_for_agents_to_exit(kube_client.get_client())
+            .await;
+
         // Run mirrord with outgoing enabled.
         let mut process = run_exec_with_target(
             node_command,
@@ -361,6 +366,11 @@ mod traffic_tests {
         assert!(!res.success()); // Should fail because local process cannot reach service.
         let logs = pod_api.logs(&internal_service.pod_name, &lp).await;
         assert_eq!(logs.unwrap(), "");
+
+        // The first agent holds the iptables lock of the target until it exits.
+        target_service
+            .wait_for_agents_to_exit(kube_client.get_client())
+            .await;
 
         // Create remote filter file with service name so we can test DNS outgoing filter.
         let mut remote_config_file = tempfile::Builder::new()

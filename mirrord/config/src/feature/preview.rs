@@ -76,6 +76,35 @@ pub struct PreviewConfig {
     #[config(env = "MIRRORD_PREVIEW_REPLICAS", default = 1)]
     pub replicas: i32,
 
+    /// #### feature.preview.autoscale {#feature-preview-autoscale}
+    ///
+    /// Scale the preview pods the way the target scales: the operator copies the target's
+    /// `HorizontalPodAutoscaler` (metrics, thresholds and scaling behavior) onto the preview's
+    /// pods, so a preview under load grows and shrinks like the service it previews.
+    ///
+    /// - `false`, or unset: the preview runs a fixed number of pods
+    ///   ([`replicas`](#feature-preview-replicas), 1 by default).
+    /// - `true`: copy the target's autoscaler, scaling from 1 pod up to the target's maximum.
+    /// - `{ "min": 4, "max": 12 }`, or `{ "max": 12 }`: copy the target's autoscaler with
+    ///   these bounds. `min` is 1 when unset, `max` is the target's maximum when unset, and
+    ///   `1 <= min <= max` must hold.
+    ///
+    /// Cannot be combined with `replicas`. A target without an autoscaler fails the preview.
+    /// With [idle mode](#feature-preview-idle), an idle preview still scales to zero pods, and
+    /// a woken preview starts at `min` pods and lets the autoscaler take over from there.
+    ///
+    /// ```json
+    /// {
+    ///   "feature": {
+    ///     "preview": {
+    ///       "autoscale": { "min": 4, "max": 12 }
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[config(default)]
+    pub autoscale: Option<PreviewAutoscaleConfig>,
+
     /// #### feature.preview.labels {#feature-preview-labels}
     ///
     /// Filters labels copied from the target pod template to the preview pod.
@@ -413,6 +442,16 @@ impl PreviewConfig {
     /// flapping between idle and running.
     pub const MIN_SLEEP_AFTER_SECS: u64 = 30;
 
+    /// The pod count of a preview that sets neither `replicas` nor `autoscale`.
+    pub const DEFAULT_REPLICAS: i32 = 1;
+
+    /// The autoscaler bounds the preview asks the operator for, `None` for a fixed pod count.
+    pub fn autoscale_range(&self) -> Option<PreviewAutoscaleRange> {
+        self.autoscale
+            .as_ref()
+            .and_then(PreviewAutoscaleConfig::range)
+    }
+
     /// Returns the configured TTL converted to seconds, applying the default if neither
     /// `ttl_mins` nor `ttl_secs` is set. An infinite TTL (from either field) collapses to
     /// [`PreviewTtl::INFINITE_TTL_SECS`].
@@ -439,6 +478,22 @@ impl PreviewConfig {
             return Err(ConfigError::Conflict(
                 "`feature.preview.replicas` cannot be negative.".to_owned(),
             ));
+        }
+
+        if let Some(autoscale) = &self.autoscale {
+            autoscale.verify()?;
+
+            // The default replica count is 1, so only another value shows the user set both. An
+            // explicit `replicas: 1` next to `autoscale` is accepted and means the same as
+            // `autoscale` alone, since 1 is also the autoscaler's default minimum.
+            if autoscale.is_enabled() && self.replicas != Self::DEFAULT_REPLICAS {
+                return Err(ConfigError::Conflict(
+                    "`feature.preview.replicas` and `feature.preview.autoscale` cannot both be \
+                     set: an autoscaled preview takes its pod count from `autoscale.min` and \
+                     `autoscale.max`. Remove one of them."
+                        .to_owned(),
+                ));
+            }
         }
 
         if self.labels.exclude.is_some() && self.labels.include.is_some() {
@@ -618,6 +673,84 @@ impl FromStr for PreviewTtl {
 #[error("preview ttl must be an integer or \"infinite\"")]
 pub struct PreviewTtlParseError;
 
+/// Whether, and within which bounds, a preview copies its target's `HorizontalPodAutoscaler`.
+///
+/// Either a flag (`true` copies the target's autoscaler from 1 pod to its maximum) or a range
+/// with optional `min` and `max` bounds, which is how a range is set in `mirrord-up.yaml` too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PreviewAutoscaleConfig {
+    Enabled(bool),
+    Range(PreviewAutoscaleRange),
+}
+
+/// The bounds a preview's copied autoscaler scales within. Both are optional: `min` falls back
+/// to 1 pod and `max` to the target autoscaler's maximum.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewAutoscaleRange {
+    /// The fewest pods the preview runs while it isn't idle. 1 when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<i32>,
+
+    /// The most pods the preview scales up to. The target autoscaler's maximum when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<i32>,
+}
+
+impl PreviewAutoscaleConfig {
+    /// Whether the preview copies its target's autoscaler at all: `false` is the same as leaving
+    /// the option out.
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            Self::Enabled(enabled) => *enabled,
+            Self::Range(_) => true,
+        }
+    }
+
+    /// The bounds the preview's autoscaler is asked for, `None` when autoscaling is off. A
+    /// plain `true` is a range with neither bound set.
+    pub fn range(&self) -> Option<PreviewAutoscaleRange> {
+        match self {
+            Self::Enabled(true) => Some(PreviewAutoscaleRange::default()),
+            Self::Enabled(false) => None,
+            Self::Range(range) => Some(*range),
+        }
+    }
+
+    /// Checks `1 <= min <= max` on the bounds the user set, naming the option that is wrong.
+    fn verify(&self) -> Result<(), ConfigError> {
+        let Some(PreviewAutoscaleRange { min, max }) = self.range() else {
+            return Ok(());
+        };
+
+        if min.is_some_and(|min| min < 1) {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.autoscale.min` must be at least 1: an idle preview is the only \
+                 one that runs no pod, see `feature.preview.idle`."
+                    .to_owned(),
+            ));
+        }
+
+        if max.is_some_and(|max| max < 1) {
+            return Err(ConfigError::Conflict(
+                "`feature.preview.autoscale.max` must be at least 1.".to_owned(),
+            ));
+        }
+
+        if let (Some(min), Some(max)) = (min, max)
+            && min > max
+        {
+            return Err(ConfigError::Conflict(format!(
+                "`feature.preview.autoscale.min` ({min}) cannot be greater than \
+                 `feature.preview.autoscale.max` ({max})."
+            )));
+        }
+
+        Ok(())
+    }
+}
+
 /// Idle-mode settings for preview sessions.
 ///
 /// An idle preview keeps its session, traffic listener, queue splits, and database branches
@@ -788,6 +921,7 @@ mod tests {
             ttl_secs,
             creation_timeout_secs: 60,
             replicas: 1,
+            autoscale: None,
             labels: PreviewLabelsConfig::default(),
             idle: PreviewIdleConfig::default(),
             cronjob: PreviewCronJobConfig::default(),
@@ -847,6 +981,7 @@ mod tests {
             ttl_secs: None,
             creation_timeout_secs: 60,
             replicas: 1,
+            autoscale: None,
             labels: PreviewLabelsConfig::default(),
             idle: PreviewIdleConfig::default(),
             cronjob: PreviewCronJobConfig::default(),
@@ -864,6 +999,7 @@ mod tests {
             ttl_secs: None,
             creation_timeout_secs: 60,
             replicas: 1,
+            autoscale: None,
             labels: PreviewLabelsConfig::default(),
             idle: PreviewIdleConfig::default(),
             cronjob: PreviewCronJobConfig::default(),
@@ -1090,5 +1226,89 @@ mod tests {
 
         cfg.cronjob.schedule = Some("0 * * * *".to_owned());
         assert!(cfg.verify().is_ok());
+    }
+
+    fn config_with_autoscale(replicas: i32, autoscale: PreviewAutoscaleConfig) -> PreviewConfig {
+        PreviewConfig {
+            replicas,
+            autoscale: Some(autoscale),
+            ..config_with_ttl(None, None)
+        }
+    }
+
+    #[test]
+    fn autoscale_parses_a_flag_and_a_range() {
+        let parse = |json: &str| serde_json::from_str::<PreviewAutoscaleConfig>(json).unwrap();
+
+        assert_eq!(
+            parse("true").range(),
+            Some(PreviewAutoscaleRange::default())
+        );
+        assert_eq!(parse("false").range(), None);
+        assert_eq!(
+            parse(r#"{"max": 12}"#).range(),
+            Some(PreviewAutoscaleRange {
+                min: None,
+                max: Some(12)
+            })
+        );
+        assert_eq!(
+            parse(r#"{"min": 4, "max": 12}"#).range(),
+            Some(PreviewAutoscaleRange {
+                min: Some(4),
+                max: Some(12)
+            })
+        );
+        // A misspelled bound is an error, not a silently ignored key.
+        assert!(serde_json::from_str::<PreviewAutoscaleConfig>(r#"{"mni": 4}"#).is_err());
+    }
+
+    #[test]
+    fn autoscale_bounds_must_satisfy_one_min_max() {
+        let range = |min, max| PreviewAutoscaleConfig::Range(PreviewAutoscaleRange { min, max });
+
+        assert!(
+            config_with_autoscale(1, range(Some(1), Some(1)))
+                .verify()
+                .is_ok()
+        );
+        assert!(
+            config_with_autoscale(1, range(None, Some(5)))
+                .verify()
+                .is_ok()
+        );
+        assert!(
+            config_with_autoscale(1, range(Some(2), None))
+                .verify()
+                .is_ok()
+        );
+
+        for (invalid, wrong_option) in [
+            (range(Some(0), Some(5)), "min"),
+            (range(Some(1), Some(0)), "max"),
+            (range(Some(6), Some(5)), "min"),
+        ] {
+            let error = config_with_autoscale(1, invalid).verify().unwrap_err();
+            assert!(
+                matches!(&error, ConfigError::Conflict(message) if message.contains(wrong_option)),
+                "{invalid:?} should fail on `{wrong_option}`, got {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn autoscale_and_replicas_cannot_both_be_set() {
+        let on = PreviewAutoscaleConfig::Enabled(true);
+        assert!(config_with_autoscale(1, on).verify().is_ok());
+        assert!(matches!(
+            config_with_autoscale(3, on).verify(),
+            Err(ConfigError::Conflict(message)) if message.contains("cannot both be set")
+        ));
+        // `autoscale: false` is the same as leaving it out, so `replicas` is free.
+        assert!(
+            config_with_autoscale(3, PreviewAutoscaleConfig::Enabled(false))
+                .verify()
+                .is_ok()
+        );
     }
 }

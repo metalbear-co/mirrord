@@ -23,7 +23,7 @@
 use std::os::unix::ffi::OsStrExt;
 use std::{
     io,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     path::Path,
     sync::{
         Arc,
@@ -33,7 +33,6 @@ use std::{
 };
 
 use futures::{SinkExt, StreamExt};
-use local_ip_address::local_ip;
 use mirrord_analytics::{
     AnalyticsReporter, CollectAnalytics, Reporter, read_correlation_id_from_env,
     read_kube_version_from_env,
@@ -66,6 +65,18 @@ fn print_addr(listener: &TcpListener) -> io::Result<()> {
     let addr = listener.local_addr()?;
     println!("{addr}");
     Ok(())
+}
+
+/// The address this host sends from on its default route, which is the one a container is most
+/// likely to reach it on.
+///
+/// Connecting a UDP socket sends nothing: it only makes the OS pick the route to the destination,
+/// and with it the source address. `192.0.2.1` is in TEST-NET-1 (RFC 5737), which no network
+/// routes, so the default route is the one picked. Without a default route, the connect fails.
+fn default_route_ip() -> io::Result<IpAddr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9))?;
+    Ok(socket.local_addr()?.ip())
 }
 
 #[mirrord_macros::boxed_future]
@@ -132,7 +143,7 @@ pub async fn proxy(
     let ip_addr = config
         .external_proxy
         .host_ip
-        .or_else(|| local_ip().ok())
+        .or_else(|| default_route_ip().ok())
         .unwrap_or_else(|| Ipv4Addr::UNSPECIFIED.into());
 
     let listener = create_listen_socket(SocketAddr::new(ip_addr, listen_port))

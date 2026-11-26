@@ -1,4 +1,4 @@
-//! The `search_docs` tool: keyword search over the vendored docs and skills, so an agent finds the
+//! The `search_docs` tool: keyword search over the embedded docs and skills, so an agent finds the
 //! page that answers its question without network access.
 //!
 //! Pages are ranked with [BM25](https://en.wikipedia.org/wiki/Okapi_BM25), with title matches
