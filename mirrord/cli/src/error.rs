@@ -1246,10 +1246,10 @@ pub(crate) enum CliError {
     #[error(transparent)]
     Mcp(#[from] McpError),
 
-    /// Errors produced by the `mirrord login` command.
+    /// Errors produced by the `mirrord login`, `mirrord logout` and `mirrord whoami` commands.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Login(#[from] LoginError),
+    Login(LoginError),
 
     /// Errors produced by the `mirrord ui` and `mirrord chaos` commands.
     #[error(transparent)]
@@ -1944,5 +1944,16 @@ mod kube_environment_tests {
             ]
             .join("\n")
         );
+    }
+}
+
+impl From<LoginError> for CliError {
+    /// An operator whose license lacks SSO is reported like every other paid feature, with the
+    /// plan to ask for; the rest of the login errors speak for themselves.
+    fn from(error: LoginError) -> Self {
+        match error {
+            LoginError::NotLicensed(gate) => Self::PaidFeatureRequiresPlan { gate },
+            error => Self::Login(error),
+        }
     }
 }

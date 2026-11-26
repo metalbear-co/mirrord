@@ -874,6 +874,11 @@ pub enum NewOperatorFeature {
     /// This operator can perform queue splitting on NATS JetStream consumers
     NatsQueueSplitting,
 
+    /// This operator lets developers log in with the company identity provider from the CLI
+    /// (`mirrord login --url`) and accepts the resulting login tokens on its public URL.
+    /// Advertised when the chart's `sso.enabled` is true; Enterprise only.
+    SsoLogin,
+
     /// This operator can perform queue splitting on core NATS (non-JetStream) subject
     /// subscriptions, with best-effort delivery.
     NatsPubSubQueueSplitting,
@@ -1119,6 +1124,7 @@ impl NewOperatorFeature {
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
+            Self::SsoLogin => Some("sso"),
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
@@ -1244,6 +1250,7 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::SsoLogin => "SSO login",
             NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
@@ -1347,6 +1354,7 @@ impl NewOperatorFeature {
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
             NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
+            NewOperatorFeature::SsoLogin => &["sso.enabled"],
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
