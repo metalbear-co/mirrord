@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 676" width="1202" height="676" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 676" width="1200" height="676" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">mirrord for Teams architecture</title>
   <desc id="d">Two developers run local processes with mirrord on their laptops. Each local process connects to the mirrord Operator in the Kubernetes cluster. The Operator sends incoming traffic to each local process, and each local process sends outgoing traffic, database access, and file reads and writes to the Operator. The Operator connects to the mirrord agents of the target pods. Each agent runs as a separate pod in the network namespace of its target pod. Internet traffic and traffic from other services reach the target pods. The agents send outgoing traffic to other services and database access to the database.</desc>
   <defs>
@@ -33,7 +33,7 @@
 <path d="M243.9,427.5c11.1-4.4,16-21.4,12-40.5c-0.3-0.3-0.6-0.6-0.9-0.9c2,15.9-1.2,29.1-7.6,30.2c-7.3,1.5-15.8-12-19-29.7 c-0.3-1.2-0.3-2.3-0.6-3.5h0.9l12.5-1.5l-11.1-6.5l-3.2-1.8c0-10,2.3-17.6,6.4-20.3c-1.2-2.1-2.3-4.1-3.8-6.2 c-7-4.1-13.7-5-19.3-2.6c-6.4,2.6-11.1,9.4-12.8,18.8c-1.8,10-0.3,22,4.4,33.5c3.5,8.8,8.5,16.4,14,22c0,0,0.3,0,0.3,0.3 c0.6,0.3,1.2,0.9,1.5,1.2C225.9,427.2,235.8,430.7,243.9,427.5z M204.9,319.1c11.1,2.1,19.3,9.7,24.2,15.6c2,2.3,3.8,5,5.5,7.3 c0,0,0,0,0,0.3c2,2.9,3.5,5.6,5,8.2c1.2,1.8,2,3.5,3.2,5.6l1.5,2.3c3.8,6.5,7.6,12.9,12.3,19.1c5.8,7.3,11.7,12.9,18.4,16.7 c-0.6-5-2-9.7-4.4-14.1c-0.9-1.8-0.3-3.8,1.5-4.7c1.8-0.9,3.8-0.3,4.7,1.5c2.9,5.6,4.7,11.5,5,17.9c0,0.9,0.3,3.5-1.5,5.6 c-1.2,1.2-2.6,1.8-4.1,1.8c-1.5,0-2.9-0.6-4.4-1.2c-2.6-1.5-5.3-3.2-7.9-5.3c1.7,18.5-5,34.1-17.5,39.3c-2.9,1.2-5.8,1.8-8.8,1.8 c-8.5,0-17.5-4.4-25.7-11.7c-11.4-6.2-21.6-14.7-29.5-24.7c-1.2-1.5-0.9-3.8,0.6-5c1.5-1.2,3.8-0.9,5,0.6c3.2,4.1,7,7.9,11.1,11.5 c-1.2-2.3-2.6-5-3.5-7.6c-5-12.6-6.7-25.8-4.7-37.3c2-12,8.2-20.6,16.9-24.1c4.1-1.8,8.8-2.1,13.7-1.2c-4.4-4.4-10.2-8.8-17.5-10 c-8.2-1.5-16.6,1.5-20.4,7.3c-1.2,1.5-3.2,2.1-4.7,0.9c-1.5-1.2-2-3.2-0.9-4.7C183,320.9,194.1,317.1,204.9,319.1z"/>
     </symbol>
   </defs>
-  <rect x="0" y="0" width="1202" height="676" fill="#ffffff"/>
+  <rect x="0" y="0" width="1200" height="676" fill="#ffffff"/>
   <path d="M410.0 571.6 A66.3 66.3 0 0 1 410.0 487.1 A66.3 66.3 0 0 1 410.0 402.5 A66.3 66.3 0 0 1 410.0 318.0 A92.0 92.0 0 0 1 531.6 180.0 A114.9 114.9 0 0 1 736.8 180.0 A97.9 97.9 0 0 1 911.6 180.0 A93.6 93.6 0 0 1 1078.8 180.0 A71.6 71.6 0 0 1 1170.0 290.4 A76.6 76.6 0 0 1 1170.0 384.1 A76.6 76.6 0 0 1 1170.0 477.9 A76.6 76.6 0 0 1 1170.0 571.6 A48.4 48.4 0 0 1 1101.6 640.0 A242.4 242.4 0 0 1 881.2 640.0 A267.5 267.5 0 0 1 638.0 640.0 A175.6 175.6 0 0 1 478.4 640.0 A48.4 48.4 0 0 1 410.0 571.6 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
   <use href="#k8s" x="1141" y="185" width="40" height="40"/>
   <text x="1150" y="624" font-size="15" font-weight="700" fill="#4a44b8" text-anchor="end">Kubernetes cluster</text>
@@ -74,7 +74,7 @@
   <text x="138" y="508" font-size="12.5" fill="#ffffff" text-anchor="middle">developer 2</text>
   <polyline points="560,440 560,190 224,190" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="300" y="182" font-size="12.5" fill="#4a44b8" text-anchor="middle">incoming traffic</text>
-  <polyline points="220,236 520,236 520,436" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <polyline points="220,236 548,236 548,436" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="300" y="256" font-size="12.5" fill="#333344" text-anchor="middle">outgoing traffic</text>
   <text x="300" y="272" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
   <text x="300" y="288" font-size="12.5" fill="#333344" text-anchor="middle">file reads and writes</text>

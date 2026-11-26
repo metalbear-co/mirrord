@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 400" width="1202" height="400" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">BullMQ queue splitting flow</title>
   <desc id="d">A producer app pushes a job ID with RPUSH to the Redis list bull:orders:wait. The job data is in the hash bull:orders:&lt;jobId&gt;. The BullMQ forwarder in the mirrord operator moves job IDs from the wait list to its in-flight list bull:orders:mirrord-forwarding with BLMOVE, reads the job data with HGETALL, and checks the data JSON field against the users' filters. A job that matches a filter is pushed with RPUSH to the per-session queue bull:mirrord-tmp-&lt;session&gt;-orders:wait, which your local process reads with BLPOP. A job that matches no filter is pushed with RPUSH to the main queue bull:mirrord-tmp-&lt;main&gt;-orders:wait, which the deployed workload reads with BLPOP after the operator patches its queue-name environment variable.</desc>
   <defs>
@@ -37,7 +37,7 @@
       <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
     </symbol>
   </defs>
-  <rect x="0" y="0" width="1202" height="400" fill="#ffffff"/>
+  <rect x="0" y="0" width="1200" height="400" fill="#ffffff"/>
 
   <!-- Producer -->
   <rect x="60" y="30" width="180" height="64" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>

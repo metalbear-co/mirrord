@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1222 288" width="1222" height="288" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1222 288" width="1200" height="283" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">Redis Pub/Sub splitting flow</title>
   <desc id="d">A producer publishes to the original channel, orders. The mirrord operator subscribes to the original channel, evaluates the session filters, and re-publishes each message to a temporary channel. Non-matching messages go to the main temporary channel, mirrord-main-orders-..., which the deployed consumer reads because the operator patched its channel environment variable. Matching messages go to the session channel, mirrord-user1-orders-..., which the local developer reads with mirrord exec.</desc>
   <defs>
