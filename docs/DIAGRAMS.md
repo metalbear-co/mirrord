@@ -152,9 +152,9 @@ Put an envelope on the arrow from a producer or publisher to a queue, topic, or 
 </symbol>
 ```
 
-### Code and cloud icons
+### Cloud icon
 
-The dev loop diagram uses a laptop with code (`#code`) for local work and a cloud (`#cloud`) for a remote environment. The env vars diagram uses the cloud for the remote environment that the agent sends back. Copy them from `docs/.gitbook/assets/devloop.svg` when another diagram needs the same meaning. The dev loop is a ring, as in the original: keep the stages on a circle and the arrow out to production.
+The ECS diagram uses a small cloud (`#cloud`) for a remote environment. The env vars diagram uses it for the remote environment that the agent sends back. Copy it from `docs/.gitbook/assets/ecs-sample-app.svg` when another diagram needs the same meaning.
 
 ## Text
 
@@ -185,7 +185,7 @@ The dev loop diagram uses a laptop with code (`#code`) for local work and a clou
 </marker>
 ```
 
-- Use straight lines or right-angle `polyline`s. Do not use curves, except for a loop such as the dev loop ring. Arrows must not cross boxes or labels.
+- Use straight lines or right-angle `polyline`s. Do not use curves, except for a loop. Arrows must not cross boxes or labels.
 - Flow goes left to right, or top to bottom.
 
 ## Check a diagram
