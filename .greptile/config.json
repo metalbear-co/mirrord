@@ -19,6 +19,18 @@
       "rule": "Before accepting a new helper, trait, module, or codepath, check whether an existing abstraction already covers it and request extending that instead.",
       "scope": ["**/*.rs"],
       "severity": "medium"
+    },
+    {
+      "id": "changes-reach-every-page",
+      "rule": "A change in behavior can make pages false that it does not touch (\"Changes That Reach Several Pages\" in docs/AGENTS.md). When a PR changes what a config field, CLI flag, or Helm value does, search docs/docs/ for it and flag each page outside the diff that still describes the old behavior. When a PR adds a database engine or queue service, flag each list of its siblings it is missing from, including its row in docs/docs/reference/feature-matrix.md, the lists in docs/docs/sharing-the-cluster/queue-splitting.md, and, for an engine with a default branch image, the default images table in docs/docs/managing-mirrord/operator.md. Some lists name only a few siblings, so search for several of them.",
+      "scope": ["docs/docs/**"],
+      "severity": "high"
+    },
+    {
+      "id": "fence-tags",
+      "rule": "Every fenced json or yaml code block in a markdown file must carry a tag in the fence info string from the set documented in skills/CONTRIBUTING.md. Flag any block with no tag or a tag outside the set. For blocks tagged mirrord, mirrord=<path>, mirrord-up or mirrord-up=<path>: flag the block if it is not valid JSON or YAML (placeholders like ..., inline comments, trailing commas), for a mirrord=<path> fragment flag it if <path> does not exist in mirrord-schema.json at the repository root or the block's top-level keys are not properties of the object at that path, and for a mirrord-up=<path> fragment flag it if <path> does not exist in mirrord-up-schema.json at the repository root or the block's top-level keys are not properties of the object at that path. Skip the files listed under \"Exempt files\" in skills/CONTRIBUTING.md.",
+      "scope": ["skills/**/*.md"],
+      "severity": "high"
     }
   ]
 }

@@ -1,0 +1,17 @@
+{
+  "name": "mirrord",
+  "version": "1.0.0",
+  "description": "Connect your agent to a live Kubernetes cluster with mirrord, so it tests code changes against real services. Covers setup, config, CI, database branching, queue splitting, and preview environments.",
+  "author": {
+    "name": "MetalBear",
+    "email": "support@metalbear.com",
+    "url": "https://metalbear.com"
+  },
+  "homepage": "https://metalbear.com/mirrord/ai/",
+  "repository": "https://github.com/metalbear-co/skills",
+  "license": "MIT",
+  "keywords": ["mirrord", "kubernetes", "k8s", "metalbear", "dev-tools", "ai-agents"],
+  "logo": "assets/mirrord-icon.png",
+  "category": "development",
+  "skills": "./skills/"
+}

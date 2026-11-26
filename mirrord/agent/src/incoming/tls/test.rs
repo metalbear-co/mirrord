@@ -26,7 +26,7 @@ use crate::{
         StealTlsHandlerStore,
         error::{StealTlsSetupError, StealTlsSetupErrorInner},
     },
-    util::path_resolver::InTargetPathResolver,
+    util::target_root::TargetRoot,
 };
 
 /// Identity backed by a file written with [`CertChainWithKey::to_file`], which holds both the
@@ -158,7 +158,7 @@ async fn server_authentication(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -237,7 +237,7 @@ async fn client_verification(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -310,7 +310,7 @@ async fn client_authentication(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -394,7 +394,7 @@ async fn server_verification(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -526,7 +526,7 @@ async fn configured_server_name_fills_in_for_missing_sni(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -629,7 +629,7 @@ async fn agent_presents_matching_identity(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -754,7 +754,7 @@ async fn identities_require_client_verification(
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
 
     let error = store.get(443).await.unwrap_err();
@@ -804,7 +804,7 @@ async fn unverified_client_identity_is_not_reported() {
                 },
             },
         }],
-        InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+        TargetRoot::new(root_dir.path().to_path_buf()),
     );
     let handler = store.get(443).await.unwrap().unwrap();
 
@@ -931,7 +931,7 @@ impl SimpleStore {
                     },
                 },
             }],
-            InTargetPathResolver::with_root_path(root_dir.path().to_path_buf()),
+            TargetRoot::new(root_dir.path().to_path_buf()),
         );
 
         let mut root_store = RootCertStore::empty();
@@ -978,5 +978,86 @@ impl SimpleStore {
 
     pub fn acceptor(&self) -> TlsAcceptor {
         TlsAcceptor::from(Arc::new(self.server_config.clone()))
+    }
+}
+
+/// Trust roots and PEM files are read from the target's filesystem. CA directories are full of
+/// absolute symlinks, which have to resolve in the target, and must not lead out of it.
+///
+/// ```text
+/// outside/escaped.pem               a CA outside the target root
+/// root/top.pem                      a CA named directly in `trust_roots`
+/// root/store/linked.pem             a CA
+/// root/certs/plain.pem              a CA
+/// root/certs/linked.pem          -> /store/linked.pem
+/// root/certs/escaped.pem         -> <outside>/escaped.pem
+/// root/certs/rel_escaped.pem     -> ../../outside/escaped.pem
+/// ```
+#[tokio::test]
+async fn files_are_read_from_target_root() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("root");
+    let outside = parent.path().join("outside");
+    for dir in [root.join("store"), root.join("certs"), outside.clone()] {
+        fs::create_dir_all(dir).unwrap();
+    }
+
+    let write_ca = |name: &str, path: &Path| {
+        let ca = generate_cert(name, None, true).unwrap();
+        fs::write(path, ca.cert.pem()).unwrap();
+        ca.cert.der().clone()
+    };
+    let top = write_ca("top", &root.join("top.pem"));
+    let linked = write_ca("linked", &root.join("store/linked.pem"));
+    let plain = write_ca("plain", &root.join("certs/plain.pem"));
+    write_ca("escaped", &outside.join("escaped.pem"));
+    std::os::unix::fs::symlink("/store/linked.pem", root.join("certs/linked.pem")).unwrap();
+    std::os::unix::fs::symlink(outside.join("escaped.pem"), root.join("certs/escaped.pem"))
+        .unwrap();
+    std::os::unix::fs::symlink(
+        "../../outside/escaped.pem",
+        root.join("certs/rel_escaped.pem"),
+    )
+    .unwrap();
+
+    let store = StealTlsHandlerStore::new(Default::default(), TargetRoot::new(root.clone()));
+    let root_store = store
+        .in_target(|target_root| {
+            Ok(StealTlsHandlerStore::root_store(
+                target_root,
+                vec!["/top.pem".into(), "/certs".into()],
+            ))
+        })
+        .await
+        .unwrap();
+
+    let mut expected = RootCertStore::empty();
+    for ca in [top, linked, plain] {
+        expected.add(ca).unwrap();
+    }
+    let sorted = |store: &RootCertStore| {
+        let mut subjects = store
+            .subjects()
+            .iter()
+            .map(|subject| subject.as_ref().to_vec())
+            .collect::<Vec<_>>();
+        subjects.sort();
+        subjects
+    };
+    assert_eq!(sorted(&root_store), sorted(&expected));
+
+    for path in [
+        outside.join("escaped.pem"),
+        "/certs/escaped.pem".into(),
+        "/certs/rel_escaped.pem".into(),
+        "/../outside/escaped.pem".into(),
+    ] {
+        let read = store
+            .read_authentication(TlsAuthentication {
+                cert_pem: path.clone(),
+                key_pem: path.clone(),
+            })
+            .await;
+        assert!(read.is_err(), "{path:?}");
     }
 }

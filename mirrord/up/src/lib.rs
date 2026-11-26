@@ -18,12 +18,12 @@ use std::{
 };
 
 pub use config::{
-    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranching,
-    IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError, PreviewImageSource,
-    PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig, RunType,
-    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
-    SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig, TargetValidationError,
-    UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
+    AutoscaleOrigin, BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError,
+    DbBranching, IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError,
+    PreviewImageSource, PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig,
+    RunType, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode,
+    SkipReason, SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig,
+    TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -491,9 +491,24 @@ const INFERRED_TARGET_TYPES: [TargetType; 4] = [
     TargetType::Pod,
 ];
 
+/// How [`resolve_unresolved_workloads`] reports the targets it infers, and what it does about a
+/// service with no workload named after it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Resolution {
+    /// `mirrord up` in a terminal: prints each inferred target, and runs a wizard for a service
+    /// without one.
+    Prompt,
+    /// `mirrord up` without a terminal, as IDEs run it: prints each inferred target, and fails on
+    /// a service without one, since no one can answer a prompt.
+    Fail,
+    /// `mirrord preview`: fails like [`Resolution::Fail`], and prints nothing, since the caller
+    /// reports the targets the way its output is set up.
+    Quiet,
+}
+
 /// Resolve every service whose `target.path` is absent by looking the service
 /// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order).
-/// When no workload matches and `interactive` is set, a wizard lets the user
+/// When no workload matches, [`Resolution::Prompt`] has a wizard let the user
 /// pick a different namespace and workload, or exit. Otherwise that fails.
 ///
 /// If the user has specified a kube context via `--context`, `config.services.*.context` or
@@ -502,7 +517,7 @@ async fn resolve_unresolved_workloads(
     up_config: &UpConfig,
     config_path: &Path,
     up_context: UpKubeContext,
-    interactive: bool,
+    resolution: Resolution,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -544,8 +559,7 @@ async fn resolve_unresolved_workloads(
         let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
-                // Without prompts, the caller reports the targets the way its output is set up.
-                if interactive {
+                if resolution != Resolution::Quiet {
                     println!("{name}: using {path}");
                 }
                 ResolvedTarget {
@@ -555,7 +569,7 @@ async fn resolve_unresolved_workloads(
                     },
                 }
             }
-            None if interactive.not() => {
+            None if resolution != Resolution::Prompt => {
                 return Err(UpError::NoInferredTarget {
                     service: name.clone(),
                     namespace: namespace.to_owned(),
@@ -855,11 +869,15 @@ fn save_target(
 /// Generate the [`mirrord_config::LayerConfig`] of every service based on the provided
 /// [`UpConfig`] and [`EnvKey`], resolving the targets left to the cluster. The configs are
 /// handed to [`launch`], after the caller checked what needs the operator.
+///
+/// A service with no `target.path` and no workload named after it gets a wizard to pick its
+/// target when `interactive` is set, and fails with [`UpError::NoInferredTarget`] otherwise.
 pub async fn resolve_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
+    interactive: bool,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
     let config_directory = config_directory(config_path)?;
@@ -882,8 +900,14 @@ pub async fn resolve_services(
         common_context: up_config.common.context.clone(),
     };
 
+    let resolution = if interactive {
+        Resolution::Prompt
+    } else {
+        Resolution::Fail
+    };
     let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), true).await?;
+        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), resolution)
+            .await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -914,8 +938,13 @@ pub async fn resolve_preview_services(
         common_context: up_config.common.context.clone(),
     };
 
-    let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), false).await?;
+    let mut resolved_targets = resolve_unresolved_workloads(
+        &up_config,
+        config_path,
+        up_context.clone(),
+        Resolution::Quiet,
+    )
+    .await?;
 
     up_config.assemble_services(
         key,
@@ -968,6 +997,7 @@ fn service_commands(
                 incoming: _,
                 db_branches_origin: _,
                 queues_origin: _,
+                autoscale_origin: _,
             } = config;
             let config::RunConfig {
                 r#type,
