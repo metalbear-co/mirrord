@@ -1,14 +1,20 @@
-//! `mirrord login`: authenticates the user with mirrord Cloud,
-//! and stores the resulting login token in [`AuthStore`].
+//! `mirrord login`, `mirrord logout` and `mirrord whoami`.
 //!
-//! The login is a browser approval bound to a PKCE verifier ([RFC 7636]), following [RFC 8252] for
-//! native apps:
+//! `mirrord login --url` logs in to an operator with the company identity provider ([`operator`])
+//! or to mirrord Cloud, and stores the resulting login token in [`AuthStore`]. Which one the URL
+//! is gets decided before any browser opens: an operator answers the login info route, mirrord
+//! Cloud is the URL `MIRRORD_METALBEAR_CLOUD_URL` names.
 //!
-//! 1. The CLI generates a verifier, listens on an ephemeral loopback port, and opens the backend's
-//!    `/auth-cli` page with the verifier's S256 challenge and its callback URI.
-//! 2. The user signs in if needed and approves. The backend signs a two-minute grant bound to the
-//!    challenge and the callback, and the browser delivers it on loopback.
-//! 3. The CLI calls the backend again to exchange the grant and the verifier for a login token.
+//! Both logins are a browser approval bound to a PKCE verifier ([RFC 7636]), following [RFC 8252]
+//! for native apps:
+//!
+//! 1. The CLI generates a verifier, listens on an ephemeral loopback port, and opens the login
+//!    page (the backend's `/auth-cli` page, or the operator's authorize route, which sends the
+//!    browser on to the identity provider) with the verifier's S256 challenge and its callback URI.
+//! 2. The user signs in if needed and approves. The backend or the operator signs a two-minute
+//!    grant bound to the challenge and the callback, and the browser delivers it on loopback.
+//! 3. The CLI calls the backend or the operator again to exchange the grant and the verifier for
+//!    a login token.
 //!
 //! The verifier never leaves the CLI, so a grant intercepted on its way to the callback is useless
 //! by itself.
@@ -17,6 +23,7 @@
 //! [RFC 8252]: https://www.rfc-editor.org/info/rfc8252/
 
 use std::{
+    fmt,
     io::{self, IsTerminal},
     ops::Not,
     time::Duration,
@@ -25,7 +32,9 @@ use std::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Local, Utc};
 use miette::Diagnostic;
+use mirrord_operator::types::PaidFeatureGate;
 use mirrord_progress::{Progress, ProgressTracker};
+use mirrord_sessions_manager_client::cloud_url_from_env;
 use rand::RngExt;
 use reqwest::{StatusCode, redirect::Policy};
 use serde::{Deserialize, Serialize};
@@ -40,7 +49,16 @@ use crate::{
     login::callback::LoginCallbackServer,
 };
 
+mod active;
 mod callback;
+mod expiry;
+mod logout;
+mod operator;
+mod whoami_command;
+
+pub(crate) use active::apply_login_and_global_defaults;
+pub(crate) use logout::logout_command;
+pub(crate) use whoami_command::whoami_command;
 
 /// 5 minutes – how long the CLI waits for the user to approve the login in the browser,
 /// this including signing in.
@@ -55,39 +73,50 @@ const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REJECTION_BODY_CHARS: usize = 512;
 
 /// Implementation of the `mirrord login` command.
+///
+/// The URL decides the flow before any browser opens: a saved, unexpired operator login is
+/// switched to on the spot; an operator that answers its login info route gets the SSO login; the
+/// mirrord Cloud URL gets the Cloud login. Anything else is an error naming both options.
 #[mirrord_macros::boxed_future]
 pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     let mut progress = ProgressTracker::from_env("mirrord login");
+    let url = backend_base_url(args.url)?;
 
-    let backend_url = backend_base_url(args.url)?;
+    if let Some(login) = AuthStore::activate_operator_login(issuer(&url).to_owned())
+        .await
+        .map_err(LoginError::Store)?
+    {
+        progress.success(Some(&format!(
+            "Logged in to {} as {} already, valid until {}. mirrord uses this operator now.",
+            login.host(),
+            login.account,
+            local_time(login.expires_at),
+        )));
+        return Ok(());
+    }
+
+    if let Some(info) = operator::probe(&url).await? {
+        return operator::login(&mut progress, url, info).await;
+    }
+
+    let cloud_url = cloud_url_from_env()
+        .ok()
+        .and_then(|cloud_url| Url::parse(&cloud_url).ok());
+    if cloud_url.is_some_and(|cloud_url| issuer(&cloud_url) == issuer(&url)) {
+        return cloud_login(&mut progress, url).await;
+    }
+
+    Err(LoginError::NotALoginUrl(url))
+}
+
+/// Login to mirrord Cloud at `backend_url`.
+async fn cloud_login(progress: &mut ProgressTracker, backend_url: Url) -> Result<(), LoginError> {
     let login_page = backend_url.join(LOGIN_PAGE_PATH)?;
     let callback = LoginCallbackServer::prepare(&login_page).await?;
     let callback_uri = callback.url();
     let verifier = Verifier::random();
 
-    // User logs in and the browser delivers the grant to the loopback callback server.
-    let mut approval_url = login_page;
-    approval_url
-        .query_pairs_mut()
-        .append_pair("code_challenge", &verifier.code_challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("redirect_uri", &callback_uri)
-        .append_pair("state", callback.state_param());
-    let approval_message = format!(
-        "Approve the login in your browser. If it does not open, visit:\n\n{approval_url}\n"
-    );
-    // The progress is not drawn without a terminal, which is how agents run the CLI.
-    if io::stderr().is_terminal().not() {
-        eprintln!("{approval_message}");
-    }
-    let mut subtask = progress.subtask(&approval_message);
-    if let Err(error) = opener::open_browser(approval_url.as_str()) {
-        warn!(%error, "Failed to open the browser");
-    }
-    let grant = tokio::time::timeout(APPROVAL_TIMEOUT, callback.wait())
-        .await
-        .map_err(|_| LoginError::ApprovalTimeout)??;
-    subtask.success(Some("Grant received"));
+    let grant = approve_in_browser(progress, login_page, &verifier, callback).await?;
 
     // The grant is exchanged for the auth token.
     let mut subtask = progress.subtask("Exchanging grant for the auth token");
@@ -107,7 +136,7 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     if expires_at <= Utc::now() {
         return Err(LoginError::BadToken(format!(
             "expired at {}",
-            expires_at.with_timezone(&Local).format("%Y-%m-%d %H:%M %Z"),
+            local_time(expires_at),
         )));
     }
     subtask.success(Some("Token received"));
@@ -130,10 +159,55 @@ pub(crate) async fn login_command(args: LoginArgs) -> Result<(), LoginError> {
     progress.success(Some(&format!(
         "Logged in as {}. The login is valid until {}.",
         claims.email,
-        expires_at.with_timezone(&Local).format("%Y-%m-%d %H:%M %Z"),
+        local_time(expires_at),
     )));
 
     Ok(())
+}
+
+/// Opens `login_page` in the browser with the PKCE challenge and the callback's URI and state,
+/// and waits for the browser to deliver the grant to `callback`.
+async fn approve_in_browser(
+    progress: &mut ProgressTracker,
+    mut approval_url: Url,
+    verifier: &Verifier,
+    callback: LoginCallbackServer,
+) -> Result<String, LoginError> {
+    approval_url
+        .query_pairs_mut()
+        .append_pair("code_challenge", &verifier.code_challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("redirect_uri", &callback.url())
+        .append_pair("state", callback.state_param());
+    let approval_message = format!(
+        "Approve the login in your browser. If it does not open, visit:\n\n{approval_url}\n"
+    );
+    // The progress is not drawn without a terminal, which is how agents run the CLI.
+    if io::stderr().is_terminal().not() {
+        eprintln!("{approval_message}");
+    }
+    let mut subtask = progress.subtask(&approval_message);
+    if let Err(error) = opener::open_browser(approval_url.as_str()) {
+        warn!(%error, "Failed to open the browser");
+    }
+    let grant = tokio::time::timeout(APPROVAL_TIMEOUT, callback.wait())
+        .await
+        .map_err(|_| LoginError::ApprovalTimeout)??;
+    subtask.success(Some("Grant received"));
+    Ok(grant)
+}
+
+/// The host (and port, when not the default) of a login URL, how messages name an operator.
+fn host_of(url: &Url) -> String {
+    issuer(url)
+        .split_once("://")
+        .map(|(_, host)| host.to_owned())
+        .unwrap_or_else(|| url.to_string())
+}
+
+/// A point in time in the developer's time zone, how login messages show when a login ends.
+fn local_time(time: DateTime<Utc>) -> impl fmt::Display {
+    time.with_timezone(&Local).format("%Y-%m-%d %H:%M %Z")
 }
 
 /// Validates the backend URL passed in [`LoginArgs`], and turns it into a base for [`Url::join`].
@@ -281,6 +355,14 @@ pub(crate) enum LoginError {
     /// Loopback callback handler failed.
     #[error("failed to listen on a loopback port: {0}")]
     LoopbackListen(#[source] io::Error),
+    /// The browser delivered a refusal from the operator or the identity provider instead of a
+    /// grant.
+    #[error("the login was refused in the browser: {0}")]
+    #[diagnostic(help(
+        "Your identity provider or the operator did not complete the login. Fix what the message \
+         names, then run `mirrord login` again."
+    ))]
+    Refused(String),
     /// Loopback callback handler was not called within the time limit.
     #[error("the login was not approved in the browser within {} minutes", APPROVAL_TIMEOUT.as_secs() / 60)]
     #[diagnostic(help("Run `mirrord login` again to start a new login."))]
@@ -298,6 +380,42 @@ pub(crate) enum LoginError {
     /// Failed to store the token locally.
     #[error("failed to store the login token: {0}")]
     Store(#[source] io::Error),
+    /// The URL is neither an operator with SSO on nor the mirrord Cloud URL.
+    #[error("{0} is not a mirrord operator with SSO enabled, and it is not mirrord Cloud")]
+    #[diagnostic(help(
+        "Pass the operator URL your platform team set in the chart's `sso.url`, or the mirrord \
+         Cloud URL. An operator with SSO off cannot be logged in to."
+    ))]
+    NotALoginUrl(Url),
+    /// The operator could not be reached at all.
+    #[error("could not reach {url}: {source}")]
+    #[diagnostic(help("Check the URL and your network connection."))]
+    Unreachable {
+        url: Url,
+        #[source]
+        source: reqwest::Error,
+    },
+    /// The operator has SSO on but predates the CLI login routes.
+    #[error("the operator at {host} does not support `mirrord login` yet")]
+    #[diagnostic(help(
+        "Ask your platform team to upgrade the operator to {} or newer.",
+        operator::MIN_OPERATOR_VERSION
+    ))]
+    OperatorTooOld { host: String },
+    /// The operator answered the login info route with something the CLI cannot read.
+    #[error("the operator at {host} answered the login check with an unexpected {status} response")]
+    #[diagnostic(help(
+        "Run `mirrord login` again. If this keeps happening, check the operator's logs."
+    ))]
+    UnexpectedOperatorAnswer { host: String, status: StatusCode },
+    /// The operator's license does not include SSO. Mapped to the paid-feature error every other
+    /// gated feature produces.
+    #[error("{0}")]
+    NotLicensed(PaidFeatureGate),
+    /// No login to that URL is saved, so there is nothing to log out of.
+    #[error("you are not logged in to {0}")]
+    #[diagnostic(help("Run `mirrord whoami` to see your logins."))]
+    NotLoggedIn(String),
 }
 
 #[cfg(test)]

@@ -1,0 +1,7 @@
+# One service with no `target.path`, in a cluster with no workload named after it.
+common:
+  telemetry: false
+services:
+  api:
+    run:
+      command: ["unused"]
