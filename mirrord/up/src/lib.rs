@@ -18,12 +18,12 @@ use std::{
 };
 
 pub use config::{
-    BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError, DbBranching,
-    IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError, PreviewImageSource,
-    PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig, RunType,
-    SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode, SkipReason,
-    SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig, TargetValidationError,
-    UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
+    AutoscaleOrigin, BuiltinModeName, COMMON_LAYER_PATHS, CommonConfig, ConfigPatchError,
+    DbBranching, IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError,
+    PreviewImageSource, PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig,
+    RunType, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode,
+    SkipReason, SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig,
+    TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -997,6 +997,7 @@ fn service_commands(
                 incoming: _,
                 db_branches_origin: _,
                 queues_origin: _,
+                autoscale_origin: _,
             } = config;
             let config::RunConfig {
                 r#type,
