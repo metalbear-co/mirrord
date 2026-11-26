@@ -1,6 +1,6 @@
 ---
 title: Starting your first session
-description: "Run your local code in the context of your cluster with the mirrord CLI or IDE extension, and see what mirrord does by default."
+description: "Run your local code in the context of your Kubernetes cluster or Amazon ECS with the mirrord CLI, and see what mirrord does by default."
 tags:
   - oss
   - team
@@ -9,7 +9,9 @@ tags:
 
 # Starting your first session
 
-You need [mirrord installed](install-mirrord.md) and a running workload in your cluster (a deployment, a pod, or [another target](../reference/targets.md)) to run against.
+You need [mirrord installed](install-mirrord.md) and a workload to run against: a deployment or a pod in your cluster, [another target](../reference/targets.md), or a [workload outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md), such as an Amazon ECS task.
+
+Using VS Code or a JetBrains IDE? See [Use mirrord in your IDE](use-mirrord-in-your-ide.md).
 
 ## CLI
 
@@ -43,12 +45,7 @@ mirrord up init
 
 This walks you through an interactive wizard and writes a `mirrord-up.yaml` for you, so you don't need to write any config by hand. To answer the same questions in your browser, run `mirrord wizard` (see [Onboarding Wizard](onboarding-wizard.md)). Once you have a `mirrord-up.yaml`, start the services by running `mirrord up`.
 
-## IDE extensions
-
-1. **VS Code:** Click **mirrord** in the status bar at the bottom of the window. The circle next to it fills in when mirrord is enabled.
-2. **JetBrains:** Click the **mirrord icon** in the navigation toolbar (top right).
-
-Then start a debug session. When prompted, pick the pod you want to impersonate, and your local process is plugged into it.
+`mirrord up init` and the wizard find Kubernetes workloads only. For a workload outside Kubernetes, write its `serverless/` target into `mirrord-up.yaml` yourself. See [Using mirrord with a Workload Outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md#using-mirrord-with-a-workload-outside-kubernetes).
 
 {% hint style="success" %}
 **Send a request to your remote target.** You should see it arrive at your local process as well!
@@ -80,7 +77,7 @@ It opens in your browser and shows every active session on your machine, with a 
 
 ## Test from your browser
 
-Install the mirrord browser extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/mirrord/bijejadnnfgjkfdocgocklekjhnhkhkf) (Edge users can install it from there too) or [Firefox Add-ons](https://addons.mozilla.org/firefox/addon/mirrord/) to route requests you make from your browser to your local process. It works together with a running mirrord session that steals traffic with an [HTTP filter](../using-mirrord/incoming-traffic/filter-incoming-traffic.md): join the session from the extension popup (with `mirrord ui` running), and the extension injects the header matching the session's filter into every browser request. Hit a staging URL in your browser and your local code answers, without changing any application code or configuring proxies. No operator? Set the header manually in the extension to match your session's filter. See [Debugging from Browser](../using-mirrord/incoming-traffic/debug-from-browser.md) for setup.
+The mirrord browser extension for Chrome, Edge, and Firefox routes requests you make from your browser to your local process, so you can hit a staging URL and have your local code answer. It works with a session that steals traffic with an [HTTP filter](../using-mirrord/incoming-traffic/filter-incoming-traffic.md). See [Debugging from Browser](../using-mirrord/incoming-traffic/debug-from-browser.md) to install and set it up.
 
 {% hint style="info" %}
 **Working with a team?** [mirrord for Teams](https://app.metalbear.com) adds access control, traffic policies, and concurrent session management so your whole team can use mirrord safely.
@@ -93,10 +90,6 @@ Install the mirrord browser extension from the [Chrome Web Store](https://chrome
 mirrord reads config from `<project-path>/.mirrord/mirrord.json` (also supports `.toml` and `.yaml`). You can also prefix config files, e.g. `my-config.mirrord.json`.
 
 See the full [configuration options](https://metalbear.com/mirrord/docs/config). To keep an Operator preference across projects, see [Global Configuration](../installing-mirrord/global-configuration.md).
-
-{% hint style="info" %}
-The IDE extensions provide autocomplete for mirrord config files.
-{% endhint %}
 
 ## Next steps
 

@@ -20,7 +20,7 @@ mirrord runs in two places: a thin layer injected into your local process (`mirr
 
 ![mirrord - Basic Architecture](../.gitbook/assets/architecture.svg)
 
-No VPN, no root access, no deployment. Your local process behaves as if it's running inside the cluster, but you keep your local tools, debugger, and IDE.
+No VPN, no root access, no deployment. Your local process behaves as if it's running inside the cluster, but you keep your local tools, debugger, and IDE. Run it from the terminal, or from VS Code and JetBrains IDEs with the [mirrord extension](use-mirrord-in-your-ide.md).
 
 For the full architecture, see the [Architecture reference](../reference/architecture.md).
 
