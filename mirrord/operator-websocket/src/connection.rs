@@ -28,14 +28,30 @@ use tokio_tungstenite::{
 ///    into the existing interfaces. Encoded messages are not verified in any way.
 ///
 /// Other endpoints stream `E::InMsg` and accept pre-encoded [`Vec<u8>`] or [`Bytes`] payloads.
-pub struct OperatorConnection<E = Client>(
-    WebSocketStream<TokioIo<Upgraded>>,
-    PhantomData<fn() -> E>,
-);
+///
+/// A close frame from the peer is an [`OperatorConnectionError::InvalidMessage`], unless its code
+/// is one of [`Self::with_clean_close_codes`], which end the stream instead. Consumers such as
+/// `mirrord_protocol_io`'s IO task treat both as the end of the connection, but log an error at
+/// `ERROR`, so a peer that closes with a code meaning "done" must not look like a failure.
+pub struct OperatorConnection<E = Client> {
+    socket: WebSocketStream<TokioIo<Upgraded>>,
+    clean_close_codes: &'static [u16],
+    endpoint: PhantomData<fn() -> E>,
+}
 
 impl<E> OperatorConnection<E> {
     pub fn new(socket: WebSocketStream<TokioIo<Upgraded>>) -> Self {
-        Self(socket, PhantomData)
+        Self {
+            socket,
+            clean_close_codes: &[],
+            endpoint: PhantomData,
+        }
+    }
+
+    /// Ends the stream, instead of yielding an error, when the peer closes with one of `codes`.
+    pub fn with_clean_close_codes(mut self, codes: &'static [u16]) -> Self {
+        self.clean_close_codes = codes;
+        self
     }
 }
 
@@ -43,7 +59,7 @@ impl<E> fmt::Debug for OperatorConnection<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_tuple("OperatorConnection")
-            .field(&self.0)
+            .field(&self.socket)
             .finish()
     }
 }
@@ -55,7 +71,7 @@ impl<E: ProtocolEndpoint> Stream for OperatorConnection<E> {
         let this = self.get_mut();
 
         loop {
-            let msg = std::task::ready!(this.0.poll_next_unpin(cx));
+            let msg = std::task::ready!(this.socket.poll_next_unpin(cx));
             let msg = match msg {
                 Some(Ok(Message::Binary(msg))) => {
                     let msg = DecodeCtx::decode_from_bytes::<E::InMsg>(msg).map_err(From::from);
@@ -64,6 +80,11 @@ impl<E: ProtocolEndpoint> Stream for OperatorConnection<E> {
                 Some(Ok(Message::Ping(..) | Message::Pong(..))) => {
                     // `tungstenite` can surface ping messages, but handles them automatically
                     continue;
+                }
+                Some(Ok(Message::Close(Some(frame))))
+                    if this.clean_close_codes.contains(&u16::from(frame.code)) =>
+                {
+                    None
                 }
                 Some(Ok(msg @ (Message::Text(..) | Message::Frame(..) | Message::Close(..)))) => {
                     Some(Err(OperatorConnectionError::InvalidMessage(msg.into())))
@@ -80,21 +101,30 @@ impl Sink<ClientMessage> for OperatorConnection<Client> {
     type Error = OperatorConnectionError;
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_close_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_close_unpin(cx)
+            .map_err(From::from)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_flush_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_flush_unpin(cx)
+            .map_err(From::from)
     }
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_ready_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_ready_unpin(cx)
+            .map_err(From::from)
     }
 
     fn start_send(self: Pin<&mut Self>, item: ClientMessage) -> Result<(), Self::Error> {
         let item = bincode::encode_to_vec(&item, bincode::config::standard())?;
         self.get_mut()
-            .0
+            .socket
             .start_send_unpin(Message::Binary(item.into()))
             .map_err(From::from)
     }
@@ -104,20 +134,29 @@ impl<E> Sink<Vec<u8>> for OperatorConnection<E> {
     type Error = OperatorConnectionError;
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_close_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_close_unpin(cx)
+            .map_err(From::from)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_flush_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_flush_unpin(cx)
+            .map_err(From::from)
     }
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_ready_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_ready_unpin(cx)
+            .map_err(From::from)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
         self.get_mut()
-            .0
+            .socket
             .start_send_unpin(Message::Binary(item.into()))
             .map_err(From::from)
     }
@@ -127,20 +166,29 @@ impl<E> Sink<Bytes> for OperatorConnection<E> {
     type Error = OperatorConnectionError;
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_close_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_close_unpin(cx)
+            .map_err(From::from)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_flush_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_flush_unpin(cx)
+            .map_err(From::from)
     }
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().0.poll_ready_unpin(cx).map_err(From::from)
+        self.get_mut()
+            .socket
+            .poll_ready_unpin(cx)
+            .map_err(From::from)
     }
 
     fn start_send(self: Pin<&mut Self>, item: Bytes) -> Result<(), Self::Error> {
         self.get_mut()
-            .0
+            .socket
             .start_send_unpin(Message::Binary(item))
             .map_err(From::from)
     }

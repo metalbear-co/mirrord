@@ -79,6 +79,16 @@ pub const REMOTE_SERVICE_REPLICA: CheckedEnv<String> =
 /// This is distinct from `MIRRORD_TARGET_NAMESPACE`, which configures a local mirrord process.
 pub const REMOTE_ENVIRONMENT: CheckedEnv<String> = CheckedEnv::new("MIRRORD_REMOTE_ENVIRONMENT");
 
+/// Opaque platform metadata the workload companion sends when it registers with the
+/// sessions-manager, which forwards it to the intproxies paired with this agent (e.g.
+/// `platform=aws-lambda&invocation_port=8080`). Set by whatever launches the companion on a
+/// platform the CLI needs to know about.
+///
+/// A value the agent doesn't accept as `AgentMetadata` is dropped and the agent registers without
+/// metadata.
+pub const REMOTE_AGENT_METADATA: CheckedEnv<String> =
+    CheckedEnv::new("MIRRORD_REMOTE_AGENT_METADATA");
+
 /// Base URL of the standalone sessions-manager the workload companion registers with, including
 /// any path prefix it is served under, e.g. `https://example.com/sm`.
 ///

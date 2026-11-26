@@ -13,11 +13,13 @@
 //! defined by `mirrord-protocol`.
 
 pub use control_plane::{
-    AgentIdentity, AssignmentId, AssignmentRole, AssignmentSubscription, ControlPlaneEventName,
-    IntproxyIdentity, ReplicaId, ServiceScope,
+    AGENT_METADATA_HEADER, AgentIdentity, AgentMetadata, AssignmentId, AssignmentRole,
+    AssignmentSubscription, ControlPlaneEventName, IntproxyIdentity, InvalidAgentMetadata,
+    ReplicaId, ServiceScope,
 };
 pub use data_plane::{
     DataPlaneAuthorization, DataPlaneEndpoint, OPERATOR_DATA_PLANE_AUTHORIZATION_HEADER,
+    PEER_LEFT_CLOSE_CODE,
 };
 pub use error::SessionsManagerProtocolError;
 use serde::{Deserialize, Serialize};
@@ -34,6 +36,18 @@ pub struct ConnectionAssignment {
     pub assignment_id: AssignmentId,
     pub data_plane_endpoint: DataPlaneEndpoint,
     pub authorization: DataPlaneAuthorization,
+    /// The [`AgentMetadata`] the paired agent registered with. Set only on intproxy assignments,
+    /// and only by a sessions-manager that supports it.
+    ///
+    /// A value this client's [`AgentMetadata`] rejects reads as absent, logged at debug, instead of
+    /// failing the assignment: a later sessions-manager may accept more, and a released client
+    /// must keep pairing with it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "control_plane::deserialize_lenient_agent_metadata"
+    )]
+    pub agent_metadata: Option<AgentMetadata>,
 }
 
 #[cfg(test)]
@@ -48,6 +62,7 @@ mod tests {
             assignment_id: "assignment-1".to_owned().into(),
             data_plane_endpoint: DataPlaneEndpoint::new(Uri::from_static("/sm/ws/123")).unwrap(),
             authorization: DataPlaneAuthorization::new("Bearer secret".to_owned()),
+            agent_metadata: None,
         };
 
         assert_eq!(
@@ -62,6 +77,7 @@ mod tests {
             assignment_id: "assignment-1".to_owned().into(),
             data_plane_endpoint: DataPlaneEndpoint::new(Uri::from_static("/sm/ws/123")).unwrap(),
             authorization: DataPlaneAuthorization::new("Bearer secret".to_owned()),
+            agent_metadata: None,
         };
 
         assert!(!format!("{assignment:?}").contains("secret"));
