@@ -91,7 +91,7 @@ Put the mirrord logo (the mirror) on every box that is a part of mirrord: the op
 <use href="#mirrord" x="..." y="..." width="32" height="57"/>
 ```
 
-The symbol is the mirror from `images/logo.svg` at the repository root, without the wordmark. Copy the `<symbol id="mirrord" viewBox="97 61 391 696">` definition from `docs/.gitbook/assets/api-gateway-traffic.svg`. Do not change it.
+The symbol is the mirror from `images/logo.svg` at the repository root, without the wordmark, the thin white outline, and the glare lines on the glass. Those details look grainy at icon size. Copy the `<symbol id="mirrord" viewBox="97 61 391 696">` definition from `docs/.gitbook/assets/api-gateway-traffic.svg`. Do not change it, and do not use the full logo in a diagram.
 
 ### Laptop
 
