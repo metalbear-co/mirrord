@@ -8,6 +8,19 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.291.2](https://github.com/metalbear-co/mirrord/tree/3.291.2) - 2026-11-25
+
+
+### Fixed
+
+- Fixed target paths with extra segments after the container name, such as
+  `pod/foo/container/bar/baz`, being accepted with the extra segments dropped
+  instead of rejected as invalid.
+  [#5277](https://github.com/metalbear-co/mirrord/issues/5277)
+- Fixed an agent that removed the iptables rules of another agent for the same
+  target container. Now an agent fails to start while another agent runs for
+  the same target container.
+
 ## [3.291.1](https://github.com/metalbear-co/mirrord/tree/3.291.1) - 2026-11-24
 
 

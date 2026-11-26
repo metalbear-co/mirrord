@@ -13,6 +13,7 @@ use mirrord_config::{
     LayerConfig, LayerFileConfig,
     config::{ConfigContext, ConfigError, EnvKey, MirrordConfig},
     feature::{
+        FeatureFileConfig,
         copy_target::CopyTargetConfig,
         database_branches::{
             AllSplitConfigDbBranches, BranchCopyMode, DatabaseBranchesConfig, SplitConfigCopy,
@@ -23,6 +24,7 @@ use mirrord_config::{
             IncomingMode,
             http_filter::{HttpFilterConfig, HttpFilterFileConfig},
         },
+        preview::{PreviewAutoscaleConfig, PreviewFileConfig},
         split_queues::{QueueKind, QueueMode, SplitQueuesConfig},
     },
     target::{Target, TargetType, deployment::DeploymentTarget},
@@ -318,17 +320,53 @@ pub struct CommonConfig {
     /// variable takes precedence.
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
     pub(crate) baggage: Option<String>,
+
+    /// Preview environment settings for every service of `mirrord preview up`. A service's own
+    /// `preview` takes precedence, setting by setting.
+    ///
+    /// ```yaml
+    /// preview:
+    ///   autoscale: true
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
+    pub(crate) preview: Option<PreviewUpConfig>,
+}
+
+/// Preview environment settings of `mirrord preview up`, under `common.preview` for every service
+/// and under `services.*.preview` for one.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewUpConfig {
+    /// Scale the service's preview pods the way the target scales, by copying the target's
+    /// `HorizontalPodAutoscaler`. Maps to
+    /// [`feature.preview.autoscale`](https://metalbear.com/mirrord/docs/config/options#feature-preview-autoscale):
+    /// `false` (the default) runs 1 pod, `true` copies the target's autoscaler from 1 pod up to
+    /// its maximum, and `{ min: 4, max: 12 }` or `{ max: 12 }` copies it within these bounds.
+    ///
+    /// Under `common`, a service whose target has no autoscaler runs 1 pod; under a service, such
+    /// a target fails the service's preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) autoscale: Option<PreviewAutoscaleConfig>,
 }
 
 impl CommonConfig {
     /// The mirrord config every service is assembled from: these settings plus whatever
     /// `context` takes from the environment.
     fn base_config(&self, context: &mut ConfigContext) -> Result<LayerConfig, ConfigError> {
+        let autoscale = self.preview.and_then(|preview| preview.autoscale);
         LayerFileConfig {
             accept_invalid_certificates: self.accept_invalid_certificates,
             operator: self.operator,
             telemetry: self.telemetry,
             baggage: self.baggage.clone(),
+            feature: autoscale.is_some().then(|| FeatureFileConfig {
+                preview: Some(PreviewFileConfig {
+                    autoscale,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
             ..Default::default()
         }
         .generate_config(context)
@@ -700,6 +738,14 @@ pub struct ServiceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Enterprise))]
     pub(crate) sync: Option<SyncConfig>,
+
+    /// Preview environment settings of this service for `mirrord preview up`, which take
+    /// precedence over `common.preview` setting by setting.
+    ///
+    /// `mirrord up` ignores this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-mirrord-plan" = mirrord_config::plan::Plan::Team))]
+    pub(crate) preview: Option<PreviewUpConfig>,
 }
 
 /// How `mirrord preview sync` previews a service with local code.
@@ -864,6 +910,7 @@ pub const COMMON_LAYER_PATHS: &[(&str, &str)] = &[
     ("telemetry", "telemetry"),
     ("context", "kube_context"),
     ("baggage", "baggage"),
+    ("preview", "feature.preview"),
 ];
 
 /// The settings of a service in a `mirrord-up.yaml` that [`ServiceConfig::assemble`] copies into
@@ -878,6 +925,7 @@ pub const SERVICE_LAYER_PATHS: &[(&str, &str)] = &[
     ("default_mode", "feature.network.incoming.mode"),
     ("http_filter", "feature.network.incoming.http_filter"),
     ("ignore_ports", "feature.network.incoming.ignore_ports"),
+    ("preview", "feature.preview"),
 ];
 
 impl ServiceConfig {
@@ -915,6 +963,7 @@ impl ServiceConfig {
         }
 
         let kube_context = up_context.get_context(self.context.clone());
+        let autoscale_origin = self.autoscale_origin(base.feature.preview.autoscale);
         let mut cfg = self.unpatched_config(base, mode, &key, kube_context.clone());
 
         // `PreviewIncomingConfig` falls back to the anchored `^baggage: ...$` filter only when
@@ -1058,6 +1107,7 @@ impl ServiceConfig {
             incoming: mode.incoming(),
             db_branches_origin,
             queues_origin,
+            autoscale_origin,
         })
     }
 
@@ -1157,7 +1207,35 @@ impl ServiceConfig {
 
         cfg.feature.network.incoming.ignore_ports = self.ignore_ports.iter().copied().collect();
         cfg.key = key.clone();
+
+        // `common.preview.autoscale` is already in the base config; the service's own wins.
+        if let Some(autoscale) = self.preview.and_then(|preview| preview.autoscale) {
+            cfg.feature.preview.autoscale = Some(autoscale);
+        }
         cfg
+    }
+
+    /// Where the `feature.preview.autoscale` of this service's config comes from: the service's
+    /// own `preview`, or `common.preview`, or neither. `common_autoscale` is what `common` sets.
+    /// A `config_patch` that sets it counts as the service's own, strict like `mirrord.json`.
+    fn autoscale_origin(
+        &self,
+        common_autoscale: Option<PreviewAutoscaleConfig>,
+    ) -> Option<AutoscaleOrigin> {
+        let patch_sets_autoscale = self
+            .config_patch
+            .as_ref()
+            .is_some_and(|patch| patch.pointer("/feature/preview/autoscale").is_some());
+        let service_sets_autoscale = self
+            .preview
+            .is_some_and(|preview| preview.autoscale.is_some());
+        if service_sets_autoscale || patch_sets_autoscale {
+            Some(AutoscaleOrigin::Service)
+        } else if common_autoscale.is_some() {
+            Some(AutoscaleOrigin::Common)
+        } else {
+            None
+        }
     }
 
     fn resolve_target(
@@ -1289,6 +1367,20 @@ pub struct SubprocessCfg {
     /// are the `"*"` splits `mirrord up` adds, which a preview session asks its operator to drop
     /// where it can't serve them rather than failing.
     pub queues_origin: RequestOrigin,
+    /// Where `config.feature.preview.autoscale` came from, `None` when it isn't set. A preview
+    /// whose target has no autoscaler fails when the setting is the service's own, and runs a
+    /// fixed number of pods when it comes from `common`, which speaks for services that may not
+    /// all autoscale.
+    pub autoscale_origin: Option<AutoscaleOrigin>,
+}
+
+/// Which part of a `mirrord-up.yaml` set a service's `feature.preview.autoscale`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoscaleOrigin {
+    /// The service's own `preview.autoscale`, or its `config_patch`.
+    Service,
+    /// `common.preview.autoscale`.
+    Common,
 }
 
 /// Whether `target` is one workload. The operator resolves a DB branching request against the
@@ -2164,6 +2256,7 @@ impl CollectAnalytics for &CommonConfig {
             telemetry,
             context,
             baggage,
+            preview,
         } = self;
 
         analytics.add(
@@ -2174,6 +2267,10 @@ impl CollectAnalytics for &CommonConfig {
         analytics.add("telemetry", telemetry.is_some());
         analytics.add("context", context.is_some());
         analytics.add("baggage", baggage.is_some());
+        analytics.add(
+            "preview_autoscale",
+            preview.is_some_and(|preview| preview.autoscale.is_some()),
+        );
     }
 }
 
@@ -2212,8 +2309,9 @@ impl CollectAnalytics for &UpConfig {
                 run,
                 context,
                 config_patch,
-                // `mirrord up` ignores it.
+                // `mirrord up` ignores them.
                 sync: _,
+                preview: _,
             } = svc;
 
             if *target != TargetConfig::UNSPECIFIED {
@@ -2362,6 +2460,7 @@ mod tests {
             "default_mode" => "mirror",
             "http_filter" => "{ header_filter: x }",
             "ignore_ports" => "[80]",
+            "preview" => "{ autoscale: true }",
             other => panic!("no value to set `{other}` to"),
         };
         let service =
@@ -2445,6 +2544,7 @@ mod tests {
                 telemetry: Some(false),
                 context: Some("minikube".into()),
                 baggage: Some("mirrord-session=abc".into()),
+                preview: None,
             }
         );
     }
@@ -4167,6 +4267,7 @@ mod tests {
                     "telemetry": false,
                     "context": false,
                     "baggage": false,
+                    "preview_autoscale": false,
                 },
                 "config_fields_used": {
                     "target": 0,

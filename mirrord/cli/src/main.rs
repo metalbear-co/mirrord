@@ -1382,6 +1382,8 @@ fn main() -> miette::Result<()> {
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
             Commands::Login(args) => login::login_command(*args).await?,
+            Commands::Logout(args) => login::logout_command(*args).await?,
+            Commands::Whoami => login::whoami_command().await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");
