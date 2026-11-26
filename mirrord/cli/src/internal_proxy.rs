@@ -43,6 +43,7 @@ use mirrord_intproxy::{
 use mirrord_kube::api::kubernetes::create_kube_config_with_context;
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
+use mirrord_sessions_manager_client::TargetPlatform;
 #[cfg(not(target_os = "windows"))]
 use nix::sys::resource::{Resource, setrlimit};
 #[cfg(unix)]
@@ -114,11 +115,20 @@ fn json_diff(actual: &serde_json::Value, default: &serde_json::Value) -> Option<
     }
 }
 
-/// Print the address for the caller (mirrord cli execution flow) so it can pass it
-/// back to the layer instances via env var.
-fn print_addr(listener: &TcpListener) -> io::Result<()> {
+/// Prints the handshake the caller (mirrord cli execution flow) waits for: the listener address,
+/// which it passes back to the layer instances via env var, then the target's platform as JSON,
+/// or an empty line when there is none.
+///
+/// Readers that take only the first line, such as the container sidecar, are unaffected by the
+/// second.
+fn print_handshake(listener: &TcpListener, platform: Option<&TargetPlatform>) -> io::Result<()> {
     let addr = listener.local_addr()?;
-    println!("{addr}\n");
+    let platform = platform
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(io::Error::other)?
+        .unwrap_or_default();
+    println!("{addr}\n{platform}");
     Ok(())
 }
 
@@ -419,7 +429,8 @@ pub(crate) async fn proxy(
     let listener = create_listen_socket(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_port))
         .map_err(InternalProxyError::ListenerSetup)?;
     let shutdown = shutdown_handler.token.clone();
-    print_addr(&listener).map_err(InternalProxyError::ListenerSetup)?;
+    print_handshake(&listener, agent_conn.platform.as_ref())
+        .map_err(InternalProxyError::ListenerSetup)?;
 
     #[cfg(not(target_os = "windows"))]
     if container_mode.not() {

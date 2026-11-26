@@ -20,8 +20,9 @@ use mirrord_protocol::DaemonMessage;
 use mirrord_protocol_io::ConnectionOutput;
 use mirrord_protocol_io::{Client, Connection, ProtocolError};
 use mirrord_sessions_manager_client::{
-    IntproxyClient, LoginTokenSource, OperatorTransport, SessionsManagerClientError,
-    SessionsManagerConnectInfo, SessionsManagerEndpoint,
+    IntproxyClient, IntproxyConnection, LoginTokenSource, OperatorTransport,
+    SessionsManagerClientError, SessionsManagerConnectInfo, SessionsManagerEndpoint,
+    TargetPlatform,
 };
 #[cfg(not(test))]
 use serde::Deserialize;
@@ -179,6 +180,9 @@ pub enum AgentConnectionMessage {
 pub struct AgentConnection {
     pub connection: Connection<Client>,
     pub reconnect: ReconnectFlow,
+    /// What the agent reported about its target's platform. Only an agent paired through
+    /// sessions-manager reports one.
+    pub platform: Option<TargetPlatform>,
 }
 
 impl AgentConnection {
@@ -196,6 +200,7 @@ impl AgentConnection {
     ) -> Result<Self, AgentConnectionError> {
         let kind = connect_info.discriminant();
 
+        let mut platform = None;
         let (connection, reconnect) = match connect_info {
             AgentConnectInfo::Operator(session) => {
                 let connection =
@@ -280,9 +285,12 @@ impl AgentConnection {
                 );
                 let proxy_client =
                     IntproxyClient::new(connect_info.clone(), endpoint, login_tokens.clone())?;
-                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
-                    .await
-                    .map(Connection::from_channel)?;
+                let IntproxyConnection {
+                    connection,
+                    platform: reported,
+                } = Box::pin(proxy_client.connect(Duration::from_secs(60))).await?;
+                platform = reported;
+                let conn = Connection::from_channel(connection);
                 (
                     conn,
                     ReconnectFlow::ConnectInfo {
@@ -298,9 +306,12 @@ impl AgentConnection {
                     OperatorApi::serverless_sessions_manager_client(config).await?,
                 );
                 let proxy_client = IntproxyClient::with_transport(connect_info.clone(), transport)?;
-                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
-                    .await
-                    .map(Connection::from_channel)?;
+                let IntproxyConnection {
+                    connection,
+                    platform: reported,
+                } = Box::pin(proxy_client.connect(Duration::from_secs(60))).await?;
+                platform = reported;
+                let conn = Connection::from_channel(connection);
                 (
                     conn,
                     ReconnectFlow::ConnectInfo {
@@ -329,6 +340,7 @@ impl AgentConnection {
         Ok(Self {
             connection,
             reconnect,
+            platform,
         })
     }
 
@@ -342,6 +354,7 @@ impl AgentConnection {
         Ok(Self {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            platform: None,
         })
     }
 
@@ -354,6 +367,7 @@ impl fmt::Debug for AgentConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AgentConnection")
             .field("reconnect", &self.reconnect)
+            .field("platform", &self.platform)
             .finish()
     }
 }

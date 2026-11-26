@@ -434,6 +434,7 @@ mod tests {
         let agent_conn = AgentConnection {
             connection,
             reconnect: ReconnectFlow::Break(AgentConnectInfoDiscriminants::DirectKubernetes),
+            platform: None,
         };
         let (_, chaos_rx) = watch::channel(Default::default());
         let mut proxy = IntProxy::new_with_connection(

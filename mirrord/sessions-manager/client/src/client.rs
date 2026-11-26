@@ -2,7 +2,7 @@ mod agent;
 mod intproxy;
 
 pub use agent::AgentClient;
-pub use intproxy::{IntproxyClient, SessionsManagerConnectInfo};
+pub use intproxy::{IntproxyClient, IntproxyConnection, SessionsManagerConnectInfo};
 use mirrord_sessions_manager_protocol::ServiceScope;
 
 use crate::error::SessionsManagerClientError;
