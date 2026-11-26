@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1202 622" width="1202" height="622" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 622" width="1200" height="622" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">NATS queue splitting flow</title>
   <desc id="d">Producers publish to orders.* into the stream ORDERS, which the app reads through the durable consumer orders-app. The operator never changes this stream. The forwarder in the mirrord operator pulls and acknowledges messages from orders-app and routes every message by each session's header or jq filter. A message that matches tenant=^acme$ goes to the temporary stream mirrord-tmp-&lt;a&gt;-orders-app, which developer A's local app reads. A message that matches tenant=^globex$ goes to mirrord-tmp-&lt;b&gt;-orders-app, which developer B's local app reads. A message that matches no filter goes to the fallback stream mirrord-tmp-main-orders-app, which the deployed consumer reads. The operator resolves the queue names from the pod environment or a mounted file, creates every temporary stream, patches only the pods and not the Deployment object, and cleans up when a session ends.</desc>
   <defs>
@@ -37,7 +37,7 @@
       <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
     </symbol>
   </defs>
-  <rect x="0" y="0" width="1202" height="622" fill="#ffffff"/>
+  <rect x="0" y="0" width="1200" height="622" fill="#ffffff"/>
 
   <!-- Producers -->
   <rect x="476" y="4" width="280" height="64" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>

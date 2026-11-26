@@ -182,6 +182,8 @@
   <text x="800" y="922" font-size="12.5" fill="#ffffff" text-anchor="middle">and <tspan font-family="Menlo, Consolas, monospace">mirrord-session-dev-...-shipping</tspan></text>
   <text x="800" y="940" font-size="12.5" fill="#ffffff" text-anchor="middle">receives only the tasks that match its filters</text>
   <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="1122" y="24" width="36" height="36"/>
-  <use href="#k8s" x="1122" y="482" width="36" height="36"/>
+  <!-- Kubernetes logos: what runs in the cluster -->
+  
+  <!-- Kubernetes logos: what runs in the cluster -->
+  <use href="#k8s" x="437" y="156" width="26" height="26"/><use href="#k8s" x="1077" y="115" width="26" height="26"/><use href="#k8s" x="437" y="276" width="26" height="26"/><use href="#k8s" x="1077" y="235" width="26" height="26"/><use href="#k8s" x="437" y="367" width="26" height="26"/><use href="#k8s" x="1077" y="361" width="26" height="26"/><use href="#k8s" x="437" y="443" width="26" height="26"/><use href="#k8s" x="1077" y="437" width="26" height="26"/><use href="#k8s" x="1077" y="585" width="26" height="26"/><use href="#k8s" x="1077" y="661" width="26" height="26"/>
 </svg>
