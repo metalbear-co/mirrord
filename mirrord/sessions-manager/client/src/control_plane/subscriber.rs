@@ -6,8 +6,8 @@
 //!
 //! - [`ControlPlaneSubscription`]: the trait describing one feed — what to open, how to read what
 //!   comes back. The only feed-specific part; holds no connection.
-//! - Implementations live with their feed, not here. `AssignmentSubscription` in
-//!   [`crate::assignments`] is the only one.
+//! - Implementations live with their feed, not here: `AssignmentSubscription` and
+//!   `AssignmentSubscriptionWithOptions`, in [`crate::assignments`].
 //! - [`ControlPlaneSubscriber`]: the caller-facing type, generic over that trait. Yields events one
 //!   at a time, retrying underneath.
 //! - [`ControlPlaneSubscriptionDriver`]: the subscriber's private inner state — the open stream and
@@ -365,7 +365,8 @@ mod tests {
                 ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
                 ControlPlaneEvent::Matched(_)
                 | ControlPlaneEvent::Ended(_)
-                | ControlPlaneEvent::Admission(_) => Ok(None),
+                | ControlPlaneEvent::Admission(_)
+                | ControlPlaneEvent::Gone => Ok(None),
             }
         }
     }

@@ -169,6 +169,8 @@ impl TryFrom<TargetCrd> for TargetConfig {
         Ok(TargetConfig {
             path: Some(Target::try_from(crd.spec.target)?),
             namespace: crd.metadata.namespace,
+            tag_filter: None,
+            jq_filter: None,
         })
     }
 }

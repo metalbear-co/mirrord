@@ -128,7 +128,8 @@ pub enum ReconnectFlow {
     ConnectInfo {
         /// Boxed due to large size.
         config: Box<LayerConfig>,
-        connect_info: AgentConnectInfo,
+        /// Boxed due to large size.
+        connect_info: Box<AgentConnectInfo>,
         login_tokens: Option<Arc<dyn LoginTokenSource>>,
     },
 
@@ -206,7 +207,7 @@ impl AgentConnection {
                     if session.allow_reconnect {
                         ReconnectFlow::ConnectInfo {
                             config: Box::new(config.clone()),
-                            connect_info: AgentConnectInfo::Operator(session),
+                            connect_info: Box::new(AgentConnectInfo::Operator(session)),
                             login_tokens,
                         }
                     } else {
@@ -270,6 +271,9 @@ impl AgentConnection {
                 (conn, ReconnectFlow::Break(kind))
             }
 
+            // A session with a selector names the replica the CLI's own connection reached, in
+            // `assigned_replica`, and reconnects keep it: the session stays on the task it
+            // attached to, and ends when that task is gone, as one targeting a gone pod does.
             AgentConnectInfo::SessionsManager(connect_info) => {
                 let endpoint =
                     SessionsManagerEndpoint::resolve(config.sessions_manager.url.as_deref())?;
@@ -280,14 +284,12 @@ impl AgentConnection {
                 );
                 let proxy_client =
                     IntproxyClient::new(connect_info.clone(), endpoint, login_tokens.clone())?;
-                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
-                    .await
-                    .map(Connection::from_channel)?;
+                let (conn, _) = Box::pin(proxy_client.connect(Duration::from_secs(60))).await?;
                 (
-                    conn,
+                    Connection::from_channel(conn),
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
-                        connect_info: AgentConnectInfo::SessionsManager(connect_info),
+                        connect_info: Box::new(AgentConnectInfo::SessionsManager(connect_info)),
                         login_tokens,
                     },
                 )
@@ -298,14 +300,14 @@ impl AgentConnection {
                     OperatorApi::serverless_sessions_manager_client(config).await?,
                 );
                 let proxy_client = IntproxyClient::with_transport(connect_info.clone(), transport)?;
-                let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))
-                    .await
-                    .map(Connection::from_channel)?;
+                let (conn, _) = Box::pin(proxy_client.connect(Duration::from_secs(60))).await?;
                 (
-                    conn,
+                    Connection::from_channel(conn),
                     ReconnectFlow::ConnectInfo {
                         config: Box::new(config.clone()),
-                        connect_info: AgentConnectInfo::OperatorSessionsManager(connect_info),
+                        connect_info: Box::new(AgentConnectInfo::OperatorSessionsManager(
+                            connect_info,
+                        )),
                         login_tokens,
                     },
                 )
@@ -318,7 +320,7 @@ impl AgentConnection {
 
                 let reconnect = ReconnectFlow::ConnectInfo {
                     config: Box::new(config.clone()),
-                    connect_info: AgentConnectInfo::Dummy(sender),
+                    connect_info: Box::new(AgentConnectInfo::Dummy(sender)),
                     login_tokens,
                 };
 
@@ -366,6 +368,12 @@ pub enum AgentConnectionTaskError {
     /// [`tokio::task`], which handles raw IO. The original (e.g. some IO error) is not available.
     #[error("{0} unexpectedly closed connection")]
     ChannelError(AgentConnectInfoDiscriminants),
+    /// The connection closed, and reconnecting failed for good: with an error no retry can fix,
+    /// such as the operator's 410 for a gone target pod or the sessions-manager's `gone` for the
+    /// task a session is pinned to, or after every retry. Carries that error, so that the proxy's
+    /// failover, which terminates the session's processes, names the reason.
+    #[error("{kind} closed the connection, and reconnecting failed: {reason}", reason = Report::new(.1.as_ref()), kind = .0)]
+    ReconnectFailed(AgentConnectInfoDiscriminants, Box<AgentConnectionError>),
 }
 
 impl BackgroundTask for AgentConnection {
@@ -435,7 +443,8 @@ impl RestartableBackgroundTask for AgentConnection {
                     .max_delay(Duration::from_secs(8))
                     .take(10);
                 // Unless the operator responded with explicit 410 (meaning that the session is
-                // permanently gone), we can still retry.
+                // permanently gone), or the sessions-manager said that the agent replica a pinned
+                // session reconnects to is gone, we can still retry.
                 let can_retry = |error: &AgentConnectionError| match error {
                     AgentConnectionError::Operator(OperatorApiError::KubeError {
                         error: kube::Error::Api(error),
@@ -444,6 +453,9 @@ impl RestartableBackgroundTask for AgentConnection {
                         error.code != RECONNECT_NOT_POSSIBLE_CODE
                             || error.reason != RECONNECT_NOT_POSSIBLE_REASON
                     }
+                    AgentConnectionError::SessionsManagerClient(
+                        SessionsManagerClientError::PinnedReplicaGone,
+                    ) => false,
                     _ => true,
                 };
 
@@ -454,7 +466,7 @@ impl RestartableBackgroundTask for AgentConnection {
                             .closed_token()
                             .run_until_cancelled(AgentConnection::new(
                                 config,
-                                connect_info.clone(),
+                                AgentConnectInfo::clone(connect_info),
                                 login_tokens.clone(),
                                 &mut NullReporter::default(),
                             ))
@@ -483,9 +495,13 @@ impl RestartableBackgroundTask for AgentConnection {
 
                         ControlFlow::Continue(())
                     }
-                    Ok(None) | Err(..) => ControlFlow::Break(
-                        AgentConnectionTaskError::ChannelError(self.reconnect.kind()),
-                    ),
+                    Ok(None) => ControlFlow::Break(AgentConnectionTaskError::ChannelError(
+                        self.reconnect.kind(),
+                    )),
+                    Err(error) => ControlFlow::Break(AgentConnectionTaskError::ReconnectFailed(
+                        self.reconnect.kind(),
+                        Box::new(error),
+                    )),
                 }
             }
         }

@@ -31,6 +31,12 @@ pub enum ControlPlaneEventName {
     /// Carries an [`Admission`] as its JSON body. Sent to an agent that registered with
     /// [`crate::GateState::Pending`].
     Admission,
+    /// Carries an empty JSON object as its body, and is the last event of its stream. Sent to an
+    /// intproxy registration that names its agent's replica, when that replica isn't registered
+    /// and stays away for the sessions-manager's grace period: counted from when it left, or
+    /// from the registration's arrival for a replica the sessions-manager doesn't know. The
+    /// session can't reach that agent again, so it ends, as one whose target pod is gone does.
+    Gone,
 }
 
 /// A task that matched a developer's watch.

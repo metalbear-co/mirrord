@@ -3,12 +3,14 @@ use std::{future::Future, sync::Arc, time::Duration};
 use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol_io::Client;
 use mirrord_sessions_manager_protocol::{
-    AssignmentSubscription, ConnectionAssignment, IntproxyIdentity, ReplicaId, ServiceScope,
+    AgentSelector, AssignmentSubscription, ConnectionAssignment, IntproxyIdentity,
+    IntproxySubscriptionOptions, ReplicaId, ServiceScope, SubscriptionOptions,
 };
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use crate::{
+    assignments::AssignmentSubscriptionWithOptions,
     client::validate_scope,
     control_plane::subscriber::ControlPlaneSubscriber,
     credentials::LoginTokenSource,
@@ -18,6 +20,9 @@ use crate::{
 };
 
 /// Describes the sessions-manager control-plane subscription an intproxy opens.
+///
+/// The CLI hands it to the intproxy and the extproxy it spawns as JSON, so fields added later are
+/// `#[serde(default)]`, and a reader ignores the fields it doesn't know.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionsManagerConnectInfo {
     /// Service scope for this control-plane registration.
@@ -29,6 +34,18 @@ pub struct SessionsManagerConnectInfo {
     pub user_session_id: String,
     /// Optional replica constraint for routing this connection.
     pub replica_filter: Option<ReplicaId>,
+    /// Restricts the agents this session may be paired with to those whose task's tags match.
+    /// Only the operator-hosted sessions-manager honors it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_selector: Option<AgentSelector>,
+    /// The replica the session's first connection was paired with.
+    ///
+    /// Among several tasks matching [`Self::agent_selector`], the sessions-manager picks one per
+    /// pairing, so two connections of a session paired by selector can reach different tasks.
+    /// With this set, the connection registers for this replica alone and sends no selector,
+    /// which keeps it on the task the first connection reached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned_replica: Option<ReplicaId>,
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.
@@ -38,6 +55,8 @@ pub struct IntproxyClient<T = DirectTransport> {
     /// session while staying stable across the control-plane subscriber's SSE reconnects.
     identity: IntproxyIdentity,
     replica_filter: Option<ReplicaId>,
+    /// The encoded [`IntproxySubscriptionOptions`], sent on every registration attempt.
+    subscription_options: Option<String>,
     transport: T,
 }
 
@@ -59,13 +78,26 @@ impl<T: SessionsManagerTransport> IntproxyClient<T> {
         connect_info: SessionsManagerConnectInfo,
         transport: T,
     ) -> Result<Self, SessionsManagerClientError> {
+        let (replica_filter, agent_selector) = match connect_info.assigned_replica {
+            Some(replica) => (Some(replica), None),
+            None => (connect_info.replica_filter, connect_info.agent_selector),
+        };
+        let subscription_options = agent_selector.map(|agent_selector| {
+            IntproxySubscriptionOptions {
+                agent_selector: Some(agent_selector),
+                watch: None,
+            }
+            .encode()
+        });
+
         Ok(Self {
             scope: validate_scope(connect_info.scope)?,
             identity: IntproxyIdentity {
                 user_session_id: connect_info.user_session_id,
                 intproxy_connection_id: uuid::Uuid::new_v4().to_string(),
             },
-            replica_filter: connect_info.replica_filter,
+            replica_filter,
+            subscription_options,
             transport,
         })
     }
@@ -75,10 +107,14 @@ impl<T: SessionsManagerTransport> IntproxyClient<T> {
     /// The returned connection exposes incoming daemon messages and accepts typed client messages
     /// or pre-encoded binary payloads, allowing callers to drive its [`futures::Sink`] and
     /// [`futures::Stream`] implementations directly.
+    ///
+    /// Also returns the replica of the agent the connection was paired with, when the
+    /// sessions-manager names it. A caller that opens more connections for the session passes it
+    /// as [`SessionsManagerConnectInfo::assigned_replica`], so they reach the same agent.
     pub async fn connect(
         &self,
         timeout: Duration,
-    ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
+    ) -> Result<(OperatorConnection<Client>, Option<ReplicaId>), SessionsManagerClientError> {
         let deadline = Instant::now() + timeout;
         self.retry(deadline, || self.connect_once(deadline)).await
     }
@@ -111,14 +147,17 @@ impl<T: SessionsManagerTransport> IntproxyClient<T> {
     async fn connect_once(
         &self,
         deadline: Instant,
-    ) -> Result<OperatorConnection<Client>, SessionsManagerClientError> {
-        let assignment = self.next_assignment(deadline).await?;
+    ) -> Result<(OperatorConnection<Client>, Option<ReplicaId>), SessionsManagerClientError> {
+        let mut assignment = self.next_assignment(deadline).await?;
+        let agent_replica_id = assignment.agent_replica_id.take();
 
-        with_deadline(
+        let connection = with_deadline(
             Some(self.connect_deadline(deadline)),
             self.transport.connect_data_plane(assignment),
         )
-        .await?
+        .await??;
+
+        Ok((connection, agent_replica_id))
     }
 
     async fn next_assignment(
@@ -128,9 +167,12 @@ impl<T: SessionsManagerTransport> IntproxyClient<T> {
         let mut assignments = ControlPlaneSubscriber::new(
             self.transport.clone(),
             self.scope.clone(),
-            AssignmentSubscription::Intproxy {
-                identity: self.identity.clone(),
-                agent_replica_filter: self.replica_filter.clone(),
+            AssignmentSubscriptionWithOptions {
+                subscription: AssignmentSubscription::Intproxy {
+                    identity: self.identity.clone(),
+                    agent_replica_filter: self.replica_filter.clone(),
+                },
+                options: self.subscription_options.clone(),
             },
             false,
         );

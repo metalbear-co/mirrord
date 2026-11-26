@@ -1,4 +1,4 @@
-use std::{ffi::NulError, io, num::ParseIntError, path::PathBuf, process::ExitStatus};
+use std::{borrow::Cow, ffi::NulError, io, num::ParseIntError, path::PathBuf, process::ExitStatus};
 
 use kube::{self, Error, client::AuthError};
 use miette::Diagnostic;
@@ -392,6 +392,18 @@ pub(crate) enum CliError {
     #[diagnostic(help(r#"Inspect your config file and arguments provided.{GENERAL_HELP}"#))]
     ConfigError(mirrord_config::config::ConfigError),
 
+    /// A `target.tag_filter` or `target.jq_filter` that the config's own verification refuses.
+    /// Kept apart from [`CliError::ConfigError`] because only the user's config is at fault, so
+    /// the refusal is no bug to report, as when the operator refuses a filter
+    /// ([`CliError::TaskSelectorRefused`]). The message is written for the user and shown as it
+    /// is.
+    #[error("Failed to verify mirrord config: {message}")]
+    #[diagnostic(help("Correct `{setting}` in the mirrord config."))]
+    TaskSelectorConfig {
+        setting: Cow<'static, str>,
+        message: String,
+    },
+
     #[cfg(unix)]
     #[error("Failed to set up the local directory for prefetched files: {0}")]
     #[diagnostic(help(
@@ -566,6 +578,15 @@ pub(crate) enum CliError {
     #[error("failed to connect to the serverless target's agent through sessions-manager: {0}")]
     #[diagnostic(help("{GENERAL_HELP}"))]
     SessionsManagerConnect(mirrord_sessions_manager_client::SessionsManagerClientError),
+
+    /// Kept apart from [`CliError::SessionsManagerConnect`] because the operator refuses only
+    /// what the user configured, so the refusal is no bug to report.
+    #[error("the operator refused the target's task filters: {0}")]
+    #[diagnostic(help(
+        "Correct the filter it names in `target.tag_filter` or `target.jq_filter` in the mirrord \
+        config."
+    ))]
+    TaskSelectorRefused(String),
 
     /// Kept apart from [`CliError::SessionsManagerConnect`] because the timeout's message alone
     /// doesn't say what to fix, while the other errors name it themselves.
@@ -1289,7 +1310,9 @@ impl CliError {
             Self::SessionsManagerConnect(
                 mirrord_sessions_manager_client::SessionsManagerClientError::ServerlessSessionsManagerNotServed(..),
             ) => AnalyticsError::ServerlessSessionsManagerNotServed,
-            Self::SessionsManagerConnect(..) => AnalyticsError::SessionsManagerConnect,
+            Self::SessionsManagerConnect(..) | Self::TaskSelectorRefused(..) => {
+                AnalyticsError::SessionsManagerConnect
+            }
             Self::SessionsManagerUrl(..) => AnalyticsError::SessionsManagerUrl,
             Self::ServerlessSessionsManagerNotServed => {
                 AnalyticsError::ServerlessSessionsManagerNotServed
@@ -1339,14 +1362,23 @@ impl From<crate::preview::resources::ResourcesError> for CliError {
 }
 
 /// A share error is written for the user, so it isn't framed as a failed config verification.
+/// Neither is a refused task filter, which needs no bug report.
 impl From<ConfigError> for CliError {
     fn from(error: ConfigError) -> Self {
         match error {
             ConfigError::Share(_) => Self::LocalShare(LocalShareError::Config(error)),
+            ConfigError::ConflictAt { setting, message }
+                if TASK_SELECTOR_SETTINGS.contains(&setting.as_ref()) =>
+            {
+                Self::TaskSelectorConfig { setting, message }
+            }
             error => Self::ConfigError(error),
         }
     }
 }
+
+/// The settings that select a serverless task by its tags.
+const TASK_SELECTOR_SETTINGS: [&str; 2] = ["target.tag_filter", "target.jq_filter"];
 
 impl From<mirrord_up::UpError> for CliError {
     fn from(error: mirrord_up::UpError) -> Self {

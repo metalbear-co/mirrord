@@ -256,7 +256,9 @@ impl ListedTarget {
         json_patch::merge(&mut merged, patch);
         let (path, namespace) = match serde_json::from_value(merged) {
             Ok(TargetFileConfig::Simple(path)) => (path, None),
-            Ok(TargetFileConfig::Advanced { path, namespace }) => (path, namespace),
+            Ok(TargetFileConfig::Advanced {
+                path, namespace, ..
+            }) => (path, namespace),
             Err(_) => return unpatched,
         };
         let namespace = namespace.map(Arc::from);

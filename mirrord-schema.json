@@ -6488,6 +6488,14 @@
         {
           "type": "object",
           "properties": {
+            "jq_filter": {
+              "description": "Selects the task of a serverless target with a jq program run on\n`{\"tags\": {\"<name>\": \"<value>\", ...}}`, the tags of its AWS Batch job. The task matches\nwhen the program outputs `true`. Needs `operator: true`.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-mirrord-plan": "enterprise"
+            },
             "namespace": {
               "type": [
                 "string",
@@ -6507,6 +6515,17 @@
                   "type": "string"
                 }
               ]
+            },
+            "tag_filter": {
+              "description": "Selects the task of a serverless target by the tags of its AWS Batch job: a mapping of\ntag names to regexes, all of which the task's tags must match. Needs `operator: true`.",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "string"
+              },
+              "x-mirrord-plan": "enterprise"
             }
           },
           "additionalProperties": false

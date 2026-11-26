@@ -24,7 +24,7 @@ use mirrord_operator_websocket::connection::OperatorConnection;
 use mirrord_protocol::{ClientCodec, ClientMessage, DaemonMessage};
 use mirrord_protocol_api::client::{ClientConfig, ClientError, MirrordClient, ProtocolConnector};
 use mirrord_sessions_manager_client::{
-    DirectTransport, IntproxyClient, OperatorTransport, SessionsManagerClientError,
+    DirectTransport, IntproxyClient, OperatorTransport, ReplicaId, SessionsManagerClientError,
     SessionsManagerConnectInfo, SessionsManagerEndpoint, SessionsManagerTransport,
 };
 use tokio::io::DuplexStream;
@@ -125,8 +125,9 @@ pub(crate) struct DirectConnector {
 /// The first connection is established while the session is set up, so its wait for an agent
 /// shows up in the progress, and is parked in [`Self::first_conn`], to be handed out on the first
 /// [`connect`](AgentConnector::connect) call. Any later call opens a fresh, one-shot data plane
-/// connection to the room. There is no reconnect support: once a connection to the room fails,
-/// the session is over, same as [`DirectConnector`].
+/// connection to the room, which for a session with a selector is on the replica the first one
+/// reached ([`SessionsManagerConnectInfo::assigned_replica`]). There is no reconnect support: once
+/// a connection to the room fails, the session is over, same as [`DirectConnector`].
 pub(crate) struct SessionsManagerConnector {
     pub(crate) connect_info: SessionsManagerConnectInfo,
     pub(crate) route: SessionsManagerRoute,
@@ -142,11 +143,14 @@ pub(crate) enum SessionsManagerRoute {
 }
 
 impl SessionsManagerConnector {
+    /// Also returns the replica of the agent the connection was paired with, when the
+    /// sessions-manager names it.
+    ///
     /// Takes `&mut self` only to keep the future [`Send`], since [`Self::first_conn`] isn't
     /// [`Sync`].
     pub(crate) async fn connect(
         &mut self,
-    ) -> Result<OperatorConnection, SessionsManagerClientError> {
+    ) -> Result<(OperatorConnection, Option<ReplicaId>), SessionsManagerClientError> {
         match &self.route {
             SessionsManagerRoute::Operator(client) => {
                 self.connect_with(OperatorTransport::new(client.clone()))
@@ -166,7 +170,7 @@ impl SessionsManagerConnector {
     async fn connect_with<T: SessionsManagerTransport>(
         &mut self,
         transport: T,
-    ) -> Result<OperatorConnection, SessionsManagerClientError> {
+    ) -> Result<(OperatorConnection, Option<ReplicaId>), SessionsManagerClientError> {
         let client = IntproxyClient::with_transport(self.connect_info.clone(), transport)?;
         Box::pin(client.connect(Duration::from_mins(10))).await
     }
@@ -379,7 +383,7 @@ impl ProtocolConnector for AgentConnector {
             AgentConnector::SessionsManager(sessions_manager) => {
                 let conn = match sessions_manager.first_conn.take() {
                     Some(conn) => conn,
-                    None => Box::new(sessions_manager.connect().await?),
+                    None => Box::new(sessions_manager.connect().await?.0),
                 };
 
                 Ok(AgentConnection::SessionsManager(conn))

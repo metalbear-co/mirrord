@@ -45,4 +45,8 @@ pub(crate) enum ControlPlaneEvent {
         reason = "decoded so a subscriber can receive it; no subscriber reads it yet"
     )]
     Admission(Admission),
+
+    /// The agent replica this intproxy registration names is gone for good. Only an intproxy
+    /// registration pinned to a replica receives it, and it ends the stream.
+    Gone,
 }

@@ -42,10 +42,52 @@ impl ControlPlaneSubscription for AssignmentSubscription {
         match event {
             ControlPlaneEvent::Assignment(assignment) => Ok(Some(assignment)),
             ControlPlaneEvent::Superseded => Err(SessionsManagerClientError::Superseded),
+            // Reconnecting can't bring the pinned agent back, so the subscription ends here
+            // rather than waiting out its deadline for an assignment that never comes.
+            ControlPlaneEvent::Gone => match self {
+                Self::Intproxy { .. } => Err(SessionsManagerClientError::PinnedReplicaGone),
+                Self::Agent { .. } => Ok(None),
+            },
             ControlPlaneEvent::Matched(_)
             | ControlPlaneEvent::Ended(_)
             | ControlPlaneEvent::Admission(_) => Ok(None),
         }
+    }
+}
+
+/// An assignments subscription that sends options in
+/// [`SUBSCRIPTION_OPTIONS_HEADER`](mirrord_sessions_manager_protocol::SUBSCRIPTION_OPTIONS_HEADER)
+/// on every attempt, reconnects included.
+pub(crate) struct AssignmentSubscriptionWithOptions {
+    pub(crate) subscription: AssignmentSubscription,
+    /// The header value, as
+    /// [`SubscriptionOptions::encode`](mirrord_sessions_manager_protocol::SubscriptionOptions::encode)
+    /// produces it, or [`None`] to send no header.
+    pub(crate) options: Option<String>,
+}
+
+impl ControlPlaneSubscription for AssignmentSubscriptionWithOptions {
+    type Output = ConnectionAssignment;
+
+    fn name(&self) -> &'static str {
+        self.subscription.name()
+    }
+
+    async fn subscribe<T: SessionsManagerTransport>(
+        &self,
+        transport: &T,
+        scope: &ServiceScope,
+    ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+        transport
+            .subscribe_assignments(scope, &self.subscription, self.options.as_deref())
+            .await
+    }
+
+    fn extract(
+        &self,
+        event: ControlPlaneEvent,
+    ) -> Result<Option<Self::Output>, SessionsManagerClientError> {
+        self.subscription.extract(event)
     }
 }
 
