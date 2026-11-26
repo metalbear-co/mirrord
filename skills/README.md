@@ -119,4 +119,4 @@ Each skill is a folder following the [Agent Skills format](https://agentskills.i
 
 ## Contributing
 
-PRs welcome. Open an issue if you'd like to see a skill added or improved. See [CONTRIBUTING.md](CONTRIBUTING.md) for the json/yaml fence tag convention.
+The skills are maintained in the [`skills/` directory of metalbear-co/mirrord](https://github.com/metalbear-co/mirrord/tree/main/skills), so open pull requests there. Every merge there that changes them copies them to [metalbear-co/skills](https://github.com/metalbear-co/skills), which the installs above read, and the next copy replaces a change made in metalbear-co/skills. Open an issue if you'd like to see a skill added or improved. See [CONTRIBUTING.md](CONTRIBUTING.md) for the json/yaml fence tag convention and the plugin version bump that every skill change needs.

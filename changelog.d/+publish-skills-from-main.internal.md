@@ -1,0 +1,1 @@
+Copy `skills/` to `metalbear-co/skills` on every merge to `main` that changes it, so `npx skills add` and `install.sh`, which install from that repository, get skill changes as they merge. CI also requires every change to the files of the Claude Code plugin, its skills and its manifest, to raise the plugin's version, so Claude Code plugin installs get the changes too.

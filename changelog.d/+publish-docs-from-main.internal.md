@@ -1,0 +1,1 @@
+Publish the docs and guides from `main` through GitBook's Git Sync, so a merged page reaches the site without waiting for a release, and pull requests from branches of this repository get GitBook previews.

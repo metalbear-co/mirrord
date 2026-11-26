@@ -1134,20 +1134,6 @@ jobs:
       CUBBY_CLIENT_ID: ${{ secrets.CUBBY_CLIENT_ID }}
       CUBBY_PRIVATE_KEY: ${{ secrets.CUBBY_PRIVATE_KEY }}
 
-  publish_docs:
-    needs: [validate_release_request, release_gh]
-    if: needs.validate_release_request.outputs.should_release == 'true'
-    permissions:
-      contents: write
-      statuses: read
-    uses: ./.github/workflows/publish-docs.yaml
-    with:
-      # The tag that release_gh created at the released commit, so the publish commits name the version.
-      ref: ${{ needs.validate_release_request.outputs.version }}
-      dry_run: false
-    secrets:
-      SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
-
   release_homebrew:
     needs: [validate_release_request, release_gh]
     runs-on: blacksmith-4vcpu-ubuntu-2404
