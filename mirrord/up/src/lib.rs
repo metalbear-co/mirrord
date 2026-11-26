@@ -65,7 +65,10 @@ mod config;
 mod init;
 mod kube_context;
 mod list;
+mod owner;
 mod process;
+
+pub use owner::TaskOwners;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
 /// time it took for **all** of them to become ready, measured from process spawn, and the
@@ -125,6 +128,9 @@ pub struct TaskWatch {
     pub session_id: String,
     /// What the watch reports. Ends only after an error.
     pub tasks: BoxStream<'static, Result<TaskEvent, SessionsManagerClientError>>,
+    /// Set when the service replaces its tasks (`replace_task`): how `mirrord up` reaches them to
+    /// report each local process's exit code.
+    pub owners: Option<TaskOwners>,
 }
 
 /// Errors produced by `mirrord up` command.
@@ -162,6 +168,21 @@ pub enum UpError {
     )]
     TaskDrivenContainer {
         /// Name of the task-driven service.
+        service: Arc<str>,
+    },
+
+    /// A service sets `replace_task` without a filter to select the tasks it replaces.
+    #[error(
+        "invalid `replace_task` for service `{service}`: it needs `target.tag_filter` or \
+         `target.jq_filter`"
+    )]
+    #[diagnostic(help(
+        "`replace_task` replaces the serverless tasks whose AWS Batch job tags match the \
+         target's filters. Set `target.tag_filter` or `target.jq_filter`, or remove \
+         `replace_task`."
+    ))]
+    ReplaceWithoutSelector {
+        /// Name of the service.
         service: Arc<str>,
     },
 
@@ -468,11 +489,21 @@ impl UpConfig {
             .map(|service| UpError::TaskDrivenContainer {
                 service: service.clone(),
             });
+        let replace_without_selector = self
+            .services
+            .iter()
+            .filter(|(_, service)| service.replace_task && service.has_task_selector().not())
+            .map(|(service, _)| service)
+            .sorted()
+            .map(|service| UpError::ReplaceWithoutSelector {
+                service: service.clone(),
+            });
 
         builtin_names
             .chain(unknown_modes)
             .chain(container_directories)
             .chain(task_driven_containers)
+            .chain(replace_without_selector)
             .collect()
     }
 }
@@ -1088,6 +1119,7 @@ fn service_commands(
                 db_branches_origin: _,
                 queues_origin: _,
                 task_driven: _,
+                replace_task: _,
             } = config;
 
             let debugged = debug.iter().any(|name| **name == *service_name);
@@ -1126,7 +1158,11 @@ fn task_commands(
     config.target.tag_filter = None;
     config.target.jq_filter = None;
 
-    let TaskWatch { session_id, tasks } = watch;
+    let TaskWatch {
+        session_id,
+        tasks,
+        owners,
+    } = watch;
     let pre = pre_command(&run);
     let name = service_name.clone();
     let instance = move |replica: &ReplicaId| {
@@ -1146,6 +1182,7 @@ fn task_commands(
         name,
         pre,
         instance: Box::new(instance),
+        replace: owners,
         tasks,
     })
 }

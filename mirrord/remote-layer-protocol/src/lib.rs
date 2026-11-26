@@ -78,8 +78,8 @@ pub const LOST_SESSION_EXIT_CODE: u8 = 214;
 ///
 /// A status outside `0..=255` becomes 1. `_exit` keeps only the low 8 bits of its argument, and
 /// on Windows `ExitStatus::code()` can be 256 or an NTSTATUS, so truncating could end a failed
-/// local process's task as a success. Shared by `mirrord up`, which reports the status, and the
-/// workload companion, which relays it, so both apply one rule.
+/// local process's task as a success. Only the workload companion applies it, to the code a
+/// client reported: `mirrord up` reports the local process's code as it is.
 pub fn gate_exit_code(status: i32) -> u8 {
     u8::try_from(status).unwrap_or(1)
 }

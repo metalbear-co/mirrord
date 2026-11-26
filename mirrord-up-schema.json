@@ -728,6 +728,11 @@
           },
           "uniqueItems": true
         },
+        "replace_task": {
+          "description": "Replaces the serverless tasks that `target.tag_filter` or `target.jq_filter` match with\nlocal processes: a matching task doesn't run its own code, and ends with the exit code of\nthe local process started for it. Only tasks that start while `mirrord up` runs, and that\nset `MIRRORD_REMOTE_ADMISSION`, are replaced. For example:\n\n```yaml\ntarget:\n  path: serverless/report-generator\n  tag_filter:\n    company_id: \"^1234$\"\nreplace_task: true\n```\n\nA task ends with the local process's exit code, `128 + <signal>` when a signal killed it,\nor 214 when the session was lost before the local process exited, which includes stopping\n`mirrord up`. Needs `target.tag_filter` or `target.jq_filter`, and `common.operator: true`.\nDefaults to `false`.",
+          "type": "boolean",
+          "x-mirrord-plan": "enterprise"
+        },
         "run": {
           "description": "How to launch the service's local process.",
           "$ref": "#/$defs/RunConfig"

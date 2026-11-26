@@ -18,7 +18,10 @@ mirrord-analytics = { path = "../analytics" }
 mirrord-command = { path = "../command", features = ["tokio"] }
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
+mirrord-operator-websocket = { path = "../operator-websocket" }
 mirrord-progress = { path = "../progress/" }
+mirrord-protocol = { path = "../protocol" }
+mirrord-remote-layer-protocol.workspace = true
 mirrord-sessions-manager-client.workspace = true
 
 futures.workspace = true
@@ -31,6 +34,7 @@ serde_yaml.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
+semver.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 process-wrap.workspace = true
 thiserror.workspace = true
