@@ -1,7 +1,7 @@
 ---
 title: Configuration Options
 date: 2023-05-17T12:59:39.000Z
-lastmod: 2026-11-15T00:00:00.000Z
+lastmod: 2026-11-26T00:00:00.000Z
 draft: false
 images: []
 menu:
@@ -4125,6 +4125,45 @@ Controls the lifetime and creation behavior of preview sessions.
   }
 }
 ```
+
+#### feature.preview.autoscale {#feature-preview-autoscale}
+
+Scale the preview pods the way the target scales: the operator copies the target's
+`HorizontalPodAutoscaler` (metrics, thresholds and scaling behavior) onto the preview's
+pods, so a preview under load grows and shrinks like the service it previews.
+
+- `false`, or unset: the preview runs a fixed number of pods
+  ([`replicas`](#feature-preview-replicas), 1 by default).
+- `true`: copy the target's autoscaler, scaling from 1 pod up to the target's maximum.
+- `{ "min": 4, "max": 12 }`, or `{ "max": 12 }`: copy the target's autoscaler with
+  these bounds. `min` is 1 when unset, `max` is the target's maximum when unset, and
+  `1 <= min <= max` must hold.
+
+Cannot be combined with `replicas`. A target without an autoscaler fails the preview.
+With [idle mode](#feature-preview-idle), an idle preview still scales to zero pods, and
+a woken preview starts at `min` pods and lets the autoscaler take over from there.
+
+```json
+{
+  "feature": {
+    "preview": {
+      "autoscale": { "min": 4, "max": 12 }
+    }
+  }
+}
+```
+
+Whether, and within which bounds, a preview copies its target's `HorizontalPodAutoscaler`.
+
+Either a flag (`true` copies the target's autoscaler from 1 pod to its maximum) or a range
+with optional `min` and `max` bounds, which is how a range is set in `mirrord-up.yaml` too.
+
+The bounds a preview's copied autoscaler scales within. Both are optional: `min` falls back
+to 1 pod and `max` to the target autoscaler's maximum.
+
+The most pods the preview scales up to. The target autoscaler's maximum when unset.
+
+The fewest pods the preview runs while it isn't idle. 1 when unset.
 
 #### feature.preview.config_mounts {#feature-preview-config_mounts}
 
