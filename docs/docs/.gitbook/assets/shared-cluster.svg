@@ -49,9 +49,9 @@
   <!-- Developer D -->
   <rect x="20" y="250" width="180" height="80" rx="10" fill="#232141"/><rect x="28" y="258" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M20 330 H200 L216 344 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="335" x2="190" y2="335" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="94" y="338.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="344" width="220" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="32" y="270" width="22" height="40"/>
-  <text x="124" y="284" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer D</text>
-  <text x="124" y="306" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
+  <use href="#mirrord" x="36.0" y="264.0" width="29.2" height="52.0"/>
+  <text x="126.0" y="284" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer D</text>
+  <text x="126.0" y="306" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
 
   <!-- Upstream service -->
   <rect x="280" y="250" width="170" height="80" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
@@ -88,19 +88,19 @@
   <!-- Developers A, B, C -->
   <rect x="1000" y="150" width="180" height="80" rx="10" fill="#FFCB7D" stroke="#232141" stroke-width="2"/><rect x="1008" y="158" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M1000 230 H1180 L1196 244 H984 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1010" y1="235" x2="1170" y2="235" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1074" y="238.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="980" y="244" width="220" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="1012" y="170" width="22" height="40"/>
-  <text x="1104" y="184" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer A</text>
-  <text x="1104" y="206" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
+  <use href="#mirrord" x="1016.0" y="164.0" width="29.2" height="52.0"/>
+  <text x="1106.0" y="184" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer A</text>
+  <text x="1106.0" y="206" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
   <rect x="1000" y="250" width="180" height="80" rx="10" fill="#8FD9B0" stroke="#232141" stroke-width="2"/><rect x="1008" y="258" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M1000 330 H1180 L1196 344 H984 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1010" y1="335" x2="1170" y2="335" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1074" y="338.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="980" y="344" width="220" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="1012" y="270" width="22" height="40"/>
-  <text x="1104" y="284" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer B</text>
-  <text x="1104" y="306" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
+  <use href="#mirrord" x="1016.0" y="264.0" width="29.2" height="52.0"/>
+  <text x="1106.0" y="284" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer B</text>
+  <text x="1106.0" y="306" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
   <rect x="1000" y="350" width="180" height="80" rx="10" fill="#8CC4F7" stroke="#232141" stroke-width="2"/><rect x="1008" y="358" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M1000 430 H1180 L1196 444 H984 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1010" y1="435" x2="1170" y2="435" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1074" y="438.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="980" y="444" width="220" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="1012" y="370" width="22" height="40"/>
-  <text x="1104" y="384" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer C</text>
-  <text x="1104" y="406" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
+  <use href="#mirrord" x="1016.0" y="364.0" width="29.2" height="52.0"/>
+  <text x="1106.0" y="384" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer C</text>
+  <text x="1106.0" y="406" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
 
   <!-- D targets the upstream service -->
   <line x1="200" y1="290" x2="276" y2="290" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>

@@ -69,7 +69,7 @@
 
   <!-- Forwarder -->
   <rect x="340" y="240" width="520" height="70" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="358" y="255" width="22" height="40"/>
+  <use href="#mirrord" x="353.0" y="246.5" width="32.0" height="57.0"/>
   <text x="600" y="269" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Forwarder</text>
   <text x="600" y="292" font-size="12.5" fill="#ffffff" text-anchor="middle">routes every message by each session's header or jq filter</text>
 
@@ -98,7 +98,7 @@
   <line x1="1000" y1="470" x2="1000" y2="516" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <rect x="20" y="520" width="360" height="80" rx="10" fill="#232141"/><rect x="28" y="528" width="344" height="64" rx="4" fill="#756DF3"/>
   <path d="M20 600 H380 L396 614 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="605" x2="370" y2="605" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="184" y="608.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="614" width="400" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="36" y="540" width="22" height="40"/>
+  <use href="#mirrord" x="36.0" y="534.0" width="29.2" height="52.0"/>
   <text x="200" y="548" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer A's local app</text>
   <text x="200" y="569" font-size="12.5" fill="#ffffff" text-anchor="middle">its env vars or mounted config file</text>
   <text x="200" y="587" font-size="12.5" fill="#ffffff" text-anchor="middle">are rewritten to point at A's stream</text>

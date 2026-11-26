@@ -44,7 +44,7 @@
   <line x1="225" y1="80" x2="225" y2="112" stroke="#232141" stroke-width="1.5"/>
   <line x1="235" y1="80" x2="235" y2="112" stroke="#232141" stroke-width="1.5"/>
   <rect x="50" y="160" width="200" height="60" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="62" y="170" width="22" height="40"/>
+  <use href="#mirrord" x="59.5" y="166.0" width="27.0" height="48.0"/>
   <text x="162" y="186" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
   <text x="162" y="205" font-size="12.5" fill="#ffffff" text-anchor="middle">applies your filter</text>
   <rect x="340" y="160" width="210" height="60" rx="12" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
@@ -82,9 +82,9 @@
 
   <!-- Local application -->
   <rect x="470" y="536" width="260" height="64" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="484" y="548" width="22" height="40"/>
-  <text x="612" y="563" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Your local application</text>
-  <text x="612" y="584" font-size="12.5" fill="#ffffff" text-anchor="middle">or preview environment</text>
+  <use href="#mirrord" x="480.4" y="542.0" width="29.2" height="52.0"/>
+  <text x="615.6" y="563" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Your local application</text>
+  <text x="615.6" y="584" font-size="12.5" fill="#ffffff" text-anchor="middle">or preview environment</text>
 
   <!-- Cluster A arrows -->
   <line x1="150" y1="124" x2="150" y2="156" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>

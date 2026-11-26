@@ -85,10 +85,10 @@ Use a symbol, not only a label, when a symbol shows what a thing is. A reader re
 
 ### mirrord logo
 
-Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, and move the title to the right to make space. The logo is 22 wide and 40 high. In a smaller box, use 18 by 32, or 14 by 26 in a box less than 50 high, as the agent boxes in `api-gateway-traffic.svg` and `header-propagation.svg` do:
+Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, and move the title to the right to make space. The logo is 32 wide and 57 high. GitBook scales a diagram down to the page width, and a smaller logo looks grainy on a purple box. When the box is too small, use the largest size that keeps 6px of space above and below the logo, and keep the width at 0.56 of the height. For a new diagram, make the box tall enough for a logo of at least 22 by 40:
 
 ```xml
-<use href="#mirrord" x="..." y="..." width="22" height="40"/>
+<use href="#mirrord" x="..." y="..." width="32" height="57"/>
 ```
 
 The symbol is the mirror from `images/logo.svg` at the repository root, without the wordmark. Copy the `<symbol id="mirrord" viewBox="97 61 391 696">` definition from `docs/.gitbook/assets/api-gateway-traffic.svg`. Do not change it.

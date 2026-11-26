@@ -40,7 +40,7 @@
   <path d="M20 320 H240 L256 334 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="325" x2="230" y2="325" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="114" y="328.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="334" width="260" height="5" rx="2.5" fill="#232141"/>
   <text x="40" y="128" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
   <rect x="32" y="150" width="196" height="68" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="46" y="164" width="22" height="40"/>
+  <use href="#mirrord" x="41.3" y="156.0" width="31.5" height="56.0"/>
   <text x="140" y="190" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord CLI</text>
   <rect x="32" y="236" width="196" height="64" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
   <use href="#mirrord" x="44" y="248" width="22" height="40"/>
@@ -50,9 +50,9 @@
   <rect x="380" y="100" width="300" height="270" rx="16" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
   <text x="400" y="128" font-size="15" font-weight="700" fill="#4a44b8">Primary cluster</text>
   <rect x="410" y="150" width="240" height="68" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="426" y="164" width="22" height="40"/>
-  <text x="542" y="179" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
-  <text x="542" y="200" font-size="12.5" fill="#ffffff" text-anchor="middle">coordinates all clusters</text>
+  <use href="#mirrord" x="421.3" y="156.0" width="31.5" height="56.0"/>
+  <text x="544.7" y="179" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
+  <text x="544.7" y="200" font-size="12.5" fill="#ffffff" text-anchor="middle">coordinates all clusters</text>
   <rect x="410" y="236" width="240" height="64" rx="10" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
   <text x="530" y="274" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Parent session</text>
   <text x="530" y="328" font-size="12.5" fill="#333344" text-anchor="middle">can also run workloads,</text>
@@ -62,10 +62,10 @@
   <rect x="800" y="20" width="380" height="200" rx="16" fill="#F5F4FE" stroke="#756DF3" stroke-width="2"/>
   <text x="820" y="48" font-size="15" font-weight="700" fill="#4a44b8">Workload cluster A</text>
   <rect x="825" y="66" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="845" y="74" width="20" height="36"/>
+  <use href="#mirrord" x="843.8" y="72.0" width="22.5" height="40.0"/>
   <text x="917" y="97" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">operator</text>
   <rect x="1000" y="66" width="155" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="1026" y="74" width="20" height="36"/>
+  <use href="#mirrord" x="1024.8" y="72.0" width="22.5" height="40.0"/>
   <text x="1089" y="97" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">agent</text>
   <rect x="841" y="134" width="330" height="56" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <rect x="833" y="142" width="330" height="56" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
@@ -79,10 +79,10 @@
   <rect x="1000" y="262" width="155" height="28" rx="8" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
   <text x="1077" y="281" font-size="12.5" font-weight="700" fill="#232141" text-anchor="middle">Default cluster</text>
   <rect x="825" y="306" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="845" y="314" width="20" height="36"/>
+  <use href="#mirrord" x="843.8" y="312.0" width="22.5" height="40.0"/>
   <text x="917" y="337" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">operator</text>
   <rect x="1000" y="306" width="155" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="1026" y="314" width="20" height="36"/>
+  <use href="#mirrord" x="1024.8" y="312.0" width="22.5" height="40.0"/>
   <text x="1089" y="337" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">agent</text>
   <rect x="841" y="374" width="330" height="56" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <rect x="833" y="382" width="330" height="56" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>

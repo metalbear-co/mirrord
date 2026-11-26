@@ -42,7 +42,7 @@
 
   <!-- The command -->
   <rect x="40" y="64" width="500" height="166" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="504" y="76" width="22" height="40"/>
+  <use href="#mirrord" x="499.0" y="70.0" width="32.0" height="57.0"/>
   <circle cx="62" cy="88" r="11" fill="#756DF3"/>
   <text x="62" y="92.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
   <text x="80" y="93" font-size="14" font-weight="700" fill="#232141">Add a service to the preview</text>

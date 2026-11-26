@@ -58,8 +58,8 @@
   <path d="M990 240 H1180 L1196 254 H974 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1000" y1="245" x2="1170" y2="245" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1069" y="248.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="970" y="254" width="230" height="5" rx="2.5" fill="#232141"/>
   <text x="1008" y="80" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
   <rect x="1005" y="105" width="160" height="115" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="1074" y="113" width="22" height="40"/>
-  <text x="1085" y="176" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">orders app</text>
+  <use href="#mirrord" x="1069.0" y="96.0" width="32.0" height="57.0"/>
+  <text x="1090.0" y="176" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">orders app</text>
   <text x="1085" y="200" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">"version": "v2"</text>
 
   <!-- Labels on the mirrord route -->

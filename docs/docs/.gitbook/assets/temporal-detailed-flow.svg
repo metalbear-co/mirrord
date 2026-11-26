@@ -51,7 +51,7 @@
   <text x="105" y="149" font-size="12.5" fill="#333344" text-anchor="middle">real queue</text>
   <line x1="170" y1="134" x2="226" y2="134" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <rect x="230" y="99" width="220" height="70" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="240" y="103" width="18" height="32"/>
+  <use href="#mirrord" x="238.0" y="105.0" width="26.0" height="46.3"/>
   <text x="340" y="126" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">poll real queue</text>
   <text x="340" y="148" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">workflow_id ^dev-</text>
   <polyline points="450,134 488,134 488,106 516,106" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
@@ -99,7 +99,7 @@
   <text x="105" y="367" font-size="12.5" fill="#333344" text-anchor="middle">real queue</text>
   <line x1="170" y1="352" x2="226" y2="352" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <rect x="230" y="324" width="220" height="56" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="240" y="326" width="18" height="32"/>
+  <use href="#mirrord" x="238.0" y="330.0" width="24.7" height="44.0"/>
   <text x="340" y="349" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">no split</text>
   <text x="340" y="367" font-size="12.5" fill="#ffffff" text-anchor="middle">forwards as-is</text>
   <line x1="450" y1="352" x2="516" y2="352" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
@@ -115,7 +115,7 @@
   <text x="105" y="443" font-size="12.5" fill="#333344" text-anchor="middle">real queue</text>
   <line x1="170" y1="428" x2="226" y2="428" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <rect x="230" y="400" width="220" height="56" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="240" y="402" width="18" height="32"/>
+  <use href="#mirrord" x="238.0" y="406.0" width="24.7" height="44.0"/>
   <text x="340" y="425" font-size="12.5" font-weight="700" fill="#ffffff" text-anchor="middle">no split</text>
   <text x="340" y="443" font-size="12.5" fill="#ffffff" text-anchor="middle">forwards as-is</text>
   <line x1="450" y1="428" x2="516" y2="428" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
@@ -170,13 +170,13 @@
   <text x="36" y="822" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
   <text x="36" y="842" font-size="12.5" fill="#333344">Local workers run with mirrord. They connect through the operator proxy, not to Temporal directly.</text>
   <rect x="40" y="858" width="420" height="94" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="54" y="864" width="22" height="40"/>
+  <use href="#mirrord" x="49.2" y="864.0" width="31.5" height="56.1"/>
   <text x="250" y="888" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord client</text>
   <text x="250" y="912" font-size="12.5" fill="#ffffff" text-anchor="middle">starts your local worker and connects it</text>
   <text x="250" y="930" font-size="12.5" fill="#ffffff" text-anchor="middle">through the operator proxy (<tspan font-family="Menlo, Consolas, monospace">TEMPORAL_ADDRESS</tspan> patched)</text>
   <line x1="460" y1="905" x2="536" y2="905" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <rect x="540" y="858" width="520" height="94" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="556" y="864" width="22" height="40"/>
+  <use href="#mirrord" x="551.0" y="864.0" width="32.0" height="57.0"/>
   <text x="800" y="882" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Dev local worker</text>
   <text x="800" y="904" font-size="12.5" fill="#ffffff" text-anchor="middle">polls <tspan font-family="Menlo, Consolas, monospace">mirrord-session-dev-...-checkout</tspan></text>
   <text x="800" y="922" font-size="12.5" fill="#ffffff" text-anchor="middle">and <tspan font-family="Menlo, Consolas, monospace">mirrord-session-dev-...-shipping</tspan></text>

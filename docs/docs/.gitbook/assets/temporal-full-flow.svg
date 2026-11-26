@@ -49,9 +49,9 @@
 
   <!-- mirrord operator -->
   <rect x="340" y="90" width="240" height="80" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="358" y="97" width="20" height="36"/>
-  <text x="472" y="124" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
-  <text x="460" y="146" font-size="12.5" fill="#ffffff" text-anchor="middle">poll → filter → route → serve</text>
+  <use href="#mirrord" x="353.5" y="96.0" width="29.0" height="51.6"/>
+  <text x="476.5" y="124" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
+  <text x="464.5" y="146" font-size="12.5" fill="#ffffff" text-anchor="middle">poll → filter → route → serve</text>
 
   <!-- Operator to Worker 1 -->
   <line x1="580" y1="130" x2="656" y2="130" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>

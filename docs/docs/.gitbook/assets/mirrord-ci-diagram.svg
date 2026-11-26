@@ -47,7 +47,7 @@
   <rect x="40" y="280" width="120" height="80" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
   <text x="100" y="325" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Tests</text>
   <rect x="176" y="244" width="158" height="136" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="188" y="296" width="18" height="32"/>
+  <use href="#mirrord" x="185.8" y="292.0" width="22.5" height="40.1"/>
   <text x="274" y="310" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Microservice</text>
   <text x="274" y="330" font-size="12.5" fill="#ffffff" text-anchor="middle">runs with</text><text x="274" y="346" font-size="12.5" fill="#ffffff" text-anchor="middle">mirrord</text>
 
@@ -64,7 +64,7 @@
   <line x1="710" y1="250" x2="710" y2="300" stroke="#232141" stroke-width="2"/>
   <text x="720" y="280" font-size="12.5" fill="#333344">same network namespace</text>
   <rect x="600" y="300" width="220" height="90" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="618" y="325" width="22" height="40"/>
+  <use href="#mirrord" x="613.0" y="316.5" width="32.0" height="57.0"/>
   <text x="724" y="336" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
   <text x="724" y="357" font-size="12.5" fill="#ffffff" text-anchor="middle">separate pod on the</text>
   <text x="724" y="373" font-size="12.5" fill="#ffffff" text-anchor="middle">target's node</text>
