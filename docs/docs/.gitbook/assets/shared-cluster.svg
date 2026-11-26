@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -47 1200 767" width="1200" height="767" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">How several developers use one cluster at the same time</title>
-  <desc id="d">Four developers run local processes with mirrord on their laptops, against one shared cluster. One: an upstream service sends requests to a shared service, and HTTP filters on the x-header header send yellow requests to developer A and green requests to developer B. Two: SQS or Kafka splitting sends the queue messages for developer B and developer C to them, and other messages stay with the deployed service. Three: developer D targets the upstream service, and a mirrord policy blocks writes to the main database. Four: DB branching gives developer D a personal database branch, which receives the writes.</desc>
+  <desc id="d">Four developers run local processes with mirrord on their laptops, against one shared cluster. One: an upstream service sends requests to a shared service, and HTTP filters on the x-header header send yellow requests to developer A, whose laptop is yellow, and green requests to developer B, whose laptop is green. Two: SQS or Kafka splitting sends the green queue messages to developer B and the blue queue messages to developer C, whose laptop is blue. The white messages stay with the deployed service. Three: developer D targets the upstream service, and a mirrord policy blocks writes to the main database. Four: DB branching gives developer D a personal database branch, which receives the writes.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -11,14 +11,6 @@
     <marker id="arrow-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#ACACAC"/>
     </marker>
-    <symbol id="k8s" viewBox="0 0 32 32">
-      <polygon points="16.00,1.60 27.73,7.25 30.62,19.94 22.51,30.11 9.49,30.11 1.38,19.94 4.27,7.25" fill="#326CE5" stroke="#326CE5" stroke-width="2" stroke-linejoin="round"/>
-      <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
-        <circle cx="16" cy="16" r="7"/>
-        <line x1="16.00" y1="13.40" x2="16.00" y2="5.80"/><line x1="18.03" y1="14.38" x2="23.97" y2="9.64"/><line x1="18.53" y1="16.58" x2="25.94" y2="18.27"/><line x1="17.13" y1="18.34" x2="20.43" y2="25.19"/><line x1="14.87" y1="18.34" x2="11.57" y2="25.19"/><line x1="13.47" y1="16.58" x2="6.06" y2="18.27"/><line x1="13.97" y1="14.38" x2="8.03" y2="9.64"/>
-      </g>
-      <circle cx="16" cy="16" r="2.4" fill="#ffffff"/>
-    </symbol>
     <symbol id="mirrord" viewBox="97 61 391 696">
 <path fill="#ffffff" d="M255.6,387c4.1,19.1-0.9,36.1-12,40.5c-8.2,3.2-17.8,0-26.5-8.2c-0.3-0.6-0.9-0.9-1.5-1.2c0,0,0,0-0.3-0.3 c-5.5-5.6-10.5-13.2-14-22c-4.7-11.5-6.1-23.2-4.4-33.5c1.8-9.4,6.1-16.1,12.8-18.8c5.5-2.3,12.5-1.5,19.3,2.6 c1.5,2.3,2.6,4.4,3.8,6.2c-4.1,2.6-6.4,10.3-6.4,20.3l3.2,1.8l11.1,6.5l-12.5,1.5h-0.9c0.3,1.2,0.3,2.3,0.6,3.5 c3.2,17.9,12,31.1,19,29.7c6.4-1.2,9.6-14.4,7.6-30.2C255.3,386.4,255.6,386.7,255.6,387z"/>
 <path fill="#ffffff" d="M384,398.4c-3.2,6.8-7.3,12.3-12,17c0,0,0,0-0.3,0c-0.6,0.3-0.9,0.9-1.2,1.2c-8.7,7.9-18.4,11.5-26.5,8.2 c-11.1-4.7-16-21.4-12-40.5c1.5-1.8,3.2-3.8,4.7-5.6c5-6.5,9-13.2,12.8-20l1.2-2.1c1.2-1.8,2-3.8,3.2-5.6c1.2-2.1,2.6-4.4,4.4-7 c3.5-2.1,6.7-3.2,9.9-3.8c-2,4.7-2.3,10.3-2.3,15.3l3.2,1.8l11.1,6.5l-12.5,1.5h-0.9c0.3,1.2,0.3,2.3,0.6,3.8 C370.5,384.6,377.5,397,384,398.4z"/>
@@ -39,12 +31,20 @@
       <rect x="1" y="1" width="26" height="18" rx="3" fill="#ffffff" stroke="#232141" stroke-width="2"/>
       <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
     </symbol>
+    <symbol id="envelope-green" viewBox="0 0 28 20">
+      <rect x="1" y="1" width="26" height="18" rx="3" fill="#8FD9B0" stroke="#232141" stroke-width="2"/>
+      <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="envelope-blue" viewBox="0 0 28 20">
+      <rect x="1" y="1" width="26" height="18" rx="3" fill="#8CC4F7" stroke="#232141" stroke-width="2"/>
+      <path d="M2 3 L14 11.5 L26 3" fill="none" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
   </defs>
   <rect x="0" y="-47" width="1200" height="767" fill="#ffffff"/>
 
   <!-- Cluster boundary -->
   <path d="M240.0 546.9 A64.2 64.2 0 0 1 240.0 465.1 A64.2 64.2 0 0 1 240.0 383.3 A64.2 64.2 0 0 1 240.0 301.6 A64.2 64.2 0 0 1 240.0 219.8 A64.2 64.2 0 0 1 240.0 138.0 A75.6 75.6 0 0 1 334.4 20.0 A89.2 89.2 0 0 1 493.7 20.0 A76.0 76.0 0 0 1 629.4 20.0 A72.7 72.7 0 0 1 759.2 20.0 A59.0 59.0 0 0 1 830.0 114.4 A67.9 67.9 0 0 1 830.0 200.9 A67.9 67.9 0 0 1 830.0 287.4 A67.9 67.9 0 0 1 830.0 373.9 A67.9 67.9 0 0 1 830.0 460.4 A67.9 67.9 0 0 1 830.0 546.9 A37.5 37.5 0 0 1 776.9 600.0 A188.2 188.2 0 0 1 605.8 600.0 A207.7 207.7 0 0 1 417.0 600.0 A136.3 136.3 0 0 1 293.1 600.0 A37.5 37.5 0 0 1 240.0 546.9 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
-  <text x="260" y="48" font-size="15" font-weight="700" fill="#4a44b8">Shared Kubernetes cluster</text>
+  <text x="260" y="48" font-size="15" font-weight="700" fill="#4a44b8">Shared cluster</text>
 
   <!-- Developer D -->
   <rect x="20" y="250" width="180" height="80" rx="10" fill="#232141"/><rect x="28" y="258" width="164" height="64" rx="4" fill="#756DF3"/>
@@ -62,8 +62,8 @@
   <rect x="600" y="64" width="200" height="64" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
   <text x="656" y="92" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Queue</text>
   <text x="656" y="113" font-size="12.5" fill="#232141" text-anchor="middle">SQS or Kafka</text>
-  <use href="#envelope" x="714" y="86" width="22" height="16"/>
-  <use href="#envelope" x="740" y="86" width="22" height="16"/>
+  <use href="#envelope-green" x="714" y="86" width="22" height="16"/>
+  <use href="#envelope-blue" x="740" y="86" width="22" height="16"/>
   <use href="#envelope" x="766" y="86" width="22" height="16"/>
 
   <!-- Shared service -->
@@ -86,17 +86,17 @@
   <text x="520" y="528" font-size="12" fill="#333344" text-anchor="middle">personal to D</text>
 
   <!-- Developers A, B, C -->
-  <rect x="1000" y="150" width="180" height="80" rx="10" fill="#232141"/><rect x="1008" y="158" width="164" height="64" rx="4" fill="#756DF3"/>
+  <rect x="1000" y="150" width="180" height="80" rx="10" fill="#FFCB7D" stroke="#232141" stroke-width="2"/><rect x="1008" y="158" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M1000 230 H1180 L1196 244 H984 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1010" y1="235" x2="1170" y2="235" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1074" y="238.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="980" y="244" width="220" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="1012" y="170" width="22" height="40"/>
   <text x="1104" y="184" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer A</text>
   <text x="1104" y="206" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
-  <rect x="1000" y="250" width="180" height="80" rx="10" fill="#232141"/><rect x="1008" y="258" width="164" height="64" rx="4" fill="#756DF3"/>
+  <rect x="1000" y="250" width="180" height="80" rx="10" fill="#8FD9B0" stroke="#232141" stroke-width="2"/><rect x="1008" y="258" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M1000 330 H1180 L1196 344 H984 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1010" y1="335" x2="1170" y2="335" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1074" y="338.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="980" y="344" width="220" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="1012" y="270" width="22" height="40"/>
   <text x="1104" y="284" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer B</text>
   <text x="1104" y="306" font-size="12.5" fill="#ffffff" text-anchor="middle">local process</text>
-  <rect x="1000" y="350" width="180" height="80" rx="10" fill="#232141"/><rect x="1008" y="358" width="164" height="64" rx="4" fill="#756DF3"/>
+  <rect x="1000" y="350" width="180" height="80" rx="10" fill="#8CC4F7" stroke="#232141" stroke-width="2"/><rect x="1008" y="358" width="164" height="64" rx="4" fill="#756DF3"/>
   <path d="M1000 430 H1180 L1196 444 H984 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1010" y1="435" x2="1170" y2="435" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1074" y="438.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="980" y="444" width="220" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="1012" y="370" width="22" height="40"/>
   <text x="1104" y="384" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Developer C</text>
@@ -119,10 +119,10 @@
   <line x1="800" y1="290" x2="996" y2="290" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="846" y="262" font-size="12.5" fill="#4a44b8" font-family="Menlo, Consolas, monospace">x-header: green</text>
   <text x="846" y="280" font-size="12.5" fill="#4a44b8">+ B's messages</text>
-  <use href="#envelope" x="956" y="264" width="28" height="20"/>
+  <use href="#envelope-green" x="956" y="264" width="28" height="20"/>
   <line x1="800" y1="390" x2="996" y2="390" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="846" y="380" font-size="12.5" fill="#4a44b8">C's messages</text>
-  <use href="#envelope" x="956" y="364" width="28" height="20"/>
+  <use href="#envelope-blue" x="956" y="364" width="28" height="20"/>
 
   <!-- D's writes: blocked to main DB, sent to the branch -->
   <line x1="340" y1="330" x2="340" y2="452" stroke="#ACACAC" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow-grey)"/>
@@ -153,6 +153,4 @@
   <circle cx="622" cy="682" r="12" fill="#756DF3"/>
   <text x="622" y="687" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
   <text x="644" y="687" font-size="14" fill="#232141">DB branching gives a developer a personal, isolated database.</text>
-  <!-- Kubernetes logos: what runs in the cluster -->
-  <use href="#k8s" x="805" y="28" width="36" height="36"/>
 </svg>
