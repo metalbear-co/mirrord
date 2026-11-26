@@ -11,7 +11,7 @@ Rules that apply to all of them:
 - **Match whole members, not substrings.** `.*mirrord-session={{ key }}.*` also matches `mirrord-session={{ key }}2` and would steal another developer's requests. The patterns below require a member boundary before the name (start or `,`) and after the value (`,`, `;` or end). Same for cookies (`;`).
 - **Set `ports`** to the target's HTTP ports when the pod also exposes non-HTTP ports (metrics, gRPC health, a debugger), otherwise mirrord applies the filter to every port it subscribes to.
 - **Start in `mirror` mode** to verify a filter; switch to `steal` only when the local process must be the one responding.
-- The jq engine is jaq (a jq reimplementation), with a 500 ms time limit per evaluation (`agent.jaq_time_limit`). Keep programs small and guard them with `select(startswith("<name>: "))` so only the header you care about is decoded. Test a program locally with `jq -n --arg h 'authorization: Bearer ...' '$h | <program>'` before putting it in the config; the behaviours used here (`select`, `sub`, `gsub`, `split`, `ltrimstr`, `@base64d`, `fromjson`, `try`/`catch`, `test`) match between jq 1.7 and jaq.
+- The jq engine is jaq (a jq reimplementation), with a 1 second time limit per evaluation (`agent.jaq_time_limit`). Keep programs small and guard them with `select(startswith("<name>: "))` so only the header you care about is decoded. Test a program locally with `jq -n --arg h 'authorization: Bearer ...' '$h | <program>'` before putting it in the config; the behaviours used here (`select`, `sub`, `gsub`, `split`, `ltrimstr`, `@base64d`, `fromjson`, `try`/`catch`, `test`) match between jq 1.7 and jaq.
 
 ## Baggage member (recommended)
 
