@@ -37,12 +37,14 @@ pub struct PgBranchDatabaseSpec {
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
     /// PostgreSQL database name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
     pub target: Target,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// PostgreSQL server image version, e.g. "16".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postgres_version: Option<String>,
     /// Options for copying data from source database to the branch.
     #[serde(default)]
@@ -118,6 +120,7 @@ impl From<PgBranchCopyConfig> for BranchCopyConfig {
 pub struct TableCopyConfig {
     /// Data that matches the filter will be copied.
     /// For PostgreSQL, this filter is a `WHERE` clause that looks like `username = 'alice'`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
 }
 
