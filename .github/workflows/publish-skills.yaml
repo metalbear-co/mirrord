@@ -11,12 +11,12 @@ name: Publish skills
 #
 # Each publish appends one commit on top of the tip of metalbear-co/skills `main`, whose tree is exactly `skills/` at
 # the tip of the run's ref when the run starts. That is the tip, not the commit that started the run, so a re-run of an
-# earlier run never puts older skills back. The branch is never force-pushed: its ruleset refuses that, and appending
-# keeps the history that the skills had before they moved into this repository. Nothing but this workflow should push
-# to that branch, so the push isn't retried: a push that loses a race fails the run, and a re-run, or a dispatch from
-# `main` with `dry_run` off, publishes on top of the new tip. A dispatch is a dry run by default, which lists the files
-# that differ. CONTRIBUTING.md ("Publishing docs, guides and skills") has the setup in metalbear-co/skills that this
-# workflow relies on, and what to check when a run fails.
+# earlier run never puts older skills back. The branch is never force-pushed: its `default` ruleset refuses that for
+# everyone, Cubby included, and appending keeps the history that the skills had before they moved into this repository.
+# Nothing but this workflow should push to that branch, so the push isn't retried: a push that loses a race fails the
+# run, and a re-run, or a dispatch from `main` with `dry_run` off, publishes on top of the new tip. A dispatch is a dry
+# run by default, which lists the files that differ. CONTRIBUTING.md ("Publishing docs, guides and skills") has the
+# setup in metalbear-co/skills that this workflow relies on, and what to check when a run fails.
 
 on:
   push:

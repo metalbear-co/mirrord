@@ -17,11 +17,11 @@ The Configuration tab is generated from the doc comments in `mirrord/config/src`
 python3 .github/scripts/check_plan_tags.py
 ```
 
-CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. There is no local build. Instead, a pull request into `main` from a branch of the mirrord repository gets a `GitBook - metalbear.com/mirrord/docs/` status whose Details link opens a preview of the site. Only people with a GitBook account can view the preview. A pull request from a fork gets no preview: GitBook serves previews from the docs site's domain, so a fork's preview would put content that anyone can write under `metalbear.com`, and the spaces' Git Sync settings keep fork previews off for that reason.
+CI runs it in the `content_check` job of the root `.github/workflows/ci.yaml`. There is no local build. Instead, a pull request into `main` from a branch of the mirrord repository gets a `GitBook (./docs) - metalbear.com/mirrord/docs/` status whose Details link opens a preview of the site. Only people with a GitBook account can view the preview. A pull request from a fork gets no preview: GitBook serves previews from the docs site's domain, so a fork's preview would put content that anyone can write under `metalbear.com`, and the spaces' Git Sync settings keep fork previews off for that reason.
 
 ## Publishing
 
-GitBook imports each commit on `main` that changes this directory, and reports the result as a commit status whose context starts with `GitBook`, such as `GitBook - metalbear.com/mirrord/docs/`. The Guides space syncs the root `guides/` directory the same way, with the project directory `guides` and the status `GitBook - metalbear.com/mirrord/docs/guides/`. No CI job waits for these statuses, so a failed import shows only as a failed GitBook status on the merge commit.
+GitBook imports each commit on `main` that changes this directory, and reports the result as two commit statuses, `GitBook (./docs)` and `GitBook (./docs) - metalbear.com/mirrord/docs/`. The Guides space syncs the root `guides/` directory the same way, with the project directory `guides` and the statuses `GitBook (./guides)` and `GitBook (./guides) - metalbear.com/mirrord/docs/guides/`. No CI job waits for these statuses, so a failed import shows only as a failed GitBook status on the merge commit.
 
 A commit that GitBook never imports leaves the site at the previous import. Check the space's Git Sync in GitBook, and try syncing it again from there. GitBook's Git Sync troubleshooting guide also says that GitBook imports all the content again when a new commit reaches the branch, so the next merge that changes `docs/` (or `guides/`) also brings in the changes of the failed import.
 

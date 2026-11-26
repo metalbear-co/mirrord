@@ -12,7 +12,7 @@ The root of the GitBook docs is `./docs`, as defined in `.gitbook.yaml`. See [th
 
 ### Development
 
-GitBook syncs this directory on the mirrord repository's `main` branch, so a merged change reaches the site once GitBook imports it, while `mirrord mcp` gets it with the next mirrord release. A pull request into `main` from a branch of the mirrord repository gets a preview, linked from its `GitBook - metalbear.com/mirrord/docs/` status, and a pull request from a fork gets none. `AGENTS.md` says what to do when GitBook fails to import a change.
+GitBook syncs this directory on the mirrord repository's `main` branch, so a merged change reaches the site once GitBook imports it, while `mirrord mcp` gets it with the next mirrord release. A pull request into `main` from a branch of the mirrord repository gets a preview, linked from its `GitBook (./docs) - metalbear.com/mirrord/docs/` status, and a pull request from a fork gets none. `AGENTS.md` says what to do when GitBook fails to import a change.
 
 Changes to **content and basic structure** can be made in this directory. Other changes, such as a space's settings, must be made via the [GitBook platform](https://app.gitbook.com), because GitBook doesn't store them in this directory. To do so, you will need access to the MetalBear organisation.
 

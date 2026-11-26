@@ -1023,9 +1023,10 @@ The setup that the Publish skills workflow relies on:
 
 - The Cubby GitHub App is installed on `metalbear-co/skills` with write access to its contents. The workflow creates its
   token from the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets, as the other workflows that use Cubby do.
-- Cubby is a bypass actor of the `default` ruleset of `metalbear-co/skills`, with the bypass mode **Always**, so that
-  its push doesn't need a pull request. The mode **For pull requests only** doesn't exempt a direct push. The ruleset
-  still refuses force pushes and deletion of `main`, and the workflow needs neither.
+- The `main-pr-required` ruleset of `metalbear-co/skills` holds only the rule that requires a pull request for the
+  default branch, and Cubby is its bypass actor, with the bypass mode **Always**, so that its push doesn't need a pull
+  request. The mode **For pull requests only** doesn't exempt a direct push. The `default` ruleset refuses force pushes
+  and deletion of `main` and has no bypass actor. The workflow needs none there, because it only fast-forwards `main`.
 - `metalbear-co/skills` has no `.github/workflows`, because the Cubby token has no Workflows permission, so a publish
   that would delete them fails. That means removing all three old workflows: `check-fence-tags.yml`, which the
   `content_check` job of mirrord replaces, and `docs-sync.yml` and `update-references.yml`, which open weekly pull
@@ -1039,7 +1040,8 @@ When a run fails:
   `metalbear-co/skills`, then re-run the failed run.
 - If git rejected the push as non-fast-forward, someone pushed to `metalbear-co/skills` during the run. Re-run the
   failed run.
-- If a ruleset rejected the push, check that Cubby is still a bypass actor of the `default` ruleset, with the bypass
-  mode **Always**.
+- If a ruleset rejected the push, check that Cubby is still a bypass actor of the `main-pr-required` ruleset, with
+  the bypass mode **Always**. The `default` ruleset rejects only a force push or a deletion, which the workflow never
+  makes.
 - If creating the token failed, check that Cubby is still installed on `metalbear-co/skills`, and that the
   `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set.
