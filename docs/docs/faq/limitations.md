@@ -40,6 +40,7 @@ Some features need a newer version:
 | [Multi-cluster](../using-mirrord/multi-cluster-setup.md#prerequisites) | `1.30` on the Primary cluster |
 | [Multi-cluster preview replicas](../using-mirrord/multi-cluster-setup.md#preview-environment-replicas) with database branching | `1.29` on the workload clusters |
 | [Syncing local code to a preview environment](../use-cases/preview-environments-code-sync.md) | `1.29` on the API server and the nodes |
+| [Copy-on-write database branching](../sharing-the-cluster/db-branching.md#copy-on-write-branches) | `1.24` |
 
 ## Does mirrord support clusters with a service mesh like Istio or Linkerd?
 

@@ -56,7 +56,7 @@ If you have any restrictions for pulling external images inside your cluster, yo
 ## How does mirrord protect against disrupting my shared environment with my local code?
 
 - By letting you mirror traffic rather than intercept it, the stable version of the code can still run in the cluster and handle requests.
-- By letting you control which functionality runs locally and which runs in the cloud, you can configure mirrord in the way that's safest for your architecture. For example, you can configure mirrord to read files and receive incoming traffic from the cloud, but write files and send outgoing traffic locally. Our main goal in future versions of mirrord is to reduce the risk of disruption of the shared environment when using mirrord. This will be achieved by providing more granular configuration options (for example, filtering traffic by hostname or protocol), and advanced functionality like copy-on-write for databases.
+- By letting you control which functionality runs locally and which runs in the cloud, you can configure mirrord in the way that's safest for your architecture. For example, you can configure mirrord to read files and receive incoming traffic from the cloud, but write files and send outgoing traffic locally. Our main goal in future versions of mirrord is to reduce the risk of disruption of the shared environment when using mirrord. This is done through more granular configuration options, such as filtering traffic by hostname or protocol, and through features like [copy-on-write database branches](../sharing-the-cluster/db-branching.md#copy-on-write-branches).
 
 ## Can I use mirrord to run a local container, rather than a local process, in the context of the remote Kubernetes cluster?
 

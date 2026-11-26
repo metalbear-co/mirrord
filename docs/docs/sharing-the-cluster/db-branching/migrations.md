@@ -49,7 +49,7 @@ The `flavor` field selects what the Job runs. Pick by where your migrations live
 
 Using `migrations` requires the branch's `name` field to be set.
 
-The branch's `creation_timeout_secs` covers the whole startup: cloning the source, pulling the migration image, and running the migrations. Raise it if your migrations are slow or your migration image is large.
+The branch's `creation_timeout_secs` covers the whole startup: cloning the source, pulling the migration image, and running the migrations. Raise it if your migrations are slow or your migration image is large. For a [copy-on-write](../db-branching.md#copy-on-write-branches) branch, the CLI also waits while its snapshot is built or pulled, and once that wait ends, the timeout starts over for the rest of the start.
 
 ## Carrying migration history onto the branch
 

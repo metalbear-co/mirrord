@@ -112,6 +112,19 @@ Only the `users` collection is created, containing documents for alice and bob. 
 The `dump_args` field is not supported for MongoDB. MongoDB branches use their own internal dump mechanism, so only MySQL, MariaDB, and PostgreSQL branches accept custom dump arguments.
 {% endhint %}
 
+## Server Arguments
+
+`dbServerArgs` is a list of extra command-line flags for the branch's `mongod` server, set per cluster via the `operator.mongodbBranchConfig` value in the operator's Helm chart. The operator passes them as the branch container's args, and the official image's entrypoint hands them to the server. Keep the listener on port 27017: the operator and the copy connect there.
+
+```yaml
+operator:
+  mongodbBranchConfig:
+    dbPod:
+      dbServerArgs:
+        - "--wiredTigerCacheSizeGB"
+        - "0.5"
+```
+
 ## Custom Branch Image
 
 A branch that sets [`image`](../db-branching.md#custom-branch-image) runs that image through its own `docker-entrypoint.sh`. With mirrord operator `3.238.0` or later the branch container's command replaces the image's `CMD`, so the server starts as plain `mongod`: flags your image's `CMD` carried go in the operator's `operator.mongodbBranchConfig.dbPod.dbServerArgs` Helm value instead. A branch that selects a [profile](../db-branching.md#branch-config-profiles) takes them from that profile's `dbPod.dbServerArgs`, since a profile inherits nothing from the default `dbPod`.
