@@ -12,7 +12,7 @@ Two diagrams show the style well. Copy from them when you start a new one:
 ## File
 
 - Root element: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 W H" width="W" height="H" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">`.
-- Width: 960 to 1200. GitBook scales the image down to the page width, so a wider image makes the text too small.
+- Width: 960 to 1200. GitBook scales the image down to the page width, so a wider image makes the text too small. Use the same width in the `viewBox` and the `width` attribute. When the content needs more than 1200, keep the wider `viewBox` and set `width="1200"`, as in `redis-pubsub-splitting.svg`.
 - Put a `<title id="t">` and a `<desc id="d">` first. The `desc` tells the full flow in words, for screen readers.
 - Put a white background as the first shape: `<rect x="0" y="0" width="W" height="H" fill="#ffffff"/>`. GitBook dark mode needs it.
 - Keep the file small and readable. Use plain `rect`, `line`, `path`, `polyline`, `circle`, `ellipse`, and `text`. Do not embed fonts, raster images, or base64 data. Add a short comment before each group of shapes.
@@ -48,8 +48,8 @@ Two diagrams show the style well. Copy from them when you start a new one:
 
 The Kubernetes logo shows what runs in the cluster. Use it in two places:
 
-- **On a Kubernetes cluster.** On a cloud, center the logo on the top-right corner bump, 24px in from the top of the bump. On a boundary, center a 36px logo on the top-right corner, at `x + width - 18`, `y - 18`. Do not put it on a broker boundary, such as "Kafka cluster". A broker boundary gets the broker logo (see below).
-- **On a box that runs in the cluster, when the diagram has no Kubernetes cluster boundary.** Center a 36px logo on the bottom-right corner of the box, at `x + width - 18`, `y + height - 18`. Examples: the mirrord operator, a forwarder, the deployed app, a preview pod. Do not put it on brokers or managed services.
+- **On a Kubernetes cluster.** On a cluster drawn as a cloud, center the logo on the top-right corner bump, 24px in from the top of the bump, as in `api-gateway-traffic.svg`. The boundary rule that follows does not apply to a cloud. On a cluster drawn as a boundary, center a 36px logo on the top-right corner, at `x + width - 18`, `y - 18`. Do not put it on a broker boundary, such as "Kafka cluster". A broker boundary gets the broker logo (see below).
+- **On a box that runs in the cluster, when the diagram has no Kubernetes cluster boundary.** Center a 36px logo on the bottom-right corner of the box, at `x + width - 18`, `y + height - 18`. On a box less than 60 high, use a 26px logo, at `x + width - 13`, `y + height - 13`. Examples: the mirrord operator, a forwarder, the deployed app, a preview pod. Do not put it on brokers or managed services.
 
 Define the symbol once in `<defs>`, and place it with `<use href="#k8s" x="..." y="..." width="36" height="36"/>`. The logo half covers the corner, so make sure it does not cover an arrow or text, and grow the canvas when it goes past the edge:
 
@@ -85,32 +85,36 @@ Use a symbol, not only a label, when a symbol shows what a thing is. A reader re
 
 ### mirrord logo
 
-Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, 22 wide and 40 high, and move the title to the right to make space:
+Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, and move the title to the right to make space. The logo is 22 wide and 40 high. In a smaller box, use 18 by 32, or 14 by 26 in a box less than 50 high, as the agent boxes in `api-gateway-traffic.svg` and `header-propagation.svg` do:
 
 ```xml
 <use href="#mirrord" x="..." y="..." width="22" height="40"/>
 ```
 
-The symbol is the mirror from `images/logo.svg` at the repository root, without the wordmark. Copy the `<symbol id="mirrord" viewBox="97 61 391 696">` definition from `docs/.gitbook/assets/operator-architecture.svg`. Do not change it.
+The symbol is the mirror from `images/logo.svg` at the repository root, without the wordmark. Copy the `<symbol id="mirrord" viewBox="97 61 391 696">` definition from `docs/.gitbook/assets/api-gateway-traffic.svg`. Do not change it.
 
 ### Laptop
 
-Draw a developer machine, a local process, or a CI runner as a laptop: a dark screen frame and a keyboard deck under it. The rect `X, Y, W, H` is the screen frame. Arrows end at its edge.
+Draw a developer machine or a local process as a laptop: a dark screen frame and a keyboard deck under it. Do not draw a CI runner as a laptop (see [Server](#server)). The example is a laptop whose screen frame is the rect `x=100, y=100, width=200, height=120`. Arrows end at the edge of the frame.
 
 ```xml
-<rect x="X" y="Y" width="W" height="H" rx="10" fill="#232141"/>
-<rect x="X+8" y="Y+8" width="W-16" height="H-16" rx="4" fill="FILL"/>
-<path d="M X Y+H H X+W L X+W+16 Y+H+14 H X-16 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
-<line x1="X+10" y1="Y+H+5" x2="X+W-10" y2="Y+H+5" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/>
-<rect x="X+W/2-16" y="Y+H+8.5" width="32" height="3.5" rx="1.5" fill="#232141"/>
-<rect x="X-20" y="Y+H+14" width="W+40" height="5" rx="2.5" fill="#232141"/>
+<rect x="100" y="100" width="200" height="120" rx="10" fill="#232141"/>
+<rect x="108" y="108" width="184" height="104" rx="4" fill="#756DF3"/>
+<path d="M100 220 H300 L316 234 H84 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+<line x1="110" y1="225" x2="290" y2="225" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/>
+<rect x="184" y="228.5" width="32" height="3.5" rx="1.5" fill="#232141"/>
+<rect x="80" y="234" width="240" height="5" rx="2.5" fill="#232141"/>
 ```
 
-Calculate the numbers. The laptop reaches 20 beyond the frame on each side and 19 below it. Put the content 8 or more inside the frame. `FILL` is the fill of the role: `#756DF3` when the screen is a local process, or the boundary fill `#F5F4FE` when the screen holds other boxes, such as `mirrord-layer`, a terminal, or `mirrord.json`. When the screen holds one box, such as "Local process", you can also put the box on a white screen, as in `operator-architecture.svg`.
+For a frame `X, Y, W, H`: the inner rect is inset 8; the deck goes from `(X, Y+H)` to `(X+W+16, Y+H+14)` and back to `(X-16, Y+H+14)`; the key line is at `Y+H+5`, from `X+10` to `X+W-10`; the trackpad is 32 wide at `X+W/2-16, Y+H+8.5`; and the lip is `X-20, Y+H+14, W+40, 5`. The laptop reaches 20 beyond the frame on each side and 19 below it. Put the content 8 or more inside the frame. The inner rect has the fill of the role: `#756DF3` when the screen is a local process, or the boundary fill `#F5F4FE` when the screen holds other boxes, such as `mirrord-layer`, a terminal, or `mirrord.json`. When the screen holds one box, such as "Local process", you can also put the box on a white screen, as in `operator-architecture.svg`.
+
+### Server
+
+Draw a CI runner or another machine that is not a developer laptop as a server: the dark frame of a laptop without the keyboard deck, with a status strip along the bottom of the frame. The strip has two status lights on the left and vent lines on the right. Copy it from `mirrord-ci-diagram.svg`.
 
 ### Cluster
 
-Draw a Kubernetes cluster as a cloud when the diagram shows one cluster. A cloud has bumps on all four sides. Do not draw straight sides with bumps only on the top, because that shape looks like a loaf of bread. The cloud holds the whole rect `x, y, w, h` that you plan for its content. The top bumps reach about 0.12 of `w` above the rect, the side bumps about 16px beside it, and the bottom bumps about 0.05 of `w` below it. Keep that space free of laptops, labels, and other boxes. Copy the path from `operator-architecture.svg` and scale it, or calculate it:
+Draw a Kubernetes cluster as a cloud when the diagram shows one cluster. A cloud has bumps on all four sides. Do not draw straight sides with bumps only on the top, because that shape looks like a loaf of bread. The cloud holds the whole rect `x, y, w, h` that you plan for its content. The top bumps reach about 0.12 of `w` above the rect, the side bumps about 16px beside it, and the bottom bumps about 0.05 of `w` below it. Keep that space free of laptops, labels, and other boxes. Copy the path from `shared-cluster.svg` and scale it, or calculate it:
 
 - `a = min(0.30 h, 0.20 w)`, `cb = min(0.16 h, 0.09 w)`.
 - Go clockwise from `(x, y+h-cb)`. Join the points with clockwise arcs (`A r r 0 0 1`).
@@ -186,7 +190,7 @@ The dev loop diagram uses a laptop with code (`#code`) for local work and a clou
 
 ## Check a diagram
 
-Render the file and look at it before you open a PR:
+Render the file and look at it before you open a PR. Run this command from the `docs` directory:
 
 ```sh
 rsvg-convert -w 1200 -b white docs/.gitbook/assets/<name>.svg -o /tmp/<name>.png
