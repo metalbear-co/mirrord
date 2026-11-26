@@ -6,7 +6,7 @@ tags:
   - team
   - enterprise
 
-description: "Use mirrord replay to send an HTTP request that your session received to your local application again."
+description: "Use mirrord replay to send an HTTP request or a queue message that your session received to your local application again."
 ---
 
 # Replaying Requests
@@ -82,6 +82,35 @@ This prints the headers and body of the request, the status of the response to t
 ## Replaying from the Local UI
 
 The session view of the [Local UI](local-ui.md) has a **Replay** tab. It lists the requests of the session, and shows each request with its replays and their responses. Select a request and press **Replay**.
+
+## Replaying queue messages
+
+A session through the operator can also replay the SQS and Kafka messages that the operator routed to it. The operator keeps these messages, not your machine, so queue replay must be turned on in the operator with the `operator.queueReplay` value of the mirrord-operator chart:
+
+```bash
+helm upgrade mirrord-operator metalbear/mirrord-operator --reuse-values --set operator.queueReplay=true
+```
+
+The operator keeps the latest 50 messages of each session, with their bodies, for an hour, in its own memory. A message larger than 256 KiB, counting its body, attributes or headers, and key, is listed, but can't be replayed. The copies are lost when the operator restarts. Kafka splits that run through the JVM sidecar are not kept, and a multi-cluster primary operator doesn't serve queue replay yet.
+
+```bash
+mirrord replay messages
+```
+
+```
+ ID  QUEUE   MESSAGE       SIZE   BODY                 REPLAYS
+ 4   orders  0@1182        212 B  {"order":"o_91",...  0
+```
+
+```bash
+mirrord replay send-message 4
+```
+
+The operator publishes the message to the session's queue again, with its original attributes or headers, so your application consumes it once more. On an SQS FIFO queue the copy gets a new deduplication ID and keeps its group ID. A Kafka message can't be replayed after the session stops splitting its topic.
+
+Listing messages needs the `list` verb and replaying needs the `create` verb on the `queuereplays` resource of the `operator.metalbear.co` API group. The `mirrord-operator-user`, `mirrord-operator-ci` and `mirrord-operator-user-basic` roles have both.
+
+In the [Local UI](local-ui.md), the **Replay** tab of a session through the operator lists its queue messages above its requests, each with a **Publish again** button.
 
 ## Choosing a session
 
