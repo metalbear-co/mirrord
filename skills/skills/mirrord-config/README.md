@@ -32,5 +32,5 @@ This skill helps AI agents:
 ## References
 
 This skill uses local reference files:
-- `references/schema.json`: mirrord JSON Schema, synced from upstream. The fence tag check validates config examples against it; read it only as a last resort, when neither `validate_config` (mirrord MCP server) nor `mirrord verify-config` is available
+- `references/schema.json`: mirrord JSON Schema, a copy of `mirrord-schema.json` that nothing updates automatically. The fence tag check validates config examples against it; read it only as a last resort, when neither `validate_config` (mirrord MCP server) nor `mirrord verify-config` is available
 - `references/configuration.md` — Configuration reference

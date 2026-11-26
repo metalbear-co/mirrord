@@ -22,6 +22,8 @@ COPY .cargo /app/.cargo
 COPY mirrord/macros /app/mirrord/macros
 COPY mirrord/nightly-polyfill /app/mirrord/nightly-polyfill
 COPY mirrord/tls-util /app/mirrord/tls-util
+COPY mirrord/test-macros /app/mirrord/test-macros
+COPY mirrord/jaq /app/mirrord/jaq
 COPY mirrord/protocol /app/mirrord/protocol
 COPY mirrord/protocol-io /app/mirrord/protocol-io
 COPY mirrord/remote-layer-protocol /app/mirrord/remote-layer-protocol
@@ -36,7 +38,7 @@ COPY Cargo.toml Cargo.lock CHANGELOG.md README.md LICENSE rust-toolchain.toml /a
 # so we remove from the workspace. `default-members` goes first: it names crates not copied here,
 # and its `members` substring would otherwise make the members rewrite match it too.
 RUN sed -i '/^default-members = \[/,/^\]/d' /app/Cargo.toml && \
-    sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/agent",\n    "mirrord/agent/env",\n    "mirrord/agent/iptables",\n    "mirrord/cluster-auth",\n    "mirrord/macros",\n    "mirrord/nightly-polyfill",\n    "mirrord/operator-websocket",\n    "mirrord/protocol",\n    "mirrord/protocol-io",\n    "mirrord/remote-layer-protocol",\n    "mirrord/sessions-manager/client",\n    "mirrord/sessions-manager/protocol",\n    "mirrord/tls-util",\n]' /app/Cargo.toml
+    sed -i '/members = \[/,/\]/c\members = [\n    "mirrord/agent",\n    "mirrord/agent/env",\n    "mirrord/agent/iptables",\n    "mirrord/cluster-auth",\n    "mirrord/jaq",\n    "mirrord/macros",\n    "mirrord/nightly-polyfill",\n    "mirrord/operator-websocket",\n    "mirrord/protocol",\n    "mirrord/protocol-io",\n    "mirrord/remote-layer-protocol",\n    "mirrord/sessions-manager/client",\n    "mirrord/sessions-manager/protocol",\n    "mirrord/test-macros",\n    "mirrord/tls-util",\n]' /app/Cargo.toml
 
 
 # Build final binary against BuildKit cache mounts. The target directory is one of them, so cargo's

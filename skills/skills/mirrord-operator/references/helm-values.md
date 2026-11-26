@@ -1,9 +1,9 @@
 # mirrord Operator — Helm values reference
 
-Curated digest of the important knobs in the operator chart. This file is **hand-maintained** — for the exact current defaults and any value not listed here, read the verbatim upstream snapshot in `references/values.yaml` (kept in sync automatically by the `update-references` workflow), or the live source:
+Curated digest of the important knobs in the operator chart. This file is **hand-maintained**. For the defaults and any value not listed here, read the verbatim snapshot in `references/values.yaml`, a copy of the chart's `values.yaml` that nothing updates automatically, so it can be older than the chart. For the exact current defaults, read the live source:
 https://raw.githubusercontent.com/metalbear-co/charts/main/mirrord-operator/values.yaml
 
-> When the workflow opens a PR because `values.yaml` changed, review whether this digest needs a matching edit.
+> When you refresh `references/values.yaml` from the chart, review whether this digest needs a matching edit.
 
 > **Secrets rule:** never inline a cloud API key, license key, or PEM in `values.yaml` or on the
 > CLI. Use a Kubernetes Secret ref or a Google Secret Manager ref (see [Authentication](#authentication)).
