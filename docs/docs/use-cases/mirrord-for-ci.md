@@ -19,7 +19,7 @@ tags:
 
 mirrord can be used to greatly speed up CI runs by enabling testing against a shared staging environment without interrupting it. With mirrord for CI, you're able to keep your staging environment working, while also running your batch of end-to-end and other automated tests. The local app runs in the context of the targeted app that's deployed in your staging cluster, so it gets access to traffic, files, and more, as if it's running in the cluster. This means there's no need to spin up a whole test environment for a CI run, then spin it down when it's done.
 
-![How mirrord ci works](../.gitbook/assets/mirrord-ci-diagram.png)
+![How mirrord ci works](../.gitbook/assets/mirrord-ci-diagram.svg)
 
 While running regular `mirrord exec` can be made to work for this purpose, it requires some finagling to get right, such as wrapping `mirrord exec` in some other command that would start it as a background process. The `mirrord ci start` command is more appropriate for this use case, since it starts your app and mirrord as background processes, allowing you to then run tests while your app is running in the background and connected to the cluster.
 

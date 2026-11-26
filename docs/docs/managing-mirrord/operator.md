@@ -26,7 +26,7 @@ To install the Operator and check its requirements, see [Install the Operator](.
 
 Rotate and revoke the key at [app.metalbear.com](https://app.metalbear.com). When you revoke, you can choose a grace window so the current key keeps working while you roll the Operator over to the new one.
 
-## Single sign-on
+## Single sign-on (Enterprise)
 
 Developers can log in to the Operator with your OIDC identity provider at a public HTTPS URL instead of through a kubeconfig. See [Single Sign-On](sso.md) for registering mirrord at the provider, the `sso` Helm values and granting groups access.
 

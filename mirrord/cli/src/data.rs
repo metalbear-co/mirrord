@@ -16,11 +16,15 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::task;
 use tracing::trace;
 
-mod auth_store;
+/// Public within the crate so the commands that reach the operator through a saved login can
+/// name [`auth_store::ActiveLoginError`].
+pub(crate) mod auth_store;
 mod global_config;
 mod user_data;
 
-pub(crate) use auth_store::{AuthStore, SignupApiKey, StoredLogin, StoredLoginToken};
+pub(crate) use auth_store::{
+    AuthStore, LogoutOutcome, OperatorLogins, SignupApiKey, StoredLogin, StoredLoginToken,
+};
 pub(crate) use global_config::{GlobalConfig, GlobalConfigError, global_config_command};
 pub(crate) use user_data::UserData;
 
