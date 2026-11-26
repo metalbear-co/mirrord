@@ -434,8 +434,14 @@ jobs:
           # then move the marker back. So this step checks both again, with the Cubby token, which can read the pull
           # requests. Once both checks pass, the branch holds only what an earlier run left there, or what a reviewer
           # pushed to a docs-sync pull request that has since closed, and CONTRIBUTING.md says to keep no work on it.
-          # A plain `--force-with-lease` can't guard the push, because a push to an explicit URL has no remote-tracking
-          # ref to take the expected commit from.
+          #
+          # The step reads the branch's tip before the checks, and the push takes it as its lease, so a push to the
+          # branch after that read makes this push fail rather than replace it. An empty tip means that the branch must
+          # not exist. A pull request opened from the branch between the check and `gh pr create`, without a push, still
+          # gets this run's commit, and then `gh pr create` fails. The repository is public, so `ls-remote` needs no
+          # token.
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          tip=$(git ls-remote "$url" "refs/heads/$SYNC_BRANCH" | cut -f1)
           open=$(GH_TOKEN=$TOKEN gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=$GITHUB_REPOSITORY_OWNER:$SYNC_BRANCH" \
             --jq '.[].html_url')
           if [ -n "$open" ]; then
@@ -469,14 +475,14 @@ jobs:
           # With `push.negotiate`, git first asks GitHub which commits it already has. Without it, a push after `main`
           # moved could send objects that GitHub already has, and the partial clone would first fetch their blobs to
           # send them.
-          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           basic=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
           echo "::add-mask::$basic"
           (
             n=${GIT_CONFIG_COUNT:-0}
             export GIT_CONFIG_COUNT=$((n + 1)) "GIT_CONFIG_KEY_$n=http.$url.extraheader" \
               "GIT_CONFIG_VALUE_$n=AUTHORIZATION: basic $basic"
-            git -c push.negotiate=true push --quiet --force "$url" "HEAD:refs/heads/$SYNC_BRANCH"
+            git -c push.negotiate=true push --quiet --force-with-lease="refs/heads/$SYNC_BRANCH:$tip" "$url" \
+              "HEAD:refs/heads/$SYNC_BRANCH"
           )
 
           # The commit subjects go in a code block, where GitHub turns no `@name` into a mention and no `#123` into a

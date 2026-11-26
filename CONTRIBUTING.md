@@ -1119,6 +1119,8 @@ A failed run of `main` that could open a pull request posts to `#ci-alerts`; a d
 - If creating the token, listing the pull requests, the push or opening the pull request failed, check that Cubby is
   still installed on this repository, and that the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set. The fetch
   of `main` before the push uses no token, so its failure has nothing to do with Cubby.
+- If git rejected the push as `stale info`, someone pushed to `auto/docs-sync` while the run was going, and the run
+  didn't replace it. Find out who and why before you start a new run, which replaces the branch.
 
 To re-run a failed run, use **Re-run all jobs**, not **Re-run failed jobs**. Re-running all jobs finds the commits to
 sync again, up to the current tip of `main`. A re-run of the failed jobs syncs the commits that the first attempt found,
