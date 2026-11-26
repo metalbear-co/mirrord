@@ -1,5 +1,6 @@
 use std::str::Split;
 
+use itertools::Itertools;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +51,7 @@ impl FromSplit for ServerlessTarget {
         match (split.next(), split.next()) {
             (Some("container"), Some(container)) => Ok(Self {
                 serverless: service.to_owned(),
-                container: Some(container.to_owned()),
+                container: Some(std::iter::once(container).chain(split.by_ref()).join("/")),
             }),
             (None, None) => Ok(Self {
                 serverless: service.to_owned(),

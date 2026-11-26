@@ -293,7 +293,8 @@ impl MirrordConfig for TargetFileConfig {
 
 /// Parses the segments after a target path's type prefix: the target's name and an optional
 /// `container/{name}` pair. Implementations stop there, and [`Target::from_str`] rejects any
-/// segment left over, so every kind gets the same end-of-path check.
+/// segment left over, so every kind gets the same end-of-path check. Only a serverless replica id,
+/// such as an ECS task ARN, spans segments, so it takes every segment after `container/`.
 trait FromSplit {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self>
     where
@@ -1053,8 +1054,44 @@ mod tests {
     #[rstest]
     #[case("pod/foo/container/bar/baz")]
     #[case("deployment/foo/container/bar/baz")]
-    #[case("serverless/foo/container/bar/baz")]
     fn target_path_rejects_trailing_segments(#[case] path: &str) {
+        assert!(matches!(
+            Target::from_str(path),
+            Err(ConfigError::InvalidTargetPath(_))
+        ));
+    }
+
+    #[rstest]
+    #[case("bar", "bar")]
+    #[case(
+        "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/0123abcd",
+        "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/0123abcd"
+    )]
+    #[case("a//b/", "a//b/")]
+    fn serverless_replica_id_keeps_every_segment(#[case] replica: &str, #[case] expected: &str) {
+        let path = format!("serverless/foo/container/{replica}");
+        let target = Target::from_str(&path).unwrap();
+        let expected_target = Target::Serverless(serverless::ServerlessTarget {
+            serverless: "foo".to_owned(),
+            container: Some(expected.to_owned()),
+        });
+
+        assert_eq!(target, expected_target);
+        assert_eq!(target.to_string(), path);
+        assert_eq!(
+            serde_json::from_value::<Target>(
+                serde_json::json!({"serverless": "foo", "container": expected})
+            )
+            .unwrap(),
+            expected_target
+        );
+    }
+
+    #[rstest]
+    #[case("serverless/foo/bar")]
+    #[case("serverless/foo/bar/baz")]
+    #[case("serverless/foo/container")]
+    fn serverless_target_path_rejects_malformed_prefix(#[case] path: &str) {
         assert!(matches!(
             Target::from_str(path),
             Err(ConfigError::InvalidTargetPath(_))
