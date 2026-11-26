@@ -9,12 +9,14 @@
 //! from the file, so it works while the session runs, after it is gone, and without a cluster.
 
 use std::{
+    cmp::Reverse,
     env::home_dir,
     fs, io,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
+use chrono::{DateTime, Utc};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_intproxy::timings::{
@@ -22,7 +24,7 @@ use mirrord_intproxy::timings::{
 };
 use mirrord_operator::client::{
     OperatorApi,
-    session_start::{SessionStartTimings, StartConnect},
+    session_start::{SessionStartTimings, StartConnect, StartPhase},
 };
 use mirrord_progress::NullProgress;
 use prettytable::{
@@ -230,6 +232,9 @@ const APPLICATION_HEADING: &str = "Application calls";
 enum SessionStart {
     Recorded {
         connects: Vec<StartConnect>,
+        /// On a session that runs on several clusters: the clusters that had nothing to report.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        missing_clusters: Vec<String>,
     },
     /// The session did not go through an operator, so nobody timed its start.
     NoOperator,
@@ -238,9 +243,7 @@ enum SessionStart {
     /// The operator has nothing for this session.
     Forgotten,
     /// The operator could not be asked.
-    Unavailable {
-        reason: String,
-    },
+    Unavailable { reason: String },
 }
 
 /// The application's part of the report: the summary file's numbers plus what this command adds.
@@ -272,12 +275,33 @@ fn millis_as_nanos(millis: u64) -> u64 {
     millis.saturating_mul(1_000_000)
 }
 
+/// A duration the operator measured in milliseconds, which has no finer unit to show.
+fn format_millis(millis: u64) -> String {
+    if millis == 0 {
+        "0 ms".to_owned()
+    } else {
+        format_wait(millis_as_nanos(millis))
+    }
+}
+
+/// A point on the session's timeline, counted from its first step.
+fn format_offset(millis: u64) -> String {
+    format!("+{}", format_millis(millis))
+}
+
 fn render_session_start(session_start: &SessionStart, output: &mut String) {
     let connects = match session_start {
         // A session without an operator has no start to report, and saying so every time would
         // be noise for users who never use one.
         SessionStart::NoOperator => return,
-        SessionStart::Recorded { connects } => connects,
+        SessionStart::Recorded {
+            connects,
+            missing_clusters,
+        } if connects.iter().any(|connect| connect.cluster.is_some()) => {
+            render_multi_cluster_start(connects, missing_clusters, output);
+            return;
+        }
+        SessionStart::Recorded { connects, .. } => connects,
         SessionStart::Unsupported => {
             output.push_str(&format!(
                 "\n{SESSION_START_HEADING}\nThis operator does not record session start timings.\n"
@@ -315,7 +339,7 @@ fn render_session_start(session_start: &SessionStart, output: &mut String) {
         }
         for phase in &connect.phases {
             total_millis = total_millis.saturating_add(phase.duration_ms);
-            let duration = format_wait(millis_as_nanos(phase.duration_ms));
+            let duration = format_millis(phase.duration_ms);
             table.add_row(row![
                 number,
                 printable(&phase.name),
@@ -328,8 +352,205 @@ fn render_session_start(session_start: &SessionStart, output: &mut String) {
             ]);
         }
     }
-    table.add_row(row!["all", "", "", r->format_wait(millis_as_nanos(total_millis))]);
+    table.add_row(row!["all", "", "", r->format_millis(total_millis)]);
     output.push_str(&table.to_string());
+}
+
+/// The part of a multi-cluster session start that one cluster's operator did.
+struct ClusterSpan<'a> {
+    cluster: &'a str,
+    started: u64,
+    finished: u64,
+    slowest: &'a StartPhase,
+}
+
+/// One phase of a multi-cluster session start, placed on the session's timeline.
+struct TimedPhase<'a> {
+    cluster: &'a str,
+    phase: &'a StartPhase,
+    /// When the phase started, counted from the start of the session's first connect.
+    start_ms: u64,
+    end_ms: u64,
+}
+
+/// The phases of every cluster on one timeline, the earliest first.
+///
+/// A phase is placed by its connect's start plus [`StartPhase::started_after_ms`]. An operator
+/// that sends no offset gets its phases placed one after the other, which is how a connect runs
+/// them. The clusters' clocks are taken to agree, as the clocks of hosts that sync their time do
+/// to within milliseconds.
+fn timeline(connects: &[StartConnect]) -> Vec<TimedPhase<'_>> {
+    let starts = connects
+        .iter()
+        .map(|connect| connect.started_at.parse::<DateTime<Utc>>().ok())
+        .collect::<Vec<_>>();
+    let Some(first) = starts.iter().flatten().min().copied() else {
+        return Vec::new();
+    };
+
+    let mut phases = Vec::new();
+    for (connect, start) in connects.iter().zip(starts) {
+        let connect_start = start
+            .and_then(|start| u64::try_from((start - first).num_milliseconds()).ok())
+            .unwrap_or_default();
+        let mut next_ms = connect_start;
+        for phase in &connect.phases {
+            let start_ms = phase
+                .started_after_ms
+                .map_or(next_ms, |offset| connect_start.saturating_add(offset));
+            let end_ms = start_ms.saturating_add(phase.duration_ms);
+            next_ms = end_ms;
+            phases.push(TimedPhase {
+                cluster: connect.cluster.as_deref().unwrap_or("?"),
+                phase,
+                start_ms,
+                end_ms,
+            });
+        }
+    }
+    phases.sort_by_key(|timed| timed.start_ms);
+
+    phases
+}
+
+/// The start of a session that runs on several clusters: every step on one timeline, a table per
+/// cluster, and a line that says which cluster held the start up and why.
+fn render_multi_cluster_start(
+    connects: &[StartConnect],
+    missing_clusters: &[String],
+    output: &mut String,
+) {
+    let phases = timeline(connects);
+    // The cluster of the first connect is the one the session was started against.
+    let primary = phases
+        .first()
+        .map(|timed| timed.cluster)
+        .unwrap_or_default();
+    let mut clusters = Vec::<&str>::new();
+    for timed in &phases {
+        if !clusters.contains(&timed.cluster) {
+            clusters.push(timed.cluster);
+        }
+    }
+
+    output.push_str(&format!(
+        "\n{SESSION_START_HEADING}\nWhat the operators did before your application could start, \
+        on {} clusters. At is when a step started, counted from the session's first step.\n\n",
+        clusters.len() + missing_clusters.len()
+    ));
+
+    let mut table = Table::new();
+    table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
+    table.set_titles(row![r->"At", r->"Took", "Cluster", "Phase", "What it is"]);
+    for timed in &phases {
+        let took = format_millis(timed.phase.duration_ms);
+        // The other clusters' steps are indented: they happen inside the primary's setup.
+        let cluster = if timed.cluster == primary {
+            printable(timed.cluster)
+        } else {
+            format!("  {}", printable(timed.cluster))
+        };
+        table.add_row(row![
+            r->format_offset(timed.start_ms),
+            r->if timed.phase.failed {
+                format!("{took} (did not finish)")
+            } else {
+                took
+            },
+            cluster,
+            printable(&timed.phase.name),
+            printable(&timed.phase.description),
+        ]);
+    }
+    output.push_str(&table.to_string());
+
+    let spans = clusters
+        .iter()
+        .filter_map(|cluster| {
+            let own = phases.iter().filter(|timed| timed.cluster == *cluster);
+            let slowest = own
+                .clone()
+                .max_by_key(|timed| timed.phase.duration_ms)?
+                .phase;
+            Some(ClusterSpan {
+                cluster,
+                started: own.clone().map(|timed| timed.start_ms).min()?,
+                finished: own.map(|timed| timed.end_ms).max()?,
+                slowest,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    output.push_str("\nBy cluster\n");
+    let mut table = Table::new();
+    table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
+    table.set_titles(row![
+        "Cluster",
+        r->"Started",
+        r->"Finished",
+        r->"Took",
+        "Slowest step"
+    ]);
+    for span in &spans {
+        table.add_row(row![
+            printable(span.cluster),
+            r->format_offset(span.started),
+            r->format_offset(span.finished),
+            r->format_millis(span.finished.saturating_sub(span.started)),
+            format!(
+                "{} {}",
+                printable(&span.slowest.name),
+                format_millis(span.slowest.duration_ms)
+            ),
+        ]);
+    }
+    output.push_str(&table.to_string());
+
+    let total = spans
+        .iter()
+        .map(|span| span.finished)
+        .max()
+        .unwrap_or_default();
+    let mut by_finish = spans.iter().collect::<Vec<_>>();
+    by_finish.sort_by_key(|span| Reverse(span.finished));
+    // The primary does its own steps first and then connects to the other clusters, so the one
+    // of the others that finished last is the one the session waited for.
+    let others = by_finish
+        .iter()
+        .filter(|span| span.cluster != primary)
+        .collect::<Vec<_>>();
+    output.push_str(&format!("\nThe start took {}.", format_millis(total)));
+    match others.as_slice() {
+        [last, next, ..] => output.push_str(&format!(
+            " {} finished last, {} after {}: its slowest step was {} ({}).",
+            printable(last.cluster),
+            format_millis(last.finished.saturating_sub(next.finished)),
+            printable(next.cluster),
+            printable(&last.slowest.name),
+            format_millis(last.slowest.duration_ms),
+        )),
+        [only] => output.push_str(&format!(
+            " Its slowest step on {} was {} ({}).",
+            printable(only.cluster),
+            printable(&only.slowest.name),
+            format_millis(only.slowest.duration_ms),
+        )),
+        [] => {}
+    }
+    output.push('\n');
+
+    if !missing_clusters.is_empty() {
+        output.push_str(&format!(
+            "No timings from {}: the operator there records none for this session, or could not \
+            be asked.\n",
+            missing_clusters
+                .iter()
+                .map(String::as_str)
+                .map(printable)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
 }
 
 /// What a slow call was for. A file call without a path worked on a file the application had
@@ -536,9 +757,13 @@ async fn ask_operator(
     .await;
 
     Ok(match answer {
-        Ok(Ok(Some(SessionStartTimings::Recorded(connects)))) => {
-            SessionStart::Recorded { connects }
-        }
+        Ok(Ok(Some(SessionStartTimings::Recorded {
+            connects,
+            missing_clusters,
+        }))) => SessionStart::Recorded {
+            connects,
+            missing_clusters,
+        },
         Ok(Ok(Some(SessionStartTimings::Forgotten))) => SessionStart::Forgotten,
         Ok(Ok(Some(SessionStartTimings::Unsupported))) => SessionStart::Unsupported,
         Ok(Ok(None)) => SessionStart::Unavailable {
@@ -679,8 +904,6 @@ pub(super) async fn diagnose_timings(
 
 #[cfg(test)]
 mod tests {
-    use mirrord_operator::client::session_start::StartPhase;
-
     use super::*;
 
     fn summary(path_lookups: Vec<DirLookups>) -> TimingsSummary {
@@ -754,6 +977,7 @@ mod tests {
         StartPhase {
             name: name.to_owned(),
             description: String::new(),
+            started_after_ms: None,
             duration_ms,
             failed: false,
         }
@@ -868,13 +1092,20 @@ mod tests {
             nanos: 1_000_000,
         }];
         let connects = vec![StartConnect {
+            cluster: None,
             started_at: "2026-11-25T01:11:54.660513Z".to_owned(),
             phases: vec![StartPhase {
                 description: "finding the \u{1b}[2Jtarget".to_owned(),
                 ..phase("target_lookup", 1)
             }],
         }];
-        let recorded = report(summary.clone(), SessionStart::Recorded { connects });
+        let recorded = report(
+            summary.clone(),
+            SessionStart::Recorded {
+                connects,
+                missing_clusters: Vec::new(),
+            },
+        );
         let unavailable = report(
             summary,
             SessionStart::Unavailable {
@@ -897,6 +1128,7 @@ mod tests {
     fn the_session_start_section_prints_the_operators_phases_as_they_come() {
         let connects = vec![
             StartConnect {
+                cluster: None,
                 started_at: "2026-11-25T01:11:54.660513Z".to_owned(),
                 phases: vec![
                     StartPhase {
@@ -914,15 +1146,23 @@ mod tests {
                 ],
             },
             StartConnect {
+                cluster: None,
                 started_at: "2026-11-25T01:13:15.161211Z".to_owned(),
                 phases: vec![phase("agent_reused", 0)],
             },
             StartConnect {
+                cluster: None,
                 started_at: "2026-11-25T01:13:16.000000Z".to_owned(),
                 phases: vec![],
             },
         ];
-        let report = report(summary(vec![]), SessionStart::Recorded { connects });
+        let report = report(
+            summary(vec![]),
+            SessionStart::Recorded {
+                connects,
+                missing_clusters: Vec::new(),
+            },
+        );
 
         let rendered = render(&report, SystemTime::now());
 
@@ -946,7 +1186,7 @@ mod tests {
                         "7.0 ms"
                     ],
                     vec!["1", "queue_splits", "", "72.82 s (did not finish)"],
-                    vec!["2", "agent_reused", "", "0 ns"],
+                    vec!["2", "agent_reused", "", "0 ms"],
                     vec!["3", "", "no phase finished yet", ""],
                 ]
                 .as_slice()
@@ -990,10 +1230,17 @@ mod tests {
     #[test]
     fn the_json_report_has_a_key_per_section() {
         let connects = vec![StartConnect {
+            cluster: None,
             started_at: "2026-11-25T01:11:54.660513Z".to_owned(),
             phases: vec![phase("target_lookup", 1_293)],
         }];
-        let report = report(summary(vec![]), SessionStart::Recorded { connects });
+        let report = report(
+            summary(vec![]),
+            SessionStart::Recorded {
+                connects,
+                missing_clusters: Vec::new(),
+            },
+        );
 
         let json = serde_json::to_value(&report).unwrap();
         let at = |pointer: &str| json.pointer(pointer).cloned().unwrap_or_default();

@@ -23,6 +23,10 @@ pub struct StartPhase {
     /// is the one that describes them. Empty from an operator that sends none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// When the connect first entered the phase, counted from the connect's `started_at`. It
+    /// lines up the phases of several clusters. Absent from an operator that sends none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_after_ms: Option<u64>,
     pub duration_ms: u64,
     /// Set on the phase a connect ended in without finishing it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -35,6 +39,10 @@ pub struct StartPhase {
 #[serde(rename_all = "camelCase")]
 pub struct StartConnect {
     pub started_at: String,
+    /// The cluster whose operator served the connect, on a session that runs on several
+    /// clusters. A multi-cluster primary gathers the connects of every cluster and tags each.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster: Option<String>,
     /// In the order the connect went through them. A phase the connect did not need is absent,
     /// and a connect that is still running lists only the phases it has finished.
     #[serde(default)]
@@ -47,6 +55,8 @@ struct SessionStart {
     session_id: String,
     #[serde(default)]
     connects: Vec<StartConnect>,
+    #[serde(default)]
+    missing_clusters: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -58,8 +68,12 @@ struct SessionStartList {
 /// What the operator answered when asked about one session's start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionStartTimings {
-    /// The session's connects, oldest first.
-    Recorded(Vec<StartConnect>),
+    /// The session's connects, oldest first. On a session that runs on several clusters, also
+    /// the clusters whose operator had nothing to report.
+    Recorded {
+        connects: Vec<StartConnect>,
+        missing_clusters: Vec<String>,
+    },
     /// The operator records timings and has none for this session: it never saw the session,
     /// dropped it to make room for newer ones, or restarted since.
     Forgotten,
@@ -101,7 +115,10 @@ where
                 .into_iter()
                 .find(|session| session.session_id.eq_ignore_ascii_case(session_id))
                 .map_or(SessionStartTimings::Forgotten, |session| {
-                    SessionStartTimings::Recorded(session.connects)
+                    SessionStartTimings::Recorded {
+                        connects: session.connects,
+                        missing_clusters: session.missing_clusters,
+                    }
                 })),
             // To an operator without the route this is a `get` of a session named `timings`.
             Err(kube::Error::Api(status)) if status.code == 404 => {

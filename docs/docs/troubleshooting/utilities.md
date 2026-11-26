@@ -153,6 +153,8 @@ Suggestions:
 
 **Phase:** the operator's own name for a step, with a few words on what it is. A phase the session did not need is not listed.
 
+**Sessions on several clusters:** the operator you connect to gathers the steps that the operator of every cluster took for your session. The session start section then shows all of them on one timeline: **At** is when a step started, counted from the session's first step, and **Cluster** is where it ran. A **By cluster** table sums up each cluster's part, and the last line names the cluster that finished last and its slowest step, which is usually why the start took as long as it did.
+
 **Calls:** how many calls of that kind mirrord handled instead of your machine. Most of them are a round trip to the cluster; a read answered from data mirrord already fetched is not.
 
 **Total / Slowest:** how long your application waited for those answers, all together and for the single longest call. Time spent sending and receiving data over connections is not included.
