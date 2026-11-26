@@ -1109,6 +1109,11 @@ pub enum NewOperatorFeature {
     /// reports its default wake timeout in [`MirrordOperatorSpec::preview_wake_timeout`].
     PreviewWake,
 
+    /// Serves the `queuereplays` resource of `mirrord replay messages` and `send-message`: the
+    /// operator keeps the last SQS and Kafka messages that it routed to each session and
+    /// publishes one to the session's output queue again.
+    QueueReplay,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1198,6 +1203,7 @@ impl NewOperatorFeature {
             | Self::DiagnosticPing
             | Self::SessionReadyCondition
             | Self::SubscribeEventOptions
+            | Self::QueueReplay
             | Self::KeylessCi
             | Self::LicenseGateReporting
             | Self::ProfileRoutes
@@ -1283,6 +1289,7 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
             NewOperatorFeature::PreviewWake => "waking preview environments",
+            NewOperatorFeature::QueueReplay => "queue message replay",
             NewOperatorFeature::MultiClusterQueueSplitRole => {
                 "one consumer cluster for multi-cluster queue splitting"
             }
@@ -1397,6 +1404,7 @@ impl NewOperatorFeature {
             NewOperatorFeature::BullMqQueueSplitting => &["operator.bullmqSplitting"],
             NewOperatorFeature::NatsQueueSplitting => &["operator.natsSplitting"],
             NewOperatorFeature::NatsPubSubQueueSplitting => &["operator.natsPubsubSplitting"],
+            NewOperatorFeature::QueueReplay => &["operator.queueReplay"],
             NewOperatorFeature::AzureServiceBusQueueSplitting => {
                 &["operator.azureServiceBusSplitting"]
             }
