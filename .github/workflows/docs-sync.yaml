@@ -418,7 +418,7 @@ jobs:
           set -euo pipefail
           if [ -n "$CHANGED_SKILLS" ]; then
             title="Sync the skills with the docs up to ${HEAD_SHA::9}"
-            summary="Claude updated the skills below to match the docs changes merged to \`main\` since the last sync. Check each edit against the current pages under \`docs/docs/\`. The workflow raised the version in \`skills/.claude-plugin/plugin.json\`."
+            summary="Claude updated the skills below to match the docs changes merged to \`main\` since the last sync. Check each edit against the current pages under \`docs/docs/\`. Claude made these edits from the text of the docs, which can also hold instructions aimed at Claude, so look for instructions or content that don't belong in a skill. The workflow raised the version in \`skills/.claude-plugin/plugin.json\`."
           else
             title="Sync the skills with the docs up to ${HEAD_SHA::9}: Claude changed no skill"
             summary="Claude changed no skill, because it found none that the docs changes since the last sync make outdated. Check the commits below for a change that a skill should reflect."
