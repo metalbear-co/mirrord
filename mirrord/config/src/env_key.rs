@@ -157,9 +157,11 @@ impl MirrordConfig for EnvKeyFileConfig {
     type Generated = EnvKey;
 
     fn generate_config(self, context: &mut ConfigContext) -> Result<Self::Generated> {
+        // An empty `MIRRORD_KEY` counts as unset, see `LayerFileConfig::render`.
         let key_from_env: Option<String> = FromEnv::new(MIRRORD_ENV_KEY)
             .source_value(context)
-            .transpose()?;
+            .transpose()?
+            .filter(|key: &String| !key.is_empty());
 
         let key = key_from_env
             .map(|key| {
