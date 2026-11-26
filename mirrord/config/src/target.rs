@@ -1060,4 +1060,21 @@ mod tests {
             Err(ConfigError::InvalidTargetPath(_))
         ));
     }
+
+    /// An ECS replica id is its task ARN, which contains `/`.
+    #[test]
+    fn serverless_target_path_keeps_a_replica_id_with_slashes() {
+        let arn = "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/0123abcd";
+        let path = format!("serverless/orders/container/{arn}");
+        let target = Target::from_str(&path).unwrap();
+
+        assert_eq!(
+            target,
+            Target::Serverless(serverless::ServerlessTarget {
+                serverless: "orders".to_owned(),
+                container: Some(arn.to_owned()),
+            })
+        );
+        assert_eq!(target.to_string(), path);
+    }
 }
