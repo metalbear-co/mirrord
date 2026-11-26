@@ -20,12 +20,15 @@ use crate::crd::session::SessionTarget;
 /// always see the current truth including `Unreachable`/`Missing` clusters. Clients talking
 /// to an operator without this route just get a 404.
 ///
-/// One entry per logical preview: multicluster replica copies are folded into their
-/// primary's entry, never listed. Read-only ON PURPOSE for now (GET and LIST): this kind is
-/// the starting point of previews' own API extension, and the write verbs land here once
-/// creation moves off the stored CRD. The `CustomResource` derive is used only to get the
-/// kube `Resource` impl (group/version/plural) and a `metadata`-carrying wrapper; `plural`
-/// is pinned to `previews` because it is the wire route.
+/// One entry per logical preview: multicluster replica and split-only copies are folded into their
+/// primary's entry, and listed on their own only when a list asks for them with `localOnly` and
+/// `includeCopies`. The default cluster's copy of a management-only primary's preview is listed by
+/// every list, as a preview of that cluster's own, and marked as a copy only by such a list (see
+/// [`PreviewEnvStatus::copy`]). Read-only ON PURPOSE for now (GET and LIST): this kind is the
+/// starting point of previews' own API extension, and the write verbs land here once creation moves
+/// off the stored CRD. The `CustomResource` derive is used only to get the kube `Resource` impl
+/// (group/version/plural) and a `metadata`-carrying wrapper; `plural` is pinned to `previews`
+/// because it is the wire route.
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
     group = "operator.metalbear.co",
@@ -43,11 +46,31 @@ pub struct PreviewEnvSpec {
     pub target: SessionTarget,
     /// The user's container image running in the preview pods.
     pub image: String,
+    /// How long the preview holds traffic while its pods boot after a wake, as the session sets
+    /// it in `idle.wakeTimeoutSecs`. `None` means the operator's default, which it reports in
+    /// [`crate::crd::MirrordOperatorSpec::preview_wake_timeout`].
+    /// Filled in by operators that advertise
+    /// [`PreviewWake`](crate::crd::NewOperatorFeature::PreviewWake); `mirrord preview wake`
+    /// waits as long as the longest of these by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_timeout_secs: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewEnvStatus {
+    /// Whether this is a copy of a multi-cluster preview whose primary runs on another cluster:
+    /// a replica or split-only copy, or the default cluster's copy of a management-only
+    /// primary's preview. The view lists copies only when asked to, with `localOnly` and
+    /// `includeCopies`, which `mirrord preview wake` sends to tell a member cluster's context,
+    /// whose copies only the primary's cluster wakes, from one without previews. Every other
+    /// list and get reports `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub copy: bool,
+    /// For a [`Self::copy`], the uid of its primary's `PreviewSession`, which is the uid of the
+    /// primary's entry in the view of the primary's cluster.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_uid: Option<String>,
     /// Lifecycle phase of the preview; `None` when the session has not reported a status
     /// yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -56,6 +56,7 @@ use mirrord_kube::{
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use preview_sync::PreviewSyncConnection;
+use preview_wake::PreviewWakeConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
@@ -98,21 +99,28 @@ use crate::{
         session::{KubeResourceTarget, SessionCiInfo, SessionTarget, UpSessionInfo},
     },
     share::LocalShareRequest,
+    sso::OperatorLogin,
     types::{
         CLIENT_CERT_HEADER, CLIENT_HOSTNAME_HEADER, CLIENT_NAME_HEADER, CONNECT_PARAMS_HEADER,
         FeatureGateHitRequest, MIRRORD_CLI_VERSION_HEADER, PaidFeatureGate, SESSION_ID_HEADER,
     },
 };
 
+pub mod access;
 pub mod connect_params;
 mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
 pub mod preview_sync;
+pub mod preview_wake;
 mod queue_split_progress;
 pub mod split_config_branches;
 
+pub use access::{
+    OperatorAccess, OperatorAccessError, active_operator_login, check_config_under_login,
+    check_operator_enabled_under_login, session_login,
+};
 pub use discovery::operator_installed;
 pub use queue_split_progress::temporal_mirror_warning;
 
@@ -224,6 +232,11 @@ pub struct OperatorSession {
     /// OpenTelemetry (OTel) / W3C baggage propagator.
     /// See [OTel docs](https://opentelemetry.io/docs/specs/otel/context/env-carriers/#environment-variable-names)
     baggage: Option<String>,
+    /// The operator login URL the session was prepared under, `None` for a kubeconfig. A
+    /// reconnect reads that login from the store, not the one selected now, so a `mirrord login
+    /// --url` to another operator in the meantime never sends this session there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    login_url: Option<String>,
 }
 
 impl OperatorSession {
@@ -421,6 +434,10 @@ pub struct OperatorApi<C> {
     /// URL of the API server [`Self::client`] talks to. Unlike [`Self::kube_context`], it tells
     /// clusters apart: two contexts can name one cluster.
     cluster_url: String,
+    /// The URL of the operator login [`Self::client`] reaches the operator with, `None` through
+    /// the kubeconfig. Under a login only the operator's own API group answers, so the workload is
+    /// never read from here, and the sessions this API prepares stay bound to that operator.
+    login_url: Option<String>,
 }
 
 impl<C> fmt::Debug for OperatorApi<C>
@@ -464,7 +481,9 @@ impl OperatorApi<NoClientCert> {
         R: Reporter,
         P: Progress,
     {
-        let (base_config, kube_context) = Self::base_client_config(config).await?;
+        let (base_config, access) = Self::base_client_config(config).await?;
+        let kube_context = access.kube_context().map(ToOwned::to_owned);
+        let login_url = access.login().map(|login| login.url.clone());
         let cluster_url = base_config.cluster_url.to_string();
 
         let client = progress
@@ -498,6 +517,7 @@ impl OperatorApi<NoClientCert> {
                     kube_context,
                     machine_id: reporter.machine_id(),
                     cluster_url,
+                    login_url,
                 }));
             }
 
@@ -527,11 +547,17 @@ impl OperatorApi<NoClientCert> {
 
     /// Builds a client for the operator-hosted sessions-manager routes, which kube-apiserver
     /// authenticates on its own. Unlike [`Self::connect_in_existing_session`], it carries no client
-    /// certificate.
+    /// certificate. `login_url` is the operator login the run started under, read from the store
+    /// as [`Self::session_client`] does; `None` is the kubeconfig.
     pub async fn serverless_sessions_manager_client(
         layer_config: &LayerConfig,
+        login_url: Option<&str>,
     ) -> OperatorApiResult<Client> {
-        let (config, _) = Self::base_client_config(layer_config).await?;
+        let login = match login_url {
+            Some(url) => Some(session_login(url).await?),
+            None => None,
+        };
+        let (config, _) = Self::client_config_with(layer_config, login).await?;
 
         Ok(ClientBuilder::try_from(config)
             .map_err(KubeApiError::from)
@@ -602,6 +628,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context: self.kube_context,
                 machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
+                login_url: self.login_url,
             },
 
             Err(error) => OperatorApi {
@@ -613,6 +640,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context: self.kube_context,
                 machine_id: self.machine_id,
                 cluster_url: self.cluster_url,
+                login_url: self.login_url,
             },
         }
     }
@@ -664,6 +692,7 @@ impl OperatorApi<NoClientCert> {
         let kube_context = self.kube_context.clone();
         let machine_id = self.machine_id;
         let cluster_url = self.cluster_url.clone();
+        let login_url = self.login_url.clone();
 
         let result = async move {
             let certificate = self.get_client_certificate().await?;
@@ -696,6 +725,7 @@ impl OperatorApi<NoClientCert> {
                 kube_context,
                 machine_id,
                 cluster_url,
+                login_url,
             },
         }
     }
@@ -718,6 +748,7 @@ impl OperatorApi<MaybeClientCert> {
             kube_context: self.kube_context,
             machine_id: self.machine_id,
             cluster_url: self.cluster_url,
+            login_url: self.login_url,
         })
     }
 }
@@ -731,6 +762,12 @@ where
     /// In-cluster clients do not have a named kubeconfig context.
     pub fn kube_context(&self) -> Option<&str> {
         self.kube_context.as_deref()
+    }
+
+    /// Whether this API reaches the operator over its public URL with a saved login, where only
+    /// the operator's own API group answers and the operator resolves the target itself.
+    pub fn through_login(&self) -> bool {
+        self.login_url.is_some()
     }
 
     /// Returns the URL of the API server this API's client talks to, which identifies the
@@ -938,6 +975,30 @@ where
                 operation: OperatorOperation::WebsocketConnection,
             })
             .map(PreviewSyncConnection::new)
+    }
+
+    /// Opens the wake websocket of the preview session `name` in `namespace`, through which the
+    /// operator wakes the preview, reports its state, and keeps it from idling until the
+    /// connection closes. Requires [`NewOperatorFeature::PreviewWake`].
+    pub async fn connect_preview_wake(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> OperatorApiResult<PreviewWakeConnection> {
+        let request = Request::builder()
+            .uri(format!(
+                "/apis/operator.metalbear.co/v1alpha1/namespaces/{namespace}/previews/{name}/wake"
+            ))
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(PreviewWakeConnection::new)
     }
 
     /// The workload `layer_config` targets and its namespace, as the `splitconfigdbbranches`
@@ -1920,7 +1981,11 @@ where
         }
     }
 
-    /// Creates a base [`Config`] for creating kube [`Client`]s.
+    /// Creates a base [`Config`] for creating kube [`Client`]s, and says which credentials it
+    /// carries. This is the one place that decides how the operator is reached: through the
+    /// operator login `mirrord login --url` selected, as a bearer token on the operator's URL, or
+    /// else through the kubeconfig. The kubeconfig is not read while a login is selected.
+    ///
     /// Adds extra headers that we send to the operator with each request:
     /// 1. [`MIRRORD_CLI_VERSION_HEADER`]
     /// 2. [`CLIENT_NAME_HEADER`]
@@ -1930,16 +1995,36 @@ where
     /// Every client built from it adds its own [`LayerConfig::startup_retry`] layer, so kube's
     /// default retry is turned off: nested under ours, its 15 retries turn a 503 from an
     /// unavailable operator into minutes of silent waiting.
-    async fn base_client_config(
+    pub async fn base_client_config(
         layer_config: &LayerConfig,
-    ) -> OperatorApiResult<(Config, Option<String>)> {
-        let (mut client_config, kube_context) = create_kube_config_with_context(
-            layer_config.accept_invalid_certificates,
-            layer_config.kubeconfig.clone(),
-            layer_config.kube_context.clone(),
-        )
-        .await
-        .map_err(OperatorApiError::CreateKubeClient)?;
+    ) -> OperatorApiResult<(Config, OperatorAccess)> {
+        let login = active_operator_login().await?;
+        Self::client_config_with(layer_config, login).await
+    }
+
+    /// [`Self::base_client_config`] with the login decided by the caller: the selected one for a
+    /// new run, the session's own for a reconnect ([`Self::session_client`]). `None` is the
+    /// kubeconfig.
+    async fn client_config_with(
+        layer_config: &LayerConfig,
+        login: Option<OperatorLogin>,
+    ) -> OperatorApiResult<(Config, OperatorAccess)> {
+        let (mut client_config, access) = match login {
+            Some(login) => (
+                Self::login_client_config(layer_config, &login)?,
+                OperatorAccess::Login(login),
+            ),
+            None => {
+                let (config, context) = create_kube_config_with_context(
+                    layer_config.accept_invalid_certificates,
+                    layer_config.kubeconfig.clone(),
+                    layer_config.kube_context.clone(),
+                )
+                .await
+                .map_err(OperatorApiError::CreateKubeClient)?;
+                (config, OperatorAccess::Kubeconfig { context })
+            }
+        };
         client_config.default_retry = false;
 
         add_baggage_header(&mut client_config, layer_config.baggage.as_deref())?;
@@ -1972,7 +2057,26 @@ where
             }
         }
 
-        Ok((client_config, kube_context))
+        Ok((client_config, access))
+    }
+
+    /// The client configuration of a run under `login`: the operator's URL with the login token,
+    /// honoring `accept_invalid_certificates` the way the kubeconfig path does. Pure, so the test
+    /// below proves the kubeconfig named by `layer_config` is never opened.
+    fn login_client_config(
+        layer_config: &LayerConfig,
+        login: &OperatorLogin,
+    ) -> Result<Config, OperatorAccessError> {
+        let mut config = login
+            .kube_config()
+            .map_err(|error| OperatorAccessError::InvalidUrl {
+                url: login.url.clone(),
+                error,
+            })?;
+        if let Some(accept_invalid_certificates) = layer_config.accept_invalid_certificates {
+            config.accept_invalid_certs = accept_invalid_certificates;
+        }
+        Ok(config)
     }
 
     /// Refuses a `split_queues` entry with no filter of its own when the operator cannot take the
@@ -2686,6 +2790,10 @@ impl OperatorApi<PreparedClientCert> {
     /// where the primary cluster is management-only and targets exist only on
     /// workload clusters. The operator handles target resolution on the appropriate cluster.
     ///
+    /// Sessions under an operator login take this path too, whatever the cluster layout: the
+    /// login reaches only the operator's own API group, so the workload cannot be read from the
+    /// CLI and the operator resolves it.
+    ///
     /// This method skips:
     /// - `assert_valid_mirrord_target` (operator validates on workload cluster)
     /// - `runtime_data` warnings (operator handles on workload cluster)
@@ -2708,11 +2816,14 @@ impl OperatorApi<PreparedClientCert> {
         // where the target is resolved and the session is created
 
         if layer_config.feature.kafka_branch {
-            return Err(OperatorApiError::UnsupportedTargetConfig(
+            let reason = if self.through_login() {
+                "Kafka branching is not available while logged in to the operator; run `mirrord \
+                 logout` and use a kubeconfig for this session"
+            } else {
                 "Kafka branching is not available in multi-cluster sessions; set `multi_cluster` \
                  to false to run the session on the primary cluster"
-                    .to_owned(),
-            ));
+            };
+            return Err(OperatorApiError::UnsupportedTargetConfig(reason.to_owned()));
         }
 
         // Owned: branch preparation below edits the config while the target is still needed.
@@ -3205,6 +3316,7 @@ impl OperatorApi<PreparedClientCert> {
             allow_reconnect,
             traceparent,
             baggage,
+            login_url: self.login_url.clone(),
         })
     }
 
@@ -3641,11 +3753,19 @@ impl OperatorApi<PreparedClientCert> {
     /// Builds a client that authenticates with the session's certificate, for a process that
     /// holds only the [`OperatorSession`] and not the [`OperatorApi`] that prepared it, such as
     /// the intproxy.
+    ///
+    /// The operator is the one the session was prepared on: its login, read from the store by
+    /// [`OperatorSession::login_url`], or the kubeconfig when it had none. The login selected now
+    /// is not consulted, so a `mirrord login --url` since the session started changes nothing here.
     async fn session_client(
         layer_config: &LayerConfig,
         session: &OperatorSession,
     ) -> OperatorApiResult<Client> {
-        let (mut config, _) = Self::base_client_config(layer_config).await?;
+        let login = match &session.login_url {
+            Some(url) => Some(session_login(url).await?),
+            None => None,
+        };
+        let (mut config, _) = Self::client_config_with(layer_config, login).await?;
         let cert_header = Self::make_client_cert_header(&session.client_cert)?;
         config
             .headers
@@ -3836,6 +3956,7 @@ mod test {
         time::Duration,
     };
 
+    use chrono::Utc;
     use http::{HeaderName, HeaderValue, Request, Response, StatusCode};
     use k8s_openapi::api::apps::v1::Deployment;
     use kube::{Client, Config, api::ObjectMeta, client::Body};
@@ -3869,6 +3990,7 @@ mod test {
             error::OperatorApiError,
         },
         crd::{MirrordOperatorCrd, session::SessionCiInfo},
+        sso::OperatorLogin,
     };
 
     /// `mirrord preview up` prepares every service and only then starts them all, so a check
@@ -3977,6 +4099,7 @@ mod test {
                 })).unwrap(),
                 kube_context: None,
                 machine_id: None,
+                login_url: None,
             };
                 let result = api.check_serverless_sessions_manager_served();
                 assert_eq!(result.is_ok(), enabled);
@@ -4531,6 +4654,43 @@ mod test {
         assert_eq!(spec, OperatorApi::copy_target_spec(&layer_config, false));
     }
 
+    /// Under a login the client goes to the operator's URL with the login token, and the
+    /// kubeconfig the config names is never opened: here it does not even exist.
+    #[test]
+    fn login_client_config_uses_the_operator_url_and_leaves_the_kubeconfig_alone() {
+        let mut ctx = ConfigContext::default().strict_env(true);
+        let mut layer_config = LayerFileConfig::default()
+            .generate_config(&mut ctx)
+            .expect("default config generates");
+        layer_config.kubeconfig = Some("/nonexistent/kubeconfig".to_owned());
+        layer_config.kube_context = Some("nowhere".to_owned());
+        layer_config.accept_invalid_certificates = Some(true);
+        let login = OperatorLogin {
+            url: "https://mirrord.corp.example.com".to_owned(),
+            token: "secret-token".to_owned().into(),
+            username: "dev@corp.example.com".to_owned(),
+            account: "dev@corp.example.com".to_owned(),
+            expires_at: Utc::now() + chrono::TimeDelta::hours(1),
+        };
+
+        let config = OperatorApi::<NoClientCert>::login_client_config(&layer_config, &login)
+            .expect("a valid login URL builds a client config");
+
+        assert_eq!(
+            config.cluster_url.to_string(),
+            "https://mirrord.corp.example.com/"
+        );
+        assert!(
+            config.auth_info.token.is_some(),
+            "the login token is the bearer token"
+        );
+        assert!(config.accept_invalid_certs);
+        assert!(
+            !config.default_retry,
+            "startup_retry stays the only retry under a login too"
+        );
+    }
+
     /// Answers like a cluster whose operator `APIService` has no endpoints: 503 for the operator
     /// object, 404 for its group's discovery. Counts the requests for the operator object.
     async fn serve_unavailable_operator(
@@ -4731,6 +4891,7 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
             machine_id: None,
+            login_url: None,
         };
         tokio::time::timeout(
             std::time::Duration::from_secs(60),
@@ -4784,6 +4945,7 @@ mod test {
             operator: MirrordOperatorCrd::new("operator", spec),
             kube_context: None,
             machine_id: None,
+            login_url: None,
             cluster_url: "https://127.0.0.1:9669/".to_owned(),
         };
 

@@ -636,6 +636,7 @@ mod tests {
             context: Some("popper-deskpop".into()),
             config_patch: None,
             sync: None,
+            preview: None,
         }
     }
 
@@ -648,6 +649,7 @@ mod tests {
                 telemetry: None,
                 context: None,
                 baggage: Some("mirrord-session=abc".into()),
+                preview: None,
             },
             modes: Default::default(),
             services: [("api".into(), sample_service())].into_iter().collect(),
@@ -710,6 +712,7 @@ mod tests {
             context: None,
             config_patch: None,
             sync: None,
+            preview: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -762,6 +765,7 @@ mod tests {
             context: None,
             config_patch: None,
             sync: None,
+            preview: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
@@ -812,6 +816,7 @@ mod tests {
             context: None,
             config_patch: None,
             sync: None,
+            preview: None,
         };
         let cfg = UpConfig {
             common: CommonConfig::default(),
