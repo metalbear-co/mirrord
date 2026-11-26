@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">mirrord architecture</title>
-  <desc id="d">A local process runs on a laptop with mirrord-layer loaded into it. In the Kubernetes cluster, mirrord-agent runs in the network namespace of the target pod. Incoming traffic from the internet and from other services reaches the target pod, and the agent sends that incoming traffic to the local process. The local process sends its outgoing traffic, database access, and file reads and writes to the agent. The agent sends the outgoing traffic to the other services and the database access to the database, from inside the cluster.</desc>
+  <desc id="d">A local process runs on a laptop with mirrord-layer loaded into it. In the cluster, mirrord-agent runs in the network namespace of the target. Incoming traffic from the internet and from other services reaches the target, and the agent sends that incoming traffic to the local process. The local process sends its outgoing traffic, database access, and file reads and writes to the agent. The agent sends the outgoing traffic to the other services and the database access to the database, from inside the cluster.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -8,14 +8,6 @@
     <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#756DF3"/>
     </marker>
-    <symbol id="k8s" viewBox="0 0 32 32">
-      <polygon points="16.00,1.60 27.73,7.25 30.62,19.94 22.51,30.11 9.49,30.11 1.38,19.94 4.27,7.25" fill="#326CE5" stroke="#326CE5" stroke-width="2" stroke-linejoin="round"/>
-      <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
-        <circle cx="16" cy="16" r="7"/>
-        <line x1="16.00" y1="13.40" x2="16.00" y2="5.80"/><line x1="18.03" y1="14.38" x2="23.97" y2="9.64"/><line x1="18.53" y1="16.58" x2="25.94" y2="18.27"/><line x1="17.13" y1="18.34" x2="20.43" y2="25.19"/><line x1="14.87" y1="18.34" x2="11.57" y2="25.19"/><line x1="13.47" y1="16.58" x2="6.06" y2="18.27"/><line x1="13.97" y1="14.38" x2="8.03" y2="9.64"/>
-      </g>
-      <circle cx="16" cy="16" r="2.4" fill="#ffffff"/>
-    </symbol>
     <symbol id="mirrord" viewBox="97 61 391 696">
 <path fill="#ffffff" d="M255.6,387c4.1,19.1-0.9,36.1-12,40.5c-8.2,3.2-17.8,0-26.5-8.2c-0.3-0.6-0.9-0.9-1.5-1.2c0,0,0,0-0.3-0.3 c-5.5-5.6-10.5-13.2-14-22c-4.7-11.5-6.1-23.2-4.4-33.5c1.8-9.4,6.1-16.1,12.8-18.8c5.5-2.3,12.5-1.5,19.3,2.6 c1.5,2.3,2.6,4.4,3.8,6.2c-4.1,2.6-6.4,10.3-6.4,20.3l3.2,1.8l11.1,6.5l-12.5,1.5h-0.9c0.3,1.2,0.3,2.3,0.6,3.5 c3.2,17.9,12,31.1,19,29.7c6.4-1.2,9.6-14.4,7.6-30.2C255.3,386.4,255.6,386.7,255.6,387z"/>
 <path fill="#ffffff" d="M384,398.4c-3.2,6.8-7.3,12.3-12,17c0,0,0,0-0.3,0c-0.6,0.3-0.9,0.9-1.2,1.2c-8.7,7.9-18.4,11.5-26.5,8.2 c-11.1-4.7-16-21.4-12-40.5c1.5-1.8,3.2-3.8,4.7-5.6c5-6.5,9-13.2,12.8-20l1.2-2.1c1.2-1.8,2-3.8,3.2-5.6c1.2-2.1,2.6-4.4,4.4-7 c3.5-2.1,6.7-3.2,9.9-3.8c-2,4.7-2.3,10.3-2.3,15.3l3.2,1.8l11.1,6.5l-12.5,1.5h-0.9c0.3,1.2,0.3,2.3,0.6,3.8 C370.5,384.6,377.5,397,384,398.4z"/>
@@ -35,29 +27,29 @@
   </defs>
   <rect x="0" y="0" width="1200" height="600" fill="#ffffff"/>
 
-  <!-- Kubernetes cluster -->
+  <!-- Cluster -->
   <path d="M440.0 469.2 A90.2 90.2 0 0 1 440.0 366.6 A90.2 90.2 0 0 1 440.0 264.0 A81.0 81.0 0 0 1 555.2 150.0 A108.9 108.9 0 0 1 749.6 150.0 A92.7 92.7 0 0 1 915.2 150.0 A88.7 88.7 0 0 1 1073.6 150.0 A62.8 62.8 0 0 1 1160.0 241.2 A59.6 59.6 0 0 1 1160.0 317.2 A59.6 59.6 0 0 1 1160.0 393.2 A59.6 59.6 0 0 1 1160.0 469.2 A43.0 43.0 0 0 1 1099.2 530.0 A234.1 234.1 0 0 1 886.4 530.0 A253.4 253.4 0 0 1 656.0 530.0 A170.7 170.7 0 0 1 500.8 530.0 A43.0 43.0 0 0 1 440.0 469.2 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
-  <text x="460" y="178" font-size="15" font-weight="700" fill="#4a44b8">Kubernetes cluster</text>
+  <text x="460" y="178" font-size="15" font-weight="700" fill="#4a44b8">Cluster</text>
 
   <!-- Local machine: the local process with mirrord-layer -->
   <rect x="30" y="300" width="220" height="160" rx="10" fill="#232141"/><rect x="38" y="308" width="204" height="144" rx="4" fill="#756DF3"/>
   <path d="M30 460 H250 L266 474 H14 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="40" y1="465" x2="240" y2="465" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="124.0" y="468.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="10" y="474" width="260" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="48" y="338" width="22" height="40"/>
-  <text x="154" y="356" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
-  <text x="154" y="378" font-size="12.5" fill="#ffffff" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-layer</text>
-  <text x="154" y="396" font-size="12.5" fill="#ffffff" text-anchor="middle">loaded in the process</text>
+  <use href="#mirrord" x="48" y="352" width="32" height="57"/>
+  <text x="162" y="366" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
+  <text x="162" y="388" font-size="12.5" fill="#ffffff" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-layer</text>
+  <text x="162" y="406" font-size="12.5" fill="#ffffff" text-anchor="middle">loaded in the process</text>
 
-  <!-- Target pod -->
+  <!-- Target -->
   <rect x="500" y="220" width="220" height="90" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
-  <text x="610" y="258" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Target pod</text>
+  <text x="610" y="258" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Target</text>
   <text x="610" y="280" font-size="12.5" fill="#333344" text-anchor="middle">the deployed app</text>
 
   <!-- mirrord-agent -->
   <rect x="500" y="345" width="220" height="130" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="516" y="370" width="22" height="40"/>
-  <text x="626" y="396" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-agent</text>
-  <text x="626" y="420" font-size="12.5" fill="#ffffff" text-anchor="middle">in the pod's network</text>
-  <text x="626" y="437" font-size="12.5" fill="#ffffff" text-anchor="middle">namespace</text>
+  <use href="#mirrord" x="516" y="382" width="32" height="57"/>
+  <text x="634" y="396" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-agent</text>
+  <text x="634" y="420" font-size="12.5" fill="#ffffff" text-anchor="middle">in the target's</text>
+  <text x="634" y="437" font-size="12.5" fill="#ffffff" text-anchor="middle">network namespace</text>
 
   <!-- Other services -->
   <rect x="946" y="314" width="170" height="70" rx="10" fill="#ffffff" stroke="#232141" stroke-width="2"/>
@@ -94,6 +86,4 @@
   <line x1="720" y1="457" x2="946" y2="457" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="823" y="447" font-size="12.5" fill="#333344" text-anchor="middle">DB access</text>
 
-  <!-- Kubernetes logo: what runs in the cluster -->
-  <use href="#k8s" x="1127.0" y="150.9" width="36" height="36"/>
 </svg>
