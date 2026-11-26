@@ -180,6 +180,32 @@ Serverless targets work with these limitations:
 
 All the [limitations of workloads outside Kubernetes](beyond-kubernetes/README.md#limitations) also apply.
 
+#### Tasks selected by tags
+
+{% hint style="info" %}
+This feature requires at least mirrord version 3.292.0, and the Operator 3.239.0 or later.
+{% endhint %}
+
+A service whose serverless target sets `tag_filter` or `jq_filter` is **task-driven**: instead of one local process, `mirrord up` starts one for every task whose AWS Batch job tags match, including the tasks that start later. Each local process starts with its task's environment, with the task's arguments appended to `run.command`, and is stopped when its task ends. A local process exiting doesn't stop the run, and a run with only task-driven services lasts until you stop it.
+
+```yaml
+common:
+  operator: true
+services:
+  reports:
+    target:
+      path: serverless/report-generator
+      namespace: staging
+      tag_filter:
+        company_id: "^1234$"
+    run:
+      command: ["python", "generate.py"]
+```
+
+With `replace_task: true` on the service, a matching task doesn't run its own code: the local process runs in its place, and the task ends with the local process's exit code. See [Replacing jobs](beyond-kubernetes/aws-batch.md#replacing-jobs) for what the job definition needs, and for the exit codes.
+
+Task-driven services need `common.operator: true` and `run.type: exec`, and `mirrord up --debug` can't name them. `run.pre_command` runs once, before the first local process starts. See [AWS Batch](beyond-kubernetes/aws-batch.md) for how the filters match.
+
 ### Context
 
 `mirrord up` allows you to specify which Kubernetes context to run services in. You can do this either with the `--context` flag, or by setting it in `context` in the config file.
@@ -237,7 +263,7 @@ When `path` is omitted, `mirrord up` infers it from the service id (the key in t
 
 To run a service without a target (outgoing traffic only), set `target: none`.
 
-For a [serverless target](#serverless-targets), `namespace` is the environment of the service in sessions-manager, `default` when not set. Serverless targets aren't inferred, so set `path` explicitly.
+For a [serverless target](#serverless-targets), `namespace` is the environment of the service in sessions-manager, `default` when not set. Serverless targets aren't inferred, so set `path` explicitly. A serverless target can also set `tag_filter` and `jq_filter`, which make the service [task-driven](#tasks-selected-by-tags).
 
 Examples:
 
@@ -365,6 +391,10 @@ sync:
     command: ["npm", "run", "dev"]
     directory: /app
 ```
+
+##### `services.*.replace_task`
+
+Replaces the tasks that a [task-driven](#tasks-selected-by-tags) service's filters match with local processes: a matching task doesn't run its own code, and ends with the exit code of its local process, `128` plus the signal's number when a signal killed it, or `214` when the session was lost first, which includes stopping `mirrord up`. Only tasks that start while `mirrord up` runs, and that turn on [admission](beyond-kubernetes/aws-batch.md#replacing-jobs), are replaced. Needs `target.tag_filter` or `target.jq_filter`. Defaults to `false`.
 
 ##### `services.*.skip`
 

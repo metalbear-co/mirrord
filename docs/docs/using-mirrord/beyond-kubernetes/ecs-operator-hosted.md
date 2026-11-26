@@ -16,7 +16,7 @@ This guide connects an ECS task that runs the [mirrord remote bootstrap](ecs.md)
 
 1. Bind the `mirrord-ecs-workloads` group to the chart's `mirrord-operator-sessions-manager-agent` ClusterRole ([Grant the ECS task access](#grant-the-ecs-task-access)).
 2. Map the ECS task role into that group with an EKS access entry ([Map the ECS task role into the cluster](#map-the-ecs-task-role-into-the-cluster)).
-3. Make the EKS API server's private endpoint reachable and resolvable from the ECS VPC over a Transit Gateway ([Make the EKS API server reachable from ECS](#make-the-eks-api-server-reachable-from-ecs)).
+3. Make the EKS API server reachable from the tasks: a public endpoint needs only a route to the internet, and the private endpoint needs to be reachable and resolvable from the ECS VPC over a Transit Gateway ([Make the EKS API server reachable from ECS](#make-the-eks-api-server-reachable-from-ecs)).
 4. Add the connection variables to the task and deploy it ([Add the connection variables](#add-the-connection-variables)).
 5. [Verify](#verify) that the task registers and a developer session works.
 
@@ -44,7 +44,7 @@ This authentication flow is the same on **Fargate and EC2**. On EC2, use the tas
 1. The [Operator-hosted sessions-manager](operator-hosted.md) enabled on the EKS cluster.
 2. The ECS task definition set up with the [remote bootstrap](ecs.md), up to [Connect to your deployment mode](ecs.md#connect-to-your-deployment-mode).
 3. The cluster's authentication mode set to `API` or `API_AND_CONFIG_MAP`, so access entries can be used. [Map the ECS task role into the cluster](#map-the-ecs-task-role-into-the-cluster) shows how to check and change it.
-4. The ECS VPC and the EKS VPC attached to the same Transit Gateway.
+4. The ECS VPC and the EKS VPC attached to the same Transit Gateway, unless the tasks reach a public EKS endpoint ([Make the EKS API server reachable from ECS](#make-the-eks-api-server-reachable-from-ecs)).
 5. An IAM **task role** on the ECS service (`taskRoleArn` in the task definition), with credentials available inside the application container. This is not the execution role or, for EC2-backed tasks, the container instance role.
 6. `kubectl` and the AWS CLI, with permission to manage cluster RBAC, EKS access entries, VPC networking and the ECS task definition.
 
@@ -140,6 +140,10 @@ kubectl auth can-i list pods -A \
 ```
 
 ## Make the EKS API server reachable from ECS
+
+{% hint style="info" %}
+When the cluster's API server endpoint is public, a task with a route to the internet reaches it without any of this section: a public IP (`assignPublicIp: ENABLED` on Fargate, in subnets that route to an internet gateway), or a NAT gateway. If the endpoint limits public access to some CIDR ranges, include the tasks' public addresses. The rest of this section is for tasks that must use the private endpoint.
+{% endhint %}
 
 The ECS task connects to the cluster's **private** API server endpoint over the Transit Gateway. The private endpoint is a set of network interfaces EKS places in the cluster VPC's subnets; they carry the cluster security group. You only need to do this once per ECS VPC.
 
@@ -295,6 +299,8 @@ The bootstrap's messages appear in the application container's logs. For problem
 | `No AWS credentials provider found in environment` | The task definition has no `taskRoleArn`. |
 | `Initial AWS credential resolution failed, will retry` | The task role's credentials weren't available at startup. The bootstrap retries a few times with backoff, then stops with an error. |
 | `Token refresh failed, will retry` | Fetching the task role's credentials failed; the current token stays in use while it retries. If it still fails when the current token expires, the bootstrap stops with an error. |
+
+A task whose image has no CA certificates, for example without the `ca-certificates` package, logs `no native root CA certificates found!` as a warning when it starts. The warning is harmless: the bootstrap verifies the API server's certificate with `MIRRORD_OPERATOR_API_CA_DATA`, not with the image's certificates.
 
 To check name resolution and reachability from inside a running task, use [ECS Exec](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html) if it's enabled for the service. The endpoint hostname must resolve to addresses within the EKS VPC CIDR, and TCP 443 on it must be reachable.
 
