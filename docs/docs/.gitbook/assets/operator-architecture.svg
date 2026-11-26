@@ -42,7 +42,7 @@
   <rect x="596" y="236" width="160" height="60" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/><rect x="588" y="244" width="160" height="60" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/><rect x="580" y="252" width="160" height="60" rx="10" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <text x="660" y="288" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Pods</text>
   <rect x="596" y="316" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/><rect x="588" y="324" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/><rect x="580" y="332" width="160" height="52" rx="10" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="596.0" y="330.0" width="22.5" height="40.0"/>
+  <use href="#mirrord" x="596" y="338" width="22.5" height="40"/>
   <text x="674.5" y="363" font-size="14" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agents</text>
   <polyline points="632,384 632,436" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <polyline points="688,436 688,388" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>

@@ -85,7 +85,7 @@ Use a symbol, not only a label, when a symbol shows what a thing is. A reader re
 
 ### mirrord logo
 
-Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, and move the title to the right to make space. The logo is 32 wide and 57 high. GitBook scales a diagram down to the page width, and a smaller logo looks grainy on a purple box. When the box is too small, use the largest size that keeps 6px of space above and below the logo, and keep the width at 0.56 of the height. For a new diagram, make the box tall enough for a logo of at least 22 by 40:
+Put the mirrord logo (the mirror) on every box that is a part of mirrord: the operator, an agent, `mirrord-layer`, the mirrord CLI, a forwarder in the operator, and a local process that runs with mirrord. Place it inside the box, to the left of the title, and move the title to the right to make space. The logo is 32 wide and 57 high. GitBook shows a diagram at about 768px, and on a 1x display a smaller logo looks grainy. Make a new box tall enough for this size: at least 69 high, so that the logo has 6px of space above and below. In an existing box that is too small, use the largest logo that fits. Keep 6px of space to the box edge and 8px to the text, and keep the width at 0.56 of the height. Do not use less than 22 by 40, except in a box less than 52 high:
 
 ```xml
 <use href="#mirrord" x="..." y="..." width="32" height="57"/>
