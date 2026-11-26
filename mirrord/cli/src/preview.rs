@@ -56,11 +56,12 @@ use mirrord_operator::{
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
         preview::{
-            PreviewCronJobConfig, PreviewDbBranchingConfig, PreviewEnvVarsConfig,
-            PreviewIdleConfig, PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs,
-            PreviewQueueSplittingConfig, PreviewSecretMountFile, PreviewSession,
-            PreviewSessionPhase, PreviewSessionSpec, PreviewSyncStatus, PreviewTlsClientAuth,
-            PreviewTlsClientAuthFromTarget, PreviewTlsDelivery,
+            PreviewAutoscaleConfig, PreviewAutoscalingStatus, PreviewCronJobConfig,
+            PreviewDbBranchingConfig, PreviewEnvVarsConfig, PreviewIdleConfig,
+            PreviewIncomingConfig, PreviewLabelFilter, PreviewPodLogs, PreviewQueueSplittingConfig,
+            PreviewSecretMountFile, PreviewSession, PreviewSessionPhase, PreviewSessionSpec,
+            PreviewSyncStatus, PreviewTlsClientAuth, PreviewTlsClientAuthFromTarget,
+            PreviewTlsDelivery,
             view::{PreviewEnv, PreviewMessageKind},
         },
         session::{KubeResourceTarget, PodSetTarget, SessionTarget},
@@ -191,6 +192,7 @@ async fn preview_start(
 
     progress.success(Some("preview environment created successfully"));
     summary.report(&progress);
+    summary.report_scaling(&progress, "`feature.preview.autoscale` in mirrord.json");
 
     Ok(())
 }
@@ -203,9 +205,51 @@ struct PreviewSummary {
     share_host: Option<String>,
     /// The session started idle, its pods boot on first traffic.
     idle: bool,
+    /// The session's target, as the user named it.
+    target: String,
+    /// How the operator resolved the session's scaling, `None` while an older operator doesn't
+    /// report it or the session runs no preview pods.
+    autoscaling: Option<PreviewAutoscalingStatus>,
+    /// Whether the session asked to copy the target's autoscaler.
+    autoscale_requested: bool,
+    /// The pod count of a session that runs a fixed number of pods.
+    fixed_replicas: i32,
 }
 
 impl PreviewSummary {
+    /// Reports how the session's pods scale: the bounds of the preview's own autoscaler, or, for
+    /// a target that autoscales while the preview runs a fixed number of pods, how to make the
+    /// preview follow it. `autoscale_option` names the option to set in the config file the
+    /// session was started from.
+    fn report_scaling(&self, progress: &ProgressTracker, autoscale_option: &str) {
+        let Some(autoscaling) = &self.autoscaling else {
+            return;
+        };
+
+        let pods = match self.fixed_replicas {
+            1 => "1 pod".to_owned(),
+            replicas => format!("{replicas} pods"),
+        };
+        match (autoscaling.preview, autoscaling.target) {
+            (Some(preview), _) => progress
+                .subtask(&format!(
+                    "autoscale {}-{}",
+                    preview.min_replicas, preview.max_replicas
+                ))
+                .success(None),
+            (None, Some(target)) => progress.info(&format!(
+                "{} autoscales in the cluster ({target}). Its preview runs {pods}. To match, set \
+                 {autoscale_option}.",
+                self.target
+            )),
+            (None, None) if self.autoscale_requested => progress.info(&format!(
+                "{} has no autoscaler in the cluster. Its preview runs {pods}.",
+                self.target
+            )),
+            (None, None) => {}
+        }
+    }
+
     /// Reports the session's key, namespace, name and preview URL on `progress`, one task each.
     fn report(&self, progress: &ProgressTracker) {
         // These lines are parsed by the github action to generate its outputs, so please update
@@ -283,6 +327,7 @@ fn drop_pod_settings(layer_config: &mut LayerConfig, auto_queue_splitting: &mut 
     layer_config.feature.kafka_branch = false;
     layer_config.feature.preview.image = None;
     layer_config.feature.preview.replicas = PreviewSessionSpec::default_replicas();
+    layer_config.feature.preview.autoscale = None;
     layer_config.feature.preview.labels = Default::default();
     layer_config.feature.preview.secret_mounts.clear();
     layer_config.feature.preview.config_mounts.clear();
@@ -424,6 +469,15 @@ impl PreparedPreview {
 
             if let Some(sync) = &sync {
                 check_sync(sync, &operator_api.operator().spec)?;
+            }
+
+            // An older operator's CRD would drop `spec.autoscale` and run a fixed number of
+            // pods without a word, so refuse before the running preview is replaced.
+            if layer_config.feature.preview.autoscale_range().is_some() {
+                operator_api
+                    .operator()
+                    .spec
+                    .require_feature(NewOperatorFeature::PreviewAutoscale)?;
             }
 
             if let Some(Target::Label(label_target)) = &layer_config.target.path {
@@ -678,6 +732,15 @@ impl PreparedPreview {
             target: session_target,
             ttl_secs: layer_config.feature.preview.resolved_ttl_secs(),
             replicas: layer_config.feature.preview.replicas,
+            // Whether a target without an autoscaler is tolerated is decided by the caller:
+            // `mirrord preview up` tolerates it for an `autoscale` that comes from `common`.
+            autoscale: layer_config.feature.preview.autoscale_range().map(|range| {
+                PreviewAutoscaleConfig {
+                    min_replicas: range.min,
+                    max_replicas: range.max,
+                    target_autoscaler_optional: None,
+                }
+            }),
             incoming,
             queue_splitting: PreviewQueueSplittingConfig::from_config(
                 &layer_config.feature.split_queues,
@@ -749,6 +812,10 @@ impl PreparedPreview {
             mut spec,
             sync,
         } = self;
+
+        // Read before `spec` goes to the operator.
+        let autoscale_requested = spec.autoscale.is_some();
+        let fixed_replicas = spec.replicas;
 
         // Label targets with branches were rejected in `prepare`, so an empty config is the only
         // way a label target gets here and it skips branch preparation entirely. The branches are
@@ -918,6 +985,7 @@ impl PreparedPreview {
         let Started {
             share_host,
             idle,
+            autoscaling,
             sync_task,
         } = wait_until_started(
             &api,
@@ -978,6 +1046,10 @@ impl PreparedPreview {
             session_name,
             share_host,
             idle,
+            target: config_target.to_string(),
+            autoscaling,
+            autoscale_requested,
+            fixed_replicas,
         };
 
         Ok((summary, sync_task))
@@ -991,6 +1063,9 @@ struct Started {
 
     /// Whether the session started idle, see `feature.preview.idle.start_idle`.
     idle: bool,
+
+    /// How the operator resolved the session's scaling, when it reports it.
+    autoscaling: Option<PreviewAutoscalingStatus>,
 
     /// With `watch_files`, the task of the session's sync, which keeps pushing the changes.
     sync_task: Option<SyncTask>,
@@ -1088,7 +1163,7 @@ async fn wait_until_started(
     // session can turn `Ready` before the supervisor in the preview pod is done with the first
     // push, so the loop also waits for that, which the creation timeout bounds too.
     let mut started = None;
-    let (share_host, idle) = loop {
+    let (share_host, idle, autoscaling) = loop {
         // The `Ready` of a reused session predates the push, and the volume holds the push
         // before the supervisor ran `prepare` and restarted the app, so the first push only
         // counts once the preview pod is done with it, as `SyncActivity::handled` says: once the
@@ -1180,13 +1255,21 @@ async fn wait_until_started(
                                     started = None;
                                 }
                                 PreviewSessionPhase::Ready => {
-                                    started = Some((status.share_host.clone(), false));
+                                    started = Some((
+                                        status.share_host.clone(),
+                                        false,
+                                        status.autoscaling,
+                                    ));
                                 }
                                 // Sessions started with `feature.preview.idle.start_idle` never
                                 // pass through `Ready` on creation — `Idle` is their terminal
                                 // success state (pods boot on first traffic).
                                 PreviewSessionPhase::Idle => {
-                                    started = Some((status.share_host.clone(), true));
+                                    started = Some((
+                                        status.share_host.clone(),
+                                        true,
+                                        status.autoscaling,
+                                    ));
                                 }
                                 PreviewSessionPhase::Failed => {
                                     let error = session_failed(
@@ -1240,6 +1323,7 @@ async fn wait_until_started(
     Ok(Started {
         share_host,
         idle,
+        autoscaling,
         sync_task,
     })
 }
@@ -1678,6 +1762,20 @@ async fn preview_status(
                 Some(PreviewSessionPhase::Paused) => "paused".to_owned(),
                 Some(PreviewSessionPhase::Unknown) => "unknown".to_owned(),
                 None => "pending".to_owned(),
+            };
+            // The preview's own autoscaler, when the operator created one. An idle or paused
+            // session keeps it, dormant, so the bounds show in every phase that has them.
+            let status = match session
+                .status
+                .as_ref()
+                .and_then(|status| status.autoscaling)
+                .and_then(|autoscaling| autoscaling.preview)
+            {
+                Some(range) => format!(
+                    "{status}, autoscale {}-{}",
+                    range.min_replicas, range.max_replicas
+                ),
+                None => status,
             };
 
             // Multicluster detail from the previews view, best-effort (older operators do
