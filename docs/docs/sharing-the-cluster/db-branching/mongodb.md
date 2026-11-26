@@ -124,3 +124,7 @@ operator:
         - "--wiredTigerCacheSizeGB"
         - "0.5"
 ```
+
+## Custom Branch Image
+
+A branch that sets [`image`](../db-branching.md#custom-branch-image) runs that image through its own `docker-entrypoint.sh`. With mirrord operator `3.238.0` or later the branch container's command replaces the image's `CMD`, so the server starts as plain `mongod`: flags your image's `CMD` carried go in the operator's `operator.mongodbBranchConfig.dbPod.dbServerArgs` Helm value instead. A branch that selects a [profile](../db-branching.md#branch-config-profiles) takes them from that profile's `dbPod.dbServerArgs`, since a profile inherits nothing from the default `dbPod`.

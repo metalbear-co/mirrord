@@ -66,6 +66,9 @@ pub(crate) enum AgentError {
     #[error("IP tables dirty")]
     IPTablesDirty,
 
+    #[error("IP tables locked")]
+    IPTablesLocked,
+
     #[error("Failed to start a tokio runtime in the target's namespace: {0}")]
     RemoteRuntimeError(#[from] AgentRuntimeError),
 

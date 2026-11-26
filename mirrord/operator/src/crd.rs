@@ -756,6 +756,11 @@ pub enum NewOperatorFeature {
     /// Prevents older operators from silently ignoring preview TLS client identity and SNI.
     PreviewTlsDelivery,
 
+    /// This operator copies the target's `HorizontalPodAutoscaler` onto a preview that sets
+    /// `spec.autoscale`. An older operator's CRD drops the field, so the CLI refuses to send it
+    /// there instead of starting a preview that silently runs a fixed number of pods.
+    PreviewAutoscale,
+
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
     /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
     /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
@@ -868,6 +873,11 @@ pub enum NewOperatorFeature {
 
     /// This operator can perform queue splitting on NATS JetStream consumers
     NatsQueueSplitting,
+
+    /// This operator lets developers log in with the company identity provider from the CLI
+    /// (`mirrord login --url`) and accepts the resulting login tokens on its public URL.
+    /// Advertised when the chart's `sso.enabled` is true; Enterprise only.
+    SsoLogin,
 
     /// This operator can perform queue splitting on core NATS (non-JetStream) subject
     /// subscriptions, with best-effort delivery.
@@ -1106,6 +1116,7 @@ impl NewOperatorFeature {
             | Self::TargetlessDbBranches => Some("feature.db_branches"),
             Self::PreviewEnv
             | Self::PreviewTlsDelivery
+            | Self::PreviewAutoscale
             | Self::PreviewCronJobTarget
             | Self::PreviewLabelTarget
             | Self::PreviewTlsClientAuthFromTarget
@@ -1113,6 +1124,7 @@ impl NewOperatorFeature {
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
+            Self::SsoLogin => Some("sso"),
             Self::MultiClusterPrimary
             | Self::MultiClusterRemote
             | Self::MultiClusterSubscribe
@@ -1160,6 +1172,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::PreviewTlsDelivery => "TLS delivery configuration for previews",
+            NewOperatorFeature::PreviewAutoscale => "autoscaling previews like their target",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
@@ -1237,6 +1250,7 @@ impl Display for NewOperatorFeature {
                 "db_branches resolved from the target's MirrordSplitConfig"
             }
             NewOperatorFeature::ServerlessSessionsManager => "serverless sessions-manager",
+            NewOperatorFeature::SsoLogin => "SSO login",
             NewOperatorFeature::KafkaBranching => "Kafka branching",
             NewOperatorFeature::DbBranchSecretManagerExtract => {
                 "DB branching field extraction from secret manager sources"
@@ -1294,6 +1308,7 @@ impl NewOperatorFeature {
             NewOperatorFeature::LocalShare => &[],
             NewOperatorFeature::PreviewEnv
             | NewOperatorFeature::PreviewTlsDelivery
+            | NewOperatorFeature::PreviewAutoscale
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget
@@ -1339,6 +1354,7 @@ impl NewOperatorFeature {
             }
             NewOperatorFeature::DbBranchDedicatedNamespace => &["operator.dbBranchNamespaces"],
             NewOperatorFeature::ServerlessSessionsManager => &["operator.sessionsManager"],
+            NewOperatorFeature::SsoLogin => &["sso.enabled"],
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers

@@ -8,6 +8,64 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.291.2](https://github.com/metalbear-co/mirrord/tree/3.291.2) - 2026-11-25
+
+
+### Fixed
+
+- Fixed target paths with extra segments after the container name, such as
+  `pod/foo/container/bar/baz`, being accepted with the extra segments dropped
+  instead of rejected as invalid.
+  [#5277](https://github.com/metalbear-co/mirrord/issues/5277)
+- Fixed an agent that removed the iptables rules of another agent for the same
+  target container. Now an agent fails to start while another agent runs for
+  the same target container.
+
+## [3.291.1](https://github.com/metalbear-co/mirrord/tree/3.291.1) - 2026-11-24
+
+
+### Security
+
+- User-supplied jq filters can no longer call `env`, `halt`, or `halt_error`. A
+  filter that calls one of these now fails with an `Undefined filter` error.
+
+
+### Fixed
+
+- Outgoing unix socket connections now reach sockets whose path in the target
+  is too long for a socket address. In ephemeral mode, their paths now resolve
+  in the target container's filesystem rather than the agent's. The
+  `trustRoots` directories of a TLS steal config now load certificates that are
+  absolute symlinks in the target, as most of `/etc/ssl/certs` is. The agent's
+  DNS resolution now reads the target's `/etc/resolv.conf` and `/etc/hosts`
+  when they're absolute symlinks, instead of the agent's files. Remote file
+  operations relative to an open directory, with a path that leaves it such as
+  `../file`, now resolve from where the directory is after it's renamed, rather
+  than from its old path.
+- The agent now resolves the paths of remote file operations and outgoing unix
+  socket connections strictly inside the target container's filesystem. Remote
+  file operations no longer follow the magic links of `/proc` in any mode,
+  including targetless, so reading a path such as `/proc/self/exe` or
+  `/dev/stdin` remotely fails. A remote read now returns at most 1 MiB at a
+  time, and a `feature.fs.readonly_file_buffer` larger than 1 MiB buffers only
+  1 MiB.
+
+## [3.291.0](https://github.com/metalbear-co/mirrord/tree/3.291.0) - 2026-11-23
+
+
+### Changed
+
+- `mirrord mcp` links each skill file to `skills/skills` in the mirrord
+  repository, at the tag of the installed version, instead of to
+  `metalbear-co/skills`. The `mirrord://info` resource no longer has the `docs`
+  and `skills` fields, and gives only the mirrord version.
+
+
+### Fixed
+
+- Fixed `mirrord mcp` serving no skills on Windows: the skills were embedded
+  with Windows line endings, which the server couldn't parse.
+
 ## [3.290.0](https://github.com/metalbear-co/mirrord/tree/3.290.0) - 2026-11-17
 
 
