@@ -1112,9 +1112,10 @@ A failed run of `main` that could open a pull request posts to `#ci-alerts`; a d
   moved. If the check of Claude's changes failed, Claude changed a file outside `skills/skills/` or one of the four
   exempt files that the prompt says never to edit. The run pushed nothing. Run a dry run from `main` to see why, and
   change the prompt if it needs to say more.
-- If the error says that a pull request from `auto/docs-sync` is open, or that the marker on `main` changed, the run
-  started from an older state than the repository has now, for example because only its failed jobs were re-run. It
-  pushed nothing. Merge or close that pull request if there is one, then start a new run.
+- If the error says that a pull request from `auto/docs-sync` is open, or that the marker or the plugin version on
+  `main` changed, the run started from an older state than the repository has now, for example because only its failed
+  jobs were re-run, or another pull request that changes the skills merged while it ran. It pushed nothing. Merge or
+  close that pull request if there is one, then start a new run.
 - If creating the token, listing the pull requests, the push or opening the pull request failed, check that Cubby is
   still installed on this repository, and that the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set. The fetch
   of `main` before the push uses no token, so its failure has nothing to do with Cubby.

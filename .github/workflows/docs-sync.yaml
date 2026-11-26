@@ -449,6 +449,18 @@ jobs:
             echo "::error::skills/.github/docs-sync-sha on main is now $main_marker, but this run syncs from $MARKER, so a newer sync merged after this run started, for example because only the failed jobs of this run were re-run. Nothing was pushed. Start a new run, or use \"Re-run all jobs\"."
             exit 1
           fi
+          # The pull request's plugin version is one above the version at this run's commit. If another skills change
+          # raised the version on `main` since, the plugin version check of ci.yaml would fail the pull request, so the
+          # run stops here instead.
+          plugin=skills/.claude-plugin/plugin.json
+          if [ -n "$CHANGED_SKILLS" ]; then
+            main_version=$(git show "FETCH_HEAD:$plugin" | jq -r '.version')
+            base_version=$(git show "$HEAD_SHA:$plugin" | jq -r '.version')
+            if [ "$main_version" != "$base_version" ]; then
+              echo "::error::The version in $plugin on main is now $main_version, but this run raised it from $base_version, so another skills change raised it after this run started. Nothing was pushed. Start a new run, or use \"Re-run all jobs\"."
+              exit 1
+            fi
+          fi
 
           # Git reads this header from the environment rather than from the command line or the checkout's config, so it
           # shows in no log. The URL in the key limits it to the push. It takes the next free `GIT_CONFIG_*` index, so
