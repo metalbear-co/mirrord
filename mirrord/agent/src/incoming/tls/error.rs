@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, sync::PoisonError};
+use std::{path::PathBuf, sync::PoisonError};
 
 use mirrord_tls_util::FromPemError;
 use rustls::{pki_types::InvalidDnsNameError, server::VerifierBuilderError};
@@ -26,12 +26,6 @@ impl<T> From<PoisonError<T>> for StealTlsSetupError {
 /// Errors that can occure when building mirrord-agent's TLS server or client.
 #[derive(Error, Debug)]
 pub enum StealTlsSetupErrorInner {
-    #[error("failed to resolve path `{path}` in the target container filesystem: {error}")]
-    PathResolutionError {
-        #[source]
-        error: io::Error,
-        path: PathBuf,
-    },
     #[error("no good trust root certificate was found")]
     NoGoodRoot,
     #[error("`{name}` is not a valid server name: {error}")]

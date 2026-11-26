@@ -70,7 +70,8 @@ jobs:
       flaky_report_changed: ${{ steps.changed-flaky-report.outputs.any_changed }}
       protocol_changed: ${{ steps.changed-protocol.outputs.any_changed }}
       config_schema_changed: ${{ steps.changed-config-schema.outputs.any_changed }}
-      corpus_changed: ${{ steps.changed-corpus.outputs.any_changed }}
+      content_changed: ${{ steps.changed-content.outputs.any_changed }}
+      content_only: ${{ steps.changed-content-only.outputs.only_changed }}
       dockerfile_changed: ${{ steps.changed-dockerfile.outputs.any_changed }}
       runner_image_changed: ${{ steps.changed-runner-image.outputs.any_changed }}
       install_script_changed: ${{ steps.changed-install-script.outputs.any_changed }}
@@ -236,13 +237,24 @@ jobs:
             echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
             exit 1
           fi
-      - name: get corpus changes
-        id: changed-corpus
+      - name: get docs, guides and skills changes
+        id: changed-content
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
         with:
           files: |
-            mirrord/mcp/corpus/**
-            xtask/src/tasks/corpus.rs
+            docs/**
+            guides/**
+            skills/**
+      # `towncrier_check` uses this to skip the changelog check when only the docs, guides or
+      # skills change.
+      - name: get docs, guides and skills-only changes
+        id: changed-content-only
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            docs/**
+            guides/**
+            skills/**
       - name: get config changes
         id: changed-config-schema
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -278,7 +290,8 @@ jobs:
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};
-          echo ${{ steps.changed-corpus.outputs.any_changed }};
+          echo ${{ steps.changed-content.outputs.any_changed }};
+          echo ${{ steps.changed-content-only.outputs.only_changed }};
           echo ${{ steps.changed-wizard-frontend.outputs.any_changed }};
           echo ${{ steps.changed-frontend-only.outputs.only_changed }};
           echo ${{ steps.changed-install-script.outputs.any_changed }};
@@ -300,7 +313,11 @@ jobs:
       build: ${{ needs.plan.outputs.runner_image_changed == 'true' }}
     secrets: inherit
 
+  # A change to only `docs/`, `guides/` or `skills/` needs no changelog fragment, since the release
+  # notes describe changes to mirrord, not to its documentation or skills.
   towncrier_check:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.content_only != 'true' }}
     uses: ./.github/workflows/check-towncrier.yaml
 
   lint:
@@ -332,76 +349,53 @@ jobs:
     uses: ./.github/workflows/check-rust-docs.yaml
     secrets: inherit
 
-  # The vendored docs and skills must be byte-identical to their pinned upstream commits, and the
-  # config blocks in the skills repo at its pinned commit must validate against the schemas of this
-  # commit. A change to the schemas runs it, so that a change that breaks a pinned skill fails on
-  # its own PR rather than on the next release PR. Release PRs always run it, because they ship the
-  # corpus with the schemas of their head even when the pins didn't move.
-  corpus_check:
+  # The checks that `docs/` and `skills/` ran in their own repositories. Every docs feature page must
+  # have a plan tag, since `mirrord mcp` reads the tag to tell users which plan a feature needs. Every
+  # config block in the skills must validate against the schemas of this commit, so a schema change
+  # that breaks a skill fails on its own PR. `guides/` has no check yet, but is in `content_changed`
+  # so that a check added for it later runs without a change to the filter.
+  #
+  # `mirrord mcp` embeds `docs/docs` and `skills/skills`, so the job also runs the `mirrord-mcp`
+  # tests, which check that every embedded page and skill loads. The Rust jobs run them too, but
+  # only when Rust changes.
+  content_check:
     needs: [plan]
-    if: ${{ needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' || needs.plan.outputs.release_branch == 'true' }}
+    if: ${{ needs.plan.outputs.content_changed == 'true' || needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.ci_changed == 'true' }}
     runs-on: ${{ needs.plan.outputs.runner_4 }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          # `release.yaml` builds the head of the release branch rather than its merge with main,
-          # so a release PR checks the schemas of that head. Other runs keep the default ref.
-          ref: ${{ needs.plan.outputs.release_branch == 'true' && github.event.pull_request.head.sha || '' }}
-      # `cargo xtask corpus check` runs the skills repo's config check through uv.
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Check the plan tags of the docs pages
+        run: python3 docs/.github/scripts/check_plan_tags.py
+      - name: Test the fence-tag check
+        run: >-
+          uv run --no-project --python 3.12 --with-requirements skills/.github/scripts/requirements.txt
+          python -m unittest discover -s skills/.github/scripts -p 'test_*.py'
+      - name: Check the fence tags and config blocks of the skills
+        run: >-
+          uv run --no-project --python 3.12 --with-requirements skills/.github/scripts/requirements.txt
+          python skills/.github/scripts/check_fence_tags.py
+          --mirrord-schema mirrord-schema.json --mirrord-up-schema mirrord-up-schema.json
       - uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
         with:
           cache: false
+      # The job has its own cache, since the jobs with the `mirrord` cache key don't build
+      # `mirrord-mcp`'s tests. With it, a docs pull request rebuilds only `mirrord-mcp` and the
+      # workspace crates it depends on, which rust-cache never caches, rather than their whole
+      # dependency tree. It is saved from `main` only, so pull requests don't replace it with their
+      # own builds.
       - name: Rust cache
         uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
         with:
-          shared-key: mirrord
-      - run: cargo xtask corpus check
-
-  # The next release PR bumps the corpus pins to upstream HEAD, so this checks the config blocks in
-  # the skills repo at HEAD against the schemas of this PR, to fail a schema change that breaks
-  # them here rather than on the release PR. A change the skills repo can only follow once it ships,
-  # such as renaming an option, can't pass: add the `skip-corpus-upstream` label, re-run the failed
-  # jobs, and update the skills repo before the next release. The label is read when the job runs,
-  # since a re-run gets the labels of the original event. The merge queue doesn't run it, as a PR
-  # in the queue has already passed it or been labeled to skip it.
-  corpus_upstream_check:
-    needs: [plan]
-    if: ${{ github.event_name == 'pull_request' && (needs.plan.outputs.config_schema_changed == 'true' || needs.plan.outputs.corpus_changed == 'true' || needs.plan.outputs.ci_changed == 'true') }}
-    runs-on: ${{ needs.plan.outputs.runner_4 }}
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - name: Check for the skip label
-        id: skip
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
-          if grep -qx skip-corpus-upstream <<< "$labels"; then
-            echo "Skipped by the skip-corpus-upstream label."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+          shared-key: content
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: metalbear-co/install-action@c127aaa0fa8c555cbfb72bfa29b29a692d25d267 # v2.75.16
         with:
-          persist-credentials: false
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: metalbear-co/setup-rust-toolchain@a8d42d5aa259519dac1faeee20e37c1fb43453a3
-        with:
-          cache: false
-      - name: Rust cache
-        if: ${{ steps.skip.outputs.skip != 'true' }}
-        uses: metalbear-co/rust-cache@d49d62d59c5755dd81754c833186b84a82f895fe # v2.9.1+1
-        with:
-          shared-key: mirrord
-      - if: ${{ steps.skip.outputs.skip != 'true' }}
-        run: cargo xtask corpus check-upstream
+          tool: cargo-nextest
+      - name: Test the embedded docs and skills
+        run: cargo nextest run -p mirrord-mcp
 
   install_script:
     needs: [plan]
@@ -558,8 +552,7 @@ jobs:
         cargo-deny,
         windows_tests,
         install_script,
-        corpus_check,
-        corpus_upstream_check,
+        content_check,
       ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:

@@ -68,7 +68,10 @@ use crate::{
     runtime::{self, get_container},
     steal::{StealerCommand, TcpStealerApi},
     task::{BgTaskRuntime, RuntimeNamespace, status::BgTaskStatus},
-    util::{ClientId, io::throttle::Throttle, protocol_version::ClientProtocolVersion},
+    util::{
+        ClientId, io::throttle::Throttle, protocol_version::ClientProtocolVersion,
+        target_root::TargetRoot,
+    },
     workload_companion::{WorkloadCompanionIngress, resolve_replica_id},
 };
 
@@ -166,11 +169,13 @@ struct State {
     container: Option<ContainerHandle>,
     env: Arc<HashMap<String, String>>,
     ephemeral: bool,
-    workload_companion: bool,
     /// When present, it is used to secure incoming TCP connections.
     tls_connector: Option<AgentTlsConnector>,
     /// [`tokio::runtime`] that should be used for network operations ([`BackgroundTasks`]).
     network_runtime: Arc<BgTaskRuntime>,
+    /// The filesystem of the target container, or the agent's own when there's none. Every path
+    /// the agent opens for a client or from its configuration is confined to it.
+    target_root: TargetRoot,
     /// Session keys that redirected requests may join with a share link.
     ///
     /// Lives here rather than in a client handler, because the keys the operator registers apply
@@ -190,7 +195,7 @@ impl State {
 
         let mut env: HashMap<String, String> = HashMap::new();
 
-        let (ephemeral, workload_companion, container) = match &args.mode {
+        let (ephemeral, container) = match &args.mode {
             cli::Mode::Targeted {
                 container_id,
                 container_runtime,
@@ -208,7 +213,7 @@ impl State {
 
                 env.extend(container_handle.raw_env().clone());
 
-                (false, false, Some(container_handle))
+                (false, Some(container_handle))
             }
             cli::Mode::Ephemeral { .. } => {
                 IPTABLES_IDENTIFIER.get_or_init(|| {
@@ -236,13 +241,15 @@ impl State {
                 env.extend(container_handle.raw_env().clone());
 
                 // If we are in an ephemeral container, we use pid 1.
-                (true, false, Some(container_handle))
+                (true, Some(container_handle))
             }
-            cli::Mode::Targetless => (false, false, None),
-            cli::Mode::WorkloadCompanion => (false, true, None),
+            cli::Mode::Targetless | cli::Mode::WorkloadCompanion => (false, None),
         };
 
         tracing::debug!("THE ID IS: {IPTABLES_IDENTIFIER:?}");
+
+        // Built as soon as the PID is known, since it pins the target's root (see `TargetRoot`).
+        let target_root = TargetRoot::for_target(container.as_ref().map(ContainerHandle::pid));
 
         let network_runtime = match container.as_ref().map(ContainerHandle::pid) {
             Some(pid) if ephemeral.not() => {
@@ -270,9 +277,9 @@ impl State {
             container,
             env: Arc::new(env),
             ephemeral,
-            workload_companion,
             tls_connector,
             network_runtime: Arc::new(network_runtime),
+            target_root,
             share_links: Default::default(),
         })
     }
@@ -446,15 +453,7 @@ impl ClientConnectionHandler {
     ) -> AgentResult<Self> {
         let protocol_version = ClientProtocolVersion::default();
 
-        let file_manager = if state.workload_companion {
-            FileManager::new_workload_companion()
-        } else {
-            FileManager::new(
-                state
-                    .container_pid()
-                    .or_else(|| state.ephemeral.then_some(1)),
-            )
-        };
+        let file_manager = FileManager::new(state.target_root.clone());
 
         let tcp_mirror_api = bg_tasks
             .mirror_handle
@@ -486,16 +485,19 @@ impl ClientConnectionHandler {
             tcp_stealer_api,
             tcp_outgoing_api: OutgoingApi::new(
                 state.network_runtime.clone(),
+                state.target_root.clone(),
                 outgoing_to_client_throttle.clone(),
                 outgoing_from_client_throttle.clone(),
             ),
             udp_outgoing_api: OutgoingApi::new(
                 state.network_runtime.clone(),
+                state.target_root.clone(),
                 outgoing_to_client_throttle.clone(),
                 outgoing_from_client_throttle.clone(),
             ),
             seqpacket_api: OutgoingApi::new(
                 state.network_runtime.clone(),
+                state.target_root.clone(),
                 outgoing_to_client_throttle.clone(),
                 outgoing_from_client_throttle.clone(),
             ),
@@ -1089,10 +1091,10 @@ async fn start_agent(args: Args) -> AgentResult<()> {
 
     let (stealer, mirror_handle) = match state.container_pid() {
         None => (BackgroundTask::Disabled, None),
-        Some(pid) => {
+        Some(_) => {
             let (steal_handle, mirror_handle) = setup::start_traffic_redirector(
                 &state.network_runtime,
-                pid,
+                state.target_root.clone(),
                 state
                     .is_with_mesh_exclusion()
                     .then(|| client_listener_address.port()),
@@ -1110,7 +1112,11 @@ async fn start_agent(args: Args) -> AgentResult<()> {
         }
     };
 
-    let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
+    let dns = setup::start_dns(
+        &state.network_runtime,
+        state.target_root.clone(),
+        cancellation_token.clone(),
+    );
 
     let bg_tasks = BackgroundTasks {
         stealer,
@@ -1364,15 +1370,22 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         });
     }
 
-    let ingress =
-        WorkloadCompanionIngress::start(&state.network_runtime, cancellation_token.clone())?;
+    let ingress = WorkloadCompanionIngress::start(
+        &state.network_runtime,
+        state.target_root.clone(),
+        cancellation_token.clone(),
+    )?;
     let ingress_status = ingress.status();
     let stealer = setup::start_stealer(
         &state.network_runtime,
         ingress.steal_handle,
         cancellation_token.clone(),
     );
-    let dns = setup::start_dns(&state.network_runtime, cancellation_token.clone());
+    let dns = setup::start_dns(
+        &state.network_runtime,
+        state.target_root.clone(),
+        cancellation_token.clone(),
+    );
 
     let bg_tasks = BackgroundTasks {
         stealer,

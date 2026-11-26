@@ -1,0 +1,15 @@
+root: ./guides/
+
+structure:
+  summary: ./SUMMARY.md
+
+redirects:
+  how-to-debug-a-java-microservice: language-guides/how-to-debug-a-java-microservice
+  how-to-debug-a-go-microservice: language-guides/how-to-debug-a-go-microservice
+  how-to-debug-a-nodejs-microservice: language-guides/how-to-debug-a-nodejs-microservice
+  how-to-debug-a-kotlin-microservice: language-guides/how-to-debug-a-kotlin-microservice
+  how-to-debug-a-ruby-microservice: language-guides/how-to-debug-a-ruby-microservice
+  how-to-debug-a-php-microservice: language-guides/how-to-debug-a-php-microservice
+  how-to-debug-a-dotnet-microservice: language-guides/how-to-debug-a-dotnet-microservice
+  how-to-debug-kafka-consumers: queue-guides/how-to-debug-kafka-consumers
+  how-to-debug-sqs-consumers: queue-guides/how-to-debug-sqs-consumers
