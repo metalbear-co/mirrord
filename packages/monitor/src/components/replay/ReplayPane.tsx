@@ -7,6 +7,8 @@ import type {
   CapturedRequestSummary,
 } from '../../types'
 import type { UseReplay } from '../../hooks/useReplay'
+import type { UseQueueReplay } from '../../hooks/useQueueReplay'
+import QueueMessages from './QueueMessages'
 import { strings } from '../../strings'
 import JsonHighlight from '../JsonHighlight'
 import { TONES, statusTone } from '../SubscribeEventsTable'
@@ -267,7 +269,14 @@ function RequestDetail({
   )
 }
 
-function ReplayPane({ replay }: { replay: UseReplay }) {
+function ReplayPane({
+  replay,
+  queue,
+}: {
+  replay: UseReplay
+  /** Set for a session through the operator, because only the operator keeps queue messages. */
+  queue: UseQueueReplay | null
+}) {
   const s = strings.replay
   const newestFirst = useMemo(
     () => [...replay.requests].reverse(),
@@ -313,6 +322,7 @@ function ReplayPane({ replay }: { replay: UseReplay }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {queue && <QueueMessages queue={queue} />}
       {replay.loadError && (
         <p className="text-meta text-destructive shrink-0 px-3.5 pt-2">
           {s.loadFailed}

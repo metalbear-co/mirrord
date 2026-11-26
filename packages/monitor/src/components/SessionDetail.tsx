@@ -12,6 +12,7 @@ import { EventType } from '../eventTypes'
 import { expectArray, formatHostPort } from '../utils'
 import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
 import { useReplay } from '../hooks/useReplay'
+import { useQueueReplay } from '../hooks/useQueueReplay'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
@@ -47,6 +48,10 @@ export default function SessionDetail({
   const [formRequest, setFormRequest] = useState<ChaosFormRequest | null>(null)
   const chaos = useChaosRules(session.session_id)
   const replay = useReplay(session.session_id, paneTab === 'replay')
+  const queueReplay = useQueueReplay(
+    session.session_id,
+    paneTab === 'replay' && session.is_operator,
+  )
 
   useEffect(() => {
     setPortSubs([])
@@ -214,6 +219,7 @@ export default function SessionDetail({
       onTabChange={setPaneTab}
       chaos={chaos}
       replay={replay}
+      queueReplay={session.is_operator ? queueReplay : null}
       seenHosts={seenHosts}
       formRequest={formRequest}
       onNewRule={newRule}

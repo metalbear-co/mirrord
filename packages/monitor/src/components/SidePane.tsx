@@ -3,6 +3,7 @@ import { FileJson, Plus, FlaskConical, RotateCcw } from 'lucide-react'
 import type { SessionInfo } from '../types'
 import type { UseChaosRules } from '../hooks/useChaosRules'
 import type { UseReplay } from '../hooks/useReplay'
+import type { UseQueueReplay } from '../hooks/useQueueReplay'
 import { strings } from '../strings'
 import ConfigTab from './ConfigTab'
 import CopyButton from './CopyButton'
@@ -17,6 +18,7 @@ interface SidePaneProps {
   onTabChange: (tab: SidePaneTab) => void
   chaos: UseChaosRules
   replay: UseReplay
+  queueReplay: UseQueueReplay | null
   seenHosts: string[]
   formRequest: ChaosFormRequest | null
   onNewRule: () => void
@@ -28,6 +30,7 @@ export default function SidePane({
   onTabChange,
   chaos,
   replay,
+  queueReplay,
   seenHosts,
   formRequest,
   onNewRule,
@@ -131,7 +134,7 @@ export default function SidePane({
           formRequest={formRequest}
         />
       )}
-      {tab === 'replay' && <ReplayPane replay={replay} />}
+      {tab === 'replay' && <ReplayPane replay={replay} queue={queueReplay} />}
     </Card>
   )
 }

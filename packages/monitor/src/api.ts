@@ -5,11 +5,13 @@ import type {
   ChaosRuleRequest,
   CloudSessionsResponse,
   ContextsResponse,
+  KeptQueueMessage,
   NamespacesResponse,
   OperatorLicense,
   OperatorSessionsResponse,
   PreviewDetail,
   ReplayRun,
+  ReplayedQueueMessage,
   SessionInfo,
 } from './types'
 import { emitUserBlocked, emitUserSucceeded } from './analytics'
@@ -180,6 +182,30 @@ export const api = {
       status: run.response.status,
     })
     return run
+  },
+
+  listQueueMessages: async (sessionId: string): Promise<KeptQueueMessage[]> => {
+    const r = await fetch(withToken(`${replayPath(sessionId)}/messages`), {
+      credentials: 'include',
+    })
+    if (!r.ok) throw new Error(await chaosErrorMessage(r))
+    return (await r.json()) as KeptQueueMessage[]
+  },
+
+  replayQueueMessage: async (
+    sessionId: string,
+    messageId: number,
+  ): Promise<ReplayedQueueMessage> => {
+    const r = await fetch(
+      withToken(`${replayPath(sessionId)}/messages/${messageId}/replay`),
+      { method: 'POST', credentials: 'include' },
+    )
+    if (!r.ok) {
+      emitUserBlocked('replay_queue_message_failed', { session_id: sessionId })
+      throw new Error(await chaosErrorMessage(r))
+    }
+    emitUserSucceeded('replay_queue_message_sent', { session_id: sessionId })
+    return (await r.json()) as ReplayedQueueMessage
   },
 
   listChaosRules: async (sessionId: string): Promise<ChaosRule[]> => {

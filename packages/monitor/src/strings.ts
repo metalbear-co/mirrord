@@ -270,6 +270,19 @@ export const strings = {
     replayRun: (number: number) => `Replay ${number}`,
     responseOf: (number: number) => `Response to replay ${number}`,
     duration: (ms: number) => `${ms} ms`,
+    queue: {
+      title: 'Queue messages',
+      empty:
+        'No queue messages yet. The operator keeps the SQS and Kafka messages that it routes to this session for an hour.',
+      loadFailed: (detail: string) =>
+        `Couldn't load the queue messages: ${detail}`,
+      replay: 'Publish again',
+      replayHint:
+        "Publish again sends a message to this session's queue once more, so your application consumes it again.",
+      replayFailed: (detail: string) => `Publishing failed: ${detail}`,
+      cantReplay: (reason: string) => `Can't be published again: ${reason}.`,
+      size: (bytes: number) => `${bytes} B`,
+    },
   },
   chaos: {
     tab: 'Chaos',

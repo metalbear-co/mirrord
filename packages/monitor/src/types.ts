@@ -332,3 +332,24 @@ export interface CapturedRequest extends CapturedRequestSummary {
   response: CapturedResponse | null
   replays: ReplayRun[]
 }
+
+/** A split-queue message that the operator kept for a session, so it can be published again. */
+export interface KeptQueueMessage {
+  id: number
+  captured_at: string
+  /** The `mirrord subscribe` event of the message: `queue_message` or `kafka_message`. */
+  event: {
+    queue_message?: { queue_name: string; message_id?: string }
+    kafka_message?: { topic: string; partition: number; offset: number }
+  }
+  body_size: number
+  body_preview: string
+  not_replayable?: string
+  replay_count: number
+}
+
+export interface ReplayedQueueMessage {
+  id: number
+  message_id?: string
+  replay_count: number
+}
