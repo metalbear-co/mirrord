@@ -293,7 +293,8 @@ impl MirrordConfig for TargetFileConfig {
 
 /// Parses the segments after a target path's type prefix: the target's name and an optional
 /// `container/{name}` pair. Implementations stop there, and [`Target::from_str`] rejects any
-/// segment left over, so every kind gets the same end-of-path check.
+/// segment left over, so every kind gets the same end-of-path check. The exception is
+/// [`ServerlessTarget`], which takes the rest of the path as its replica id.
 trait FromSplit {
     fn from_split(split: &mut std::str::Split<char>) -> Result<Self>
     where
@@ -1053,7 +1054,6 @@ mod tests {
     #[rstest]
     #[case("pod/foo/container/bar/baz")]
     #[case("deployment/foo/container/bar/baz")]
-    #[case("serverless/foo/container/bar/baz")]
     fn target_path_rejects_trailing_segments(#[case] path: &str) {
         assert!(matches!(
             Target::from_str(path),
