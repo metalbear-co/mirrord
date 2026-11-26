@@ -417,15 +417,16 @@ fn config_directory(config_path: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Load and parse a `mirrord-up.yaml` configuration file for `mirrord preview up`, `mirrord
-/// preview sync` and `mirrord preview down`, and resolve the local directories of each service's
-/// `sync.files` and the globs of its `sync.prepare.triggered_by` against the directory of the
-/// file.
+/// preview sync`, `mirrord preview down` and `mirrord preview wake`, and resolve the local
+/// directories of each service's `sync.files` and the globs of its `sync.prepare.triggered_by`
+/// against the directory of the file.
 ///
-/// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview`
-/// commands never launch the services' local commands, so a `run.directory` that only exists on
-/// a developer's machine must not stop them (e.g. in CI). `mirrord preview up` and `mirrord
-/// preview down` never read the `sync` directories, so they must work in a checkout without
-/// them. `mirrord preview sync` checks the `sync` directories of the services that it previews.
+/// Unlike [`load_up_config`], it doesn't check that the local paths exist. The `preview` commands
+/// never launch the services' local commands, so a `run.directory` that only exists on a
+/// developer's machine must not stop them (e.g. in CI). `mirrord preview up`, `mirrord preview
+/// down` and `mirrord preview wake` never read the `sync` directories, so they must work in a
+/// checkout without them. `mirrord preview sync` checks the `sync` directories of the services that
+/// it previews.
 pub fn load_preview_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
     let mut config = template(&std::fs::read_to_string(path)?, key)?;
     let config_directory = config_directory(path)?;

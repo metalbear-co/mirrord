@@ -312,6 +312,26 @@ pub struct PreviewIdleConfig {
     pub wake_timeout_secs: Option<u64>,
 }
 
+impl PreviewIdleConfig {
+    /// The shortest wake timeout the operator honors: with none, it would flush held requests
+    /// toward a podless `Service` at once. The CLI refuses a zero `wake_timeout_secs`, but a
+    /// direct CR client on a stale installed schema can still submit one.
+    pub const MIN_WAKE_TIMEOUT: Duration = Duration::from_secs(1);
+
+    /// The longest wake timeout the operator honors: a deadline that far off can't be told from
+    /// none, and a longer one may not fit in an `Instant`, which the operator counts it from.
+    pub const MAX_WAKE_TIMEOUT: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
+
+    /// How long a waking preview holds traffic while its pods boot: `wake_timeout_secs`, as the
+    /// session sets it, or `operator_default` without it, between [`Self::MIN_WAKE_TIMEOUT`] and
+    /// [`Self::MAX_WAKE_TIMEOUT`]. The operator and `mirrord preview wake` both read it here.
+    pub fn wake_timeout(wake_timeout_secs: Option<u64>, operator_default: Duration) -> Duration {
+        wake_timeout_secs
+            .map_or(operator_default, Duration::from_secs)
+            .clamp(Self::MIN_WAKE_TIMEOUT, Self::MAX_WAKE_TIMEOUT)
+    }
+}
+
 /// Autoscaling configuration for preview environments.
 ///
 /// The operator copies the target's `HorizontalPodAutoscaler` (metrics, thresholds and scaling
@@ -1355,6 +1375,35 @@ mod tests {
         let restored: PreviewIdleConfig =
             serde_json::from_value(value).expect("idle config should deserialize");
         assert_eq!(restored, idle);
+    }
+
+    /// A preview without a wake timeout of its own waits as long as its operator's default, and
+    /// none waits less or more than the operator honors, so `mirrord preview wake` waits as long
+    /// as the slowest preview may take, and no longer, and a deadline counted from it fits.
+    #[test]
+    fn wake_timeout_falls_back_to_the_operator_default_and_is_clamped() {
+        let operator_default = Duration::from_secs(90);
+
+        assert_eq!(
+            PreviewIdleConfig::wake_timeout(None, operator_default),
+            operator_default
+        );
+        assert_eq!(
+            PreviewIdleConfig::wake_timeout(Some(300), operator_default),
+            Duration::from_secs(300)
+        );
+        assert_eq!(
+            PreviewIdleConfig::wake_timeout(Some(0), operator_default),
+            PreviewIdleConfig::MIN_WAKE_TIMEOUT
+        );
+        assert_eq!(
+            PreviewIdleConfig::wake_timeout(None, Duration::ZERO),
+            PreviewIdleConfig::MIN_WAKE_TIMEOUT
+        );
+        assert_eq!(
+            PreviewIdleConfig::wake_timeout(Some(u64::MAX), operator_default),
+            PreviewIdleConfig::MAX_WAKE_TIMEOUT
+        );
     }
 
     #[test]

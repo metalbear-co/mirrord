@@ -397,6 +397,7 @@ mod tests {
                 },
                 user_session_id: "session".to_owned(),
                 replica_filter: None,
+                login_url: None,
             },
             transport,
         )
