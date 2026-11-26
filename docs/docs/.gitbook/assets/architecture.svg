@@ -39,13 +39,13 @@
   <text x="170" y="388" font-size="12.5" fill="#ffffff" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-layer</text>
   <text x="170" y="406" font-size="12.5" fill="#ffffff" text-anchor="middle">loaded in the process</text>
 
-  <!-- Target -->
-  <rect x="500" y="220" width="220" height="90" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
-  <text x="610" y="258" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Target</text>
-  <text x="610" y="280" font-size="12.5" fill="#333344" text-anchor="middle">the deployed app</text>
+  <!-- Target, with mirrord-agent attached under it -->
+  <path d="M500 345 V267 A12 12 0 0 1 512 255 H708 A12 12 0 0 1 720 267 V345 Z" fill="#E4E3FD" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
+  <text x="610" y="292" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Target</text>
+  <text x="610" y="314" font-size="12.5" fill="#333344" text-anchor="middle">the deployed app</text>
 
   <!-- mirrord-agent -->
-  <rect x="500" y="345" width="220" height="130" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
+  <path d="M500 345 H720 V463 A12 12 0 0 1 708 475 H512 A12 12 0 0 1 500 463 Z" fill="#756DF3" stroke="#232141" stroke-width="2" stroke-linejoin="round"/>
   <use href="#mirrord" x="514" y="368" width="48" height="85"/>
   <text x="642" y="396" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-agent</text>
   <text x="642" y="420" font-size="12.5" fill="#ffffff" text-anchor="middle">in the target's</text>
@@ -63,12 +63,12 @@
   <text x="1015" y="470" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Database</text>
 
   <!-- Incoming traffic from the internet -->
-  <line x1="610" y1="6" x2="610" y2="216" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <line x1="610" y1="6" x2="610" y2="251" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="622" y="34" font-size="12.5" fill="#333344">incoming traffic from the internet</text>
 
   <!-- Incoming traffic from other services -->
-  <polyline points="1031,314 1031,265 724,265" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="876" y="255" font-size="12.5" fill="#333344" text-anchor="middle">incoming traffic</text>
+  <polyline points="1031,314 1031,292 724,292" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="876" y="282" font-size="12.5" fill="#333344" text-anchor="middle">incoming traffic</text>
 
   <!-- The agent sends incoming traffic to the local process -->
   <line x1="500" y1="375" x2="254" y2="375" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
