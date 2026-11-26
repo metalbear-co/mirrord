@@ -279,11 +279,20 @@ pub(super) enum Commands {
     /// Fix issues related to mirrord.
     Fix(FixArgs),
 
-    /// Log in to mirrord Cloud.
+    /// Log in to a mirrord operator with your identity provider, or to mirrord Cloud.
     ///
-    /// Opens the browser to approve the login, and stores the auth token locally.
-    #[command(hide = true)] // the flow is not released yet
+    /// Opens the browser to sign in, and saves the login locally. An operator login is valid
+    /// for 24 hours and becomes the operator mirrord uses.
     Login(Box<LoginArgs>),
+
+    /// Log out of a mirrord operator or of mirrord Cloud.
+    ///
+    /// Removes the saved login. If it was the operator in use, mirrord switches to the most
+    /// recent operator login that has not expired, or back to your kubeconfig.
+    Logout(Box<LogoutArgs>),
+
+    /// Show which operator mirrord uses, your other operator logins and your mirrord Cloud login.
+    Whoami,
 
     /// Attach mirrord layer to an already-running process by PID.
     ///
@@ -1564,16 +1573,25 @@ pub(super) struct PreviewArgs {
 /// Arguments for the `mirrord login` command.
 #[derive(Args, Debug)]
 pub(super) struct LoginArgs {
-    /// URL of the authentication backend.
+    /// URL to log in to: the operator's URL (the chart's `sso.url`, for example
+    /// `https://mirrord.corp.example.com`), or mirrord Cloud.
     ///
-    /// Read from `MIRRORD_METALBEAR_CLOUD_URL` like the cloud a standalone sessions-manager
-    /// trusts, so logging in with it set gets the token that sessions-manager expects.
+    /// Without it, logs in to mirrord Cloud. Read from `MIRRORD_METALBEAR_CLOUD_URL` like the
+    /// cloud a standalone sessions-manager trusts, so logging in with it set gets the token that
+    /// sessions-manager expects.
     #[arg(
         long,
-        hide = true,
         env = "MIRRORD_METALBEAR_CLOUD_URL",
         default_value = "https://app.metalbear.com"
     )]
+    pub url: Url,
+}
+
+/// Arguments for the `mirrord logout` command.
+#[derive(Args, Debug)]
+pub(super) struct LogoutArgs {
+    /// URL to log out of: an operator's URL as passed to `mirrord login --url`, or mirrord Cloud.
+    #[arg(long)]
     pub url: Url,
 }
 
