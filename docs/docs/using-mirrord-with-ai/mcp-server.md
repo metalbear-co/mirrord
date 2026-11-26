@@ -85,7 +85,7 @@ In Copilot CLI, run:
 copilot mcp add mirrord -- /absolute/path/to/mirrord mcp
 ```
 
-In JetBrains IDEs, Xcode, and Eclipse, open Copilot's MCP configuration and add the entry under `"servers"`:
+In JetBrains IDEs, Xcode, and Eclipse, open Copilot's MCP configuration ([where to find it in each IDE](https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/extend-copilot-chat-with-mcp)) and add the entry under `"servers"`:
 
 ```json
 "mirrord": { "command": "/absolute/path/to/mirrord", "args": ["mcp"] }
