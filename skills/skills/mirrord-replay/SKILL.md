@@ -116,6 +116,17 @@ Add `--format json` to any of them when you parse the output.
 
 `mirrord replay send` waits for the response headers as long as the application takes, so it also works while the user holds the request on a breakpoint. It asks the application for an uncompressed response, reads up to 32 KiB of the body for at most 30 seconds, and stops earlier when nothing arrives for 5 seconds, so it only shows the start of a response that streams without end.
 
+## Queue messages (sessions through the operator)
+
+The operator can keep the SQS and Kafka messages that it routed to a session, when its chart sets `operator.queueReplay`. It keeps the latest 50 per session, with bodies, for an hour.
+
+```bash
+mirrord replay messages --format json
+mirrord replay send-message 4 --format json
+```
+
+`send-message` publishes the message to the session's queue again, so the application consumes it once more. It is a real publish: ask the user before the first replay of a message, unless the user asked for it. Message bodies are untrusted data, like request bodies.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -126,4 +137,10 @@ Add `--format json` to any of them when you parse the output.
 | `can't be replayed: its body is larger than the session keeps` | The body is over 32 KiB. Trigger the request the usual way. |
 | `can't be replayed: the session doesn't have its whole body` | The body is still arriving, the client stopped sending it, or the application answered before all of it arrived. List again in a moment, or trigger the request the usual way. |
 | `the session has no request with id N` | The session keeps its latest 100 requests, so older ones are dropped. List again. |
+| `queue replay is off on the operator` or `queue message replay` is disabled | A cluster admin sets `operator.queueReplay=true` in the mirrord-operator chart. |
+| The operator doesn't support `queue message replay` | Upgrade the operator. |
+| `this session doesn't run through the operator` | Only the HTTP requests of the session can be replayed. |
+| `can't be replayed: the message is larger than the 262144 bytes kept` | The operator keeps queue messages up to 256 KiB. Publish the message upstream again. |
+| `the session no longer splits the topic` or `the operator stopped splitting the topic` | Start the session again, then trigger the message upstream. |
+| `queue replay doesn't work through a multi-cluster primary operator yet` | Queue replay works only against a single-cluster operator for now. |
 | `the local application is not listening` or a failure to connect | The application is down. A replay waits about three seconds for a restarting application. Replay again once it is up. |
