@@ -368,6 +368,12 @@ pub enum AgentConnectionTaskError {
     /// [`tokio::task`], which handles raw IO. The original (e.g. some IO error) is not available.
     #[error("{0} unexpectedly closed connection")]
     ChannelError(AgentConnectInfoDiscriminants),
+    /// The connection closed, and reconnecting failed for good: with an error no retry can fix,
+    /// such as the operator's 410 for a gone target pod or the sessions-manager's `gone` for the
+    /// task a session is pinned to, or after every retry. Carries that error, so that the proxy's
+    /// failover, which terminates the session's processes, names the reason.
+    #[error("{kind} closed the connection, and reconnecting failed: {reason}", reason = Report::new(.1.as_ref()), kind = .0)]
+    ReconnectFailed(AgentConnectInfoDiscriminants, Box<AgentConnectionError>),
 }
 
 impl BackgroundTask for AgentConnection {
@@ -489,9 +495,13 @@ impl RestartableBackgroundTask for AgentConnection {
 
                         ControlFlow::Continue(())
                     }
-                    Ok(None) | Err(..) => ControlFlow::Break(
-                        AgentConnectionTaskError::ChannelError(self.reconnect.kind()),
-                    ),
+                    Ok(None) => ControlFlow::Break(AgentConnectionTaskError::ChannelError(
+                        self.reconnect.kind(),
+                    )),
+                    Err(error) => ControlFlow::Break(AgentConnectionTaskError::ReconnectFailed(
+                        self.reconnect.kind(),
+                        Box::new(error),
+                    )),
                 }
             }
         }
