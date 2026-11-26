@@ -20,6 +20,10 @@ When **changing the structure** of the docs, like creating a new page, you must 
 
 **Every feature page needs a plan tag.** Pages under `docs/using-mirrord`, `docs/sharing-the-cluster` and `docs/use-cases` must list at least one of `oss`, `team` or `enterprise` in their `tags` frontmatter, alongside `alpha` or `beta` where relevant. `mirrord mcp` reads these tags to tell users which plan a feature needs. The `content_check` job of the mirrord repository's CI runs `.github/scripts/check_plan_tags.py` on every PR that changes the docs and fails on any page in those directories without one, so a new page cannot ship untagged.
 
+### Diagrams
+
+All diagrams use one style. Read [DIAGRAMS.md](DIAGRAMS.md) before you add or change a diagram.
+
 ### GitBook
 
 Each tab on the docs site corresponds to a GitBook "space". Adding a space is done through GitBook, and GitHub sync must be set up to sync changes between the space's repo and the website. Note that changes made in GitBook may be live. GitBook can't push to the mirrord repository's `main`, which only takes pull requests, so a change request merged in the GitBook editor doesn't reach `main` directly. The export fails, or GitBook opens a pull request for it, and the next import from `main` replaces the edit on the site. Make page changes here.

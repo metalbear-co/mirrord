@@ -6,6 +6,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Path under the operator API that serves a cluster-wide profile by name, for a CLI that reaches
+/// the operator through its URL with an operator login, where the profile CRDs themselves are not
+/// reachable. The operator answers with the profile resource, or a `NotFound` status.
+pub fn cluster_profile_api_path(name: &str) -> String {
+    format!("/apis/operator.metalbear.co/v1/mirrordclusterprofiles/{name}")
+}
+
+/// Like [`cluster_profile_api_path`], for a namespaced profile.
+pub fn namespaced_profile_api_path(namespace: &str, name: &str) -> String {
+    format!("/apis/operator.metalbear.co/v1/namespaces/{namespace}/mirrordprofiles/{name}")
+}
+
 /// Custom cluster-wide resource for storing a reusable mirrord config template.
 ///
 /// Can be selected from the user's mirrord config.

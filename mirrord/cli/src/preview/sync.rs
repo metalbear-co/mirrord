@@ -34,7 +34,9 @@ use mirrord_operator::{
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::{PrepareConfig, SubprocessCfg, SyncEntry, SyncRestart, SyncRunConfig};
+use mirrord_up::{
+    AutoscaleOrigin, PrepareConfig, SubprocessCfg, SyncEntry, SyncRestart, SyncRunConfig,
+};
 use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::{MetadataKind, ModifyKind},
@@ -96,6 +98,13 @@ impl ServiceSync {
         // Only one pod at a time can write the code volume.
         if preview.replicas != 1 {
             return Err(CliError::PreviewSyncReplicas(preview.replicas));
+        }
+        // `common.preview.autoscale` speaks for every service, so a sync service drops it (see
+        // `prepare_service`); only the service's own setting is a conflict the user has to fix.
+        if preview.autoscale_range().is_some()
+            && service.autoscale_origin == Some(AutoscaleOrigin::Service)
+        {
+            return Err(CliError::PreviewSyncAutoscale);
         }
 
         // A CronJob creates its pods on a schedule, after the CLI has pushed.
@@ -254,11 +263,12 @@ pub(super) type Connect<S> = Box<
         + Send,
 >;
 
-/// The first wait before `--watch` connects again after the connection to the operator broke.
-const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+/// The first wait before `--watch` (and `mirrord preview wake`) connects again after the
+/// connection to the operator broke.
+pub(super) const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-/// The longest wait before `--watch` connects again, which the wait doubles up to.
-const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
+/// The longest wait before connecting again, which the wait doubles up to.
+pub(super) const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 /// The code sync of one service of `mirrord preview sync`: connects to the session's `sync`
 /// websocket, pushes the service's `sync` entries whenever the operator pairs the connection with
@@ -384,20 +394,11 @@ impl From<PreviewSyncError> for Stop {
 }
 
 impl From<OperatorApiError> for Stop {
-    /// Why connecting to the operator failed with `error`. A 4xx answer refuses what no new
-    /// connection changes: a session that is gone (404) or that doesn't run (409), a user without
-    /// a certificate, a license or a seat that the operator refuses, or a role without
-    /// `previews/sync`. Retrying those would only hide the reason, and during the start it would
-    /// count as no progress, so the start would fail with a timeout. A request timeout (408) and a
-    /// rate limit (429) may pass, as may every other failure, such as an operator that restarts.
+    /// Why connecting to the operator failed with `error`. Retrying a refusal (see [`refused`])
+    /// would only hide the reason, and during the start it would count as no progress, so the
+    /// start would fail with a timeout.
     fn from(error: OperatorApiError) -> Self {
-        let refused = matches!(
-            &error,
-            OperatorApiError::KubeError {
-                error: kube::Error::Api(status),
-                ..
-            } if (400..500).contains(&status.code) && !matches!(status.code, 408 | 429)
-        );
+        let refused = refused(&error);
 
         let error = Box::new(error.into());
         if refused {
@@ -406,6 +407,21 @@ impl From<OperatorApiError> for Stop {
             Stop::Disconnected(error)
         }
     }
+}
+
+/// Whether opening a preview's websocket failed with an answer that no new connection changes.
+/// A 4xx answer refuses it: a session that is gone (404) or that doesn't run (409), a user without
+/// a certificate, a license or a seat that the operator refuses, or a role without the
+/// subresource. A request timeout (408) and a rate limit (429) may pass, as may every other
+/// failure, such as an operator that restarts.
+pub(super) fn refused(error: &OperatorApiError) -> bool {
+    matches!(
+        error,
+        OperatorApiError::KubeError {
+            error: kube::Error::Api(status),
+            ..
+        } if (400..500).contains(&status.code) && !matches!(status.code, 408 | 429)
+    )
 }
 
 impl SyncDriver<UpgradedConnection> {
