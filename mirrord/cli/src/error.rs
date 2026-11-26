@@ -1199,9 +1199,9 @@ pub(crate) enum CliError {
 
     #[error("{} not found", .0.display())]
     #[diagnostic(help(
-        "`mirrord preview up`, `mirrord preview sync` and `mirrord preview down` read the \
-         services from a mirrord-up.yaml. Pass another path with `-f <path>`, or create one with `mirrord up \
-         init`."
+        "`mirrord preview up`, `mirrord preview sync`, `mirrord preview down` and `mirrord preview \
+         wake` read the services from a mirrord-up.yaml. Pass another path with `-f <path>`, or \
+         create one with `mirrord up init`."
     ))]
     PreviewUpFileNotFound(PathBuf),
 
@@ -1216,13 +1216,28 @@ pub(crate) enum CliError {
     #[error("no preview environment was started, the checks failed for: {}", .0.join(", "))]
     PreviewUpInvalid(Vec<String>),
 
-    #[error("no key to stop preview environments under")]
+    #[error("no key to find preview environments under")]
     #[diagnostic(help(
         "Without `--key` or `MIRRORD_KEY`, the key is the git branch, but on `main`, `master` or \
          without a branch `mirrord preview up` and `mirrord preview sync` use a random key. Pass \
          the key they printed with `--key <key>`."
     ))]
-    PreviewDownKeyRequired,
+    PreviewFindableKeyRequired,
+
+    #[error("preview environments didn't wake: {}", .0.join(", "))]
+    #[diagnostic(help(
+        "Run `mirrord preview status` to see the state of each preview, and `mirrord preview \
+         logs` to read what its pods printed. A preview that wasn't ready in time may still \
+         boot; run `mirrord preview wake` again with a longer `--timeout` to wait for it."
+    ))]
+    PreviewWakeFailed(Vec<String>),
+
+    #[error(
+        "the operator doesn't report how long a preview waits for its pods by default, so `mirrord \
+         preview wake` can't tell how long to wait"
+    )]
+    #[diagnostic(help("Pass `--timeout <seconds>`.{GENERAL_HELP}"))]
+    PreviewWakeTimeoutUnknown,
 
     #[error("preview environments failed to start for: {}", .0.join(", "))]
     #[diagnostic(help(

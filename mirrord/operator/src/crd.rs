@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter},
+    time::Duration,
 };
 
 use k8s_openapi::{
@@ -234,6 +235,11 @@ pub struct MirrordOperatorSpec {
     /// reported as unsupported by the version, as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disabled_features: Vec<NewOperatorFeature>,
+    /// How long a waking preview holds traffic while its pods boot when the session sets no
+    /// `wake_timeout_secs`. `mirrord preview wake` waits as long as the longest of these by
+    /// default. Sent by operators that advertise [`NewOperatorFeature::PreviewWake`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview_wake_timeout_secs: Option<u64>,
 }
 
 impl MirrordOperatorSpec {
@@ -262,6 +268,7 @@ impl MirrordOperatorSpec {
             copy_target_enabled,
             operator_namespace,
             disabled_features: Vec::new(),
+            preview_wake_timeout_secs: None,
         }
     }
 
@@ -269,6 +276,18 @@ impl MirrordOperatorSpec {
     pub fn with_disabled_features(mut self, disabled_features: Vec<NewOperatorFeature>) -> Self {
         self.disabled_features = disabled_features;
         self
+    }
+
+    /// Records the wake timeout of a preview whose session sets none.
+    pub fn with_preview_wake_timeout(mut self, timeout: Duration) -> Self {
+        self.preview_wake_timeout_secs = Some(timeout.as_secs());
+        self
+    }
+
+    /// The wake timeout of a preview whose session sets none. `None` for operators that predate
+    /// [`NewOperatorFeature::PreviewWake`].
+    pub fn preview_wake_timeout(&self) -> Option<Duration> {
+        self.preview_wake_timeout_secs.map(Duration::from_secs)
     }
 
     /// Features this operator version knows but has switched off in its Helm values. Empty for
@@ -1078,6 +1097,12 @@ pub enum NewOperatorFeature {
     /// session's owner in [`Session::share`].
     LocalShare,
 
+    /// Serves the `previews/{name}/wake` websocket of `mirrord preview wake`: the operator wakes
+    /// the preview's pods (and its replica copies on the other workload clusters), streams how
+    /// each cluster gets on, and keeps the preview from idling while the connection lasts. It also
+    /// reports its default wake timeout in [`MirrordOperatorSpec::preview_wake_timeout`].
+    PreviewWake,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1149,7 +1174,8 @@ impl NewOperatorFeature {
             | Self::PreviewTlsClientAuthFromTarget
             | Self::PreviewAutoQueueSplitting
             | Self::PreviewCodeSync
-            | Self::PreviewSpecResources => Some("feature.preview"),
+            | Self::PreviewSpecResources
+            | Self::PreviewWake => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
             Self::SsoLogin => Some("sso"),
             Self::MultiClusterPrimary
@@ -1248,6 +1274,7 @@ impl Display for NewOperatorFeature {
                 "Azure Service Bus queue splitting"
             }
             NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
+            NewOperatorFeature::PreviewWake => "waking preview environments",
             NewOperatorFeature::MultiClusterQueueSplitRole => {
                 "one consumer cluster for multi-cluster queue splitting"
             }
@@ -1343,7 +1370,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::PreviewLabelTarget
             | NewOperatorFeature::PreviewSpecResources
             | NewOperatorFeature::PreviewAutoQueueSplitting
-            | NewOperatorFeature::PreviewCodeSync => &["operator.previewEnv"],
+            | NewOperatorFeature::PreviewCodeSync
+            | NewOperatorFeature::PreviewWake => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
             | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],
@@ -2040,6 +2068,19 @@ mod tests {
         ));
     }
 
+    /// `mirrord preview wake` waits as long as the operator's default wake timeout, which an
+    /// operator that predates the field doesn't send, and which the spec carries in whole seconds.
+    #[test]
+    fn preview_wake_timeout_is_optional() {
+        let spec = spec_without_disabled_features();
+        assert_eq!(spec.preview_wake_timeout(), None);
+
+        let spec = spec.with_preview_wake_timeout(Duration::from_secs(90));
+        let spec: MirrordOperatorSpec =
+            serde_json::from_value(serde_json::to_value(&spec).unwrap()).unwrap();
+        assert_eq!(spec.preview_wake_timeout(), Some(Duration::from_secs(90)));
+    }
+
     /// Every chart-toggled feature names the values that turn it on, so the disabled error can
     /// show `--set`s the admin can paste. Kafka branching needs splitting too, and multi-cluster
     /// gets no hint because a lone `multiCluster.enabled` fails startup.
@@ -2047,6 +2088,10 @@ mod tests {
     fn chart_toggled_features_name_their_helm_values() {
         assert_eq!(
             NewOperatorFeature::PreviewEnv.helm_values(),
+            ["operator.previewEnv"]
+        );
+        assert_eq!(
+            NewOperatorFeature::PreviewWake.helm_values(),
             ["operator.previewEnv"]
         );
         assert_eq!(

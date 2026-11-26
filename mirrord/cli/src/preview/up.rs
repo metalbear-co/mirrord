@@ -2,7 +2,8 @@
 //! service of a `mirrord-up.yaml` that the command picks (see [`PreviewRun`]), all under one key,
 //! and return once each one is ready, idle or failed. `mirrord preview sync` also pushes each
 //! service's `sync` directories into its preview (see [`super::sync`]), and with `--watch` keeps
-//! pushing them. `mirrord preview down` deletes the previews again.
+//! pushing them. `mirrord preview down` deletes the previews again, and `mirrord preview wake`
+//! (see [`super::wake`]) finds them the same way.
 //!
 //! Every service's session is created the way `mirrord preview start` creates one, from the
 //! config `mirrord_up::resolve_preview_services` assembles for it. All sessions are prepared
@@ -445,7 +446,8 @@ async fn prepare_service(
         user_data.machine_id(),
         Some(config.key.as_str().to_owned()),
     );
-    let (operator_api, api) = create_preview_api(&config, false, progress, &mut analytics).await?;
+    let (operator_api, api) =
+        create_preview_api(&config, false, &[], progress, &mut analytics).await?;
 
     // A request the user set fails in `prepare` instead, as it does for `mirrord preview start`.
     if default_db_branches && resolves_default_db_branches(&operator_api).not() {
@@ -588,22 +590,42 @@ fn up_file_path(config_file: Option<&Path>) -> &Path {
     }
 }
 
-/// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A`, with the key found the
-/// way `mirrord preview up` finds it, in every kube context the services of the
-/// `mirrord-up.yaml` run in.
-///
-/// `mirrord preview up` and `mirrord preview sync` take each service's context from the file, so
-/// `down` reads it too (`-f`, or `mirrord-up.yaml` when it exists) to reach them all. Without a
-/// file, it runs in the context of `--context`, the global config or the kubeconfig. Every
-/// preview under the key goes in those contexts, whichever services it was started for, and no
-/// mirrord config is read, neither from `-f` nor from `MIRRORD_*` variables in the environment.
+/// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A` in each scope that
+/// [`key_scopes`] finds.
 pub(super) async fn preview_down(
     common: &PreviewCommonArgs,
     watch: drain::Watch,
     user_data: &UserData,
 ) -> CliResult<()> {
+    let mut result = Ok(());
+    for common in key_scopes(common).await? {
+        let args = PreviewStopArgs {
+            glob: None,
+            target: None,
+            namespace: None,
+            all_namespaces: true,
+        };
+        let stopped = preview_stop(&common, args, StopMode::Down, watch.clone(), user_data).await;
+        if result.is_ok() {
+            result = stopped;
+        }
+    }
+    result
+}
+
+/// Where `mirrord preview down` and `mirrord preview wake` find the previews of a key: the key
+/// found the way `mirrord preview up` finds it, in every kube context the services of the
+/// `mirrord-up.yaml` run in, one [`PreviewCommonArgs`] per context, each with the key.
+///
+/// `mirrord preview up` and `mirrord preview sync` take each service's context from the file, so
+/// this reads it too (`-f`, or `mirrord-up.yaml` when it exists) to reach them all. Without a
+/// file, the only context is the one of `--context`, the global config or the kubeconfig. Every
+/// preview under the key counts in those contexts, whichever services it was started for, and
+/// the callers read no mirrord config, neither from `-f` nor from `MIRRORD_*` variables in the
+/// environment.
+pub(super) async fn key_scopes(common: &PreviewCommonArgs) -> CliResult<Vec<PreviewCommonArgs>> {
     let key =
-        findable_key_from_env(common.key.as_deref()).ok_or(CliError::PreviewDownKeyRequired)?;
+        findable_key_from_env(common.key.as_deref()).ok_or(CliError::PreviewFindableKeyRequired)?;
     let context_arg = common.context.as_deref().map(Arc::from);
 
     let path = up_file_path(common.config_file.as_deref());
@@ -626,25 +648,14 @@ pub(super) async fn preview_down(
         contexts.insert(context_arg);
     }
 
-    let mut result = Ok(());
-    for context in contexts {
-        let common = PreviewCommonArgs {
+    Ok(contexts
+        .into_iter()
+        .map(|context| PreviewCommonArgs {
             key: Some(key.clone()),
             config_file: None,
             context: context.as_deref().map(ToOwned::to_owned),
-        };
-        let args = PreviewStopArgs {
-            glob: None,
-            target: None,
-            namespace: None,
-            all_namespaces: true,
-        };
-        let stopped = preview_stop(&common, args, StopMode::Down, watch.clone(), user_data).await;
-        if result.is_ok() {
-            result = stopped;
-        }
-    }
-    result
+        })
+        .collect())
 }
 
 /// The key `mirrord preview up` runs under when it can be found again: `arg` (`--key`), then

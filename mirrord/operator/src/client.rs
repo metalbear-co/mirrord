@@ -56,6 +56,7 @@ use mirrord_kube::{
 use mirrord_operator_websocket::{connection::OperatorConnection, upgrade};
 use mirrord_progress::Progress;
 use preview_sync::PreviewSyncConnection;
+use preview_wake::PreviewWakeConnection;
 use semver::Version;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
@@ -112,6 +113,7 @@ pub mod database_branches;
 mod discovery;
 pub mod error;
 pub mod preview_sync;
+pub mod preview_wake;
 mod queue_split_progress;
 pub mod split_config_branches;
 
@@ -973,6 +975,30 @@ where
                 operation: OperatorOperation::WebsocketConnection,
             })
             .map(PreviewSyncConnection::new)
+    }
+
+    /// Opens the wake websocket of the preview session `name` in `namespace`, through which the
+    /// operator wakes the preview, reports its state, and keeps it from idling until the
+    /// connection closes. Requires [`NewOperatorFeature::PreviewWake`].
+    pub async fn connect_preview_wake(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> OperatorApiResult<PreviewWakeConnection> {
+        let request = Request::builder()
+            .uri(format!(
+                "/apis/operator.metalbear.co/v1alpha1/namespaces/{namespace}/previews/{name}/wake"
+            ))
+            .body(vec![])
+            .map_err(OperatorApiError::ConnectRequestBuildError)?;
+
+        upgrade::connect_ws(&self.client, request)
+            .await
+            .map_err(|error| OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::WebsocketConnection,
+            })
+            .map(PreviewWakeConnection::new)
     }
 
     /// The workload `layer_config` targets and its namespace, as the `splitconfigdbbranches`

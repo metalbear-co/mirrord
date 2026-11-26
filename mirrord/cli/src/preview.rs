@@ -3,7 +3,8 @@
 //! The CLI is responsible for creating `PreviewSession` resources and watching their status —
 //! all actual work (pod creation, agent spawning, traffic routing) is done by the operator.
 //! The `start` command creates a CR and watches for the status to reach `Ready`, the `status`
-//! command lists existing sessions, and the `stop` command deletes them.
+//! command lists existing sessions, and the `stop` command deletes them. The `wake` command (see
+//! [`wake`]) asks the operator to wake idle sessions and waits until they are ready.
 
 use std::{
     borrow::Cow,
@@ -88,6 +89,7 @@ mod multicluster;
 pub(crate) mod resources;
 mod sync;
 mod up;
+mod wake;
 
 /// Handle commands related to preview environments: `mirrord preview ...`
 #[mirrord_macros::boxed_future]
@@ -126,6 +128,9 @@ pub(crate) async fn preview_command(
             preview_stop(&common, stop_args, StopMode::Stop, watch, user_data).await
         }
         PreviewCommand::Down => up::preview_down(&common, watch, user_data).await,
+        PreviewCommand::Wake(wake_args) => {
+            wake::preview_wake(&common, wake_args, watch, user_data).await
+        }
         PreviewCommand::Logs(logs_args) => preview_logs(&common, logs_args, watch, user_data).await,
         PreviewCommand::Diff(diff_args) => preview_diff(&common, diff_args, watch, user_data).await,
     }
@@ -172,7 +177,7 @@ async fn preview_start(
     );
 
     let (operator_api, api) =
-        create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
+        create_preview_api(&layer_config, false, &[], &progress, &mut analytics).await?;
 
     let (summary, _) = PreparedPreview::prepare(
         layer_config,
@@ -1554,7 +1559,7 @@ impl ProgressDeadline {
     fn new(timeout: Duration) -> Self {
         Self {
             timeout,
-            at: Some(tokio::time::Instant::now() + timeout),
+            at: Some(deadline_after(timeout)),
             progress: 0,
         }
     }
@@ -1562,7 +1567,7 @@ impl ProgressDeadline {
     /// Starts the timeout again, unless it doesn't run.
     fn on_progress(&mut self) {
         if self.at.is_some() {
-            self.at = Some(tokio::time::Instant::now() + self.timeout);
+            self.at = Some(deadline_after(self.timeout));
         }
     }
 
@@ -1575,7 +1580,7 @@ impl ProgressDeadline {
         if activity.busy {
             self.at = None;
         } else if progressed || self.at.is_none() {
-            self.at = Some(tokio::time::Instant::now() + self.timeout);
+            self.at = Some(deadline_after(self.timeout));
         }
     }
 
@@ -1586,6 +1591,16 @@ impl ProgressDeadline {
             None => std::future::pending().await,
         }
     }
+}
+
+/// The longest that a `mirrord preview` command waits for anything, which a `--timeout` or a
+/// preview's `wake_timeout_secs` may exceed: no deadline that far off can be told from none.
+const MAX_WAIT: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
+
+/// When a wait of `timeout` that starts now ends, or [`MAX_WAIT`] from now for a longer
+/// `timeout`, which an [`Instant`](tokio::time::Instant) may not hold.
+fn deadline_after(timeout: Duration) -> tokio::time::Instant {
+    tokio::time::Instant::now() + timeout.min(MAX_WAIT)
 }
 
 /// Deletes the session `session_name`, whose start failed with `error`, and fails `subtask`.
@@ -1635,6 +1650,7 @@ async fn preview_status(
     let (operator_api, api) = create_preview_api(
         &layer_config,
         args.all_namespaces,
+        &[],
         &progress,
         &mut analytics,
     )
@@ -1927,6 +1943,7 @@ async fn preview_logs(
     let (operator_api, api) = create_preview_api(
         &layer_config,
         args.all_namespaces,
+        &[],
         &progress,
         &mut analytics,
     )
@@ -2087,6 +2104,7 @@ async fn preview_stop(
     let (operator_api, api) = create_preview_api(
         &layer_config,
         args.all_namespaces,
+        &[],
         &progress,
         &mut analytics,
     )
@@ -2237,7 +2255,7 @@ async fn preview_diff(
     );
 
     let (operator_api, _) =
-        create_preview_api(&layer_config, false, &progress, &mut analytics).await?;
+        create_preview_api(&layer_config, false, &[], &progress, &mut analytics).await?;
     // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
     // show what would change.
     reject_management_only(&operator_api.operator().spec)?;
@@ -2707,9 +2725,6 @@ impl KeyMatcher<'_> {
     }
 }
 
-/// Connects to the operator, validates the license and checks that the `PreviewEnv` feature is
-/// supported, then returns the operator API and a `PreviewSession` API handle scoped to the
-/// appropriate namespace(s).
 /// Resolves the configured secret mounts. The raw file contents go into `secret_values` keyed
 /// `k0`, `k1`, ... for the operator's `previewsecretmounts` endpoint; the returned per-file
 /// references (path + `Secret` key) go on the `PreviewSession` spec. The `Secret` name is in
@@ -2861,9 +2876,14 @@ fn read_tls_client_auth_file(path: &Path) -> CliResult<Vec<u8>> {
     })
 }
 
+/// Connects to the operator, validates the license and checks that the operator supports
+/// preview environments and every feature in `required` that the command needs on top of them,
+/// then returns the operator API and a `PreviewSession` API handle scoped to the appropriate
+/// namespace(s).
 async fn create_preview_api(
     config: &LayerConfig,
     all_namespaces: bool,
+    required: &[NewOperatorFeature],
     progress: &ProgressTracker,
     analytics: &mut AnalyticsReporter,
 ) -> CliResult<(OperatorApi<NoClientCert>, Api<PreviewSession>)> {
@@ -2878,10 +2898,9 @@ async fn create_preview_api(
 
     operator_api.check_license_validity(progress)?;
 
-    if let Err(error) = operator_api
-        .operator()
-        .spec
-        .require_feature(NewOperatorFeature::PreviewEnv)
+    if let Err(error) = std::iter::once(NewOperatorFeature::PreviewEnv)
+        .chain(required.iter().copied())
+        .try_for_each(|feature| operator_api.operator().spec.require_feature(feature))
     {
         subtask.failure(None);
         if let OperatorApiError::LocalFeatureNotLicensed { feature, .. } = &error {
@@ -3688,5 +3707,24 @@ mod tests {
             QueueSplit::new("other", QueueKind::Temporal),
         ]);
         assert_eq!(temporal_mirror_requested(&config), ["tasks"]);
+    }
+
+    /// A `--timeout` of `mirrord preview start` or `mirrord preview wake`, or a preview's
+    /// `wake_timeout_secs`, too long for a deadline waits as long as a command ever waits, rather
+    /// than overflowing, from the start and after each progress.
+    #[test]
+    fn a_huge_timeout_waits_the_longest() {
+        let before = tokio::time::Instant::now();
+
+        assert!(deadline_after(Duration::from_secs(u64::MAX)) >= before + MAX_WAIT);
+
+        let mut deadline = ProgressDeadline::new(Duration::MAX);
+        assert!(deadline.at.is_some_and(|at| at >= before + MAX_WAIT));
+        deadline.on_progress();
+        deadline.on_activity(&sync::SyncActivity {
+            progress: 1,
+            ..Default::default()
+        });
+        assert!(deadline.at.is_some_and(|at| at >= before + MAX_WAIT));
     }
 }
