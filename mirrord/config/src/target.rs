@@ -111,7 +111,7 @@ pub fn make_simple_target_custom_schema(generator: &mut SchemaGenerator) -> Sche
 /// | statefulset | `{ "target": { "stateful_set": "statefulset-name", "container": "container-name" } }` |
 /// | service | `{ "target": { "service": "service-name", "container": "container-name" } }` |
 /// | label | `{ "target": { "labels": { "key": "value" }, "container": "container-name" } }` |
-/// | serverless | `{ "target": { "service": "service-name", "container": "replice-id" } }` |
+/// | serverless | `{ "target": { "serverless": "service-name", "container": "replica-id" } }` |
 ///
 /// Please note that:
 ///
@@ -223,7 +223,7 @@ pub struct TargetConfig {
     /// | service | mirrord Operator | `{ "service": "service-name", "container": "container-name" }` |
     /// | replicaset | mirrord Operator | `{ "replica_set": "replicaset-name", "container": "container-name" }` |
     /// | label | mirrord Operator | `{ "labels": { "app": "api", "tier": "web" }, "container": "api" }` |
-    /// | serverless | mirrord Cloud | `{ "service": "service-name", "container": "replace-id" }` |
+    /// | serverless | mirrord Cloud | `{ "serverless": "service-name", "container": "replica-id" }` |
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<Target>,
 
