@@ -191,18 +191,22 @@ impl KeptBody {
                     keep_start(&mut self.data, &payload.0);
                     self.size += payload.0.len();
                 }
-                InternalHttpBodyFrame::Trailers(headers) => self.trailers = Some(headers.clone()),
+                InternalHttpBodyFrame::Trailers(headers) => {
+                    self.trailers = Some(headers.clone());
+                    self.ended = true;
+                }
             }
         }
 
-        self.ended = is_last;
+        self.ended |= is_last;
     }
 
     /// Returns whether all of the body arrived.
     ///
     /// The agent sends the end of a body in a message of its own. That message can arrive after
     /// the local application answered, when the proxy no longer follows the request. So a body
-    /// that has its stated size is complete without it.
+    /// that has its stated size is complete without it, and so is a body whose trailers arrived,
+    /// because trailers are always the last frame of a body.
     fn is_complete(&self) -> bool {
         self.ended || self.stated_size == Some(self.size)
     }

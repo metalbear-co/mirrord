@@ -271,10 +271,12 @@ fn print_headers_and_body(headers: &[(String, String)], body: &CapturedBody) {
     }
 }
 
-/// Returns `text` with its control characters escaped, except tabs and line breaks.
+/// Returns `text` with its control characters escaped, except tabs and line breaks, and with the
+/// characters that change the direction of text escaped.
 ///
-/// The text comes from HTTP traffic, which anyone who can reach the target can send, and a
-/// terminal would run the escape sequences in it.
+/// The text comes from HTTP traffic, which anyone who can reach the target can send. A terminal
+/// would run the escape sequences in it, and would show the text after a change of direction in
+/// another order than it has.
 fn printable(text: &str) -> String {
     let mut printable = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -283,6 +285,8 @@ fn printable(text: &str) -> String {
             '\n' | '\t' => true,
             // On its own, a carriage return moves the cursor back over what is already printed.
             '\r' => chars.peek() == Some(&'\n'),
+            // The embeddings, overrides and isolates of the Unicode bidirectional algorithm.
+            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => false,
             c => !c.is_control(),
         };
 
