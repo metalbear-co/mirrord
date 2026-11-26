@@ -36,6 +36,9 @@ impl StatusCommandHandler {
         let mut cfg_context =
             ConfigContext::default().override_env_opt(LayerConfig::FILE_PATH_ENV, config_file);
         let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
+        for warning in cfg_context.into_warnings() {
+            progress.warning(&warning);
+        }
 
         if !layer_config.use_proxy {
             remove_proxy_env();
@@ -299,6 +302,7 @@ Operator License
             "Target",
             "Namespace",
             "User",
+            "Auth",
             "Ports",
             "Session Duration"
         ]);
@@ -336,6 +340,10 @@ Operator License
                 &session.target,
                 session.namespace.as_deref().unwrap_or("N/A"),
                 &session.user,
+                session
+                    .auth_method
+                    .map(|method| method.to_string())
+                    .unwrap_or_default(),
                 locked_ports,
                 humantime::format_duration(Duration::from_secs(session.duration_secs)),
             ]);

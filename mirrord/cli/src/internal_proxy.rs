@@ -8,7 +8,7 @@
 //! (previously was solved using envguard which wasn't good enough)
 //!
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
-//! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
+//! or let the [`OperatorApi`] handle the connection.
 
 pub(crate) mod db_portforwards;
 
@@ -40,7 +40,7 @@ use mirrord_intproxy::{
         chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
 };
-use mirrord_kube::api::kubernetes::create_kube_config_with_context;
+use mirrord_operator::client::{NoClientCert, OperatorAccess, OperatorApi};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
@@ -63,7 +63,6 @@ use crate::{
     data::{StoredLogin, UserData},
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
-    kube::kube_client_from_layer_config,
     util::create_listen_socket,
 };
 
@@ -218,31 +217,21 @@ async fn start_session_monitor(
         .map(|t| t.to_string())
         .unwrap_or_else(|| "targetless".to_owned());
 
-    let namespace = match &config.target.namespace {
-        Some(namespace) => Some(namespace.clone()),
-        None => match kube_client_from_layer_config(config).await {
-            Ok(client) => Some(client.default_namespace().to_owned()),
-            Err(error) => {
-                tracing::debug!(
-                    ?error,
-                    "Failed to resolve effective namespace from kube client"
-                );
-                None
-            }
-        },
-    };
-
-    let context = match create_kube_config_with_context(
-        config.accept_invalid_certificates,
-        config.kubeconfig.as_deref(),
-        config.kube_context.clone(),
-    )
-    .await
-    {
-        Ok((_, context)) => context,
+    // The same resolution the run used: a login has no kube context and no current namespace
+    // of its own, so the session shows the operator's defaults rather than an unrelated kubeconfig.
+    let (namespace, context) = match OperatorApi::<NoClientCert>::base_client_config(config).await {
+        Ok((_, OperatorAccess::Login(_))) => (config.target.namespace.clone(), None),
+        Ok((kube_config, OperatorAccess::Kubeconfig { context })) => (
+            config
+                .target
+                .namespace
+                .clone()
+                .or(Some(kube_config.default_namespace)),
+            context,
+        ),
         Err(error) => {
             tracing::debug!(?error, "Failed to resolve the session's kube context");
-            config.kube_context.clone()
+            (config.target.namespace.clone(), config.kube_context.clone())
         }
     };
 
