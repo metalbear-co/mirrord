@@ -1,8 +1,12 @@
+mod argv;
+mod aws_batch;
 mod error;
 mod handoff;
 mod incoming;
 mod replica_id;
 
+pub(crate) use argv::application_argv;
+pub(crate) use aws_batch::aws_batch_job;
 pub(crate) use error::RemoteIncomingHandoffError;
 use mirrord_agent_env::envs;
 pub(crate) use replica_id::resolve_replica_id;

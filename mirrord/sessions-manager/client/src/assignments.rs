@@ -1,10 +1,12 @@
 use std::{
     collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AssignmentId, AssignmentSubscription, ConnectionAssignment, ServiceScope,
+    AgentIdentity, AgentSubscriptionOptions, AssignmentId, AssignmentSubscription,
+    ConnectionAssignment, ServiceScope, SubscriptionOptions,
 };
 
 use crate::{
@@ -55,18 +57,56 @@ impl ControlPlaneSubscription for AssignmentSubscription {
     }
 }
 
+/// Where an [`AssignmentSubscriptionWithOptions`] gets the value of
+/// [`SUBSCRIPTION_OPTIONS_HEADER`](mirrord_sessions_manager_protocol::SUBSCRIPTION_OPTIONS_HEADER)
+/// for each attempt.
+pub(crate) trait OptionsHeader {
+    /// The header value, as [`SubscriptionOptions::encode`] produces it, or [`None`] to send no
+    /// header.
+    fn header(&self) -> Option<String>;
+}
+
+/// Options encoded once, for a registration whose options never change.
+impl OptionsHeader for Option<String> {
+    fn header(&self) -> Option<String> {
+        self.clone()
+    }
+}
+
+/// The [`AgentSubscriptionOptions`] an agent sends on its assignments subscription.
+///
+/// Read on every subscribe, reconnects included, instead of being encoded once, so that each
+/// subscription sends the options as they are when it opens. Clones share one value.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedAgentOptions(Arc<Mutex<AgentSubscriptionOptions>>);
+
+impl SharedAgentOptions {
+    pub(crate) fn new(options: AgentSubscriptionOptions) -> Self {
+        Self(Arc::new(Mutex::new(options)))
+    }
+}
+
+/// [`None`] when the options say nothing, so that such an agent subscribes exactly as agents that
+/// predate the header do.
+impl OptionsHeader for SharedAgentOptions {
+    fn header(&self) -> Option<String> {
+        // The options are plain data, replaced whole or field by field, so a panic while they
+        // were locked can't leave them in a state worse than any other.
+        let options = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        (*options != AgentSubscriptionOptions::default()).then(|| options.encode())
+    }
+}
+
 /// An assignments subscription that sends options in
 /// [`SUBSCRIPTION_OPTIONS_HEADER`](mirrord_sessions_manager_protocol::SUBSCRIPTION_OPTIONS_HEADER)
 /// on every attempt, reconnects included.
-pub(crate) struct AssignmentSubscriptionWithOptions {
+pub(crate) struct AssignmentSubscriptionWithOptions<O = Option<String>> {
     pub(crate) subscription: AssignmentSubscription,
-    /// The header value, as
-    /// [`SubscriptionOptions::encode`](mirrord_sessions_manager_protocol::SubscriptionOptions::encode)
-    /// produces it, or [`None`] to send no header.
-    pub(crate) options: Option<String>,
+    /// Asked for the header value on every attempt.
+    pub(crate) options: O,
 }
 
-impl ControlPlaneSubscription for AssignmentSubscriptionWithOptions {
+impl<O: OptionsHeader> ControlPlaneSubscription for AssignmentSubscriptionWithOptions<O> {
     type Output = ConnectionAssignment;
 
     fn name(&self) -> &'static str {
@@ -78,8 +118,9 @@ impl ControlPlaneSubscription for AssignmentSubscriptionWithOptions {
         transport: &T,
         scope: &ServiceScope,
     ) -> Result<ControlPlaneEventStream, SessionsManagerClientError> {
+        let options = self.options.header();
         transport
-            .subscribe_assignments(scope, &self.subscription, self.options.as_deref())
+            .subscribe_assignments(scope, &self.subscription, options.as_deref())
             .await
     }
 
@@ -195,18 +236,26 @@ impl AssignmentRegistry {
 
 /// Filters replayed assignments from the agent control-plane subscription.
 pub(crate) struct DeduplicatingAssignmentSubscriber<T> {
-    subscriber: ControlPlaneSubscriber<AssignmentSubscription, T>,
+    subscriber: ControlPlaneSubscriber<AssignmentSubscriptionWithOptions<SharedAgentOptions>, T>,
     assignments: AssignmentRegistry,
     retry: RetryBudget,
 }
 
 impl<T: SessionsManagerTransport> DeduplicatingAssignmentSubscriber<T> {
-    pub(crate) fn new(transport: T, scope: ServiceScope, identity: AgentIdentity) -> Self {
+    pub(crate) fn new(
+        transport: T,
+        scope: ServiceScope,
+        identity: AgentIdentity,
+        options: SharedAgentOptions,
+    ) -> Self {
         Self {
             subscriber: ControlPlaneSubscriber::new(
                 transport,
                 scope,
-                AssignmentSubscription::Agent(identity),
+                AssignmentSubscriptionWithOptions {
+                    subscription: AssignmentSubscription::Agent(identity),
+                    options,
+                },
                 true,
             ),
             assignments: AssignmentRegistry::default(),

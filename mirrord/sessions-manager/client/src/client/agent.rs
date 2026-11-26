@@ -1,6 +1,7 @@
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AssignmentId, ConnectionAssignment, ReplicaId, ServiceScope,
+    AgentIdentity, AgentSubscriptionOptions, AssignmentId, AwsBatchJob, ConnectionAssignment,
+    ReplicaId, ServiceScope,
 };
 use tokio::{
     sync::mpsc,
@@ -9,8 +10,11 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    assignments::DeduplicatingAssignmentSubscriber, client::validate_scope,
-    error::SessionsManagerClientError, retry::with_deadline, transport::SessionsManagerTransport,
+    assignments::{DeduplicatingAssignmentSubscriber, SharedAgentOptions},
+    client::validate_scope,
+    error::SessionsManagerClientError,
+    retry::with_deadline,
+    transport::SessionsManagerTransport,
 };
 
 const CONNECTIONS_QUEUE_CAPACITY: usize = 1024;
@@ -29,15 +33,24 @@ pub struct AgentClient {
 impl AgentClient {
     /// Spawns the control-plane task, so this must be called within a Tokio runtime.
     ///
+    /// `aws_batch` is the AWS Batch job of the agent's task, sent on every subscription so that
+    /// the operator can look up the job's tags and select the task by them. Without it the agent
+    /// registers as agents that predate task selection do, and never matches a selector.
+    ///
     /// `cancellation` shuts the control plane down when fired, as does [`Self::shutdown`].
     pub fn start<T: SessionsManagerTransport>(
         scope: ServiceScope,
         replica_id: ReplicaId,
+        aws_batch: Option<AwsBatchJob>,
         transport: T,
         cancellation: impl Into<Option<CancellationToken>>,
     ) -> Result<Self, SessionsManagerClientError> {
         let scope = validate_scope(scope)?;
         let identity = AgentIdentity::new(replica_id);
+        let options = SharedAgentOptions::new(AgentSubscriptionOptions {
+            aws_batch,
+            gate: None,
+        });
         let cancellation = cancellation.into().unwrap_or_default();
         let (sender, receiver) = mpsc::channel(CONNECTIONS_QUEUE_CAPACITY);
         let queue = QueueSender { sender };
@@ -46,6 +59,7 @@ impl AgentClient {
             transport,
             scope,
             identity,
+            options,
             queue,
             cancellation.clone(),
         ));
@@ -67,12 +81,13 @@ impl AgentClient {
         transport: T,
         scope: ServiceScope,
         identity: AgentIdentity,
+        options: SharedAgentOptions,
         queue: QueueSender,
         cancellation: CancellationToken,
     ) -> Result<(), SessionsManagerClientError> {
         tokio::select! {
             _ = cancellation.cancelled() => Ok(()),
-            result = Self::run_loop(transport, scope, identity, queue) => {
+            result = Self::run_loop(transport, scope, identity, options, queue) => {
                 result
             }
         }
@@ -82,11 +97,12 @@ impl AgentClient {
         transport: T,
         scope: ServiceScope,
         identity: AgentIdentity,
+        options: SharedAgentOptions,
         queue: QueueSender,
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
         let mut assignments_subscriber =
-            DeduplicatingAssignmentSubscriber::new(transport.clone(), scope, identity);
+            DeduplicatingAssignmentSubscriber::new(transport.clone(), scope, identity, options);
 
         let result = loop {
             tokio::select! {
@@ -337,6 +353,7 @@ mod tests {
         let mut client = AgentClient::start(
             scope,
             "replica-a".to_owned().into(),
+            None,
             MockTransport::default(),
             None,
         )
@@ -368,6 +385,7 @@ mod tests {
         let mut client = AgentClient::start(
             scope,
             "replica-a".to_owned().into(),
+            None,
             transport.clone(),
             None,
         )
