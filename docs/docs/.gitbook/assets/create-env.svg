@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -45 1200 713" width="1200" height="713" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -45 1200 723" width="1200" height="723" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">Preview environment creation workflow</title>
-  <desc id="d">Step 1: on your laptop, you run mirrord preview start with a container image from a registry, a mirrord.json file, and an optional env key. Step 2: mirrord.json steals incoming traffic with a header filter, and mirrord replaces {{ key }} in every filter with the env key. The CLI prints the env key and the preview session. Step 3: in the staging cluster, a temporary cars-service preview pod starts with your image and lives until its TTL expires. Requests to cars-service that match the env key filter go to the preview pod.</desc>
+  <desc id="d">Step 1: on your laptop or in CI, you run mirrord preview up with an image for each service to preview, and an optional key. Without --key or MIRRORD_KEY, the key is the git branch. Step 2: mirrord preview up reads the same mirrord-up.yaml as mirrord up, and every service with an image gets a preview. The CLI prints the state and the key of each preview. Step 3: in the staging cluster, a temporary preview pod starts for cars-service and for users-service, all under one key, and each lives until its TTL expires. Requests that carry the header baggage: mirrord-session=pr-123 go to the preview pods. Requests without the key still reach the deployed services.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -33,53 +33,53 @@
 <path d="M243.9,427.5c11.1-4.4,16-21.4,12-40.5c-0.3-0.3-0.6-0.6-0.9-0.9c2,15.9-1.2,29.1-7.6,30.2c-7.3,1.5-15.8-12-19-29.7 c-0.3-1.2-0.3-2.3-0.6-3.5h0.9l12.5-1.5l-11.1-6.5l-3.2-1.8c0-10,2.3-17.6,6.4-20.3c-1.2-2.1-2.3-4.1-3.8-6.2 c-7-4.1-13.7-5-19.3-2.6c-6.4,2.6-11.1,9.4-12.8,18.8c-1.8,10-0.3,22,4.4,33.5c3.5,8.8,8.5,16.4,14,22c0,0,0.3,0,0.3,0.3 c0.6,0.3,1.2,0.9,1.5,1.2C225.9,427.2,235.8,430.7,243.9,427.5z M204.9,319.1c11.1,2.1,19.3,9.7,24.2,15.6c2,2.3,3.8,5,5.5,7.3 c0,0,0,0,0,0.3c2,2.9,3.5,5.6,5,8.2c1.2,1.8,2,3.5,3.2,5.6l1.5,2.3c3.8,6.5,7.6,12.9,12.3,19.1c5.8,7.3,11.7,12.9,18.4,16.7 c-0.6-5-2-9.7-4.4-14.1c-0.9-1.8-0.3-3.8,1.5-4.7c1.8-0.9,3.8-0.3,4.7,1.5c2.9,5.6,4.7,11.5,5,17.9c0,0.9,0.3,3.5-1.5,5.6 c-1.2,1.2-2.6,1.8-4.1,1.8c-1.5,0-2.9-0.6-4.4-1.2c-2.6-1.5-5.3-3.2-7.9-5.3c1.7,18.5-5,34.1-17.5,39.3c-2.9,1.2-5.8,1.8-8.8,1.8 c-8.5,0-17.5-4.4-25.7-11.7c-11.4-6.2-21.6-14.7-29.5-24.7c-1.2-1.5-0.9-3.8,0.6-5c1.5-1.2,3.8-0.9,5,0.6c3.2,4.1,7,7.9,11.1,11.5 c-1.2-2.3-2.6-5-3.5-7.6c-5-12.6-6.7-25.8-4.7-37.3c2-12,8.2-20.6,16.9-24.1c4.1-1.8,8.8-2.1,13.7-1.2c-4.4-4.4-10.2-8.8-17.5-10 c-8.2-1.5-16.6,1.5-20.4,7.3c-1.2,1.5-3.2,2.1-4.7,0.9c-1.5-1.2-2-3.2-0.9-4.7C183,320.9,194.1,317.1,204.9,319.1z"/>
     </symbol>
   </defs>
-  <rect x="0" y="-45" width="1200" height="713" fill="#ffffff"/>
+  <rect x="0" y="-45" width="1200" height="723" fill="#ffffff"/>
 
-  <!-- Your machine -->
-  <rect x="20" y="20" width="540" height="620" rx="10" fill="#232141"/><rect x="28" y="28" width="524" height="604" rx="4" fill="#F5F4FE"/>
-  <path d="M20 640 H560 L576 654 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="645" x2="550" y2="645" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="274" y="648.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="654" width="580" height="5" rx="2.5" fill="#232141"/>
-  <text x="40" y="48" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
+  <!-- Your machine or CI runner -->
+  <rect x="20" y="20" width="540" height="630" rx="10" fill="#232141"/><rect x="28" y="28" width="524" height="614" rx="4" fill="#F5F4FE"/>
+  <path d="M20 650 H560 L576 664 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="655" x2="550" y2="655" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="274" y="658.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="664" width="580" height="5" rx="2.5" fill="#232141"/>
+  <text x="40" y="48" font-size="15" font-weight="700" fill="#4a44b8">Your machine or CI</text>
 
   <!-- The command -->
   <rect x="40" y="64" width="500" height="166" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
   <use href="#mirrord" x="504" y="76" width="22" height="40"/>
   <circle cx="62" cy="88" r="11" fill="#756DF3"/>
   <text x="62" y="92.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
-  <text x="80" y="93" font-size="14" font-weight="700" fill="#232141">Create a preview</text>
-  <text x="60" y="116" font-size="12.5"  fill="#333344" xml:space="preserve">Inputs: a container image in a registry, a mirrord.json file,</text>
-  <text x="60" y="133" font-size="12.5"  fill="#333344" xml:space="preserve">and an optional env key.</text>
-  <text x="60" y="158" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">mirrord preview start</text>
-  <text x="60" y="175" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --config-file &lt;mirrord.json&gt;</text>
-  <text x="60" y="192" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image &lt;code-image&gt;</text>
-  <text x="60" y="209" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --key &lt;env-key&gt;   (optional)</text>
+  <text x="80" y="93" font-size="14" font-weight="700" fill="#232141">Create the previews</text>
+  <text x="60" y="116" font-size="12.5" fill="#333344" text-anchor="start">Inputs: an image for each service to preview, and an optional key.</text>
+  <text x="60" y="133" font-size="12.5" fill="#333344" text-anchor="start">Without --key or MIRRORD_KEY, the key is the git branch.</text>
+  <text x="60" y="158" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">mirrord preview up</text>
+  <text x="60" y="175" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image cars-service=&lt;cars-image&gt;</text>
+  <text x="60" y="192" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image users-service=&lt;users-image&gt;</text>
+  <text x="60" y="209" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --key pr-123   (optional)</text>
 
-  <!-- mirrord.json -->
+  <!-- Second box -->
   <rect x="40" y="246" width="500" height="196" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
   <circle cx="62" cy="270" r="11" fill="#756DF3"/>
   <text x="62" y="274.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
-  <text x="80" y="275" font-size="14" font-weight="700" fill="#232141" font-family="Menlo, Consolas, monospace">mirrord.json</text>
-  <text x="60" y="300" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">{</text>
-  <text x="60" y="315" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  "feature": {</text>
-  <text x="60" y="330" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    "network": {</text>
-  <text x="60" y="345" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">      "incoming": {</text>
-  <text x="60" y="360" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">        "mode": "steal",</text>
-  <text x="60" y="375" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">        "http_filter": {</text>
-  <text x="60" y="390" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" xml:space="preserve">          "header_filter": "key-{{ key }}"</text>
-  <text x="60" y="405" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">} } } } }</text>
-  <text x="330" y="300" font-size="12.5"  fill="#333344" xml:space="preserve">mirrord replaces</text>
-  <text x="330" y="317" font-size="12.5"  fill="#333344" xml:space="preserve">{{ key }} with the</text>
-  <text x="330" y="334" font-size="12.5"  fill="#333344" xml:space="preserve">env key, in every</text>
-  <text x="330" y="351" font-size="12.5"  fill="#333344" xml:space="preserve">filter in the file.</text>
+  <text x="80" y="275" font-size="14" font-weight="700" fill="#232141" font-family="Menlo, Consolas, monospace">mirrord-up.yaml</text>
+  <text x="60" y="300" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">services:</text>
+  <text x="60" y="315" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  cars-service:</text>
+  <text x="60" y="330" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    run:</text>
+  <text x="60" y="345" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">      command: [&quot;node&quot;, &quot;app.js&quot;]</text>
+  <text x="60" y="360" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  users-service:</text>
+  <text x="60" y="375" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    run:</text>
+  <text x="60" y="390" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">      command: [&quot;python&quot;, &quot;app.py&quot;]</text>
+  <text x="350" y="300" font-size="12.5" fill="#333344" text-anchor="start">The same file that</text>
+  <text x="350" y="317" font-size="12.5" fill="#333344" text-anchor="start">mirrord up reads.</text>
+  <text x="350" y="334" font-size="12.5" fill="#333344" text-anchor="start">Each service with an</text>
+  <text x="350" y="351" font-size="12.5" fill="#333344" text-anchor="start">image gets a preview.</text>
 
   <!-- CLI output -->
-  <rect x="40" y="458" width="500" height="166" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="60" y="484" font-size="14" font-weight="700" fill="#232141">Output</text>
-  <text x="60" y="510" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">✓ mirrord preview start</text>
-  <text x="60" y="527" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session resource created</text>
-  <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session is ready</text>
-  <text x="60" y="561" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">info:</text>
-  <text x="60" y="578" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * key: &lt;env-key&gt;</text>
-  <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * session: preview-session-cars-service-&lt;id&gt;</text>
+  <rect x="40" y="458" width="500" height="176" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="60" y="484" font-size="14" font-weight="700" fill="#232141">Output (abridged)</text>
+  <text x="60" y="510" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">✓ preview environments are up</text>
+  <text x="60" y="527" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ cars-service: preview environment is ready</text>
+  <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ users-service: preview environment is ready</text>
+  <text x="60" y="561" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    …</text>
+  <text x="60" y="578" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    ✓ cars-service: key: pr-123</text>
+  <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    …</text>
+  <text x="60" y="612" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    ✓ users-service: key: pr-123</text>
 
   <!-- Staging cluster -->
   <path d="M600.0 588.9 A72.8 72.8 0 0 1 600.0 497.8 A72.8 72.8 0 0 1 600.0 406.8 A72.8 72.8 0 0 1 600.0 315.7 A72.8 72.8 0 0 1 600.0 224.7 A72.8 72.8 0 0 1 600.0 133.6 A72.7 72.7 0 0 1 690.9 20.0 A85.9 85.9 0 0 1 844.2 20.0 A73.2 73.2 0 0 1 974.9 20.0 A70.0 70.0 0 0 1 1099.8 20.0 A56.8 56.8 0 0 1 1168.0 110.9 A79.4 79.4 0 0 1 1168.0 206.5 A79.4 79.4 0 0 1 1168.0 302.1 A79.4 79.4 0 0 1 1168.0 397.7 A79.4 79.4 0 0 1 1168.0 493.3 A79.4 79.4 0 0 1 1168.0 588.9 A36.1 36.1 0 0 1 1116.9 640.0 A181.2 181.2 0 0 1 952.2 640.0 A199.9 199.9 0 0 1 770.4 640.0 A131.2 131.2 0 0 1 651.1 640.0 A36.1 36.1 0 0 1 600.0 588.9 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
@@ -98,21 +98,29 @@
   <!-- Preview environment -->
   <rect x="620" y="250" width="540" height="300" rx="14" fill="#ffffff" stroke="#756DF3" stroke-width="2"/>
   <text x="640" y="278" font-size="15" font-weight="700" fill="#4a44b8">Preview environment</text>
-  <text x="640" y="296" font-size="12.5" fill="#333344">one env key</text>
+  <text x="640" y="296" font-size="12.5" fill="#333344">one key: pr-123</text>
 
   <!-- Filtered traffic to the preview pods -->
-  <line x1="800" y1="160" x2="800" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="810" y="196" font-size="12.5" fill="#4a44b8" text-anchor="start">filtered by</text>
-  <text x="810" y="212" font-size="12.5" fill="#4a44b8" text-anchor="start">env key</text>
+  <line x1="820" y1="160" x2="820" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <line x1="1050" y1="160" x2="1050" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="935" y="190" font-size="12.5" fill="#4a44b8" text-anchor="middle">filtered by the header</text>
+  <text x="935" y="207" font-size="12.5" fill="#4a44b8" text-anchor="middle" font-family="Menlo, Consolas, monospace">baggage:</text>
+  <text x="935" y="224" font-size="12.5" fill="#4a44b8" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-session=pr-123</text>
   <rect x="640" y="340" width="220" height="110" rx="10" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
   <circle cx="662" cy="364" r="11" fill="#756DF3"/>
   <text x="662" y="368.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
   <text x="680" y="369" font-size="14" font-weight="700" fill="#232141">cars-service preview</text>
   <text x="750" y="398" font-size="12.5" fill="#333344" text-anchor="middle">temporary pod, your image</text>
   <text x="750" y="416" font-size="12.5" fill="#333344" text-anchor="middle">lives until the TTL expires</text>
-  <text x="890" y="500" font-size="12.5" fill="#333344" text-anchor="middle">Requests without the env key still reach the deployed services.</text>
+  <rect x="920" y="340" width="220" height="110" rx="10" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
+  <circle cx="942" cy="364" r="11" fill="#756DF3"/>
+  <text x="942" y="368.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+  <text x="960" y="369" font-size="14" font-weight="700" fill="#232141">users-service preview</text>
+  <text x="1030" y="398" font-size="12.5" fill="#333344" text-anchor="middle">temporary pod, your image</text>
+  <text x="1030" y="416" font-size="12.5" fill="#333344" text-anchor="middle">lives until the TTL expires</text>
+  <text x="890" y="500" font-size="12.5" fill="#333344" text-anchor="middle">Requests without the key still reach the deployed services.</text>
 
-  <!-- The CLI starts the preview -->
+  <!-- The CLI starts the previews -->
   <polyline points="540,140 580,140 580,395 616,395" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
 
   <!-- Kubernetes logos: what runs in the cluster -->
