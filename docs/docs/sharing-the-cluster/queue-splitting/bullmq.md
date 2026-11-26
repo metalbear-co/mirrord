@@ -20,7 +20,7 @@ Queue splitting for BullMQ requires mirrord operator `3.175.0` or later and mirr
 
 ![BullMQ queue splitting flow](../../.gitbook/assets/bullmq.svg)
 
-BullMQ stores jobs as Redis data structures: a wait list (`bull:<queue>:wait`), per-job hashes (`bull:<queue>:<jobId>`), and an ID counter (`bull:<queue>:id`). The mirrord operator's BullMQ forwarder dequeues jobs from the original wait list using `BLPOP`, inspects the job's `data` field (which must be valid JSON), and re-enqueues each job to the appropriate temporary queue based on the users' filters.
+BullMQ stores jobs as Redis data structures: a wait list (`bull:<queue>:wait`), per-job hashes (`bull:<queue>:<jobId>`), and an ID counter (`bull:<queue>:id`). The mirrord operator's BullMQ forwarder moves jobs from the original wait list to an in-flight list (`bull:<queue>:mirrord-forwarding`) using `BLMOVE`, inspects the job's `data` field (which must be valid JSON), and re-enqueues each job to the appropriate temporary queue based on the users' filters.
 
 When the first mirrord BullMQ splitting session starts, the operator creates a temporary "main" queue for the deployed workload and patches the workload's queue-name environment variable to read from it. The forwarder then begins dequeuing from the original queue: jobs whose JSON data matches the user's filter are re-enqueued to a temporary per-session queue that the local application reads, and everything else is re-enqueued to the main queue.
 
@@ -117,7 +117,7 @@ Each entry in the `spec.queues` list describes a BullMQ queue consumed by the wo
 * `kind` - must be `bullMq`.
 * `clientConfig` (optional) - name of a `MirrordPropertyList` with the Redis connection. Can also be set once for all BullMQ queues with `spec.clientConfigs.bullMq`.
 * `queueConfig` (optional) - name of a `MirrordPropertyList` with forwarder tuning. Supported properties:
-  * `dequeue_timeout` - how long `BLPOP` waits before retrying, in seconds (default: `5`).
+  * `dequeue_timeout` - how long `BLMOVE` waits before retrying, in seconds (default: `5`).
   * `jq_time_limit` - max milliseconds for jq filter evaluation per job (default: `200`).
 * `appConfig.queue` - the BullMQ queue name. Uses the same structure as other queue services (`env`, `envLike`, `volume`, `fallback`, `valueSelector`, `valuePattern`, `containerNames`).
 

@@ -25,6 +25,15 @@
 //! the whole path in one syscall, so a concurrent rename or symlink swap in the target can't
 //! redirect it. `openat2(2)` needs Linux 5.6, and on older kernels we use [`userspace`] instead.
 //!
+//! The kernel resolver also falls back to [`userspace`] when it fails with `EACCES`. With
+//! `fs.protected_symlinks` set, which is the default on most nodes, the kernel refuses to follow a
+//! symlink in a sticky world-writable directory unless the symlink belongs to the follower or to
+//! the directory's owner. No capability lifts that. The kubelet makes such symlinks: a
+//! projected volume is a sticky world-writable directory of root, and the symlink of a service
+//! account token belongs to the user of the pod. The target can follow it, and the agent, which
+//! runs as root, can't. [`userspace`] reads symlinks instead of following them, so the
+//! restriction doesn't apply to it, and its walk stays inside the root all the same.
+//!
 //! Callers act on the returned descriptors with `f*` syscalls, with `*at` syscalls on the single
 //! final component that [`TargetRoot::open_parent`] returns, or through [`proc_fd_path`] for APIs
 //! that only take a path. They never pass the path itself to a path-based syscall.
@@ -107,6 +116,7 @@ pub(crate) enum Resolver {
     /// `openat2(2)`.
     Kernel,
     /// [`userspace`], for kernels without `openat2(2)`, or where a seccomp profile blocks it.
+    /// [`Self::Kernel`] also falls back to it when `openat2(2)` fails with `EACCES`.
     Userspace,
 }
 
@@ -173,6 +183,9 @@ impl Resolver {
         loop {
             match fcntl::openat2(dirfd, path, how) {
                 Err(Errno::EAGAIN) if retries > 0 => retries -= 1,
+                // Possibly `fs.protected_symlinks`, see the module docs. Any other cause fails
+                // the userspace walk the same way.
+                Err(Errno::EACCES) => return userspace::open(dirfd, path, flags, mode, scope),
                 result => return result.map_err(io::Error::from),
             }
         }
