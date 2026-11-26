@@ -775,6 +775,11 @@ pub enum NewOperatorFeature {
     /// Prevents older operators from silently ignoring preview TLS client identity and SNI.
     PreviewTlsDelivery,
 
+    /// This operator copies the target's `HorizontalPodAutoscaler` onto a preview that sets
+    /// `spec.autoscale`. An older operator's CRD drops the field, so the CLI refuses to send it
+    /// there instead of starting a preview that silently runs a fixed number of pods.
+    PreviewAutoscale,
+
     /// The operator supports the unified `BranchDatabase` CRD with per-dialect options
     /// (`postgresOptions`, `mysqlOptions`, `mongodbOptions`) instead of the old separate
     /// `PgBranchDatabase`, `MysqlBranchDatabase`, `MongodbBranchDatabase` CRDs.
@@ -1131,6 +1136,7 @@ impl NewOperatorFeature {
             | Self::TargetlessDbBranches => Some("feature.db_branches"),
             Self::PreviewEnv
             | Self::PreviewTlsDelivery
+            | Self::PreviewAutoscale
             | Self::PreviewCronJobTarget
             | Self::PreviewLabelTarget
             | Self::PreviewTlsClientAuthFromTarget
@@ -1186,6 +1192,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::MongodbBranching => "MongoDB branching",
             NewOperatorFeature::PreviewEnv => "preview environments",
             NewOperatorFeature::PreviewTlsDelivery => "TLS delivery configuration for previews",
+            NewOperatorFeature::PreviewAutoscale => "autoscaling previews like their target",
             NewOperatorFeature::ExtendableUserCredentials => "ExtendableUserCredentials",
             NewOperatorFeature::BypassCiCertificateVerification => {
                 "BypassCiCertificateVerification"
@@ -1321,6 +1328,7 @@ impl NewOperatorFeature {
             NewOperatorFeature::LocalShare => &[],
             NewOperatorFeature::PreviewEnv
             | NewOperatorFeature::PreviewTlsDelivery
+            | NewOperatorFeature::PreviewAutoscale
             | NewOperatorFeature::PreviewTlsClientAuthFromTarget
             | NewOperatorFeature::PreviewCronJobTarget
             | NewOperatorFeature::PreviewLabelTarget

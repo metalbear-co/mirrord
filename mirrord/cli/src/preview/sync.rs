@@ -34,7 +34,9 @@ use mirrord_operator::{
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
-use mirrord_up::{PrepareConfig, SubprocessCfg, SyncEntry, SyncRestart, SyncRunConfig};
+use mirrord_up::{
+    AutoscaleOrigin, PrepareConfig, SubprocessCfg, SyncEntry, SyncRestart, SyncRunConfig,
+};
 use notify::{
     EventKind, RecommendedWatcher, RecursiveMode, Watcher,
     event::{MetadataKind, ModifyKind},
@@ -96,6 +98,13 @@ impl ServiceSync {
         // Only one pod at a time can write the code volume.
         if preview.replicas != 1 {
             return Err(CliError::PreviewSyncReplicas(preview.replicas));
+        }
+        // `common.preview.autoscale` speaks for every service, so a sync service drops it (see
+        // `prepare_service`); only the service's own setting is a conflict the user has to fix.
+        if preview.autoscale_range().is_some()
+            && service.autoscale_origin == Some(AutoscaleOrigin::Service)
+        {
+            return Err(CliError::PreviewSyncAutoscale);
         }
 
         // A CronJob creates its pods on a schedule, after the CLI has pushed.

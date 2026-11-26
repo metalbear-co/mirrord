@@ -5,7 +5,7 @@
 //! tracks the session lifecycle (`Initializing` → `Waiting` → `Ready` / `Idle` / `Failed`),
 //! which the CLI watches to report progress back to the user.
 
-use std::{collections::BTreeMap, ops::Not, time::Duration};
+use std::{collections::BTreeMap, fmt, ops::Not, time::Duration};
 
 use k8s_openapi::{
     apimachinery::pkg::apis::meta::v1::{Condition, MicroTime},
@@ -89,6 +89,13 @@ pub struct PreviewSessionSpec {
     /// Number of replicas created by the deployment.
     #[serde(default = "PreviewSessionSpec::default_replicas")]
     pub replicas: i32,
+
+    /// Autoscaling of the preview's Deployment, copied from the target's
+    /// `HorizontalPodAutoscaler` within these bounds.
+    ///
+    /// `None` (also what older CLIs send) runs `replicas` pods and never creates an autoscaler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoscale: Option<PreviewAutoscaleConfig>,
 
     /// Incoming traffic configuration for the preview environment.
     ///
@@ -325,6 +332,79 @@ impl PreviewIdleConfig {
     }
 }
 
+/// Autoscaling configuration for preview environments.
+///
+/// The operator copies the target's `HorizontalPodAutoscaler` (metrics, thresholds and scaling
+/// behavior) onto the preview's Deployment, bounded by `min_replicas` and `max_replicas`, and
+/// deletes the copy with the session. An idle session is still scaled to zero, which disables the
+/// copied autoscaler until the session wakes at `min_replicas`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAutoscaleConfig {
+    /// The fewest preview pods while the session isn't idle. `None` means 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_replicas: Option<i32>,
+
+    /// The most preview pods. `None` means the target autoscaler's maximum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_replicas: Option<i32>,
+
+    /// What the operator does with a target that has no autoscaler: `Some(true)` runs the
+    /// session with `replicas` pods and no autoscaler of its own, which is what `mirrord up`
+    /// asks for when `autoscale` comes from `common` and not from the service itself. `None`
+    /// (also what older CLIs send) or `Some(false)` fails the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_autoscaler_optional: Option<bool>,
+}
+
+impl PreviewAutoscaleConfig {
+    /// The fewest preview pods while the session isn't idle.
+    pub fn min_replicas(&self) -> i32 {
+        self.min_replicas.unwrap_or(1)
+    }
+
+    /// Whether a target without an autoscaler fails the session.
+    pub fn target_autoscaler_required(&self) -> bool {
+        self.target_autoscaler_optional != Some(true)
+    }
+}
+
+/// The autoscaling of a preview session, as the operator resolved it from the target.
+///
+/// Reported on every session that runs preview pods, with or without `spec.autoscale`, so the CLI
+/// can tell a user whose target autoscales that the preview doesn't.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAutoscalingStatus {
+    /// The bounds of the target's own autoscaler. `None` when the target has none, or when the
+    /// operator couldn't look it up.
+    ///
+    /// Serialized as `null` rather than skipped, like `preview`, so that a status merge patch
+    /// clears the range a previous task run reported.
+    #[serde(default)]
+    pub target: Option<PreviewReplicaRange>,
+
+    /// The bounds of the autoscaler the operator created for the preview. `None` when the
+    /// session runs a fixed number of pods: without `spec.autoscale`, or with it when the target
+    /// has no autoscaler and `spec.autoscale` tolerates that.
+    #[serde(default)]
+    pub preview: Option<PreviewReplicaRange>,
+}
+
+/// The replica bounds of a `HorizontalPodAutoscaler`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewReplicaRange {
+    pub min_replicas: i32,
+    pub max_replicas: i32,
+}
+
+impl fmt::Display for PreviewReplicaRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{} pods", self.min_replicas, self.max_replicas)
+    }
+}
+
 impl PreviewSessionSpec {
     pub fn default_replicas() -> i32 {
         1
@@ -498,6 +578,14 @@ pub struct PreviewSessionStatus {
     /// idle), and cleared when the session becomes `Ready` again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_since: Option<MicroTime>,
+
+    /// How the session's pods scale, resolved from the target when the session's task starts.
+    ///
+    /// `None` for a session that runs no preview pods (targetless, split-only, CronJob), before
+    /// the task resolved it, or when running against an older operator that does not set this
+    /// field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoscaling: Option<PreviewAutoscalingStatus>,
 
     /// Standard conditions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -720,6 +808,9 @@ pub struct PreviewStatusUpdate {
     /// skipped) from "clear the field" (`Some(None)`, serialized as an explicit `null`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_since: Option<Option<MicroTime>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autoscaling: Option<PreviewAutoscalingStatus>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Condition>>,
