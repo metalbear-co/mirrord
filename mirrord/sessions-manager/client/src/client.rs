@@ -1,9 +1,11 @@
 mod agent;
 mod intproxy;
+mod watcher;
 
 pub use agent::AgentClient;
 pub use intproxy::{IntproxyClient, SessionsManagerConnectInfo};
 use mirrord_sessions_manager_protocol::ServiceScope;
+pub use watcher::{TaskEvent, TaskWatcher};
 
 use crate::error::SessionsManagerClientError;
 

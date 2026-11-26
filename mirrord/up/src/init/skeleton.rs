@@ -221,6 +221,7 @@ impl PickedService {
                 let target = SpecifiedTarget {
                     path: Some(target),
                     namespace,
+                    ..Default::default()
                 };
                 (target.into(), http_filter, self.ignore_ports.clone())
             }

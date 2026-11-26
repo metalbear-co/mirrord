@@ -615,6 +615,7 @@ mod tests {
             target: TargetConfig::Specified(SpecifiedTarget {
                 path: Some(Target::from_str("deployment/api").unwrap()),
                 namespace: Some("staging".into()),
+                ..Default::default()
             }),
             env: EnvConfig {
                 r#override: Some([("FOO".to_owned(), "bar".to_owned())].into_iter().collect()),
@@ -797,6 +798,7 @@ mod tests {
             target: TargetConfig::Specified(SpecifiedTarget {
                 path: None,
                 namespace: Some("staging".into()),
+                ..Default::default()
             }),
             env: EnvConfig::default(),
             default_mode: ServiceMode::default().into(),

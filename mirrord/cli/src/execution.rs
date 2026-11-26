@@ -33,6 +33,7 @@ use mirrord_progress::{
 };
 use mirrord_protocol::{EnvVars, GetEnvVarsRequest};
 use mirrord_protocol_api::client::{MirrordClient, MirrordClientRetry};
+use mirrord_remote_layer_protocol::APP_ARGV_ENV;
 #[cfg(target_os = "macos")]
 use mirrord_sip::{
     MIRRORD_BINARIES_DIR_PATH_BUF, MIRRORD_SIP_X64_FALLBACK_ENV, SipError, SipPatchOptions,
@@ -41,6 +42,7 @@ use mirrord_sip::{
     sip_patch,
 };
 use mirrord_tls_util::SecureChannelSetup;
+use mirrord_up::{APPEND_REMOTE_ARGV_ENV, TASK_SESSION_ID_ENV};
 use serde::Serialize;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -145,6 +147,25 @@ pub(crate) struct MirrordExecution {
     /// that they parse has no field for it.
     #[serde(skip)]
     pub share_link: Option<LocalShareLink>,
+
+    /// Arguments to append to the application's command: the target task's own, when `mirrord
+    /// up` asked for them ([`APPEND_REMOTE_ARGV_ENV`]).
+    ///
+    /// Not serialized: only `mirrord exec` appends them.
+    #[serde(skip)]
+    pub remote_args: RemoteArgs,
+}
+
+/// The target task's arguments, which `mirrord exec` appends to the application's command.
+///
+/// They can carry secrets, so [`Debug`] shows only how many there are.
+#[derive(Default)]
+pub(crate) struct RemoteArgs(pub Vec<String>);
+
+impl std::fmt::Debug for RemoteArgs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "[{} arguments]", self.0.len())
+    }
 }
 
 /// The share link that the operator recorded for this session when it connected. Requests to it
@@ -270,6 +291,8 @@ struct SpawnedIntproxy {
     uses_operator: bool,
     /// The share link of a run started with `share`.
     share_link: Option<LocalShareLink>,
+    /// See [`MirrordExecution::remote_args`].
+    remote_args: RemoteArgs,
 }
 
 /// Struct that when dropped will cancel the token and wait on the join handle
@@ -421,6 +444,7 @@ impl MirrordExecution {
             child: proxy_process,
             uses_operator,
             share_link,
+            remote_args,
         } = match std::env::var(MIRRORD_TEST_INTPROXY_ADDR) {
             Ok(addr) => Self::setup_existing_intproxy(addr, config)?,
             _ => {
@@ -559,6 +583,7 @@ impl MirrordExecution {
                 .unwrap_or_default(),
             uses_operator,
             share_link,
+            remote_args,
         })
     }
 
@@ -748,6 +773,7 @@ impl MirrordExecution {
                 .unwrap_or_default(),
             uses_operator: connect_info.is_operator(),
             share_link: None,
+            remote_args: RemoteArgs::default(),
         };
 
         Ok((execution, proxy_addr))
@@ -781,6 +807,7 @@ impl MirrordExecution {
             child: None,
             uses_operator: false,
             share_link: None,
+            remote_args: RemoteArgs::default(),
         })
     }
 
@@ -837,6 +864,9 @@ impl MirrordExecution {
                 .await
                 .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?
         };
+        let remote_args = Self::remote_args(config, &mut client, progress)
+            .await
+            .inspect_err(|_| analytics.set_error(AnalyticsError::EnvFetch))?;
         env_vars.insert(
             MIRRORD_LAYER_TARGET_CONTAINER_PORTS.to_owned(),
             target_container_ports.iter().join(","),
@@ -901,6 +931,13 @@ impl MirrordExecution {
         // session ID chosen during connection setup or fall back to a local UUID.
         let session_id = match &connect_info {
             AgentConnectInfo::Operator(session) => format!("{:X}", session.id()),
+            // The sessions of a `mirrord up` task-driven service share their sessions-manager
+            // session, but each needs a local session of its own.
+            AgentConnectInfo::SessionsManager(_) | AgentConnectInfo::OperatorSessionsManager(_)
+                if std::env::var_os(TASK_SESSION_ID_ENV).is_some() =>
+            {
+                uuid::Uuid::new_v4().to_string()
+            }
             AgentConnectInfo::SessionsManager(connect_info)
             | AgentConnectInfo::OperatorSessionsManager(connect_info) => {
                 connect_info.user_session_id.clone()
@@ -974,7 +1011,56 @@ impl MirrordExecution {
             child: Some(proxy_process),
             uses_operator: connect_info.is_operator(),
             share_link,
+            remote_args,
         })
+    }
+
+    /// The target task's arguments, `argv[1..]`, when `mirrord up` asked for them with
+    /// [`APPEND_REMOTE_ARGV_ENV`].
+    ///
+    /// The workload companion serves the task's command line as [`APP_ARGV_ENV`], which
+    /// [`LayerConfig::sanitize_remote_env`] keeps out of the application's environment, so it is
+    /// asked for on its own, unaffected by the `feature.env` settings. A task whose companion
+    /// serves no command line gets nothing appended, with a warning. The arguments can carry
+    /// secrets, so neither they nor the variable's value are logged.
+    async fn remote_args<P: Progress>(
+        config: &LayerConfig,
+        connection: &mut MirrordClient,
+        progress: &P,
+    ) -> CliResult<RemoteArgs> {
+        if std::env::var_os(APPEND_REMOTE_ARGV_ENV).is_none() {
+            return Ok(RemoteArgs::default());
+        }
+
+        let communication_timeout =
+            Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
+        let argv = Self::get_remote_env(
+            connection,
+            HashSet::new(),
+            HashSet::from([APP_ARGV_ENV.to_owned()]),
+            communication_timeout,
+        )
+        .await?
+        .remove(APP_ARGV_ENV);
+
+        match argv.map(|argv| serde_json::from_str::<Vec<String>>(&argv)) {
+            Some(Ok(argv)) => Ok(RemoteArgs(argv.into_iter().skip(1).collect())),
+            Some(Err(_)) => {
+                progress.warning(
+                    "the task's command line is not a JSON array of strings, so its arguments \
+                     are not appended to the command",
+                );
+                Ok(RemoteArgs::default())
+            }
+            None => {
+                progress.warning(
+                    "the task's mirrord companion doesn't serve its command line, so its \
+                     arguments are not appended to the command. Update the mirrord companion of \
+                     the task to get them.",
+                );
+                Ok(RemoteArgs::default())
+            }
+        }
     }
 
     /// Construct filter and retrieve remote environment from the connected agent using

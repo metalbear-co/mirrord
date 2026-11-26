@@ -55,6 +55,7 @@ use k8s_openapi::api::core::v1::PodSpec;
 use mirrord_analytics::CollectAnalytics;
 use mirrord_config_derive::MirrordConfig;
 use mirrord_protocol::tcp::JsonPathQuery;
+use mirrord_remote_layer_protocol::APP_ARGV_ENV;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use target::Target;
@@ -894,7 +895,13 @@ impl LayerConfig {
     }
 
     /// Applies enabled fixes to environment variables fetched from the target.
+    ///
+    /// Always removes [`APP_ARGV_ENV`], the task's command line that a serverless workload
+    /// companion serves along with the environment. It isn't part of the task's environment, and
+    /// `mirrord exec` asks for it on its own when `mirrord up` wants the task's arguments.
     pub fn sanitize_remote_env(&self, env: &mut HashMap<String, String>) {
+        env.remove(APP_ARGV_ENV);
+
         if self.feature.magic.java_agents
             && let Some(options) = env.get_mut(JAVA_OPTIONS_ENV)
             && let Some(sanitized) = without_java_agents(options)

@@ -19,6 +19,7 @@ mirrord-command = { path = "../command", features = ["tokio"] }
 mirrord-config = { path = "../config" }
 mirrord-kube = { path = "../kube" }
 mirrord-progress = { path = "../progress/" }
+mirrord-sessions-manager-client.workspace = true
 
 futures.workspace = true
 itertools.workspace = true
@@ -44,6 +45,7 @@ yamlpatch.workspace = true
 yamlpath.workspace = true
 tera.workspace = true
 textwrap.workspace = true
+tokio-stream.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal", "process"] }

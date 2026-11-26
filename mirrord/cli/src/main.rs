@@ -532,8 +532,16 @@ async fn exec_process(
     debug_hold.hand_to_program(&mut env_vars);
 
     // Put original executable in argv[0] even if actually running patched version.
-    let binary_args = std::iter::once(&args.binary)
+    let user_command = std::iter::once(&args.binary)
         .chain(args.binary_args.iter())
+        .map(Clone::clone)
+        .collect::<Vec<_>>();
+    // The target task's arguments can carry secrets, so they are counted in messages, never
+    // shown.
+    let appended_args = execution_info.remote_args.0.len();
+    let binary_args = user_command
+        .iter()
+        .chain(execution_info.remote_args.0.iter())
         .map(Clone::clone)
         .collect::<Vec<_>>();
 
@@ -548,11 +556,16 @@ async fn exec_process(
     let mut sub_progress_config = progress.subtask("config summary");
     print_config(
         &sub_progress_config,
-        Some(&binary_args),
+        Some(&user_command),
         &config,
         config_file_path,
         execution_info.uses_operator,
     );
+    if appended_args > 0 {
+        sub_progress_config.info(&format!(
+            "Appending the target task's {appended_args} arguments to the command"
+        ));
+    }
     sub_progress_config.success(Some("config summary"));
 
     let run_count = user_data
@@ -611,6 +624,8 @@ async fn exec_process(
     run_process_with_mirrord(
         binary,
         binary_args,
+        #[cfg(not(target_os = "windows"))]
+        appended_args,
         env_vars,
         #[cfg(target_os = "windows")]
         args.injection_method,
@@ -661,6 +676,8 @@ fn process_which(binary: &str) -> Result<std::path::PathBuf, CliError> {
 async fn run_process_with_mirrord<P: Progress>(
     binary: String,
     binary_args: Vec<String>,
+    // How many of `binary_args`, at their end, are the target task's, which stay out of errors.
+    appended_args: usize,
     mut env_vars: HashMap<String, String>,
     _did_sip_patch: bool,
     mut progress: P,
@@ -737,7 +754,9 @@ async fn run_process_with_mirrord<P: Progress>(
                 return Err(CliError::ExecveE2Big);
             }
 
-            Err(CliError::BinaryExecuteFailed(binary, binary_args))
+            let mut user_args = binary_args;
+            user_args.truncate(user_args.len().saturating_sub(appended_args));
+            Err(CliError::BinaryExecuteFailed(binary, user_args))
         }
     }
 }

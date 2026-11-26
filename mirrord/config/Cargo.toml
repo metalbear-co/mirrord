@@ -21,6 +21,7 @@ mirrord-config-derive = { path = "./derive" }
 mirrord-command = { path = "../command" }
 mirrord-analytics = { path = "../analytics" }
 mirrord-protocol = { path = "../protocol" }
+mirrord-remote-layer-protocol.workspace = true
 # We don't need the `eval` feature here because we only want to compile
 # the `jaq` code to verify its validity, but we don't need to run it here.
 mirrord-jaq = { path = "../jaq", default-features = false}

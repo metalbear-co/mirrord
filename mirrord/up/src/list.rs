@@ -233,6 +233,7 @@ impl ListedTarget {
             TargetConfig::Specified(SpecifiedTarget {
                 path: Some(path),
                 namespace,
+                ..
             }) => Self::Path {
                 path: path.to_string(),
                 namespace: namespace.clone(),
@@ -240,6 +241,7 @@ impl ListedTarget {
             TargetConfig::Specified(SpecifiedTarget {
                 path: None,
                 namespace,
+                ..
             }) => Self::Inferred {
                 namespace: namespace.clone(),
             },

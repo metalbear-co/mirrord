@@ -1,5 +1,3 @@
-#![cfg(unix)]
-
 use std::net::SocketAddr;
 
 use bincode::{Decode, Encode};
