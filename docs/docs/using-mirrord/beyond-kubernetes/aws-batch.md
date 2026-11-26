@@ -41,6 +41,7 @@ Throughout this guide, replace:
 | `<YOUR_APPLICATION_IMAGE>` | Your job's existing image |
 | `<JOB_ROLE_ARN>` | The ARN of the job definition's job role |
 | `<EXECUTION_ROLE_ARN>` | The ARN of the job definition's execution role, which Fargate uses to pull images and send logs |
+| `<LOG_GROUP>`, `<REGION>` | An existing CloudWatch Logs group for the jobs' logs, and its region |
 | `<CLUSTER_ENDPOINT>`, `<CLUSTER_NAME>`, `<CLUSTER_CA_DATA>` | The EKS cluster's endpoint, name and certificate authority, collected as in [Add the connection variables](ecs-operator-hosted.md#add-the-connection-variables) |
 | `<OPERATOR_ROLE_NAME>` | The name of the IAM role in the Operator's `sa.roleArn` |
 
@@ -168,7 +169,7 @@ A job authenticates as its job role, the way an ECS task authenticates as its ta
 
 ### A complete job definition
 
-This job definition, for Fargate and with `containerProperties`, has everything mirrord needs: the job and execution roles, the bootstrap's variables and the connection variables, and a route to a public EKS endpoint. Add your own command and settings, and register it with `aws batch register-job-definition --cli-input-json file://job-definition.json`:
+This job definition, for Fargate and with `containerProperties`, has everything mirrord needs: the job and execution roles, the bootstrap's variables and the connection variables, a route to a public EKS endpoint, and a log group where the companion's messages go. Add your own command and settings, and register it with `aws batch register-job-definition --cli-input-json file://job-definition.json`:
 
 ```json
 {
@@ -184,6 +185,14 @@ This job definition, for Fargate and with `containerProperties`, has everything 
       { "type": "MEMORY", "value": "2048" }
     ],
     "networkConfiguration": { "assignPublicIp": "ENABLED" },
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "<LOG_GROUP>",
+        "awslogs-region": "<REGION>",
+        "awslogs-stream-prefix": "<YOUR_SERVICE_NAME>"
+      }
+    },
     "environment": [
       { "name": "LD_PRELOAD", "value": "/opt/mirrord/lib/libmirrord_remote_bootstrap.so" },
       { "name": "MIRRORD_REMOTE_SERVICE", "value": "<YOUR_SERVICE_NAME>" },
@@ -196,15 +205,13 @@ This job definition, for Fargate and with `containerProperties`, has everything 
 }
 ```
 
-Fargate needs the execution role to pull the image from Amazon ECR and to send the job's logs to CloudWatch Logs; the AWS managed policy `AmazonECSTaskExecutionRolePolicy` covers both. Size `resourceRequirements` for your job: mirrord's companion runs inside the application container and needs little of it. With a private EKS endpoint, leave out `networkConfiguration`, or set `assignPublicIp` to `DISABLED`, and reach the endpoint as in step 3.
+Fargate needs the execution role to pull the image from Amazon ECR and to send the job's logs to CloudWatch Logs; the AWS managed policy `AmazonECSTaskExecutionRolePolicy` covers both. Size `resourceRequirements` for your job: mirrord's companion runs inside the application container and needs little of it. With a private EKS endpoint, leave out `networkConfiguration`, or set `assignPublicIp` to `DISABLED`, and reach the endpoint as in step 3. Without `logConfiguration`, Batch sends the logs to the `/aws/batch/job` group.
 
 ---
 
 ## Selecting jobs by their tags
 
-A serverless target selects jobs by their tags: the tags given to the job when it was submitted, with `--tags` of `aws batch submit-job` (`tags` in `SubmitJob`), as `DescribeJobs` returns them. Select jobs with two settings:
-
-<!-- TODO(INT-1093): verify on AWS whether a job definition's tags, alone or with `propagateTags`, also show up in a job's tags in `DescribeJobs`, and document the answer here. -->
+A serverless target selects jobs by their tags: the tags given to the job when it was submitted, with `--tags` of `aws batch submit-job` (`tags` in `SubmitJob`), as `DescribeJobs` returns them. Only those tags count. The job definition's tags never become a job's tags, so a filter can't match them. `propagateTags`, on the job definition or on `submit-job`, copies the job's and the job definition's tags to the job's ECS task only, not to the job. Select jobs with two settings:
 
 * `target.tag_filter`: a mapping of tag names to regexes. A job matches when it has every named tag, each with a value its regex matches. A regex matches anywhere in the value, so anchor it with `^` and `$` to match the whole value.
 * `target.jq_filter`: a jq program run on `{"tags": {"<name>": "<value>", ...}}`. A job matches when the program outputs `true`.
@@ -321,12 +328,14 @@ A replaced job counts the time its local process runs against its attempt durati
 * **Replacing is `mirrord up` only.** `mirrord exec` and the IDE extensions attach to a job without replacing it.
 * **No limit on matched jobs.** A `mirrord up` service starts a local process for every job its filters match.
 * **No reason for a miss.** When no job matches, mirrord says that it waits, and the Operator logs a warning when it can't read a job's tags.
-* **Operator restarts.** A replaced job survives an Operator restart only if mirrord connects to it again within 30 seconds. Otherwise, it ends with `214`, and `mirrord up` says that the job was lost and stops its local process. `mirrord up` registers again on its own.
+* **Operator restarts.** A replaced job survives an Operator restart only if mirrord connects to it again within 30 seconds. Otherwise, it ends with `214`, and `mirrord up` says that the job was lost and stops its local process. `mirrord up` registers again on its own. A job held across an Operator restart logs `ERROR mirrord_protocol_io: failed to receive message` lines with `CloseFrame` code `4003` and reason `revoked`, as the restart closes its connections. They're expected there.
 * **No `--debug`.** `mirrord up --debug` can't name a service with a filter.
 * **Not shown in `mirrord ui`.** The matched jobs aren't listed there.
 * All the [limitations of workloads outside Kubernetes](README.md#limitations) also apply.
 
 ## Troubleshooting
+
+The bootstrap prints only its errors by default. With `MIRRORD_LOG=warn` in the application container's `environment`, it also prints its warnings, such as `The workload-companion exited before it was ready, the application starts without mirrord`.
 
 | Symptom | Likely cause |
 | --- | --- |
