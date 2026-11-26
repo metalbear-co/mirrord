@@ -131,12 +131,13 @@ kube.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tower-test.workspace = true
+# The tests of `preview sync` and `preview wake` script the operator's end of their websockets.
+tokio-tungstenite.workspace = true
 
 # Only the tests of `preview sync`, which runs on Unix alone, use these.
 [target.'cfg(unix)'.dev-dependencies]
 flate2.workspace = true
 tar.workspace = true
-tokio-tungstenite.workspace = true
 
 [features]
 windows_build = []

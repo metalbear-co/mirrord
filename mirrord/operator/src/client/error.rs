@@ -8,6 +8,7 @@ use thiserror::Error;
 use tower::retry::backoff::InvalidBackoff;
 
 use crate::{
+    client::access::OperatorAccessError,
     crd::{NewOperatorFeature, kube_target::UnknownTargetType},
     types::PaidFeatureGate,
 };
@@ -66,6 +67,11 @@ pub enum OperatorApiError {
 
     #[error("failed to create Kubernetes client: {0}")]
     CreateKubeClient(KubeApiError),
+
+    /// The saved operator login cannot be used, so no client is built. The message is written for
+    /// the developer and names the login to end or renew.
+    #[error(transparent)]
+    Access(#[from] OperatorAccessError),
 
     #[error("{operation} failed: {error}")]
     KubeError {

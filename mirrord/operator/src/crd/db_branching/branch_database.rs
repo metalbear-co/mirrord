@@ -1161,6 +1161,7 @@ pub struct ItemCopyConfig {
     /// Data that matches the filter will be copied.
     /// For SQL databases this is a WHERE clause (e.g. `username = 'alice'`).
     /// For MongoDB this is a JSON query document (e.g. `{"username": "alice"}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
 }
 

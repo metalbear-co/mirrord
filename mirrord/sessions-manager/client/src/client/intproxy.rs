@@ -29,6 +29,11 @@ pub struct SessionsManagerConnectInfo {
     pub user_session_id: String,
     /// Optional replica constraint for routing this connection.
     pub replica_filter: Option<ReplicaId>,
+    /// The operator login URL the run started under when the sessions-manager is the one the
+    /// operator hosts; `None` for a kubeconfig or a standalone sessions-manager. A reconnect reads
+    /// that login, not the one selected now, so the session stays with its operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_url: Option<String>,
 }
 
 /// Connects an intproxy to the data plane assigned by sessions-manager.

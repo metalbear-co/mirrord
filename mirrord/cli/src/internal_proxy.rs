@@ -8,7 +8,7 @@
 //! (previously was solved using envguard which wasn't good enough)
 //!
 //! The proxy will either directly connect to an existing agent (currently only used for tests),
-//! or let the [`OperatorApi`](mirrord_operator::client::OperatorApi) handle the connection.
+//! or let the [`OperatorApi`] handle the connection.
 
 pub(crate) mod db_portforwards;
 
@@ -41,7 +41,7 @@ use mirrord_intproxy::{
     },
     timings::{CallTimingsRecorder, SessionLabel},
 };
-use mirrord_kube::api::kubernetes::create_kube_config_with_context;
+use mirrord_operator::client::{NoClientCert, OperatorAccess, OperatorApi};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
 use mirrord_session_monitor_protocol::SessionInfo;
 #[cfg(not(target_os = "windows"))]
@@ -65,7 +65,6 @@ use crate::{
     diagnose::timings::timings_dir,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
-    kube::kube_client_from_layer_config,
     util::create_listen_socket,
 };
 
@@ -187,23 +186,26 @@ pub(crate) fn install_ci_shutdown_handler(
     Ok(IntProxyShutdown { token, signal_task })
 }
 
-/// The kube context the session's client uses: the configured one, or the one that is current
-/// in the kubeconfig at this moment.
+/// The namespace and the kube context the session's client resolved, as `(namespace, context)`.
 ///
-/// What records a session keeps this next to it, so the session's cluster can still be told
-/// after the current context has moved on.
-async fn session_kube_context(config: &LayerConfig) -> Option<String> {
-    match create_kube_config_with_context(
-        config.accept_invalid_certificates,
-        config.kubeconfig.as_deref(),
-        config.kube_context.clone(),
-    )
-    .await
-    {
-        Ok((_, context)) => context,
+/// The records a session keeps (the session monitor's, the call timings summary) take these from
+/// here, so the session's cluster can still be told after the current context has moved on.
+async fn session_kube_route(config: &LayerConfig) -> (Option<String>, Option<String>) {
+    // The same resolution the run used: a login has no kube context and no current namespace
+    // of its own, so the session shows the operator's defaults rather than an unrelated kubeconfig.
+    match OperatorApi::<NoClientCert>::base_client_config(config).await {
+        Ok((_, OperatorAccess::Login(_))) => (config.target.namespace.clone(), None),
+        Ok((kube_config, OperatorAccess::Kubeconfig { context })) => (
+            config
+                .target
+                .namespace
+                .clone()
+                .or(Some(kube_config.default_namespace)),
+            context,
+        ),
         Err(error) => {
             tracing::debug!(?error, "Failed to resolve the session's kube context");
-            config.kube_context.clone()
+            (config.target.namespace.clone(), config.kube_context.clone())
         }
     }
 }
@@ -215,7 +217,7 @@ async fn session_kube_context(config: &LayerConfig) -> Option<String> {
 /// [`Weak::new()`].
 async fn start_session_monitor(
     config: &LayerConfig,
-    context: Option<String>,
+    (namespace, context): (Option<String>, Option<String>),
     is_operator: bool,
     reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
     session_id: String,
@@ -241,20 +243,6 @@ async fn start_session_monitor(
         .as_ref()
         .map(|t| t.to_string())
         .unwrap_or_else(|| "targetless".to_owned());
-
-    let namespace = match &config.target.namespace {
-        Some(namespace) => Some(namespace.clone()),
-        None => match kube_client_from_layer_config(config).await {
-            Ok(client) => Some(client.default_namespace().to_owned()),
-            Err(error) => {
-                tracing::debug!(
-                    ?error,
-                    "Failed to resolve effective namespace from kube client"
-                );
-                None
-            }
-        },
-    };
 
     let config_value = config_as_diff(config);
 
@@ -399,10 +387,10 @@ pub(crate) async fn proxy(
     // ends, while the session monitor receives a weak reference for chaos metrics.
     let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
     // Resolved once, so everything that records the session names the same context.
-    let kube_context = session_kube_context(&config).await;
+    let (session_namespace, kube_context) = session_kube_route(&config).await;
     let (monitor_tx, chaos_rx) = start_session_monitor(
         &config,
-        kube_context.clone(),
+        (session_namespace, kube_context.clone()),
         is_operator,
         Arc::downgrade(&chaos_reporter),
         local_session_id.clone(),
