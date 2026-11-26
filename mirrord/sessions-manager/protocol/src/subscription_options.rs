@@ -202,9 +202,15 @@ pub enum GateState {
     /// The application waits for a verdict, which the sessions-manager sends as an
     /// [`Admission`](crate::Admission) event on this subscription.
     Pending,
-    /// The task was replaced: its own code won't run. Sent by an agent registering again, for
-    /// example after the operator restarted, so the task stays out of every pairing that doesn't
-    /// name its replica.
+    /// The task was replaced: its own code won't run. The agent registers again with it as soon
+    /// as the process holding the task's application confirmed the hold, and keeps sending it on
+    /// every later registration, for example after the operator restarted, so the task stays out
+    /// of every pairing that doesn't name its replica.
+    ///
+    /// The sessions-manager sends [`TaskMatch::replace`](crate::TaskMatch::replace) to the
+    /// developer's watch only on a registration with this state. Until then the agent may still
+    /// withdraw the gate, because its application started its own code meanwhile, and no local
+    /// process may start for it.
     Held,
     /// A state this version doesn't know, sent by a newer agent. Read as no gate at all: the
     /// sessions-manager sends no verdict, and the task decides on its own, as it does with an

@@ -1,16 +1,18 @@
+use std::sync::Arc;
+
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_sessions_manager_protocol::{
-    AgentIdentity, AgentSubscriptionOptions, AssignmentId, AwsBatchJob, ConnectionAssignment,
-    ReplicaId, ServiceScope,
+    AdmissionVerdict, AgentIdentity, AgentSubscriptionOptions, AssignmentId, AwsBatchJob,
+    ConnectionAssignment, GateState, ReplicaId, ServiceScope,
 };
 use tokio::{
-    sync::mpsc,
+    sync::{Notify, mpsc},
     task::{JoinHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    assignments::{DeduplicatingAssignmentSubscriber, SharedAgentOptions},
+    assignments::{AgentEvent, DeduplicatingAssignmentSubscriber, SharedAgentOptions},
     client::validate_scope,
     error::SessionsManagerClientError,
     retry::with_deadline,
@@ -19,6 +21,9 @@ use crate::{
 
 const CONNECTIONS_QUEUE_CAPACITY: usize = 1024;
 const QUEUE_WARNING_THRESHOLDS: &[usize] = &[128, 256, 512, 1024];
+/// The sessions-manager sends one verdict per registration with a pending gate, and the agent acts
+/// on the first, so only a burst of re-registrations ever queues more than one.
+const VERDICTS_QUEUE_CAPACITY: usize = 8;
 
 /// Registers an agent replica with sessions-manager and runs its control plane in the
 /// background, handing out each data-plane connection it establishes.
@@ -26,8 +31,45 @@ const QUEUE_WARNING_THRESHOLDS: &[usize] = &[128, 256, 512, 1024];
 /// Dropping the client shuts the control plane down.
 pub struct AgentClient {
     receiver: mpsc::Receiver<Connection<Agent>>,
+    /// Handed out once by [`Self::take_gate`], and only to a client started with a gate.
+    gate: Option<AgentGate>,
     cancellation: CancellationToken,
     task: Option<JoinHandle<Result<(), SessionsManagerClientError>>>,
+}
+
+/// The admission gate of an agent whose task's application waits before `main` for a verdict.
+///
+/// The agent decides what its gate is, and this handle is how it tells the sessions-manager and
+/// hears the verdict. The sessions-manager reads the gate state only when the agent registers, so
+/// [`Self::set`] applies from the next subscription on, and [`Self::resubscribe`] makes that
+/// happen at once when the sessions-manager has to learn the new state: when the agent withdraws
+/// its gate, so that a hold the sessions-manager took on the task ends, and when the task is held,
+/// since the sessions-manager tells the developer's watch that it replaced the task only once the
+/// agent registers with [`GateState::Held`].
+pub struct AgentGate {
+    options: SharedAgentOptions,
+    /// [`AgentGate`] --requests to register again--> [`AgentClient::run_loop`]
+    resubscribe: Arc<Notify>,
+    /// [`AgentClient::run_loop`] --verdicts received on the assignments subscription--> agent
+    verdict_rx: mpsc::Receiver<AdmissionVerdict>,
+}
+
+impl AgentGate {
+    /// The next verdict the sessions-manager sent, in the order they came. [`None`] once the
+    /// control plane is over.
+    pub async fn verdict(&mut self) -> Option<AdmissionVerdict> {
+        self.verdict_rx.recv().await
+    }
+
+    /// Sets the gate state that every later subscription sends, reconnects included.
+    pub fn set(&self, gate: Option<GateState>) {
+        self.options.set_gate(gate);
+    }
+
+    /// Makes the control plane register again now, with the state [`Self::set`] last set.
+    pub fn resubscribe(&self) {
+        self.resubscribe.notify_one();
+    }
 }
 
 impl AgentClient {
@@ -37,38 +79,57 @@ impl AgentClient {
     /// the operator can look up the job's tags and select the task by them. Without it the agent
     /// registers as agents that predate task selection do, and never matches a selector.
     ///
+    /// `gate` is the state of the task's admission gate the first subscription sends. With one,
+    /// [`Self::take_gate`] hands out the [`AgentGate`] that receives the verdict and changes the
+    /// state. Without one, the agent registers as agents that predate admission do.
+    ///
     /// `cancellation` shuts the control plane down when fired, as does [`Self::shutdown`].
     pub fn start<T: SessionsManagerTransport>(
         scope: ServiceScope,
         replica_id: ReplicaId,
         aws_batch: Option<AwsBatchJob>,
+        gate: Option<GateState>,
         transport: T,
         cancellation: impl Into<Option<CancellationToken>>,
     ) -> Result<Self, SessionsManagerClientError> {
         let scope = validate_scope(scope)?;
         let identity = AgentIdentity::new(replica_id);
-        let options = SharedAgentOptions::new(AgentSubscriptionOptions {
-            aws_batch,
-            gate: None,
-        });
+        let options = SharedAgentOptions::new(AgentSubscriptionOptions { aws_batch, gate });
         let cancellation = cancellation.into().unwrap_or_default();
         let (sender, receiver) = mpsc::channel(CONNECTIONS_QUEUE_CAPACITY);
         let queue = QueueSender { sender };
+        let resubscribe = Arc::new(Notify::new());
+        let (verdict_tx, verdict_rx) = mpsc::channel(VERDICTS_QUEUE_CAPACITY);
 
         let task = tokio::spawn(Self::run(
             transport,
             scope,
             identity,
-            options,
+            options.clone(),
             queue,
+            GateEvents {
+                resubscribe: resubscribe.clone(),
+                verdict_tx,
+            },
             cancellation.clone(),
         ));
 
         Ok(Self {
             receiver,
+            gate: gate.map(|_| AgentGate {
+                options,
+                resubscribe,
+                verdict_rx,
+            }),
             cancellation,
             task: Some(task),
         })
+    }
+
+    /// The handle to the admission gate, for a client started with one. [`None`] for a client
+    /// started without a gate, and after the first call.
+    pub fn take_gate(&mut self) -> Option<AgentGate> {
+        self.gate.take()
     }
 
     /// Shuts the control plane down when `cancellation` fires, by dropping [`Self::run_loop`]
@@ -83,11 +144,12 @@ impl AgentClient {
         identity: AgentIdentity,
         options: SharedAgentOptions,
         queue: QueueSender,
+        gate_events: GateEvents,
         cancellation: CancellationToken,
     ) -> Result<(), SessionsManagerClientError> {
         tokio::select! {
             _ = cancellation.cancelled() => Ok(()),
-            result = Self::run_loop(transport, scope, identity, options, queue) => {
+            result = Self::run_loop(transport, scope, identity, options, queue, gate_events) => {
                 result
             }
         }
@@ -99,6 +161,7 @@ impl AgentClient {
         identity: AgentIdentity,
         options: SharedAgentOptions,
         queue: QueueSender,
+        gate_events: GateEvents,
     ) -> Result<(), SessionsManagerClientError> {
         let mut dataplane_upgrades = JoinSet::new();
         let mut assignments_subscriber =
@@ -106,14 +169,25 @@ impl AgentClient {
 
         let result = loop {
             tokio::select! {
-                assignment = assignments_subscriber.next() => match assignment {
-                    Ok(assignment) => Self::spawn_upgrade_task(
+                event = assignments_subscriber.next() => match event {
+                    Ok(AgentEvent::Assignment(assignment)) => Self::spawn_upgrade_task(
                         &mut dataplane_upgrades,
                         transport.clone(),
                         assignment,
                     ),
+                    Ok(AgentEvent::Admission(verdict)) => {
+                        if gate_events.verdict_tx.try_send(verdict).is_err() {
+                            tracing::debug!(
+                                ?verdict,
+                                "dropping an admission verdict the agent doesn't wait for"
+                            );
+                        }
+                    }
                     Err(error) => break Err(error),
                 },
+                _ = gate_events.resubscribe.notified() => {
+                    assignments_subscriber.resubscribe().await;
+                }
                 result = dataplane_upgrades.join_next(), if !dataplane_upgrades.is_empty() => {
                     match result {
                         Some(Ok((assignment_id, Ok(connection)))) => {
@@ -215,6 +289,15 @@ fn warn_if_threshold_reached(depth: usize, context: &str) {
     if QUEUE_WARNING_THRESHOLDS.contains(&depth) {
         tracing::warn!(depth, "sessions-manager data-plane {}", context);
     }
+}
+
+/// The control plane's side of an [`AgentGate`].
+struct GateEvents {
+    /// [`AgentGate`] --requests to register again--> [`AgentClient::run_loop`]
+    resubscribe: Arc<Notify>,
+    /// [`AgentClient::run_loop`] --verdicts received on the assignments subscription-->
+    /// [`AgentGate`]
+    verdict_tx: mpsc::Sender<AdmissionVerdict>,
 }
 
 enum QueueSendError {
@@ -354,6 +437,7 @@ mod tests {
             scope,
             "replica-a".to_owned().into(),
             None,
+            None,
             MockTransport::default(),
             None,
         )
@@ -385,6 +469,7 @@ mod tests {
         let mut client = AgentClient::start(
             scope,
             "replica-a".to_owned().into(),
+            None,
             None,
             transport.clone(),
             None,

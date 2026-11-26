@@ -1,3 +1,4 @@
+mod admission;
 mod argv;
 mod aws_batch;
 mod error;
@@ -5,6 +6,7 @@ mod handoff;
 mod incoming;
 mod replica_id;
 
+pub(crate) use admission::{Admission, AdmissionHandle};
 pub(crate) use argv::application_argv;
 pub(crate) use aws_batch::aws_batch_job;
 pub(crate) use error::RemoteIncomingHandoffError;

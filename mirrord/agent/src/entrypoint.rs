@@ -31,8 +31,8 @@ use mirrord_protocol::{ClientMessage, DaemonMessage, GetEnvVarsRequest};
 use mirrord_protocol_io::{Agent, Connection};
 use mirrord_remote_layer_protocol::APP_ARGV_ENV;
 use mirrord_sessions_manager_client::{
-    AgentClient, AwsBatchJob, DirectTransport, EndpointSource, OperatorTransport, ReplicaId,
-    ServiceScope, SessionsManagerClientError, SessionsManagerEndpoint,
+    AgentClient, AwsBatchJob, DirectTransport, EndpointSource, GateState, OperatorTransport,
+    ReplicaId, ServiceScope, SessionsManagerClientError, SessionsManagerEndpoint,
 };
 use socket2::SockRef;
 use tokio::{
@@ -75,7 +75,8 @@ use crate::{
         target_root::TargetRoot,
     },
     workload_companion::{
-        WorkloadCompanionIngress, application_argv, aws_batch_job, resolve_replica_id,
+        Admission, AdmissionHandle, WorkloadCompanionIngress, application_argv, aws_batch_job,
+        resolve_replica_id,
     },
 };
 
@@ -198,6 +199,9 @@ struct State {
     /// Lives here rather than in a client handler, because the keys the operator registers apply
     /// to every request the agent redirects, whichever client is stealing it.
     share_links: ShareLinkKeys,
+    /// Set in a workload companion whose task waits for admission, so that its client
+    /// connections can own and end a replaced task.
+    admission: Option<AdmissionHandle>,
 }
 
 impl State {
@@ -304,6 +308,7 @@ impl State {
             network_runtime: Arc::new(network_runtime),
             target_root,
             share_links: Default::default(),
+            admission: None,
         })
     }
 
@@ -356,6 +361,10 @@ impl State {
         cancellation_token: CancellationToken,
     ) -> u32 {
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+        let _admission_connection = self
+            .admission
+            .as_ref()
+            .map(|admission| admission.client_connected(client_id));
 
         let connection = ClientConnection::from_protocol_connection(connection, client_id);
         let result = ClientConnectionHandler::new(client_id, connection, tasks, self)
@@ -799,16 +808,21 @@ impl ClientConnectionHandler {
             ClientMessage::ShareLink(update) => {
                 self.share_links.update(update);
             }
-            // The agent replaces no task, so it has nothing to end with the code.
-            ClientMessage::ReplacedTaskExit(code) => {
-                debug!(
+            ClientMessage::ReplacedTaskExit(code) => match &self.state.admission {
+                Some(admission) => admission.replaced_task_exit(self.id, code),
+                // Only a workload companion whose task waits for admission can have its task
+                // replaced, so there is nothing to end with the code.
+                None => debug!(
                     client_id = self.id,
                     code, "ignoring the exit code of a replaced task"
-                );
-            }
-            ClientMessage::ReplacedTaskOwner => {
-                debug!(client_id = self.id, "ignoring the owner of a replaced task");
-            }
+                ),
+            },
+            ClientMessage::ReplacedTaskOwner => match &self.state.admission {
+                Some(admission) => admission.replaced_task_owner(self.id),
+                // Only a workload companion whose task waits for admission can have its task
+                // replaced, so there is no task to own.
+                None => debug!(client_id = self.id, "ignoring the owner of a replaced task"),
+            },
         }
 
         Ok(true)
@@ -1302,11 +1316,13 @@ fn select_sessions_manager(
 /// identity. The caller must poll the token-refresh future alongside the companion loop so a
 /// permanent authentication failure stops the companion with an error.
 ///
-/// `aws_batch` goes to either sessions-manager, but only the operator selects tasks by it.
+/// `aws_batch` and `gate` go to either sessions-manager, but only the operator selects tasks by the
+/// one and admits them through the other.
 async fn start_control_plane(
     scope: ServiceScope,
     replica_id: ReplicaId,
     aws_batch: Option<AwsBatchJob>,
+    gate: Option<GateState>,
     cancellation_token: CancellationToken,
 ) -> AgentResult<(
     AgentClient,
@@ -1349,6 +1365,7 @@ async fn start_control_plane(
                     scope,
                     replica_id,
                     aws_batch,
+                    gate,
                     DirectTransport::from_env(endpoint)?,
                     cancellation_token,
                 )?,
@@ -1380,7 +1397,14 @@ async fn start_control_plane(
     let token_refresh = Box::pin(async move { factory.run_token_refresh(connection).await });
 
     Ok((
-        AgentClient::start(scope, replica_id, aws_batch, transport, cancellation_token)?,
+        AgentClient::start(
+            scope,
+            replica_id,
+            aws_batch,
+            gate,
+            transport,
+            cancellation_token,
+        )?,
         Some(token_refresh),
     ))
 }
@@ -1394,7 +1418,7 @@ async fn start_control_plane(
 /// `sessions-manager <-> workload companion <-> remote layer`
 #[tracing::instrument(level = Level::TRACE, ret, err)]
 async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
-    let state = State::new(&args).await?;
+    let mut state = State::new(&args).await?;
     let cancellation_token = CancellationToken::new();
 
     if let Some(metrics_address) = args.metrics {
@@ -1444,6 +1468,9 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
         .await
         .ok_or::<AgentError>(SessionsManagerClientError::MissingAgentReplicaID.into())?;
     let aws_batch = aws_batch_job(&replica_id);
+    // Connected right before registering, since the deadline for a verdict runs from here.
+    let admission = Admission::connect().await;
+    state.admission = admission.as_ref().map(Admission::handle);
     let (mut control_plane, mut token_refresh) = select! {
         _ = cancellation_token.cancelled() => return Ok(()),
         result = start_control_plane(
@@ -1453,11 +1480,17 @@ async fn start_agent_workload_companion(args: Args) -> AgentResult<()> {
             },
             replica_id.into(),
             aws_batch,
+            admission.as_ref().map(|_| GateState::Pending),
             cancellation_token.clone(),
         ) => result?,
     };
 
     let mut join_set: JoinSet<()> = JoinSet::new();
+    if let Some(admission) = admission
+        && let Some(gate) = control_plane.take_gate()
+    {
+        join_set.spawn(admission.run(gate));
+    }
 
     let result: AgentResult<()> = loop {
         select! {
