@@ -48,10 +48,10 @@
   <text x="80" y="93" font-size="14" font-weight="700" fill="#232141">Create a preview</text>
   <text x="60" y="116" font-size="12.5"  fill="#333344" xml:space="preserve">Inputs: a container image in a registry, a mirrord.json file,</text>
   <text x="60" y="133" font-size="12.5"  fill="#333344" xml:space="preserve">and an optional env key.</text>
-  <text x="60" y="158" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">mirrord preview start</text>
-  <text x="60" y="175" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --config-file &lt;mirrord.json&gt;</text>
-  <text x="60" y="192" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image &lt;code-image&gt;</text>
-  <text x="60" y="209" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --key &lt;env-key&gt;   (optional)</text>
+  <text x="60" y="158" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">mirrord preview start \</text>
+  <text x="60" y="175" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --config-file &lt;mirrord.json&gt; \</text>
+  <text x="60" y="192" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image &lt;code-image&gt; \</text>
+  <text x="60" y="209" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --key &lt;env-key&gt;   # optional</text>
 
   <!-- mirrord.json -->
   <rect x="40" y="246" width="500" height="196" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
@@ -79,7 +79,7 @@
   <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session is ready</text>
   <text x="60" y="561" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">info:</text>
   <text x="60" y="578" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * key: &lt;env-key&gt;</text>
-  <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * session: preview-session-cars-service-&lt;id&gt;</text>
+  <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * session: deployment-cars-service-&lt;env-key&gt;-&lt;id&gt;</text>
 
   <!-- Staging cluster -->
   <path d="M600.0 588.9 A72.8 72.8 0 0 1 600.0 497.8 A72.8 72.8 0 0 1 600.0 406.8 A72.8 72.8 0 0 1 600.0 315.7 A72.8 72.8 0 0 1 600.0 224.7 A72.8 72.8 0 0 1 600.0 133.6 A72.7 72.7 0 0 1 690.9 20.0 A85.9 85.9 0 0 1 844.2 20.0 A73.2 73.2 0 0 1 974.9 20.0 A70.0 70.0 0 0 1 1099.8 20.0 A56.8 56.8 0 0 1 1168.0 110.9 A79.4 79.4 0 0 1 1168.0 206.5 A79.4 79.4 0 0 1 1168.0 302.1 A79.4 79.4 0 0 1 1168.0 397.7 A79.4 79.4 0 0 1 1168.0 493.3 A79.4 79.4 0 0 1 1168.0 588.9 A36.1 36.1 0 0 1 1116.9 640.0 A181.2 181.2 0 0 1 952.2 640.0 A199.9 199.9 0 0 1 770.4 640.0 A131.2 131.2 0 0 1 651.1 640.0 A36.1 36.1 0 0 1 600.0 588.9 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>

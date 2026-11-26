@@ -85,7 +85,7 @@ Example output:
   info:
     * key: <key>
     * namespace: <namespace>
-    * session: preview-session-<target>-<id>
+    * session: <target>-<key>-<id>
     * preview URL: https://<slug>.<shareDomain>
 ```
 
