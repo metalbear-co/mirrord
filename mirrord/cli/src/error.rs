@@ -1246,6 +1246,11 @@ pub(crate) enum CliError {
     #[error(transparent)]
     Mcp(#[from] McpError),
 
+    /// Errors produced by the `mirrord lambda` command, and by wrapping a Lambda target's command.
+    #[error(transparent)]
+    #[diagnostic(help("{GENERAL_HELP}"))]
+    Lambda(#[from] crate::lambda::LambdaError),
+
     /// Errors produced by the `mirrord login` command.
     #[error(transparent)]
     #[diagnostic(transparent)]
