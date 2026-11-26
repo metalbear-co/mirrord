@@ -50,6 +50,7 @@ As an agent, also use it on your own when a mirrord session is running and you c
 
 - mirrord `3.292.0` or newer. Check with `mirrord --version`.
 - A running local session (`mirrord exec`) that already received the request. If the list is empty, the request has to be triggered once the usual way.
+- The session's local API, which is on unless the mirrord config sets `"api": false`. Without it, the session keeps no requests.
 
 ## Commands
 
@@ -119,7 +120,7 @@ Add `--format json` to any of them when you parse the output.
 
 | Symptom | Cause and fix |
 |---|---|
-| `no local mirrord session is running` | Start the application with `mirrord exec` first. |
+| `no local mirrord session is running` | Start the application with `mirrord exec` first. If it is running, its mirrord config sets `"api": false`: remove that, start the session again and trigger the request again. |
 | `several local sessions are running` | Pass `--session-id` with one of the listed ids. |
 | The list is empty | The session has not received an HTTP request yet. Trigger one once. Health probes are never listed. |
 | `can't be replayed: its body is larger than the session keeps` | The body is over 32 KiB. Trigger the request the usual way. |
