@@ -35,6 +35,7 @@ pub mod db_branching;
 pub mod kafka;
 pub mod kube_target;
 pub mod label_selector;
+pub mod namespaces;
 pub mod preview;
 pub mod profile;
 pub mod queue_filter;
@@ -929,6 +930,11 @@ pub enum NewOperatorFeature {
     /// without reaching the profile CRDs.
     ProfileRoutes,
 
+    /// This operator lists the namespaces the caller may list targets in under its own API
+    /// ([`namespaces::namespaces_api_path`]), so a CLI logged in through SSO can offer them in
+    /// `mirrord ls` without reading the cluster's namespaces, which its URL does not reach.
+    NamespaceRoutes,
+
     /// This operator resolves `configmap` connection param sources for DB branching (values
     /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
     /// Gated so the CLI fails fast on older operators: the branch CRD schema lets the new
@@ -1195,6 +1201,7 @@ impl NewOperatorFeature {
             | Self::KeylessCi
             | Self::LicenseGateReporting
             | Self::ProfileRoutes
+            | Self::NamespaceRoutes
             | Self::Unknown => None,
         }
     }
@@ -1267,6 +1274,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::NatsQueueSplitting => "NATS queue splitting",
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
             NewOperatorFeature::ProfileRoutes => "mirrord profiles served by the operator API",
+            NewOperatorFeature::NamespaceRoutes => "namespace listing served by the operator API",
             NewOperatorFeature::PreviewAutoQueueSplitting => {
                 "default queue splitting in preview environments"
             }
@@ -1414,6 +1422,7 @@ impl NewOperatorFeature {
             NewOperatorFeature::SsoLogin => &["sso.enabled"],
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::ProfileRoutes
+            | NewOperatorFeature::NamespaceRoutes
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
             | NewOperatorFeature::SessionManagement
