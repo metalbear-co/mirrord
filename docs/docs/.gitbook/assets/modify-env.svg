@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -45 1200 713" width="1200" height="713" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -45 1200 723" width="1200" height="723" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">Preview environment modification workflow</title>
-  <desc id="d">Step 4: on your laptop, you run mirrord preview start with a different target, users-service, a container image from a registry, and the env key of the existing preview. The CLI prints the same env key and a new preview session. Step 5: another temporary preview pod, for users-service, starts with a TTL. The cars-service and users-service preview pods form one isolated preview environment, and traffic to both services is filtered by the same env key.</desc>
+  <desc id="d">Step 4: after you change cars-service, you run mirrord preview up again with a new image for cars-service and the same key, pr-123. Step 5: mirrord preview up replaces the cars-service preview with a new session that runs the new image. users-service gets no image, so the command skips it and its preview keeps running until its TTL expires. Requests that carry the header baggage: mirrord-session=pr-123 still go to both preview pods.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -33,44 +33,44 @@
 <path d="M243.9,427.5c11.1-4.4,16-21.4,12-40.5c-0.3-0.3-0.6-0.6-0.9-0.9c2,15.9-1.2,29.1-7.6,30.2c-7.3,1.5-15.8-12-19-29.7 c-0.3-1.2-0.3-2.3-0.6-3.5h0.9l12.5-1.5l-11.1-6.5l-3.2-1.8c0-10,2.3-17.6,6.4-20.3c-1.2-2.1-2.3-4.1-3.8-6.2 c-7-4.1-13.7-5-19.3-2.6c-6.4,2.6-11.1,9.4-12.8,18.8c-1.8,10-0.3,22,4.4,33.5c3.5,8.8,8.5,16.4,14,22c0,0,0.3,0,0.3,0.3 c0.6,0.3,1.2,0.9,1.5,1.2C225.9,427.2,235.8,430.7,243.9,427.5z M204.9,319.1c11.1,2.1,19.3,9.7,24.2,15.6c2,2.3,3.8,5,5.5,7.3 c0,0,0,0,0,0.3c2,2.9,3.5,5.6,5,8.2c1.2,1.8,2,3.5,3.2,5.6l1.5,2.3c3.8,6.5,7.6,12.9,12.3,19.1c5.8,7.3,11.7,12.9,18.4,16.7 c-0.6-5-2-9.7-4.4-14.1c-0.9-1.8-0.3-3.8,1.5-4.7c1.8-0.9,3.8-0.3,4.7,1.5c2.9,5.6,4.7,11.5,5,17.9c0,0.9,0.3,3.5-1.5,5.6 c-1.2,1.2-2.6,1.8-4.1,1.8c-1.5,0-2.9-0.6-4.4-1.2c-2.6-1.5-5.3-3.2-7.9-5.3c1.7,18.5-5,34.1-17.5,39.3c-2.9,1.2-5.8,1.8-8.8,1.8 c-8.5,0-17.5-4.4-25.7-11.7c-11.4-6.2-21.6-14.7-29.5-24.7c-1.2-1.5-0.9-3.8,0.6-5c1.5-1.2,3.8-0.9,5,0.6c3.2,4.1,7,7.9,11.1,11.5 c-1.2-2.3-2.6-5-3.5-7.6c-5-12.6-6.7-25.8-4.7-37.3c2-12,8.2-20.6,16.9-24.1c4.1-1.8,8.8-2.1,13.7-1.2c-4.4-4.4-10.2-8.8-17.5-10 c-8.2-1.5-16.6,1.5-20.4,7.3c-1.2,1.5-3.2,2.1-4.7,0.9c-1.5-1.2-2-3.2-0.9-4.7C183,320.9,194.1,317.1,204.9,319.1z"/>
     </symbol>
   </defs>
-  <rect x="0" y="-45" width="1200" height="713" fill="#ffffff"/>
+  <rect x="0" y="-45" width="1200" height="723" fill="#ffffff"/>
 
-  <!-- Your machine -->
-  <rect x="20" y="20" width="540" height="620" rx="10" fill="#232141"/><rect x="28" y="28" width="524" height="604" rx="4" fill="#F5F4FE"/>
-  <path d="M20 640 H560 L576 654 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="645" x2="550" y2="645" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="274" y="648.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="654" width="580" height="5" rx="2.5" fill="#232141"/>
-  <text x="40" y="48" font-size="15" font-weight="700" fill="#4a44b8">Your machine</text>
+  <!-- Your machine or CI runner -->
+  <rect x="20" y="20" width="540" height="630" rx="10" fill="#232141"/><rect x="28" y="28" width="524" height="614" rx="4" fill="#F5F4FE"/>
+  <path d="M20 650 H560 L576 664 H4 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="30" y1="655" x2="550" y2="655" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="274" y="658.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="0" y="664" width="580" height="5" rx="2.5" fill="#232141"/>
+  <text x="40" y="48" font-size="15" font-weight="700" fill="#4a44b8">Your machine or CI</text>
 
   <!-- The command -->
   <rect x="40" y="64" width="500" height="166" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
   <use href="#mirrord" x="504" y="76" width="22" height="40"/>
   <circle cx="62" cy="88" r="11" fill="#756DF3"/>
   <text x="62" y="92.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
-  <text x="80" y="93" font-size="14" font-weight="700" fill="#232141">Add a service to the preview</text>
-  <text x="60" y="116" font-size="12.5"  fill="#333344" xml:space="preserve">Inputs: a different target, a container image in a registry,</text>
-  <text x="60" y="133" font-size="12.5"  fill="#333344" xml:space="preserve">and the env key of the existing preview.</text>
-  <text x="60" y="158" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">mirrord preview start</text>
-  <text x="60" y="175" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --target users-service</text>
-  <text x="60" y="192" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image &lt;code-image&gt;</text>
-  <text x="60" y="209" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --key &lt;env-key&gt;</text>
+  <text x="80" y="93" font-size="14" font-weight="700" fill="#232141">Update a preview</text>
+  <text x="60" y="116" font-size="12.5" fill="#333344" text-anchor="start">Inputs: a new image for the service you changed, and the key from</text>
+  <text x="60" y="133" font-size="12.5" fill="#333344" text-anchor="start">step 1. A key that came from the git branch needs no --key here.</text>
+  <text x="60" y="158" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">mirrord preview up</text>
+  <text x="60" y="175" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --image cars-service=&lt;new-cars-image&gt;</text>
+  <text x="60" y="192" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  --key pr-123</text>
 
-  <!-- Same env key -->
+  <!-- Second box -->
   <rect x="40" y="246" width="500" height="196" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="60" y="275" font-size="14" font-weight="700" fill="#232141">Same env key, new target</text>
-  <text x="60" y="302" font-size="12.5"  fill="#333344" xml:space="preserve">The key is the one from step 1, so the new preview pod</text>
-  <text x="60" y="319" font-size="12.5"  fill="#333344" xml:space="preserve">joins the same preview environment.</text>
-  <text x="60" y="336" font-size="12.5"  fill="#333344" xml:space="preserve"></text>
-  <text x="60" y="353" font-size="12.5"  fill="#333344" xml:space="preserve">Requests that carry the key go to the preview pods,</text>
-  <text x="60" y="370" font-size="12.5"  fill="#333344" xml:space="preserve">not to the deployed services.</text>
+  <text x="60" y="275" font-size="14" font-weight="700" fill="#232141">Same key, one new image</text>
+  <text x="60" y="302" font-size="12.5" fill="#333344" text-anchor="start">The cars-service preview gets a new session that runs the new</text>
+  <text x="60" y="319" font-size="12.5" fill="#333344" text-anchor="start">image. The old session is deleted first.</text>
+  <text x="60" y="353" font-size="12.5" fill="#333344" text-anchor="start">users-service gets no image, so the command skips it. Its preview</text>
+  <text x="60" y="370" font-size="12.5" fill="#333344" text-anchor="start">keeps running until its TTL expires.</text>
+  <text x="60" y="404" font-size="12.5" fill="#333344" text-anchor="start">Requests that carry the key still go to both previews.</text>
 
   <!-- CLI output -->
-  <rect x="40" y="458" width="500" height="166" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
-  <text x="60" y="484" font-size="14" font-weight="700" fill="#232141">Output</text>
-  <text x="60" y="510" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">✓ mirrord preview start</text>
-  <text x="60" y="527" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session resource created</text>
-  <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ preview session is ready</text>
-  <text x="60" y="561" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">info:</text>
-  <text x="60" y="578" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * key: &lt;env-key&gt;</text>
-  <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  * session: preview-session-users-service-&lt;id&gt;</text>
+  <rect x="40" y="458" width="500" height="176" rx="12" fill="#ffffff" stroke="#232141" stroke-width="2"/>
+  <text x="60" y="484" font-size="14" font-weight="700" fill="#232141">Output (abridged)</text>
+  <text x="60" y="510" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">* users-service: no image (`--image users-service=</text>
+  <text x="60" y="527" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  &lt;image ref&gt;` or `MIRRORD_USERS_SERVICE_IMAGE`), skipped</text>
+  <text x="60" y="544" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">! cars-service: replacing existing session &#x27;&lt;old session&gt;&#x27;</text>
+  <text x="60" y="561" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">✓ preview environments are up</text>
+  <text x="60" y="578" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">  ✓ cars-service: preview environment is ready</text>
+  <text x="60" y="595" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    …</text>
+  <text x="60" y="612" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" xml:space="preserve">    ✓ cars-service: key: pr-123</text>
 
   <!-- Staging cluster -->
   <path d="M600.0 588.9 A72.8 72.8 0 0 1 600.0 497.8 A72.8 72.8 0 0 1 600.0 406.8 A72.8 72.8 0 0 1 600.0 315.7 A72.8 72.8 0 0 1 600.0 224.7 A72.8 72.8 0 0 1 600.0 133.6 A72.7 72.7 0 0 1 690.9 20.0 A85.9 85.9 0 0 1 844.2 20.0 A73.2 73.2 0 0 1 974.9 20.0 A70.0 70.0 0 0 1 1099.8 20.0 A56.8 56.8 0 0 1 1168.0 110.9 A79.4 79.4 0 0 1 1168.0 206.5 A79.4 79.4 0 0 1 1168.0 302.1 A79.4 79.4 0 0 1 1168.0 397.7 A79.4 79.4 0 0 1 1168.0 493.3 A79.4 79.4 0 0 1 1168.0 588.9 A36.1 36.1 0 0 1 1116.9 640.0 A181.2 181.2 0 0 1 952.2 640.0 A199.9 199.9 0 0 1 770.4 640.0 A131.2 131.2 0 0 1 651.1 640.0 A36.1 36.1 0 0 1 600.0 588.9 Z" fill="#F5F4FE" stroke="#756DF3" stroke-width="2" stroke-linejoin="round"/>
@@ -89,30 +89,29 @@
   <!-- Preview environment -->
   <rect x="620" y="250" width="540" height="300" rx="14" fill="#ffffff" stroke="#756DF3" stroke-width="2"/>
   <text x="640" y="278" font-size="15" font-weight="700" fill="#4a44b8">Preview environment</text>
-  <text x="640" y="296" font-size="12.5" fill="#333344">one env key</text>
+  <text x="640" y="296" font-size="12.5" fill="#333344">one key: pr-123</text>
 
   <!-- Filtered traffic to the preview pods -->
-  <line x1="800" y1="160" x2="800" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="810" y="196" font-size="12.5" fill="#4a44b8" text-anchor="start">filtered by</text>
-  <text x="810" y="212" font-size="12.5" fill="#4a44b8" text-anchor="start">env key</text>
+  <line x1="820" y1="160" x2="820" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <line x1="1050" y1="160" x2="1050" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="935" y="190" font-size="12.5" fill="#4a44b8" text-anchor="middle">filtered by the header</text>
+  <text x="935" y="207" font-size="12.5" fill="#4a44b8" text-anchor="middle" font-family="Menlo, Consolas, monospace">baggage:</text>
+  <text x="935" y="224" font-size="12.5" fill="#4a44b8" text-anchor="middle" font-family="Menlo, Consolas, monospace">mirrord-session=pr-123</text>
   <rect x="640" y="340" width="220" height="110" rx="10" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
   <circle cx="662" cy="364" r="11" fill="#756DF3"/>
-  <text x="662" y="368.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+  <text x="662" y="368.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
   <text x="680" y="369" font-size="14" font-weight="700" fill="#232141">cars-service preview</text>
-  <text x="750" y="398" font-size="12.5" fill="#333344" text-anchor="middle">temporary pod, your image</text>
+  <text x="750" y="398" font-size="12.5" fill="#333344" text-anchor="middle">new session, new image</text>
   <text x="750" y="416" font-size="12.5" fill="#333344" text-anchor="middle">lives until the TTL expires</text>
-  <line x1="1120" y1="160" x2="1120" y2="336" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="1110" y="196" font-size="12.5" fill="#4a44b8" text-anchor="end">filtered by</text>
-  <text x="1110" y="212" font-size="12.5" fill="#4a44b8" text-anchor="end">env key</text>
   <rect x="920" y="340" width="220" height="110" rx="10" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
   <circle cx="942" cy="364" r="11" fill="#756DF3"/>
-  <text x="942" y="368.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+  <text x="942" y="368.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
   <text x="960" y="369" font-size="14" font-weight="700" fill="#232141">users-service preview</text>
-  <text x="1030" y="398" font-size="12.5" fill="#333344" text-anchor="middle">temporary pod, your image</text>
+  <text x="1030" y="398" font-size="12.5" fill="#333344" text-anchor="middle">unchanged from step 3</text>
   <text x="1030" y="416" font-size="12.5" fill="#333344" text-anchor="middle">lives until the TTL expires</text>
-  <text x="890" y="500" font-size="12.5" fill="#333344" text-anchor="middle">Both preview pods form one isolated environment.</text>
+  <text x="890" y="500" font-size="12.5" fill="#333344" text-anchor="middle">Both previews stay under one key.</text>
 
-  <!-- The CLI starts the preview -->
+  <!-- The CLI starts the previews -->
   <polyline points="540,140 580,140 580,395 616,395" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
 
   <!-- Kubernetes logos: what runs in the cluster -->
