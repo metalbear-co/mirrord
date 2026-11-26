@@ -482,6 +482,7 @@ mod tests {
                 }),
                 ttl_secs: 3600,
                 replicas: 1,
+                autoscale: None,
                 incoming: None,
                 queue_splitting: None,
                 db_branching: None,

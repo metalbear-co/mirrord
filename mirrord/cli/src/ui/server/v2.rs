@@ -716,6 +716,7 @@ mod tests {
                     container: "api".to_owned(),
                 }),
                 image: "ghcr.io/acme/api:1".to_owned(),
+                wake_timeout_secs: None,
             },
         );
         view.metadata.uid = Some("uid-1".to_owned());
@@ -729,6 +730,8 @@ mod tests {
     fn preview_message_severity_serializes_lowercase() {
         let response = PreviewDetailResponse::from_view(
             preview_view(Some(PreviewEnvStatus {
+                copy: false,
+                primary_uid: None,
                 phase: None,
                 message: Some(PreviewMessage {
                     kind: PreviewMessageKind::Degraded,
@@ -775,6 +778,8 @@ mod tests {
 
         let response = PreviewDetailResponse::from_view(
             preview_view(Some(PreviewEnvStatus {
+                copy: false,
+                primary_uid: None,
                 phase: None,
                 message: None,
                 clusters,
@@ -827,6 +832,8 @@ mod tests {
     fn a_failed_log_read_still_reports_the_message() {
         let response = PreviewDetailResponse::from_view(
             preview_view(Some(PreviewEnvStatus {
+                copy: false,
+                primary_uid: None,
                 phase: None,
                 message: Some(PreviewMessage {
                     kind: PreviewMessageKind::Failure,
