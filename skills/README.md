@@ -2,7 +2,7 @@
 
 # mirrord Agent Skills
 
-Thirteen [Agent Skills](https://agentskills.io/home) that close the AI agent feedback loop on Kubernetes and beyond it: real env vars, real DNS, real network, real traffic, real databases, real Kafka, real Temporal task queues, real preview environments, multi-service local sessions, real failure conditions, the header propagation that lets a session follow a request across services and queues, the discovery of what your cluster already propagates so a filter can use it, and the same local workflow for services running outside Kubernetes, such as Amazon ECS. Built by [MetalBear](https://metalbear.com/) to be used with [mirrord](https://metalbear.com/mirrord/).
+Fourteen [Agent Skills](https://agentskills.io/home) that close the AI agent feedback loop on Kubernetes and beyond it: real env vars, real DNS, real network, real traffic, real databases, real Kafka, real Temporal task queues, real preview environments, multi-service local sessions, real failure conditions, replays of the requests that a session received, the header propagation that lets a session follow a request across services and queues, the discovery of what your cluster already propagates so a filter can use it, and the same local workflow for services running outside Kubernetes, such as Amazon ECS. Built by [MetalBear](https://metalbear.com/) to be used with [mirrord](https://metalbear.com/mirrord/).
 
 AI coding agents work from what's in their context window. Your Kubernetes cluster is full of state that isn't. These skills teach your agent how and when to use mirrord so the code it writes against your live infrastructure stops being informed guessing.
 
@@ -21,7 +21,7 @@ AI coding agents work from what's in their context window. Your Kubernetes clust
 codex plugin marketplace add metalbear-co/skills
 ```
 
-Then install the `mirrord` plugin from `/plugins`. All thirteen skills come with it.
+Then install the `mirrord` plugin from `/plugins`. All fourteen skills come with it.
 
 ### OpenCode
 
@@ -31,7 +31,7 @@ OpenCode loads skills natively, so there's nothing to register — the skills ju
 curl -fsSL https://raw.githubusercontent.com/metalbear-co/skills/main/install.sh | sh
 ```
 
-That writes the thirteen skill folders into `~/.config/opencode/skills/`. Restart OpenCode and they're available. Re-run it any time to update — it replaces the `mirrord-*` folders and leaves your other skills alone.
+That writes the fourteen skill folders into `~/.config/opencode/skills/`. Restart OpenCode and they're available. Re-run it any time to update — it replaces the `mirrord-*` folders and leaves your other skills alone.
 
 The same script serves any agent that reads a skills directory:
 
@@ -52,7 +52,7 @@ npx skills add metalbear-co/skills
 
 The [`ports/`](./ports/) directory carries the same core content as drop-in rules files: copy [`ports/github-copilot/copilot-instructions.md`](./ports/github-copilot/copilot-instructions.md) into your repo's `.github/`, or [`ports/cline/.clinerules`](./ports/cline/.clinerules) into your repo root. Want another format? [Open an issue](https://github.com/metalbear-co/skills/issues) with the target you'd like next.
 
-## The thirteen skills
+## The fourteen skills
 
 | Skill | What it does |
 |-------|--------------|
@@ -67,6 +67,7 @@ The [`ports/`](./ports/) directory carries the same core content as drop-in rule
 | [mirrord-up](./skills/mirrord-up/) | Multiple concurrent local sessions from `mirrord-up.yaml` — compose-style multi-service debugging. |
 | [mirrord-beyond](./skills/mirrord-beyond/) | mirrord Beyond: wire Amazon ECS services to mirrord through MetalBear Cloud, and run a local service against them with `mirrord up`. |
 | [mirrord-chaos](./skills/mirrord-chaos/) | Chaos testing: inject latency or connection errors into a session's outgoing traffic via per-session rules, interactively or in CI. |
+| [mirrord-replay](./skills/mirrord-replay/) | Replay: send an HTTP request that a session already received to the local application again, to check a code change without triggering the request through the cluster. |
 | [mirrord-header-propagation](./skills/mirrord-header-propagation/) | Propagate the `baggage` session header across HTTP, gRPC, queues (Kafka, RabbitMQ, SQS, Pub/Sub, ...) and storage-triggered flows, reusing existing OpenTelemetry/Datadog where possible, and report the flows that still drop it. |
 | [mirrord-propagation-discovery](./skills/mirrord-propagation-discovery/) | Scan live traffic with `mirrord dump` to find which identifier (baggage, request id, tenant id, trace id, JWT claim, cookie, path, body field) survives every hop and is yours to set, then produce the matching `http_filter` and a per-hop report of where it's dropped. |
 

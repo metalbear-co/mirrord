@@ -1,6 +1,6 @@
 # Ports: mirrord rules for agents that don't consume Agent Skills
 
-The thirteen skills in this repo are the richest way to teach an agent mirrord. If your agent consumes [Agent Skills](https://agentskills.io) (Claude Code, Codex, OpenCode, Cursor, Gemini CLI, and others), use those — see the [main README](../README.md).
+The fourteen skills in this repo are the richest way to teach an agent mirrord. If your agent consumes [Agent Skills](https://agentskills.io) (Claude Code, Codex, OpenCode, Cursor, Gemini CLI, and others), use those — see the [main README](../README.md).
 
 These ports carry the same core content as drop-in rules files for agents that don't:
 

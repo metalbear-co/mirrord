@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "mirrord",
     "shortDescription": "Guide AI agents through real Kubernetes workflows with mirrord.",
-    "longDescription": "Bundle thirteen official mirrord skills for quickstart setup, config generation, operator rollout, CI integration, database branching, Kafka queue splitting, Temporal task queue splitting, preview environments, multi-service mirrord up sessions, mirrord Beyond setup for Amazon ECS through MetalBear Cloud, chaos testing, baggage header propagation across services and queues, and discovery of a filterable request identifier from live traffic with mirrord dump.",
+    "longDescription": "Bundle fourteen official mirrord skills for quickstart setup, config generation, operator rollout, CI integration, database branching, Kafka queue splitting, Temporal task queue splitting, preview environments, multi-service mirrord up sessions, mirrord Beyond setup for Amazon ECS through MetalBear Cloud, chaos testing, replay of the HTTP requests that a session received, baggage header propagation across services and queues, and discovery of a filterable request identifier from live traffic with mirrord dump.",
     "developerName": "MetalBear",
     "category": "Development",
     "capabilities": [
