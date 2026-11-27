@@ -73,7 +73,7 @@ You may also pass `--pretty` to pretty-print each event.
 
 ## Namespaces
 
-With CLI `3.292.0` or newer, `mirrord subscribe` streams the events of one namespace, with or without a key. Unless you pass a flag, it's the namespace that `mirrord exec` targets by default: `target.namespace` from your mirrord config, then the namespace of your kubeconfig context, which is `default` when the context names none. The status line on stderr names it:
+With CLI `3.293.0` or newer, `mirrord subscribe` streams the events of one namespace, with or without a key. Unless you pass a flag, it's the namespace that `mirrord exec` targets by default: `target.namespace` from your mirrord config, then the namespace of your kubeconfig context, which is `default` when the context names none. The status line on stderr names it:
 
 ```text
 Subscribed to events for every session in namespace `my-ns` (use -A for every namespace).
@@ -82,11 +82,11 @@ Subscribed to events for every session in namespace `my-ns` (use -A for every na
 * `-n/--namespace <NAMESPACE>` streams the events of that namespace.
 * `-A/--all-namespaces` streams the events of every namespace, as an older CLI does.
 
-A keyed subscription only receives its session's events if the session's target is in the namespace, so for a session in another namespace, pass that namespace with `-n`, or pass `-A`. An operator older than `3.237.0` ignores the namespace and streams the events of every namespace, even though the status line names one.
+A keyed subscription only receives its session's events if the session's target is in the namespace, so for a session in another namespace, pass that namespace with `-n`, or pass `-A`. An operator older than `3.240.0` ignores the namespace and streams the events of every namespace, even though the status line names one.
 
 ## Who sees which events
 
-With operator `3.237.0` or newer, you only receive the events of targets that your Kubernetes user may `get`. The operator checks this for each event's target workload, with the same check that `mirrord exec` makes when a session starts. For a `targetless` session it checks `get` on the namespace, and for a label target it checks `list` on the namespace's pods. Subscribing also needs `watch` on `events.operator.metalbear.co`.
+With operator `3.240.0` or newer, you only receive the events of targets that your Kubernetes user may `get`. The operator checks this for each event's target workload, with the same check that `mirrord exec` makes when a session starts. For a `targetless` session it checks `get` on the namespace, and for a label target it checks `list` on the namespace's pods. Subscribing also needs `watch` on `events.operator.metalbear.co`.
 
 Being allowed to `get` a target isn't the same as being able to run `mirrord exec` against it, because `mirrord exec` also needs `proxy` on the operator's `targets`. A per-target Role, such as the ones that the map form of the chart's `roleNamespaces` creates, grants `proxy` only on the targets that it lists. So a user who also has broader read access, such as the `view` ClusterRole, sees the events of workloads that they can't run `mirrord exec` against.
 
@@ -121,7 +121,7 @@ This covers queue messages only. An HTTP request that matches no filter never re
 
 Every event has the same envelope — `service_name` (the intercepted workload), `timestamp`, and a `data` payload. On a [multi-cluster](multi-cluster.md) Primary the envelope also has `cluster`, see [Multi-cluster](#multi-cluster) below.
 
-With operator `3.237.0` or newer, the envelope also names the intercepted workload in full:
+With operator `3.240.0` or newer, the envelope also names the intercepted workload in full:
 
 * `namespace` is the namespace of the target.
 * `target` is the target as mirrord names it: `kind` is the target type that `--target` takes (`deployment`, `rollout`, `pod`, `statefulset`, `job`, `cronjob`, `service`, `replicaset`, `label` or `targetless`), and `name` is the workload's name, the label selector for a label target, or empty for `targetless`. For example, `"target": {"kind": "deployment", "name": "my-app"}` is the `deployment/my-app` that you would pass to `mirrord exec --target`.
@@ -384,7 +384,7 @@ If the Primary cannot reach a Workload cluster's operator, the stream keeps goin
 
 This needs operator `3.219.0` or newer on the Primary. Each Workload cluster's operator must let the Primary watch `events`: the chart grants this through the `mirrord-operator-envoy-remote` role as of the same version, so a Workload cluster on an older chart shows up as `cluster_unavailable` with a message naming the missing permission until its chart is upgraded. Subscribing directly to a Workload cluster still works and streams that cluster alone, without a `cluster` field.
 
-The Primary makes the [access check](#who-sees-which-events) for the events of every cluster, against its own RBAC. A Workload cluster's operator older than `3.237.0` doesn't name the `namespace` and `target` of its events, so a Primary on `3.237.0` or newer can't check them and leaves them out of the stream. Upgrade the Workload clusters' operators along with the Primary to keep seeing their events.
+The Primary makes the [access check](#who-sees-which-events) for the events of every cluster, against its own RBAC. A Workload cluster's operator older than `3.240.0` doesn't name the `namespace` and `target` of its events, so a Primary on `3.240.0` or newer can't check them and leaves them out of the stream. Upgrade the Workload clusters' operators along with the Primary to keep seeing their events.
 
 A copy-target session on a Primary names its copy pod as the target of its HTTP events when it steals from the copy pod, which it does for a `Job` or `CronJob` target, with `scale_down`, or with a queue split. So seeing those events needs `get` on the copy pod, for example `get` on pods in the namespace. On a single cluster, the same events name the original target, so `get` on that target is enough. The session's queue events name the original target in both cases.
 
@@ -401,7 +401,7 @@ The `subscribe` arguments `--session-key-field` and `--unmatched` correspond to 
 
 Omit `session_key` to receive every session's events on one stream. Such a stream always names the session each event belongs to, regardless of the value of `include_session_key`. This is what `mirrord subscribe` without `--key` and the [local UI](local-ui.md) do.
 
-Add `namespace=<namespace>` to receive only the events of targets in that namespace, and omit it for every namespace. `mirrord subscribe` sends it unless you pass `-A`, and the local UI sends the namespace picked in its Events tab. An operator older than `3.237.0` ignores it.
+Add `namespace=<namespace>` to receive only the events of targets in that namespace, and omit it for every namespace. `mirrord subscribe` sends it unless you pass `-A`, and the local UI sends the namespace picked in its Events tab. An operator older than `3.240.0` ignores it.
 
 On a multi-cluster Primary, `local_only=true` limits the stream to events the Primary intercepted itself, leaving out the Workload clusters. The Primary sets it on the streams it relays, so you normally never need it.
 
