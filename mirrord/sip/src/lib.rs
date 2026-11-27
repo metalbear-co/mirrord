@@ -997,6 +997,12 @@ mod main {
     /// repeated runs of the same version stay cheap.
     pub fn extract_sip_binaries(binaries_dir: &Path, archive_bytes: &[u8]) -> Result<()> {
         let version_path = &*MIRRORD_BINARIES_VERSION_PATH_BUF;
+        if let Some(parent) = version_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Serializes concurrent sessions; lives outside `binaries_dir`, which extraction replaces.
+        let lock = std::fs::File::create(version_path.with_extension("lock"))?;
+        fs4::fs_std::FileExt::lock_exclusive(&lock)?;
         match std::fs::read_to_string(version_path) {
             Ok(extracted) if extracted == APPLE_UTILS_VERSION => {
                 debug!(
@@ -1028,9 +1034,6 @@ mod main {
         let mut archive = tar::Archive::new(gz);
         archive.unpack(binaries_dir)?;
 
-        if let Some(parent) = version_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         std::fs::write(version_path, APPLE_UTILS_VERSION)?;
         Ok(())
     }
