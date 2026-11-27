@@ -6,11 +6,13 @@ import {
   MINIMUM_OPERATOR_VERSION,
   clearEvents,
   collectEvents,
+  setNamespace,
   setRouting,
   useEvents,
 } from './eventsStore'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { ContextPicker } from './components/ContextNamespacePicker'
+import ContextNamespacePicker from './components/ContextNamespacePicker'
+import { useNamespaces } from './namespacesStore'
 import SubscribeEventsTable from './components/SubscribeEventsTable'
 import { strings } from './strings'
 
@@ -21,8 +23,13 @@ interface EventsProps {
 
 function Events({ active }: EventsProps) {
   const selection = useKubeContexts()
-  const { rows, unavailable, streaming, routing } = useEvents()
+  const { rows, unavailable, streaming, routing, namespace } = useEvents()
   const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const {
+    namespaces,
+    loading: namespacesLoading,
+    error: namespacesError,
+  } = useNamespaces(selection.selected ?? selection.current)
 
   useEffect(() => {
     setSlot(document.getElementById('mirrord-topbar-slot'))
@@ -36,11 +43,17 @@ function Events({ active }: EventsProps) {
     active &&
     slot &&
     createPortal(
-      <ContextPicker
+      <ContextNamespacePicker
         contexts={selection.contexts}
         currentContext={selection.current}
         selectedContext={selection.selected}
         onSelectContext={selectKubeContext}
+        namespaces={namespaces}
+        selectedNamespace={namespace}
+        onSelectNamespace={setNamespace}
+        namespacesLoading={namespacesLoading}
+        namespacesError={namespacesError}
+        alwaysVisible
       />,
       slot,
     )

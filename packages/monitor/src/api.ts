@@ -116,13 +116,17 @@ export const api = {
   eventStreamUrl: (sessionId: string): string =>
     withToken(`/api/v2/local/sessions/${encodeURIComponent(sessionId)}/events`),
 
+  // `namespace` narrows the stream to one namespace, and `null` streams every namespace that the
+  // kube user may see.
   operatorEventStreamUrl: (
     context: string | null,
     unmatched: boolean,
+    namespace: string | null,
   ): string => {
     const params = new URLSearchParams()
     if (context) params.set('context', context)
     if (unmatched) params.set('unmatched', 'true')
+    if (namespace) params.set('namespace', namespace)
     const query = params.toString()
     return withToken(`/api/v2/operator/events${query ? `?${query}` : ''}`)
   },

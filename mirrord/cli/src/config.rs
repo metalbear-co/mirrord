@@ -429,6 +429,7 @@ impl Commands {
             },
             Self::Session(args) => args.common.all_namespaces,
             Self::Kill(args) => args.common.all_namespaces,
+            Self::Subscribe(args) => args.all_namespaces,
             _ => false,
         }
     }
@@ -1603,10 +1604,23 @@ pub(super) struct SubscribeArgs {
     ///
     /// Matches the `--key` value passed to `mirrord exec` for the session whose interception
     /// events you want to observe. Can also be set via the `key` field in the mirrord config file.
-    /// Omit it to stream every session's events, each naming its session (operator 3.210.0 or
-    /// newer).
+    /// Omit it to stream the events of every session in the namespace (see `--namespace`), each
+    /// naming its session (operator 3.210.0 or newer).
     #[arg(short = 'k', long)]
     pub key: Option<String>,
+
+    /// Namespace whose events to stream. Defaults to `target.namespace` from the mirrord config,
+    /// then the kubeconfig's default namespace. Use -A to stream every namespace.
+    #[arg(
+        short = 'n',
+        long = "namespace",
+        value_parser = clap::builder::NonEmptyStringValueParser::new()
+    )]
+    pub namespace: Option<String>,
+
+    /// Stream the events of every namespace.
+    #[arg(short = 'A', long = "all-namespaces", conflicts_with = "namespace")]
+    pub all_namespaces: bool,
 
     /// Pretty-print each event instead of emitting compact, one-line JSON.
     #[arg(long)]
@@ -1631,6 +1645,10 @@ impl SubscribeArgs {
 
         if let Some(key) = &self.key {
             envs.insert(env_key::MIRRORD_ENV_KEY.as_ref(), key.as_ref());
+        }
+
+        if let Some(namespace) = &self.namespace {
+            envs.insert("MIRRORD_TARGET_NAMESPACE".as_ref(), namespace.as_ref());
         }
 
         if let Some(ctx) = &self.context {

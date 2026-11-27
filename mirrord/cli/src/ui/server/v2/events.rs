@@ -73,28 +73,33 @@ pub(super) struct EventsQuery {
     /// Also deliver queue messages that matched no session's filter.
     #[serde(default)]
     pub unmatched: bool,
+
+    /// The namespace whose events to stream. Absent means every namespace that the kube user may
+    /// see.
+    pub namespace: Option<String>,
 }
 
 /// Serves `GET /api/v2/operator/events`, streaming every live session's interception events for
-/// `context`.
+/// `context`, in `namespace` when the query names one.
 pub(super) async fn operator_events_sse(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Response {
     let (tx, rx) = sse_channel();
 
-    tokio::spawn(forward(state, query.context, query.unmatched, tx));
+    tokio::spawn(forward(state, query, tx));
 
     sse_response(rx)
 }
 
 /// Reports reachability whenever it changes and forwards the operator's events, reopening the
 /// stream when it ends, until the subscriber goes away.
-async fn forward(state: AppState, context: Option<String>, unmatched: bool, tx: SseSender) {
+async fn forward(state: AppState, query: EventsQuery, tx: SseSender) {
+    let context = query.context.as_deref();
     let mut reported = None;
 
     loop {
-        let status = Reachability::of(&fetch_operator(&state, context.as_deref()).await);
+        let status = Reachability::of(&fetch_operator(&state, context).await);
         let supported = status.supported;
 
         if reported.as_ref() != Some(&status) {
@@ -111,7 +116,7 @@ async fn forward(state: AppState, context: Option<String>, unmatched: bool, tx: 
         }
 
         if supported {
-            stream_events(&state, context.as_deref(), unmatched, &tx).await;
+            stream_events(&state, &query, &tx).await;
         }
 
         tokio::select! {
@@ -121,9 +126,10 @@ async fn forward(state: AppState, context: Option<String>, unmatched: bool, tx: 
     }
 }
 
-/// Forwards every session's events until the operator closes the stream or the subscriber
-/// disconnects.
-async fn stream_events(state: &AppState, context: Option<&str>, unmatched: bool, tx: &SseSender) {
+/// Forwards the events of every session in `query.namespace` (every namespace when it's absent)
+/// until the operator closes the stream or the subscriber disconnects.
+async fn stream_events(state: &AppState, query: &EventsQuery, tx: &SseSender) {
+    let context = query.context.as_deref();
     let client = match cached_client(state, context).await {
         Ok(client) => client,
         Err(error) => {
@@ -133,9 +139,10 @@ async fn stream_events(state: &AppState, context: Option<&str>, unmatched: bool,
     };
     let options = EventStreamOptions {
         session_key_field: true,
-        unmatched,
+        unmatched: query.unmatched,
     };
-    let events = match operator_event_stream(&client, None, options).await {
+    let namespace = query.namespace.as_deref();
+    let events = match operator_event_stream(&client, None, namespace, options).await {
         Ok(events) => events,
         Err(error) => {
             warn!(?context, %error, "failed to open the operator event stream");

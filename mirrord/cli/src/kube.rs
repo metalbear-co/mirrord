@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    ops::Not,
     sync::{Mutex, MutexGuard},
 };
 
@@ -55,6 +56,21 @@ pub(crate) async fn kube_client_and_access_from_layer_config(
             CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
         })?;
     Ok((client, access))
+}
+
+/// Namespace to query when not spanning all namespaces, first match wins:
+/// - `target.namespace` from the mirrord config (set by the `-n` flag)
+/// - kubeconfig default namespace
+///
+/// An empty `target.namespace`, such as an exported but empty `MIRRORD_TARGET_NAMESPACE`, names no
+/// namespace, so it falls back to the kubeconfig's like an unset one.
+pub(crate) fn resolve_namespace(layer_config: &LayerConfig, client: &kube::Client) -> String {
+    layer_config
+        .target
+        .namespace
+        .clone()
+        .filter(|namespace| namespace.is_empty().not())
+        .unwrap_or_else(|| client.default_namespace().to_owned())
 }
 
 /// Get a vector of `T`s if T is defined on the cluster. If the list request returns a 404, assume
