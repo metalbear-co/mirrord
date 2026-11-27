@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">BullMQ queue splitting on the orders queue</title>
-  <desc id="d">A producer pushes a job ID with RPUSH to the Redis list bull:orders:wait. The job data is in the hash bull:orders:&lt;jobId&gt;, and its baggage field holds mirrord-session=alice. The BullMQ forwarder in the mirrord operator moves each job ID with BLMOVE, reads the job data with HGETALL, and looks for mirrord-session=&lt;key&gt; in the data JSON field. A job that matches alice's session goes with RPUSH to the wait list of alice's temporary queue, which alice's local worker reads with BLPOP. It runs with mirrord up --key alice. A job that matches no filter goes to the wait list of the temporary main queue, which the deployed bullmq-worker reads with BLPOP.</desc>
+  <desc id="d">A producer adds a job ID to the Redis list bull:orders:wait. The job data is in the hash bull:orders:&lt;jobId&gt;, and its baggage field holds mirrord-session=alice. The BullMQ forwarder in the mirrord operator moves each job ID with BLMOVE, reads the job data with HGETALL, and looks for mirrord-session=&lt;key&gt; in the data JSON field. A job that matches alice's session goes to the wait list of alice's temporary queue, which alice's local worker reads. It runs with mirrord up --key alice. A job that matches no filter goes to the wait list of the temporary main queue, which the deployed bullmq-worker reads.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -44,7 +44,7 @@
   <text x="150" y="68" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Producer</text>
   <line x1="150" y1="94" x2="150" y2="156" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <use href="#envelope" x="136" y="104" width="28" height="20"/>
-  <text x="172" y="118" font-size="12.5" fill="#333344"><tspan font-family="Menlo, Consolas, monospace">RPUSH</tspan> job ID</text>
+  <text x="172" y="118" font-size="12.5" fill="#333344">adds a job ID</text>
 
   <!-- Redis -->
   <rect x="20" y="160" width="260" height="220" rx="12" fill="#FFCB7D" stroke="#232141" stroke-width="2"/>
@@ -73,14 +73,13 @@
 
   <!-- Match: per-session queue to your local process -->
   <line x1="570" y1="230" x2="646" y2="230" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="608" y="202" font-size="12.5" fill="#4a44b8" text-anchor="middle">match</text>
-  <text x="608" y="220" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">RPUSH</text>
+  <text x="608" y="218" font-size="12.5" fill="#4a44b8" text-anchor="middle">match</text>
   <rect x="650" y="190" width="230" height="80" rx="12" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
   <text x="765" y="212" font-size="12.5" fill="#333344" text-anchor="middle">queue of session alice</text>
   <text x="765" y="234" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" text-anchor="middle">bull:mirrord-tmp-&lt;random&gt;</text>
   <text x="765" y="252" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" text-anchor="middle">-orders:wait</text>
   <line x1="880" y1="230" x2="946" y2="230" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
-  <text x="913" y="218" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#4a44b8" text-anchor="middle">BLPOP</text>
+  <text x="913" y="218" font-size="12.5" fill="#4a44b8" text-anchor="middle">reads</text>
   <rect x="950" y="190" width="230" height="80" rx="10" fill="#232141"/><rect x="958" y="198" width="214" height="64" rx="4" fill="#756DF3"/>
   <path d="M950 270 H1180 L1196 284 H934 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="960" y1="275" x2="1170" y2="275" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1049" y="278.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="930" y="284" width="270" height="5" rx="2.5" fill="#232141"/>
   <use href="#mirrord" x="964" y="210" width="22" height="40"/>
@@ -89,14 +88,13 @@
 
   <!-- No match: main queue to the deployed workload -->
   <line x1="570" y1="330" x2="646" y2="330" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="608" y="302" font-size="12.5" fill="#333344" text-anchor="middle">no match</text>
-  <text x="608" y="320" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">RPUSH</text>
+  <text x="608" y="318" font-size="12.5" fill="#333344" text-anchor="middle">no match</text>
   <rect x="650" y="290" width="230" height="80" rx="12" fill="#ffffff" stroke="#756DF3" stroke-width="2" stroke-dasharray="8 6"/>
   <text x="765" y="312" font-size="12.5" fill="#333344" text-anchor="middle">main queue</text>
   <text x="765" y="334" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" text-anchor="middle">bull:mirrord-tmp-&lt;random&gt;</text>
   <text x="765" y="352" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#232141" text-anchor="middle">-main-orders:wait</text>
   <line x1="880" y1="330" x2="946" y2="330" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="913" y="318" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">BLPOP</text>
+  <text x="913" y="318" font-size="12.5" fill="#333344" text-anchor="middle">reads</text>
   <rect x="950" y="290" width="230" height="80" rx="12" fill="#E4E3FD" stroke="#232141" stroke-width="2"/>
   <text x="1065" y="322" font-size="16" font-weight="700" fill="#232141" text-anchor="middle">Deployed worker</text>
   <text x="1065" y="344" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">bullmq-worker</text>
