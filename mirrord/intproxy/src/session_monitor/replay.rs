@@ -354,6 +354,37 @@ impl StoredRequest {
         self.body.not_replayable()
     }
 
+    /// Returns the request to send for a replay, with `header_changes` applied.
+    fn replay_request(
+        &self,
+        header_changes: Vec<(HeaderName, Option<HeaderValue>)>,
+    ) -> HttpRequest<StreamingBody> {
+        let mut headers = self.headers.clone();
+        // The response body is shown as text, so the replay asks for one that isn't
+        // compressed, unless the caller chose an encoding.
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+        for (header, value) in header_changes {
+            match value {
+                Some(value) => headers.insert(header, value),
+                None => headers.remove(header),
+            };
+        }
+
+        HttpRequest {
+            internal_request: InternalHttpRequest {
+                method: self.method.clone(),
+                uri: self.uri.clone(),
+                headers,
+                version: self.version,
+                body: StreamingBody::from(self.body.to_frames()),
+            },
+            // These identify the request to the agent, which never sees a replay.
+            connection_id: 0,
+            request_id: 0,
+            port: self.port,
+        }
+    }
+
     fn summary(&self) -> CapturedRequestSummary {
         CapturedRequestSummary {
             id: self.id,
@@ -420,8 +451,8 @@ pub struct ReplayStore(Arc<Mutex<StoreState>>);
 
 impl ReplayStore {
     fn state(&self) -> MutexGuard<'_, StoreState> {
-        // Each change to the state is a single push, pop or assignment, so the state is consistent
-        // even if a thread panicked while holding the lock.
+        // A change that stops halfway, such as an id taken without its request, leaves the state
+        // usable, so a poisoned lock is safe to use.
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -469,11 +500,12 @@ impl ReplayStore {
 
         // A chunked body and the body of an HTTP/2 request can be followed by trailers, so
         // their size doesn't say that all of the request arrived.
-        let has_trailers = *version >= Version::HTTP_2 || headers.contains_key(TRANSFER_ENCODING);
+        let can_have_trailers =
+            *version >= Version::HTTP_2 || headers.contains_key(TRANSFER_ENCODING);
         let mut kept_body = KeptBody {
             stated_size: headers
                 .get(CONTENT_LENGTH)
-                .filter(|_| !has_trailers)
+                .filter(|_| !can_have_trailers)
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse().ok()),
             ..Default::default()
@@ -557,32 +589,11 @@ impl ReplayStore {
                 return Err(ReplayError::NotReplayable { id, reason });
             }
 
-            let mut headers = stored.headers.clone();
-            // The response body is shown as text, so the replay asks for one that isn't
-            // compressed, unless the caller chose an encoding.
-            headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
-            for (header, value) in header_changes {
-                match value {
-                    Some(value) => headers.insert(header, value),
-                    None => headers.remove(header),
-                };
-            }
-
-            let request = HttpRequest {
-                internal_request: InternalHttpRequest {
-                    method: stored.method.clone(),
-                    uri: stored.uri.clone(),
-                    headers,
-                    version: stored.version,
-                    body: StreamingBody::from(stored.body.to_frames()),
-                },
-                // These identify the request to the agent, which never sees a replay.
-                connection_id: 0,
-                request_id: 0,
-                port: stored.port,
-            };
-
-            (request, stored.delivery.clone(), stored.replay_count)
+            (
+                stored.replay_request(header_changes),
+                stored.delivery.clone(),
+                stored.replay_count,
+            )
         };
 
         let sent_at = SystemTime::now();
