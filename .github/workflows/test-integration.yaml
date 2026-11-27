@@ -112,7 +112,7 @@ jobs:
               -p mirrord-up \
               -p mirrord-mcp \
               -p mirrord-tui \
-              --features mirrord-kube/incluster,mirrord-kube/portforward,mirrord-operator/crd,mirrord-operator/client
+              --features mirrord-debug-hold/runtime-pause,mirrord-kube/incluster,mirrord-kube/portforward,mirrord-operator/crd,mirrord-operator/client
       # Built from its own directory, so that the crate is checked the way someone working only on
       # it builds it, rather than with whatever features the rest of the workspace happens to turn
       # on.

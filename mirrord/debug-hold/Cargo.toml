@@ -16,10 +16,16 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+# The .NET runtime's startup pause, which `mirrord up` serves. Off for the layer, which only
+# holds processes.
+runtime-pause = ["dep:tokio", "dep:winapi"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "io-util", "rt", "sync", "time"], optional = true }
 tracing.workspace = true
 uuid.workspace = true
 
@@ -29,6 +35,7 @@ nix = { workspace = true, features = ["fs", "signal"] }
 
 [target.'cfg(windows)'.dependencies]
 utils-win = { path = "../utils-win" }
+winapi = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dev-dependencies]
 winapi.workspace = true
@@ -36,6 +43,7 @@ winapi.workspace = true
 [dev-dependencies]
 rstest.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lib]
 doctest = false
