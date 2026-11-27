@@ -3,6 +3,9 @@ use tokio::sync::broadcast;
 
 pub mod api;
 pub mod chaos;
+pub(crate) mod replay;
+
+use replay::ReplayStore;
 
 /// Wrapper around `Vec<String>` that redacts its [`Debug`] output to avoid leaking environment
 /// variable names into logs, while still serializing normally for the session monitor API.
@@ -61,12 +64,21 @@ pub enum MonitorEvent {
     },
 }
 
-/// Wrapper around an optional broadcast sender for session monitor events.
+/// The session monitor as the proxies and the session API use it: where they send and receive
+/// [`MonitorEvent`]s, and the [`ReplayStore`] that they share.
 ///
-/// When the session monitor is disabled, this wraps `None` and all emit calls are no-ops.
+/// When the session monitor is disabled, this wraps `None`: all emit calls are no-ops and no
+/// request is captured.
 #[derive(Clone)]
 pub struct MonitorTx {
-    inner: Option<broadcast::Sender<MonitorEvent>>,
+    inner: Option<Enabled>,
+}
+
+/// What an enabled session monitor holds.
+#[derive(Clone)]
+struct Enabled {
+    event_tx: broadcast::Sender<MonitorEvent>,
+    replay_store: ReplayStore,
 }
 
 impl MonitorTx {
@@ -75,16 +87,32 @@ impl MonitorTx {
     }
 
     pub fn emit(&self, event: MonitorEvent) {
-        if let Some(tx) = &self.inner {
-            let _ = tx.send(event);
+        if let Some(enabled) = &self.inner {
+            let _ = enabled.event_tx.send(event);
         }
     }
 
+    /// Creates an enabled session monitor with a store of captured requests of its own.
+    ///
+    /// To share the store, clone the returned value. The proxies and the session API of one
+    /// session must share it, or the API would never see the requests that the proxies capture.
     pub fn from_sender(tx: broadcast::Sender<MonitorEvent>) -> Self {
-        Self { inner: Some(tx) }
+        Self {
+            inner: Some(Enabled {
+                event_tx: tx,
+                replay_store: ReplayStore::default(),
+            }),
+        }
+    }
+
+    /// Returns the store of captured requests. [`None`] when the session monitor is disabled.
+    pub(crate) fn replay_store(&self) -> Option<&ReplayStore> {
+        self.inner.as_ref().map(|enabled| &enabled.replay_store)
     }
 
     pub fn subscribe(&self) -> Option<broadcast::Receiver<MonitorEvent>> {
-        self.inner.as_ref().map(|tx| tx.subscribe())
+        self.inner
+            .as_ref()
+            .map(|enabled| enabled.event_tx.subscribe())
     }
 }

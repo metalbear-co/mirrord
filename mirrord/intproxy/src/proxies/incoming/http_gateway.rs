@@ -20,15 +20,19 @@ use mirrord_protocol::{
     },
 };
 use tokio::time;
-use tokio_retry::strategy::ExponentialBackoff;
 use tracing::Level;
 
 use super::{
-    ListeningOnExt,
-    http::{ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response},
+    http::{
+        ClientStore, LocalHttpError, ResponseMode, StreamingBody, mirrord_error_response,
+        send_backoffs,
+    },
     tasks::{HttpOut, InProxyTaskMessage},
 };
-use crate::background_tasks::{BackgroundTask, MessageBus};
+use crate::{
+    background_tasks::{BackgroundTask, MessageBus},
+    session_monitor::replay::CaptureHandle,
+};
 
 /// [`BackgroundTask`] used by the [`IncomingProxy`](super::IncomingProxy).
 ///
@@ -49,6 +53,11 @@ pub struct HttpGatewayTask {
     listening_on: ListeningOn,
     /// How to transport the HTTP request to the server.
     transport: IncomingTrafficTransportType,
+    /// Tells the session's replay store how the local application answers the request.
+    ///
+    /// [`None`] if the session monitor is disabled, or if the request is a health probe, which
+    /// is not captured.
+    capture: Option<CaptureHandle>,
 }
 
 impl fmt::Debug for HttpGatewayTask {
@@ -70,6 +79,7 @@ impl HttpGatewayTask {
         response_mode: Option<ResponseMode>,
         listening_on: ListeningOn,
         transport: IncomingTrafficTransportType,
+        capture: Option<CaptureHandle>,
     ) -> Self {
         Self {
             request,
@@ -77,6 +87,7 @@ impl HttpGatewayTask {
             response_mode,
             listening_on,
             transport,
+            capture,
         }
     }
 
@@ -229,24 +240,20 @@ impl HttpGatewayTask {
     /// sending [`ChunkedResponse::Start`]. The agent would get a duplicated response.
     #[tracing::instrument(level = Level::DEBUG, skip_all, err(level = Level::WARN))]
     async fn send_attempt(&self, message_bus: &mut MessageBus<Self>) -> Result<(), LocalHttpError> {
-        // `resolve_addr` returns a connectable address, normalizing a wildcard listen address
-        // (e.g. `0.0.0.0`) to loopback. That matters on Windows, where connecting to `0.0.0.0`
-        // fails outright (on Linux it happens to route to loopback).
-        let server_addr = self
-            .listening_on
-            .resolve_addr()
-            .await
-            .map_err(LocalHttpError::ConnectTcpFailed)?;
-        let mut client = self
+        if let Some(capture) = &self.capture {
+            capture.attempt_started();
+        }
+
+        let sent_at = Instant::now();
+        let (client, mut response) = self
             .client_store
-            .get(
-                server_addr,
-                self.request.version(),
-                &self.transport,
-                &self.request.internal_request.uri,
-            )
+            .send(&self.listening_on, &self.transport, self.request.clone())
             .await?;
-        let mut response = client.send_request(self.request.clone()).await?;
+
+        if let Some(capture) = &self.capture {
+            capture.responded(response.status(), response.headers(), sent_at.elapsed());
+        }
+
         let on_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS).then(|| {
             tracing::debug!("Detected an HTTP upgrade");
             hyper::upgrade::on(&mut response)
@@ -365,11 +372,7 @@ impl BackgroundTask for HttpGatewayTask {
         ret, err(level = Level::WARN),
     )]
     async fn run(&mut self, message_bus: &mut MessageBus<Self>) -> Result<(), Self::Error> {
-        // Will return 9 backoffs: 50ms, 100ms, 200ms, 400ms, 500ms, 500ms, ...
-        let mut backoffs = ExponentialBackoff::from_millis(2)
-            .factor(25)
-            .max_delay(Duration::from_millis(500))
-            .take(9);
+        let mut backoffs = send_backoffs();
 
         let closed_token = message_bus.closed_token().clone();
 
@@ -700,6 +703,7 @@ mod test {
                 } else {
                     IncomingTrafficTransportType::Tcp
                 },
+                None,
             );
             tasks.register(gateway, 0, 8)
         };
@@ -862,6 +866,7 @@ mod test {
                 response_mode,
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             (),
             8,
@@ -1021,6 +1026,7 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             (),
             8,
@@ -1101,6 +1107,7 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             0,
             8,
@@ -1112,6 +1119,7 @@ mod test {
                 Some(ResponseMode::Basic),
                 ListeningOn::Socket(addr),
                 IncomingTrafficTransportType::Tcp,
+                None,
             ),
             1,
             8,

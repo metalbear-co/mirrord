@@ -1,3 +1,5 @@
+use std::{collections::BTreeMap, fmt};
+
 use serde::{Deserialize, Serialize};
 
 /// File extension used for the per-session sentinel file in `~/.mirrord/sessions/`. On unix
@@ -53,4 +55,158 @@ pub struct SessionInfo {
     #[serde(default)]
     pub port_subscriptions: Vec<PortSubscription>,
     pub config: serde_json::Value,
+}
+
+/// Path of the captured requests routes in a session's HTTP API.
+pub const REPLAY_REQUESTS_ROUTE: &str = "/replay/requests";
+
+/// The part of an HTTP body that the session keeps.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CapturedBody {
+    /// The kept bytes as text. Bytes that aren't valid UTF-8 are replaced.
+    pub text: String,
+
+    /// Size of the body in bytes. For a request body that didn't arrive whole, and for the body
+    /// of a response to a replay with `truncated` set, this is the size of the part that the
+    /// session read.
+    pub size: u64,
+
+    /// Whether the session read more of the body than `text` holds, because the body is larger
+    /// than the session keeps, or because a response to a replay didn't end in time. A request
+    /// body that didn't arrive whole is marked by `not_replayable` instead.
+    pub truncated: bool,
+}
+
+/// How the local application answered a captured request or a replay of it, without the body.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CapturedResponse {
+    pub status: u16,
+
+    /// Response headers. Values of headers that usually carry secrets are redacted.
+    pub headers: Vec<(String, String)>,
+
+    /// Milliseconds between sending the request and receiving the response headers.
+    pub duration_ms: u64,
+}
+
+/// One replay of a captured request.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReplayRun {
+    /// Position of this replay among the replays of its request, starting at 1.
+    pub number: u32,
+
+    /// When the replay was sent, in milliseconds since the Unix epoch.
+    pub at_ms: u64,
+
+    pub response: CapturedResponse,
+
+    /// The response body.
+    pub body: CapturedBody,
+}
+
+/// Why a captured request can't be replayed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotReplayable {
+    /// The request upgraded the connection, for example to a WebSocket.
+    Upgraded,
+
+    /// The body is larger than the session keeps.
+    BodyTooLarge,
+
+    /// The session doesn't have the whole body: it is still arriving, the client stopped sending
+    /// it, or the local application answered before all of it arrived.
+    BodyIncomplete,
+
+    /// A reason that this version of mirrord doesn't know, sent by a newer session.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Completes the sentence "the request can't be replayed, because".
+impl fmt::Display for NotReplayable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Upgraded => "it upgraded the connection",
+            Self::BodyTooLarge => "its body is larger than the session keeps",
+            Self::BodyIncomplete => "the session doesn't have its whole body",
+            Self::Unknown => "of a reason that this version of mirrord doesn't know",
+        })
+    }
+}
+
+/// An HTTP request that the session received for the local application, without its headers,
+/// body and replays.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CapturedRequestSummary {
+    /// Identifies the request within its session.
+    pub id: u64,
+
+    /// When the session received the request, in milliseconds since the Unix epoch.
+    pub captured_at_ms: u64,
+
+    /// How the request reached the session: `steal` or `mirror`.
+    pub mode: String,
+
+    /// The remote port that received the request.
+    pub port: u16,
+
+    pub method: String,
+
+    /// Path and query of the request.
+    pub path: String,
+
+    /// Status of the response to the original request, not to a replay. `None` while the local
+    /// application hasn't answered it, and when it never did.
+    #[serde(default)]
+    pub status: Option<u16>,
+
+    /// Milliseconds the local application took to answer the original request. `None` when
+    /// `status` is.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+
+    /// Size of the request body in bytes, or of the part that arrived when `not_replayable` is
+    /// `body_incomplete`.
+    pub body_size: u64,
+
+    /// Why the request can't be replayed. `None` when it can.
+    #[serde(default)]
+    pub not_replayable: Option<NotReplayable>,
+
+    /// How many times the request was replayed.
+    pub replay_count: u32,
+}
+
+/// An HTTP request that the session received for the local application.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CapturedRequest {
+    #[serde(flatten)]
+    pub summary: CapturedRequestSummary,
+
+    /// HTTP version of the request, for example `HTTP/1.1`.
+    pub version: String,
+
+    /// Request headers. Values of headers that usually carry secrets are redacted.
+    pub headers: Vec<(String, String)>,
+
+    pub body: CapturedBody,
+
+    /// The response to the original request, not to a replay. `None` while the local
+    /// application hasn't answered it, and when it never did.
+    #[serde(default)]
+    pub response: Option<CapturedResponse>,
+
+    /// The latest replays of the request, oldest first.
+    #[serde(default)]
+    pub replays: Vec<ReplayRun>,
+}
+
+/// Changes to make to a captured request before replaying it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ReplayOptions {
+    /// Headers to set on the replayed request, by name. A value replaces every captured value of
+    /// that header, and `None` removes the header.
+    #[serde(default)]
+    pub headers: BTreeMap<String, Option<String>>,
 }
