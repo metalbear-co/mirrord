@@ -229,6 +229,9 @@ impl KeptBody {
         }
 
         self.ended |= is_last;
+        if self.is_complete() {
+            self.data.shrink_to_fit();
+        }
     }
 
     /// Returns whether all of the body arrived.
@@ -266,22 +269,43 @@ impl KeptBody {
     }
 }
 
-/// How the local application answered, without the body.
-struct ResponseHead {
-    status: StatusCode,
+/// The start of a response body, as the store keeps it.
+struct KeptResponseBody {
+    /// The first [`MAX_KEPT_BODY_BYTES`] bytes of the body, as they arrived, because text with
+    /// the bytes that aren't valid UTF-8 replaced takes up to three times as much memory.
+    data: Vec<u8>,
 
-    headers: HeaderMap,
+    /// Size of the data that arrived.
+    size: usize,
 
-    /// Time between starting to send the request and receiving the response headers.
-    duration: Duration,
+    /// Whether the replay stopped reading before the end of the body.
+    truncated: bool,
 }
 
-impl ResponseHead {
-    fn to_captured(&self) -> CapturedResponse {
-        CapturedResponse {
-            status: self.status.as_u16(),
-            headers: header_pairs(&self.headers),
-            duration_ms: millis(self.duration),
+impl KeptResponseBody {
+    fn to_captured(&self) -> CapturedBody {
+        captured_body(&self.data, self.size, self.truncated)
+    }
+}
+
+/// A replay of a captured request, as the store keeps it.
+struct KeptReplay {
+    number: u32,
+
+    at_ms: u64,
+
+    response: CapturedResponse,
+
+    body: KeptResponseBody,
+}
+
+impl KeptReplay {
+    fn to_run(&self) -> ReplayRun {
+        ReplayRun {
+            number: self.number,
+            at_ms: self.at_ms,
+            response: self.response.clone(),
+            body: self.body.to_captured(),
         }
     }
 }
@@ -307,12 +331,12 @@ struct StoredRequest {
     body: KeptBody,
 
     /// How the local application answered the original request.
-    response: Option<ResponseHead>,
+    response: Option<CapturedResponse>,
 
     replay_count: u32,
 
     /// The latest replays, oldest first.
-    replays: VecDeque<ReplayRun>,
+    replays: VecDeque<KeptReplay>,
 
     delivery: Delivery,
 }
@@ -322,7 +346,7 @@ impl StoredRequest {
         let upgraded = self
             .response
             .as_ref()
-            .is_some_and(|response| response.status == StatusCode::SWITCHING_PROTOCOLS);
+            .is_some_and(|response| response.status == StatusCode::SWITCHING_PROTOCOLS.as_u16());
         if upgraded {
             return Some(NotReplayable::Upgraded);
         }
@@ -338,14 +362,8 @@ impl StoredRequest {
             port: self.port,
             method: self.method.to_string(),
             path: redacted_path(&self.uri),
-            status: self
-                .response
-                .as_ref()
-                .map(|response| response.status.as_u16()),
-            duration_ms: self
-                .response
-                .as_ref()
-                .map(|response| millis(response.duration)),
+            status: self.response.as_ref().map(|response| response.status),
+            duration_ms: self.response.as_ref().map(|response| response.duration_ms),
             body_size: u64::try_from(self.body.size).unwrap_or(u64::MAX),
             not_replayable: self.not_replayable(),
             replay_count: self.replay_count,
@@ -358,8 +376,8 @@ impl StoredRequest {
             version: format!("{:?}", self.version),
             headers: header_pairs(&self.headers),
             body: self.body.to_captured(),
-            response: self.response.as_ref().map(ResponseHead::to_captured),
-            replays: self.replays.iter().cloned().collect(),
+            response: self.response.clone(),
+            replays: self.replays.iter().map(KeptReplay::to_run).collect(),
         }
     }
 }
@@ -579,7 +597,7 @@ impl ReplayStore {
             }
         };
 
-        let mut run = ReplayRun {
+        let mut replay = KeptReplay {
             number: replay_count + 1,
             at_ms: unix_millis(sent_at),
             response,
@@ -590,18 +608,19 @@ impl ReplayStore {
         // local application. The caller still gets the response.
         let mut state = self.state();
         let Some(stored) = state.request_mut(id) else {
-            return Ok(run);
+            return Ok(replay.to_run());
         };
 
         // Other replays of the request can finish first, so the number is taken when the replay
         // is stored.
         stored.replay_count += 1;
-        run.number = stored.replay_count;
+        replay.number = stored.replay_count;
+        let run = replay.to_run();
 
         if stored.replays.len() >= MAX_KEPT_REPLAYS {
             stored.replays.pop_front();
         }
-        stored.replays.push_back(run.clone());
+        stored.replays.push_back(replay);
 
         Ok(run)
     }
@@ -612,7 +631,7 @@ impl ReplayStore {
         &self,
         request: &HttpRequest<StreamingBody>,
         delivery: &Delivery,
-    ) -> Result<(CapturedResponse, CapturedBody), ReplayError> {
+    ) -> Result<(CapturedResponse, KeptResponseBody), ReplayError> {
         // Read on every attempt, because a local application that restarts can come back on
         // another address.
         let listening_on = self
@@ -654,12 +673,16 @@ impl CaptureHandle {
     /// Tells the store how the local application answered the current attempt to send the
     /// request.
     pub(crate) fn responded(&self, status: StatusCode, headers: &HeaderMap, duration: Duration) {
+        // Copied into text, because hyper's header values are slices of the read buffer of the
+        // connection, and keeping them would keep that whole buffer allocated.
+        let response = CapturedResponse {
+            status: status.as_u16(),
+            headers: header_pairs(headers),
+            duration_ms: millis(duration),
+        };
+
         if let Some(stored) = self.store.state().request_mut(self.id) {
-            stored.response = Some(ResponseHead {
-                status,
-                headers: headers.clone(),
-                duration,
-            });
+            stored.response = Some(response);
         }
     }
 }
@@ -697,7 +720,7 @@ async fn send_and_read(
     request: &HttpRequest<StreamingBody>,
     listening_on: &ListeningOn,
     delivery: &Delivery,
-) -> Result<(CapturedResponse, CapturedBody), LocalHttpError> {
+) -> Result<(CapturedResponse, KeptResponseBody), LocalHttpError> {
     let sent_at = Instant::now();
     let (client, mut response) = delivery
         .client_store
@@ -745,7 +768,16 @@ async fn send_and_read(
         duration_ms: millis(duration),
     };
 
-    Ok((head, captured_body(&data, size, truncated)))
+    data.shrink_to_fit();
+
+    Ok((
+        head,
+        KeptResponseBody {
+            data,
+            size,
+            truncated,
+        },
+    ))
 }
 
 /// Appends `chunk` to `kept`, the start of a body, up to [`MAX_KEPT_BODY_BYTES`] in total.
