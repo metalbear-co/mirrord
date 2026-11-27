@@ -282,72 +282,102 @@ async fn a_child_of_a_held_program_is_never_held() {
     );
 }
 
+/// Where the user sets their own value of a variable the pod also has, if anywhere.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+enum UsersOwn {
+    /// Nowhere: only the pod has it.
+    Unset,
+    /// In the environment `mirrord exec` runs in.
+    Local(&'static str),
+    /// In the config's `feature.env.env_file`.
+    EnvFile(&'static str),
+    /// In the config's `feature.env.override`.
+    Override(&'static str),
+}
+
+/// The pod's environment, as the layer's fetch gets it: each .NET diagnostic-port variable, one
+/// of them again in another case, and one variable that isn't a port.
+#[cfg(unix)]
+const POD_ENV: [(&str, &str); 6] = [
+    ("DOTNET_DiagnosticPorts", "/pod/monitor.sock,suspend"),
+    ("COMPlus_DiagnosticPorts", "/pod/monitor.sock,suspend"),
+    ("DOTNET_DefaultDiagnosticPortSuspend", "1"),
+    ("COMPlus_DefaultDiagnosticPortSuspend", "1"),
+    ("dotnet_diagnosticports", "/pod/other.sock"),
+    ("DOTNET_gcServer", "1"),
+];
+
 /// With `feature.env.load_from_process`, the layer fetches the pod's environment itself, and
 /// drops the pod's .NET diagnostic ports as `exec`'s own fetch does: they name sockets inside the
 /// pod, and one with `suspend` keeps a local runtime paused for good. The user's own values stay,
-/// whether set locally, in the env file or in `env.override`, and the rest of the pod's
-/// environment arrives.
+/// and the rest of the pod's environment arrives.
+///
+/// Each case is a run of its own, a short one, so a failure names the one variable it's about.
 #[cfg(unix)]
+#[rstest]
+// The user's own value stays, wherever they set it.
+#[case::a_local_value_stays(
+    "DOTNET_DiagnosticPorts",
+    UsersOwn::Local("mine,nosuspend"),
+    Some("mine,nosuspend")
+)]
+#[case::an_env_file_value_stays(
+    "COMPlus_DiagnosticPorts",
+    UsersOwn::EnvFile("from-env-file"),
+    Some("from-env-file")
+)]
+#[case::an_override_stays(
+    "DOTNET_DefaultDiagnosticPortSuspend",
+    UsersOwn::Override("0"),
+    Some("0")
+)]
+// The pod's own value is dropped.
+#[case::the_pods_suspend_is_dropped("COMPlus_DefaultDiagnosticPortSuspend", UsersOwn::Unset, None)]
+// The drop matches names without case, as the CLI's does.
+#[case::another_casing_is_dropped("dotnet_diagnosticports", UsersOwn::Unset, None)]
+// The odd one out: a variable that isn't a port arrives.
+#[case::the_rest_of_the_pods_environment_arrives("DOTNET_gcServer", UsersOwn::Unset, Some("1"))]
 #[tokio::test]
-async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports() {
+async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports(
+    #[case] name: &'static str,
+    #[case] users_own: UsersOwn,
+    #[case] expected: Option<&str>,
+) {
     use mirrord_protocol::{ClientMessage, DaemonMessage, RemoteEnvVars};
 
-    let dir = tempfile::tempdir().unwrap();
-    let env_file = dir.path().join("app.env");
-    std::fs::write(&env_file, "COMPlus_DiagnosticPorts=from-env-file\n").unwrap();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let mut local = vec![("MIRRORD_FILE_MODE", "local")];
+    let mut env_config = serde_json::json!({ "load_from_process": true });
+    match users_own {
+        UsersOwn::Unset => {}
+        UsersOwn::Local(value) => local.push((name, value)),
+        UsersOwn::EnvFile(value) => {
+            let env_file = dir.path().join("app.env");
+            std::fs::write(&env_file, format!("{name}={value}\n"))
+                .expect("the env file is written");
+            env_config["env_file"] = serde_json::json!(env_file);
+        }
+        UsersOwn::Override(value) => env_config["override"][name] = serde_json::json!(value),
+    }
     let config = dir.path().join("mirrord.json");
     std::fs::write(
         &config,
-        serde_json::json!({
-            "feature": {
-                "env": {
-                    "load_from_process": true,
-                    "env_file": env_file,
-                    "override": { "DOTNET_DefaultDiagnosticPortSuspend": "0" },
-                }
-            }
-        })
-        .to_string(),
+        serde_json::json!({ "feature": { "env": env_config } }).to_string(),
     )
-    .unwrap();
-    let pod = [
-        ("DOTNET_DiagnosticPorts", "/pod/monitor.sock,suspend"),
-        ("COMPlus_DiagnosticPorts", "/pod/monitor.sock,suspend"),
-        ("DOTNET_DefaultDiagnosticPortSuspend", "1"),
-        ("COMPlus_DefaultDiagnosticPortSuspend", "1"),
-        // The drop matches names without case, as the CLI's does.
-        ("dotnet_diagnosticports", "/pod/other.sock"),
-        ("DOTNET_gcServer", "1"),
-    ];
-    // What the program reads of each, `None` for unset.
-    let expected = [
-        ("DOTNET_DiagnosticPorts", "mine,nosuspend"),
-        ("COMPlus_DiagnosticPorts", "from-env-file"),
-        ("DOTNET_DefaultDiagnosticPortSuspend", "0"),
-        ("COMPlus_DefaultDiagnosticPortSuspend", "None"),
-        ("dotnet_diagnosticports", "None"),
-        ("DOTNET_gcServer", "1"),
-    ];
+    .expect("the config is written");
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let env = get_env(
-        listener.local_addr().unwrap(),
-        vec![
-            ("MIRRORD_FILE_MODE", "local"),
-            ("DOTNET_DiagnosticPorts", "mine,nosuspend"),
-        ],
-    );
+    let env = get_env(listener.local_addr().unwrap(), local);
     let env = env
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
-    let names = expected.map(|(name, _)| name);
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/apps/print_env_var.py");
     let cmdline = vec![
         Application::get_python3_executable().await,
-        "-c".to_owned(),
-        format!(
-            "import os\nfor name in {names:?}:\n    print(f'{{name}}={{os.environ.get(name)}}')"
-        ),
+        script.to_str().expect("a UTF-8 path").to_owned(),
+        name.to_owned(),
     ];
     let mut process = run_exec(
         cmdline,
@@ -366,7 +396,8 @@ async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports() {
     }
     intproxy
         .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
-            pod.iter()
+            POD_ENV
+                .iter()
                 .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
                 .collect(),
         ))))
@@ -374,10 +405,11 @@ async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports() {
 
     process.wait_assert_success().await;
     let stdout = process.get_stdout().await;
-    for (name, value) in expected {
-        assert!(
-            stdout.contains(&format!("{name}={value}\n")),
-            "the program reads {name}={value}:\n{stdout}"
-        );
-    }
+    // The script prints Python's `None` for an unset variable.
+    let reads = format!("{name}={}\n", expected.unwrap_or("None"));
+    assert!(
+        stdout.contains(&reads),
+        "the program reads {}:\n{stdout}",
+        reads.trim_end()
+    );
 }

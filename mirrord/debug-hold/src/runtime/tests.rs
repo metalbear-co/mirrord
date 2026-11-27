@@ -108,6 +108,15 @@ enum Info {
     OnlyProcessInfo2,
 }
 
+/// What a [`FakeRuntime`] does once its ResumeRuntime is answered.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnceResumed {
+    /// It connects again, as a running program's runtime does.
+    Reconnects,
+    /// It ends before it connects again, as a short program does.
+    Exits,
+}
+
 /// A stand-in for a paused .NET runtime.
 #[derive(Clone)]
 struct FakeRuntime {
@@ -116,8 +125,7 @@ struct FakeRuntime {
     /// The pid it advertises, normally its own.
     advertised_pid: u32,
     info: Info,
-    /// Whether it ends once resumed, before it connects again, as a short program does.
-    exits_once_resumed: bool,
+    once_resumed: OnceResumed,
     /// The command ids it got, in order.
     commands: Arc<Mutex<Vec<u8>>>,
 }
@@ -129,7 +137,7 @@ impl FakeRuntime {
             cookie: Uuid::new_v4(),
             advertised_pid: std::process::id(),
             info,
-            exits_once_resumed: false,
+            once_resumed: OnceResumed::Reconnects,
             commands: Arc::default(),
         }
     }
@@ -166,7 +174,7 @@ impl FakeRuntime {
             (PROCESS_INFO3, Info::EntryAssembly(name)) => process_info3_reply(name),
             (PROCESS_INFO2, _) => recorded(include_str!("testdata/processinfo2.hex")),
             // An unknown command, as an older runtime answers ProcessInfo3.
-            _ => error_reply(0x8013_1384),
+            _ => error_reply(ipc::DS_IPC_E_UNKNOWN_COMMAND),
         }
     }
 
@@ -179,7 +187,7 @@ impl FakeRuntime {
                 if let Some(command) = runtime.read_command(&mut client).await {
                     let reply = runtime.reply_to(command);
                     client.write_all(&reply).await.expect("reply");
-                    if command == RESUME_RUNTIME && runtime.exits_once_resumed {
+                    if command == RESUME_RUNTIME && runtime.once_resumed == OnceResumed::Exits {
                         return;
                     }
                 }
@@ -696,7 +704,7 @@ async fn under_dotnet_run_the_sdk_is_skipped_and_the_app_is_held() {
 async fn a_runtime_that_ends_right_after_its_resume_was_still_resumed() {
     let mut port = Port::start();
     let mut runtime = FakeRuntime::new(&port, Info::Recorded);
-    runtime.exits_once_resumed = true;
+    runtime.once_resumed = OnceResumed::Exits;
     let _running = runtime.spawn();
     let held = port.next_held().await;
 
@@ -719,7 +727,7 @@ async fn a_runtime_that_ends_right_after_its_resume_was_still_resumed() {
 async fn a_resumed_runtime_that_reconnects_late_is_not_held_again() {
     let mut port = Port::start();
     let mut runtime = FakeRuntime::new(&port, Info::Recorded);
-    runtime.exits_once_resumed = true;
+    runtime.once_resumed = OnceResumed::Exits;
     let running = runtime.spawn();
     let held = port.next_held().await;
     release_like_an_ide(&held.release);
