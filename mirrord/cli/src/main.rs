@@ -322,6 +322,10 @@ use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
+// Suppressor for the `unused-extern-crate` lint: the Windows dev-dependency `winapi` is only
+// used by the integration test `tests/up_without_terminal.rs`.
+#[cfg(all(test, windows))]
+use winapi as _;
 
 #[cfg(windows)]
 mod attach;
