@@ -388,6 +388,7 @@ mod tests {
         Event, Level, Metadata, Subscriber,
         span::{Attributes, Id, Record},
     };
+    use winapi::um::winioctl::{FSCTL_GET_REPARSE_POINT, FSCTL_LOCK_VOLUME};
 
     use super::*;
 
@@ -438,13 +439,13 @@ mod tests {
             );
             reports.report(
                 UnsupportedOperation::DeviceIoControl,
-                Some(0x0009_0018),
+                Some(FSCTL_LOCK_VOLUME),
                 file,
                 None,
             );
             reports.report(
                 UnsupportedOperation::DeviceIoControl,
-                Some(0x0009_00a8),
+                Some(FSCTL_GET_REPARSE_POINT),
                 file,
                 None,
             );
