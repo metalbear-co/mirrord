@@ -623,18 +623,21 @@ impl ReplayStore {
             body,
         };
 
+        // Converted before taking the lock, which the incoming requests wait for.
+        let mut run = replay.to_run();
+
         // Newer requests can push the request out of the store while its replay waits for the
         // local application. The caller still gets the response.
         let mut state = self.state();
         let Some(stored) = state.request_mut(id) else {
-            return Ok(replay.to_run());
+            return Ok(run);
         };
 
         // Other replays of the request can finish first, so the number is taken when the replay
         // is stored.
         stored.replay_count += 1;
         replay.number = stored.replay_count;
-        let run = replay.to_run();
+        run.number = replay.number;
 
         if stored.replays.len() >= MAX_KEPT_REPLAYS {
             stored.replays.pop_front();
