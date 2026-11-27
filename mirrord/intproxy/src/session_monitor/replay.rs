@@ -549,7 +549,7 @@ impl ReplayStore {
         })
     }
 
-    fn list(&self) -> Vec<CapturedRequestSummary> {
+    pub(crate) fn list(&self) -> Vec<CapturedRequestSummary> {
         self.state()
             .requests
             .iter()
@@ -569,7 +569,11 @@ impl ReplayStore {
     ///
     /// Waits for the response headers as long as the local application takes, so that a developer
     /// can hold the request on a breakpoint.
-    async fn replay(&self, id: u64, options: ReplayOptions) -> Result<ReplayRun, ReplayError> {
+    pub(crate) async fn replay(
+        &self,
+        id: u64,
+        options: ReplayOptions,
+    ) -> Result<ReplayRun, ReplayError> {
         let mut header_changes = Vec::new();
         for (name, value) in options.headers {
             let invalid = || ReplayError::InvalidHeader(name.clone());
@@ -619,18 +623,21 @@ impl ReplayStore {
             body,
         };
 
+        // Converted before taking the lock, which the incoming requests wait for.
+        let mut run = replay.to_run();
+
         // Newer requests can push the request out of the store while its replay waits for the
         // local application. The caller still gets the response.
         let mut state = self.state();
         let Some(stored) = state.request_mut(id) else {
-            return Ok(replay.to_run());
+            return Ok(run);
         };
 
         // Other replays of the request can finish first, so the number is taken when the replay
         // is stored.
         stored.replay_count += 1;
         replay.number = stored.replay_count;
-        let run = replay.to_run();
+        run.number = replay.number;
 
         if stored.replays.len() >= MAX_KEPT_REPLAYS {
             stored.replays.pop_front();
@@ -1135,6 +1142,8 @@ mod tests {
                 .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\npartial")
                 .await
                 .unwrap();
+            // Lets the replay read the response head, so that the reset fails the body.
+            tokio::time::sleep(Duration::from_millis(200)).await;
             // Closing with a zero linger time resets the connection.
             socket2::SockRef::from(&stream)
                 .set_linger(Some(Duration::ZERO))
@@ -1145,13 +1154,21 @@ mod tests {
         capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
         listen_on(&store, address);
 
-        let error = store
-            .replay(1, ReplayOptions::default())
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = store.replay(1, ReplayOptions::default()).await.unwrap_err();
 
-        assert!(error.contains("reset"), "{error}");
+        assert!(
+            matches!(error, ReplayError::Send(LocalHttpError::ReadBodyFailed(..))),
+            "{error:?}"
+        );
+        let mut cause: &dyn std::error::Error = &error;
+        while let Some(source) = cause.source() {
+            cause = source;
+        }
+        let reset = cause
+            .downcast_ref::<std::io::Error>()
+            .expect("the root cause is the reset of the connection");
+        assert_eq!(reset.kind(), std::io::ErrorKind::ConnectionReset);
+        assert!(error.to_string().ends_with(&reset.to_string()), "{error}");
     }
 
     /// A response that never ends, such as an event stream, is cut after
@@ -1174,7 +1191,12 @@ mod tests {
         capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
         listen_on(&store, address);
 
+        let started = Instant::now();
         let run = store.replay(1, ReplayOptions::default()).await.unwrap();
+        assert!(
+            started.elapsed() < RESPONSE_BODY_TIMEOUT,
+            "cut by the idle timeout"
+        );
         assert!(run.body.truncated);
         assert_eq!(run.body.text, "hello");
 
