@@ -2214,6 +2214,24 @@ pub(super) struct UpArgs {
     #[arg(long, global = true)]
     pub context: Option<Arc<str>>,
 
+    /// Target of one service for this run, as `<service>=<target>`, e.g. `--target
+    /// api=deployment/api`. Repeat it once per service.
+    ///
+    /// Takes any target `mirrord exec --target` takes, `targetless` included, except a label
+    /// selector, which `mirrord up` doesn't support yet. Wins over the service's `target.path` in
+    /// the config file, which isn't changed, and over a path its `config_patch` sets.
+    #[arg(short = 't', long, value_name = "SERVICE=TARGET")]
+    pub target: Vec<String>,
+
+    /// Namespace of one service's target for this run, as `<service>=<namespace>`, e.g.
+    /// `--target-namespace api=staging`. Repeat it once per service.
+    ///
+    /// Wins over the service's `target.namespace` in the config file, which isn't changed, and
+    /// over a namespace its `config_patch` sets. Without a `target.path`, it's where the workload
+    /// named after the service is looked up.
+    #[arg(short = 'n', long, value_name = "SERVICE=NAMESPACE")]
+    pub target_namespace: Vec<String>,
+
     /// Experimental: hold this service's program at its entry point until an IDE releases it, so
     /// a debugger attaches before its first line runs.
     ///

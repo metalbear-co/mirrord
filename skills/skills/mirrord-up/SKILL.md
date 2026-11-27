@@ -310,6 +310,8 @@ Here `DEV_NAMESPACE` falls back to `default` when unset, while a missing `API_TO
 | `--key` | Session key for `{{ key }}` / default filter; if omitted, OS username is used (also `MIRRORD_KEY`) |
 | `--context` | Kubernetes context for every service in the run, overriding each service's own `context` (see [Context](#context)) |
 | `-m`, `--mode` | `split`, `replace`, or `mirror` — overrides `default_mode` for **every** service in the run, ignoring each service's own config-file setting |
+| `-t`, `--target <service>=<target>` | One service's target for this run only (any `mirrord exec --target` value, `targetless` included, but not a label selector), winning over its `target.path` and a `config_patch` one; the file isn't changed. Repeat per service |
+| `-n`, `--target-namespace <service>=<namespace>` | One service's target namespace for this run only, winning over its `target.namespace` and a `config_patch` one. Each flag overrides only its own field, as with `mirrord exec` |
 | `-u`, `--ui` | Start `mirrord ui` in the background |
 | `mirrord up init` | Interactive wizard; writes skeleton YAML (does **not** query the cluster) |
 | `mirrord up init -o <path>` | Choose output path for the generated file |

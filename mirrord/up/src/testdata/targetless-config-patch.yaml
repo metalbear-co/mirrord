@@ -1,0 +1,11 @@
+# A targetless service with a `config_patch`, which is merged into the config `mirrord up` generates.
+services:
+  api:
+    target:
+      path: targetless
+    default_mode: mirror
+    config_patch:
+      agent:
+        ttl: 30
+    run:
+      command: ["echo", "api"]

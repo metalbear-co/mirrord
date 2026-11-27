@@ -453,6 +453,18 @@ Allows specifying a custom session key. When not supplied, the OS username is us
 
 Runs every service in the specified context, ignoring the `context` field(s) set in the config file. When omitted, each service uses the `context` in the config file. See [Context](#context) for precedence rules.
 
+### `-t`, `--target`
+
+Sets one service's target for this run only, as `<service>=<target>`, without changing `mirrord-up.yaml`. Repeat it once per service, e.g. `mirrord up --target api=deployment/api --target worker=targetless`. It takes any target `mirrord exec --target` takes except a label selector, which `mirrord up` doesn't support yet, and wins over the service's `target.path`, including `target: none`, and over a path its `config_patch` sets. A service with no `target.path` then runs against it, instead of one inferred from its service id.
+
+This flag requires at least mirrord version 3.293.0.
+
+### `-n`, `--target-namespace`
+
+Sets the namespace of one service's target for this run only, as `<service>=<namespace>`, e.g. `mirrord up --target api=deployment/api --target-namespace api=staging`. It wins over the service's `target.namespace`, and over a namespace its `config_patch` sets. Like `mirrord exec`'s flags, `--target` and `--target-namespace` each override only their own field: `--target` alone keeps the namespace in the config file, and `--target-namespace` alone keeps its path, or, without one, sets the namespace the workload named after the service is looked up in.
+
+This flag requires at least mirrord version 3.293.0.
+
 ## `mirrord up init`
 
 Interactive wizard that generates a skeleton `mirrord-up.yaml`, picking each service's target from your cluster. `-o` sets the file it offers to write (default: `./mirrord-up.yaml`).
