@@ -16,22 +16,7 @@ mirrord gives the Droid that connection. The Droid runs the changed service on i
 
 The Droid reads the instructions in `AGENTS.md`, picks a session key, and starts the service with `mirrord up`. mirrord connects to the mirrord Operator through the Kubernetes API, and the Operator starts a session on the staging target. The target continues to serve all requests, except the requests whose `x-mirrord-agent` header holds the key of the Droid session. mirrord sends those requests to the service that the Droid runs.
 
-```mermaid
-flowchart LR
-    droid[Factory Droid] -->|mirrord up --key| machine
-    subgraph machine[Laptop, Factory computer, or CI runner]
-        service[Changed service]
-        mirrord[mirrord CLI and layer]
-        service --- mirrord
-    end
-    mirrord -->|Kubernetes API| operator[mirrord Operator]
-    subgraph cluster[Staging cluster]
-        operator --> target[Staging target]
-    end
-    request[Request with header<br>x-mirrord-agent: key] --> target
-    others[Other developers and agents] --> target
-    target -.->|only requests with the key| mirrord
-```
+![How a Factory Droid runs a change against staging with mirrord](../.gitbook/assets/factory-droid-flow.svg)
 
 This page uses `mirrord up`, because one `mirrord-up.yaml` file holds the target, the filter, and the command, and `--key` sets the session key.
 
