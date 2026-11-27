@@ -18,7 +18,7 @@ use crate::config::source::MirrordConfigSource;
 ///   "startup_retry": {
 ///     "min_ms": 500,
 ///     "max_ms": 5000,
-///     "max_retries": 2,
+///     "max_retries": 2
 ///   }
 /// }
 /// ```

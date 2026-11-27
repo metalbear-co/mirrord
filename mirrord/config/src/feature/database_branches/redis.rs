@@ -247,10 +247,12 @@ pub enum RedisBranchCopyConfig {
 ///
 /// Example:
 /// ```json
-/// "connection": {
+/// {
+///   "connection": {
 ///     "host": { "type": "env", "variable": "REDIS_HOST" },
 ///     "port": 6379,
 ///     "password": { "type": "env", "variable": "REDIS_PASSWORD" }
+///   }
 /// }
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Serialize, Deserialize, Default)]

@@ -555,11 +555,13 @@ pub enum BodyFilter {
     ///
     /// Example:
     /// ```json
-    /// "http_filter": {
-    ///   "body_filter": {
-    ///     "body": "json",
-    ///     "query": "$.library.books[*]",
-    ///     "matches": "^\\d{3,5}$"
+    /// {
+    ///   "http_filter": {
+    ///     "body_filter": {
+    ///       "body": "json",
+    ///       "query": "$.library.books[*]",
+    ///       "matches": "^\\d{3,5}$"
+    ///     }
     ///   }
     /// }
     /// ```
@@ -570,7 +572,7 @@ pub enum BodyFilter {
     ///     "books": [
     ///       34555,
     ///       1233,
-    ///       234
+    ///       234,
     ///       23432
     ///     ]
     ///   }
@@ -590,10 +592,12 @@ pub enum BodyFilter {
     /// Example:
     ///
     /// ```json
-    /// "body_filter": {
-    ///   "body": "json",
-    ///   "query": "$.books[?(typeof(@) == 'number')]",
-    ///   "matches": "4$"
+    /// {
+    ///   "body_filter": {
+    ///     "body": "json",
+    ///     "query": "$.books[?(typeof(@) == 'number')]",
+    ///     "matches": "4$"
+    ///   }
     /// }
     /// ```
     /// will match
@@ -624,17 +628,19 @@ pub enum BodyFilter {
     ///
     /// To use with `all_of` or `any_of`, use the following syntax:
     /// ```json
-    /// "http_filter": {
-    ///   "all_of": [
-    ///     {
-    ///       "path": "/buildings"
-    ///     },
-    ///     {
-    ///       "body": "json",
-    ///       "query": "$.library.books[*]",
-    ///       "matches": "^\\d{3,5}$"
-    ///     }
-    ///   ]
+    /// {
+    ///   "http_filter": {
+    ///     "all_of": [
+    ///       {
+    ///         "path": "/buildings"
+    ///       },
+    ///       {
+    ///         "body": "json",
+    ///         "query": "$.library.books[*]",
+    ///         "matches": "^\\d{3,5}$"
+    ///       }
+    ///     ]
+    ///   }
     /// }
     /// ```
     Json { query: String, matches: String },

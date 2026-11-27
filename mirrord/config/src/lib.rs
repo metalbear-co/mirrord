@@ -2764,6 +2764,103 @@ mod tests {
         config.verify(&mut context).unwrap();
     }
 
+    /// Related to issue #2525: https://github.com/metalbear-co/mirrord/issues/2525.
+    ///
+    /// Every JSON block in the docs of this crate must be valid JSON. The docs end up in the
+    /// configuration reference, users copy the examples into their config files, and those are
+    /// parsed with `serde_json`, so a missing or trailing comma in an example is an error for
+    /// them.
+    ///
+    /// Each block is rendered with Tera first, like a config file, so templated examples pass.
+    /// `get_env` gives the `default` argument, or the name of the variable, since the examples
+    /// use variables that the test environment doesn't have (`TEMP` is Windows only).
+    #[test]
+    fn docs_json_blocks_are_valid() {
+        fn rust_files(dir: &Path) -> Vec<std::path::PathBuf> {
+            let mut files = Vec::new();
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    files.extend(rust_files(&path));
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    files.push(path);
+                }
+            }
+            files
+        }
+
+        // One engine and context for every block.
+        let mut template_engine = Tera::default();
+        template::register(&mut template_engine);
+        template_engine.register_function("get_env", |args: &HashMap<String, tera::Value>| {
+            args.get("default")
+                .or_else(|| args.get("name"))
+                .cloned()
+                .ok_or_else(|| "get_env needs a name".into())
+        });
+
+        let mut context = tera::Context::new();
+        context.insert("key", "key");
+        context.insert("git_branch", "main");
+
+        let mut parse = |block: &str| -> Result<serde_json::Value, String> {
+            let rendered = template_engine
+                .render_str(block, &context)
+                .map_err(|error| format!("{error:?}"))?;
+            serde_json::from_str(&rendered).map_err(|error| error.to_string())
+        };
+
+        let mut invalid = Vec::new();
+        for file in rust_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src")) {
+            let source = std::fs::read_to_string(&file).unwrap();
+            // The line number of the opening fence, and the block read so far.
+            let mut block: Option<(usize, String)> = None;
+
+            let not_closed = |start: usize| {
+                format!("{}:{start}: the JSON block is never closed", file.display())
+            };
+
+            for (index, line) in source.lines().enumerate() {
+                let line = line.trim_start();
+                let Some(doc) = line
+                    .strip_prefix("///")
+                    .or_else(|| line.strip_prefix("//!"))
+                else {
+                    // The doc comment ended inside the block.
+                    if let Some((start, _)) = block.take() {
+                        invalid.push(not_closed(start));
+                    }
+                    continue;
+                };
+                let doc = doc.strip_prefix(' ').unwrap_or(doc);
+
+                if let Some((start, json)) = &mut block {
+                    if doc.trim() == "```" {
+                        if let Err(error) = parse(json) {
+                            invalid.push(format!("{}:{start}: {error}", file.display()));
+                        }
+                        block = None;
+                    } else {
+                        json.push_str(doc);
+                        json.push('\n');
+                    }
+                } else if doc.trim() == "```json" {
+                    block = Some((index + 1, String::new()));
+                }
+            }
+
+            if let Some((start, _)) = block {
+                invalid.push(not_closed(start));
+            }
+        }
+
+        assert!(
+            invalid.is_empty(),
+            "invalid JSON blocks in the docs:\n{}",
+            invalid.join("\n")
+        );
+    }
+
     /// Related to issue #2936: https://github.com/metalbear-co/mirrord/issues/2936.
     ///
     /// Verifies that [`LayerConfig`] encoded with [`LayerConfig::encode`]

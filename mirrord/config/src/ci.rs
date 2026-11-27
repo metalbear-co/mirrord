@@ -12,7 +12,7 @@ use crate::config::source::MirrordConfigSource;
 /// ```json
 /// {
 ///   "ci": {
-///     "output_dir": "/tmp/mirrord/",
+///     "output_dir": "/tmp/mirrord/"
 ///   }
 /// }
 /// ```
