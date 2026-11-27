@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 510" width="1200" height="510" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">mirrord with a Factory Droid</title>
-  <desc id="d">A Factory Droid starts the changed service with mirrord up and a session key, on a laptop, a Factory computer, or a CI runner. The service runs with the mirrord CLI and layer. mirrord connects to the mirrord operator in the staging cluster through the Kubernetes API, and the operator starts a session on the staging target. Requests with the header x-mirrord-agent and the session key, and requests from other developers and agents, reach the mirrord agent at the staging target. The agent sends the requests with the key to the service that the Droid runs. All other requests go to the deployed service.</desc>
+  <desc id="d">A Factory Droid starts the changed service with mirrord up and a session key, on a laptop, a Factory computer, or a CI runner. The service runs with the mirrord CLI and layer. mirrord connects to the mirrord operator in the staging cluster through the Kubernetes API, and all traffic of the session goes through this connection and the operator, and the operator starts a session on the staging target. Requests with the header x-mirrord-agent and the session key, and requests from other developers and agents, reach the mirrord agent at the staging target. The agent sends the requests with the key through the operator to the service that the Droid runs. All other requests go to the deployed service.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -83,13 +83,14 @@
   <polyline points="220,328 244,328 244,245 326,245" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <line x1="430" y1="260" x2="430" y2="306" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="440" y="289" font-size="12.5" fill="#333344" text-anchor="start">no key</text>
-  <line x1="530" y1="230" x2="896" y2="230" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <polyline points="534,230 690,230 690,316" fill="none" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
   <text x="640" y="218" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
   <polyline points="630,320 630,245 534,245" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="640" y="280" font-size="12.5" fill="#333344" text-anchor="start">starts</text>
-  <text x="640" y="296" font-size="12.5" fill="#333344" text-anchor="start">the session</text>
-  <line x1="900" y1="370" x2="714" y2="370" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="808" y="360" font-size="12.5" fill="#333344" text-anchor="middle">Kubernetes API</text>
+  <text x="622" y="280" font-size="12.5" fill="#333344" text-anchor="end">starts</text>
+  <text x="622" y="296" font-size="12.5" fill="#333344" text-anchor="end">the session</text>
+  <line x1="896" y1="370" x2="714" y2="370" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
+  <text x="808" y="340" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
+  <text x="808" y="360" font-size="12.5" fill="#4a44b8" text-anchor="middle">Kubernetes API</text>
 
   <!-- Kubernetes logos: what runs in the cluster -->
   <use href="#k8s" x="690" y="113" width="36" height="36"/>
