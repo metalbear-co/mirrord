@@ -1210,12 +1210,12 @@ mod tests {
         shared::minwindef::FALSE,
         um::{
             handleapi::DuplicateHandle,
-            processthreadsapi::{GetCurrentProcess, OpenProcess},
+            processthreadsapi::{GetCurrentProcess, OpenProcess, OpenThread, SuspendThread},
             synchapi::{OpenEventA, SetEvent},
             winnt::{
                 DUPLICATE_SAME_ACCESS, EVENT_MODIFY_STATE, PROCESS_ALL_ACCESS,
                 PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE, PROCESS_VM_READ,
-                SYNCHRONIZE,
+                SYNCHRONIZE, THREAD_SUSPEND_RESUME,
             },
         },
     };
@@ -1249,6 +1249,8 @@ mod tests {
         Releases,
         /// Ends it, as a debugger session stopped before it started.
         Kills,
+        /// Suspends it once more without attaching a debugger, then releases it.
+        SuspendsThenReleases,
     }
 
     /// A program that outlives the readiness timeout, then ends with [`RAN`].
@@ -1374,12 +1376,18 @@ mod tests {
             }
 
             let child_pid = Arc::new(Mutex::new(None::<u32>));
+            let child_tid = Arc::new(Mutex::new(None::<u32>));
             let fake_layer = fake_layer(self.layer, &self.payload, Arc::clone(&child_pid));
             // The launcher announces the hold on the pipe's write end, and the IDE reads it.
             let mut ide: Option<(JoinHandle<Option<String>>, PipeWriter)> = self.hold.map(|ide| {
                 let (announcements, announce_to) = std::io::pipe().expect("pipe");
                 (
-                    fake_ide(ide, announcements, Arc::clone(&child_pid)),
+                    fake_ide(
+                        ide,
+                        announcements,
+                        Arc::clone(&child_pid),
+                        Arc::clone(&child_tid),
+                    ),
                     announce_to,
                 )
             });
@@ -1448,6 +1456,7 @@ mod tests {
                     unsafe { CloseHandle(process_info.hProcess) };
                     process_info.hProcess = weak;
                 }
+                *child_tid.lock().expect("tid") = Some(process_info.dwThreadId);
                 *child_pid.lock().expect("pid") = Some(process_info.dwProcessId);
                 Ok(process_info)
             };
@@ -1584,6 +1593,7 @@ mod tests {
         ide: Ide,
         announcements: PipeReader,
         child_pid: Arc<Mutex<Option<u32>>>,
+        child_tid: Arc<Mutex<Option<u32>>>,
     ) -> JoinHandle<Option<String>> {
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -1629,6 +1639,17 @@ mod tests {
                 Ide::Kills => unsafe {
                     TerminateProcess(process, 42);
                 },
+                Ide::SuspendsThenReleases => {
+                    let thread = open_primary_thread(&child_tid);
+                    unsafe {
+                        assert_ne!(
+                            SuspendThread(thread.as_raw_handle().cast()),
+                            u32::MAX,
+                            "suspend the held program once more"
+                        );
+                        SetEvent(event);
+                    }
+                }
             }
             unsafe {
                 CloseHandle(process);
@@ -1636,6 +1657,18 @@ mod tests {
             }
             Some(announcement)
         })
+    }
+
+    /// The created child's primary thread, with the rights to suspend and resume it.
+    fn open_primary_thread(child_tid: &Mutex<Option<u32>>) -> OwnedHandle {
+        let tid = child_tid
+            .lock()
+            .expect("tid")
+            .expect("the child exists once its hold is announced");
+        let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, FALSE, tid) };
+        assert!(!thread.is_null(), "open the held program's primary thread");
+        // SAFETY: a fresh handle this function owns.
+        unsafe { OwnedHandle::from_raw_handle(thread.cast()) }
     }
 
     /// An explicit environment, even one without `SystemRoot`, gets what Windows needs to start
@@ -2108,6 +2141,26 @@ mod tests {
             Some(InjectionMethod::Apc.to_string().as_str())
         );
         assert_eq!(launched.exit_code(), RAN);
+    }
+
+    /// An extra suspension with no debugger to lift it would leave the program suspended forever,
+    /// so it fails the launch, and the program never runs.
+    #[test]
+    fn a_held_program_suspended_again_without_a_debugger_is_ended() {
+        let launched = Launch {
+            hold: Some(Ide::SuspendsThenReleases),
+            policy: LayerFailurePolicy::Terminate,
+            ..Launch::new(InjectionMethod::LoadLibrary, Layer::Ready)
+        }
+        .run();
+        let error = launched.result.as_ref().err().expect("the launch fails");
+        assert!(
+            error
+                .to_string()
+                .contains("expected one suspension before resume, got 2"),
+            "{error}"
+        );
+        assert_ne!(launched.exit_code(), RAN, "the program never ran");
     }
 
     /// A program ended while held is not resumed, and its exit is the launch's outcome, not an
