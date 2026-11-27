@@ -1188,9 +1188,10 @@ mod tests {
                 let release = release.clone();
                 let first = first.clone();
                 async move {
+                    let hold = first.swap(false, Ordering::SeqCst);
                     read_head(&mut stream).await;
                     tokio::spawn(async move {
-                        if first.swap(false, Ordering::SeqCst) {
+                        if hold {
                             release.notified().await;
                         }
                         stream
