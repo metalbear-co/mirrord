@@ -9,6 +9,8 @@ tags:
 
 This page covers queue splitting for [Redis Pub/Sub](https://redis.io/docs/latest/develop/interact/pubsub/). For the general concepts and the message filter reference shared by all queue services, see the [Queue Splitting overview](../queue-splitting.md).
 
+For a walkthrough with a sample app, see the [tutorial](../../tutorials/queues/how-to-test-redis-pubsub-consumers.md).
+
 The word "queue" on this page refers to a Redis Pub/Sub channel.
 
 {% hint style="info" %}
