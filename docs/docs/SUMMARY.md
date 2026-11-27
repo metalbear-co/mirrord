@@ -20,6 +20,9 @@
 
 * [Remocal Development](use-cases/local-development.md)
 * [CI/CD Integration](use-cases/mirrord-for-ci.md)
+  * [GitLab CI](use-cases/ci/gitlab-ci.md)
+  * [Jenkins](use-cases/ci/jenkins.md)
+  * [Argo CD](use-cases/ci/argo-cd.md)
 * [Preview Environments](use-cases/preview-environments.md)
   * [Preview Environments in CI](use-cases/preview-environments-in-ci.md)
   * [Sync Your Local Code to a Preview Environment](use-cases/preview-environments-code-sync.md)

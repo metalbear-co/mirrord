@@ -23,6 +23,8 @@ mirrord can be used to greatly speed up CI runs by enabling testing against a sh
 
 While running regular `mirrord exec` can be made to work for this purpose, it requires some finagling to get right, such as wrapping `mirrord exec` in some other command that would start it as a background process. The `mirrord ci start` command is more appropriate for this use case, since it starts your app and mirrord as background processes, allowing you to then run tests while your app is running in the background and connected to the cluster.
 
+For step-by-step setups, see the guides for [GitLab CI](ci/gitlab-ci.md), [Jenkins](ci/jenkins.md), and [Argo CD](ci/argo-cd.md).
+
 ## Prerequisites
 
 1. Minimum mirrord CLI version `3.181.0`.
