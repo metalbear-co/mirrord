@@ -75,7 +75,7 @@ pub(super) struct EventsQuery {
     pub unmatched: bool,
 
     /// The namespace whose events to stream. Absent means every namespace that the kube user may
-    /// see, which is what clients that never send it, such as the browser extension, expect.
+    /// see.
     pub namespace: Option<String>,
 }
 
