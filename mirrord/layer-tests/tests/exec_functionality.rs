@@ -138,6 +138,10 @@ const HELD_PROGRAM_RAN: &str = "the held program runs";
 #[cfg(unix)]
 const CHILD_RAN: &str = "its child runs";
 
+/// The diagnostic port `mirrord up` would hand the held program's `mirrord exec`.
+#[cfg(unix)]
+const DOTNET_PORT: &str = "/tmp/mirrord-debug-0/dotnet-1-layertest.sock";
+
 /// Starts `tests/apps/exec_debug_hold.py` under `mirrord exec`, held for a debugger the way
 /// `mirrord up --debug` asks for it, and waits for the hold's announcement.
 ///
@@ -149,7 +153,10 @@ async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     let process = exec_python(
         listener.local_addr().unwrap(),
         "exec_debug_hold.py",
-        vec![("MIRRORD_DEBUG_HOLD", "1")],
+        vec![
+            ("MIRRORD_DEBUG_HOLD", "1"),
+            ("MIRRORD_DEBUG_DOTNET_PORT", DOTNET_PORT),
+        ],
     )
     .await;
     let intproxy = TestIntProxy::new(listener, None).await;
@@ -234,6 +241,9 @@ async fn exec_holds_the_program_until_its_release_gets_a_byte() {
 
 /// Only the program is held: a child it starts runs at once, even one handed the program's hold
 /// binding, and prints no `Ready!` of its own, even one handed the program's `Ready!` binding.
+///
+/// The child still inherits the diagnostic port through the `execve` hook, so a .NET program a
+/// held program starts pauses at its runtime's startup.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_child_of_a_held_program_is_never_held() {
@@ -247,6 +257,12 @@ async fn a_child_of_a_held_program_is_never_held() {
         .expect("the program's child was held too");
     let stdout = process.get_stdout().await;
     assert!(stdout.contains(CHILD_RAN), "the child ran:\n{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "its child's DOTNET_DiagnosticPorts: {DOTNET_PORT},connect,suspend\n"
+        )),
+        "the child inherits the port exec merged in:\n{stdout}"
+    );
     assert_eq!(
         stdout.matches("debug-hold ").count(),
         1,
