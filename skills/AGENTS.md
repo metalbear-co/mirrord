@@ -9,3 +9,7 @@ Every fenced `json` or `yaml` block you add or edit in a Markdown file needs a t
 ## Plugin version
 
 A change to `skills/` or `.claude-plugin/`, the files that Claude Code installs, must raise `version` in `.claude-plugin/plugin.json` above the version on `main`, because Claude Code updates an installed plugin only when its version changes. The `plan` job of the mirrord repository's CI checks this. [CONTRIBUTING.md](CONTRIBUTING.md#plugin-version) says which other manifests to leave alone and what to do when the check fails in the merge queue.
+
+## Docs sync
+
+`.github/docs-sync-prompt.md` is the prompt of the root `.github/workflows/docs-sync.yaml`, which has Claude update `skills/` every week to match the docs changes merged since the commit in `.github/docs-sync-sha`, and opens a pull request with the result. The pull request comes from the `auto/docs-sync` branch, which each run that opens one replaces. The prompt repeats this file's rules on fence tags, and the list of exempt files in [CONTRIBUTING.md](CONTRIBUTING.md#exempt-files), so change it when those change. It tells Claude to leave `.claude-plugin/plugin.json` alone, because the workflow raises the plugin version itself. Leave `.github/docs-sync-sha` to the pull requests of that workflow, and change it by hand only when a run fails because the file holds no commit of `main`, as the root `CONTRIBUTING.md` ("Syncing the skills with the docs") describes.
