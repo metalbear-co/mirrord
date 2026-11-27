@@ -277,11 +277,14 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         request?.id === id ? withRun(request, run) : request,
       )
       setSendState(undefined)
+      // The merge shows the run at once, but it can't add the replays made elsewhere meanwhile,
+      // so the request is loaded again. If that fails, the merged request stays.
+      if (selectedIdRef.current === id) void loadSelected(id)
     } catch (err) {
       if (switched()) return
       setSendState({ error: message(err) })
     }
-  }, [sessionId])
+  }, [sessionId, loadSelected])
 
   const sendState = selectedId === null ? undefined : sendStates[selectedId]
   const sending = sendState === 'sending'
