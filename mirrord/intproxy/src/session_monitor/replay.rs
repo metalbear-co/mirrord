@@ -105,15 +105,27 @@ async fn get_request(
 }
 
 // The options hold header values, which can be secrets, so they stay out of the logs.
-#[tracing::instrument(level = Level::DEBUG, skip(state, options), err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state, body), err)]
 async fn replay_request(
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    options: Option<Json<ReplayOptions>>,
+    body: Bytes,
 ) -> Result<Json<ReplayRun>, ReplayError> {
-    let Json(options) = options.unwrap_or_default();
+    let options = replay_options(&body)?;
 
     state.replay_store.replay(id, options).await.map(Json)
+}
+
+/// Reads the options of a replay from the body of its request, whatever the content type,
+/// because a client that sends options without one expects them to apply.
+fn replay_options(body: &[u8]) -> Result<ReplayOptions, ReplayError> {
+    if body.is_empty() {
+        return Ok(ReplayOptions::default());
+    }
+
+    Json::<ReplayOptions>::from_bytes(body)
+        .map(|Json(options)| options)
+        .map_err(|rejection| ReplayError::InvalidOptions(rejection.body_text()))
 }
 
 /// Why a route of the [`replay_router`] refused or failed.
@@ -125,6 +137,9 @@ pub(crate) enum ReplayError {
     #[error("request {id} can't be replayed: {reason}")]
     NotReplayable { id: u64, reason: NotReplayable },
 
+    #[error("the replay options are invalid: {0}")]
+    InvalidOptions(String),
+
     #[error("header `{0}` has an invalid name or value")]
     InvalidHeader(String),
 
@@ -134,8 +149,25 @@ pub(crate) enum ReplayError {
     #[error("the local application is not listening for port {0}")]
     NotListening(Port),
 
-    #[error(transparent)]
+    #[error("{}", with_causes(.0))]
     Send(#[from] LocalHttpError),
+}
+
+/// Returns the text of `error` and of each cause that the text doesn't already end with, because
+/// a [`hyper::Error`] leaves its cause, such as a reset connection, out of its text.
+fn with_causes(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !text.ends_with(&cause_text) {
+            text.push_str(": ");
+            text.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+
+    text
 }
 
 impl IntoResponse for ReplayError {
@@ -143,7 +175,9 @@ impl IntoResponse for ReplayError {
         let status = match self {
             Self::NotFound(..) => StatusCode::NOT_FOUND,
             Self::NotReplayable { .. } => StatusCode::CONFLICT,
-            Self::InvalidHeader(..) | Self::BodyHeader(..) => StatusCode::BAD_REQUEST,
+            Self::InvalidOptions(..) | Self::InvalidHeader(..) | Self::BodyHeader(..) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::NotListening(..) | Self::Send(..) => StatusCode::BAD_GATEWAY,
         };
 
@@ -199,6 +233,9 @@ impl KeptBody {
         }
 
         self.ended |= is_last;
+        if self.is_complete() {
+            self.data.shrink_to_fit();
+        }
     }
 
     /// Returns whether all of the body arrived.
@@ -236,22 +273,43 @@ impl KeptBody {
     }
 }
 
-/// How the local application answered, without the body.
-struct ResponseHead {
-    status: StatusCode,
+/// The start of a response body, as the store keeps it.
+struct KeptResponseBody {
+    /// The first [`MAX_KEPT_BODY_BYTES`] bytes of the body, as they arrived, because text with
+    /// the bytes that aren't valid UTF-8 replaced takes up to three times as much memory.
+    data: Vec<u8>,
 
-    headers: HeaderMap,
+    /// Size of the data that arrived.
+    size: usize,
 
-    /// Time between starting to send the request and receiving the response headers.
-    duration: Duration,
+    /// Whether the replay stopped reading before the end of the body.
+    truncated: bool,
 }
 
-impl ResponseHead {
-    fn to_captured(&self) -> CapturedResponse {
-        CapturedResponse {
-            status: self.status.as_u16(),
-            headers: header_pairs(&self.headers),
-            duration_ms: millis(self.duration),
+impl KeptResponseBody {
+    fn to_captured(&self) -> CapturedBody {
+        captured_body(&self.data, self.size, self.truncated)
+    }
+}
+
+/// A replay of a captured request, as the store keeps it.
+struct KeptReplay {
+    number: u32,
+
+    at_ms: u64,
+
+    response: CapturedResponse,
+
+    body: KeptResponseBody,
+}
+
+impl KeptReplay {
+    fn to_run(&self) -> ReplayRun {
+        ReplayRun {
+            number: self.number,
+            at_ms: self.at_ms,
+            response: self.response.clone(),
+            body: self.body.to_captured(),
         }
     }
 }
@@ -277,12 +335,12 @@ struct StoredRequest {
     body: KeptBody,
 
     /// How the local application answered the original request.
-    response: Option<ResponseHead>,
+    response: Option<CapturedResponse>,
 
     replay_count: u32,
 
     /// The latest replays, oldest first.
-    replays: VecDeque<ReplayRun>,
+    replays: VecDeque<KeptReplay>,
 
     delivery: Delivery,
 }
@@ -292,12 +350,43 @@ impl StoredRequest {
         let upgraded = self
             .response
             .as_ref()
-            .is_some_and(|response| response.status == StatusCode::SWITCHING_PROTOCOLS);
+            .is_some_and(|response| response.status == StatusCode::SWITCHING_PROTOCOLS.as_u16());
         if upgraded {
             return Some(NotReplayable::Upgraded);
         }
 
         self.body.not_replayable()
+    }
+
+    /// Returns the request to send for a replay, with `header_changes` applied.
+    fn replay_request(
+        &self,
+        header_changes: Vec<(HeaderName, Option<HeaderValue>)>,
+    ) -> HttpRequest<StreamingBody> {
+        let mut headers = self.headers.clone();
+        // The response body is shown as text, so the replay asks for one that isn't
+        // compressed, unless the caller chose an encoding.
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+        for (header, value) in header_changes {
+            match value {
+                Some(value) => headers.insert(header, value),
+                None => headers.remove(header),
+            };
+        }
+
+        HttpRequest {
+            internal_request: InternalHttpRequest {
+                method: self.method.clone(),
+                uri: self.uri.clone(),
+                headers,
+                version: self.version,
+                body: StreamingBody::from(self.body.to_frames()),
+            },
+            // These identify the request to the agent, which never sees a replay.
+            connection_id: 0,
+            request_id: 0,
+            port: self.port,
+        }
     }
 
     fn summary(&self) -> CapturedRequestSummary {
@@ -308,14 +397,8 @@ impl StoredRequest {
             port: self.port,
             method: self.method.to_string(),
             path: redacted_path(&self.uri),
-            status: self
-                .response
-                .as_ref()
-                .map(|response| response.status.as_u16()),
-            duration_ms: self
-                .response
-                .as_ref()
-                .map(|response| millis(response.duration)),
+            status: self.response.as_ref().map(|response| response.status),
+            duration_ms: self.response.as_ref().map(|response| response.duration_ms),
             body_size: u64::try_from(self.body.size).unwrap_or(u64::MAX),
             not_replayable: self.not_replayable(),
             replay_count: self.replay_count,
@@ -328,8 +411,8 @@ impl StoredRequest {
             version: format!("{:?}", self.version),
             headers: header_pairs(&self.headers),
             body: self.body.to_captured(),
-            response: self.response.as_ref().map(ResponseHead::to_captured),
-            replays: self.replays.iter().cloned().collect(),
+            response: self.response.clone(),
+            replays: self.replays.iter().map(KeptReplay::to_run).collect(),
         }
     }
 }
@@ -372,8 +455,8 @@ pub struct ReplayStore(Arc<Mutex<StoreState>>);
 
 impl ReplayStore {
     fn state(&self) -> MutexGuard<'_, StoreState> {
-        // Each change to the state is a single push, pop or assignment, so the state is consistent
-        // even if a thread panicked while holding the lock.
+        // A change that stops halfway, such as an id taken without its request, leaves the state
+        // usable, so a poisoned lock is safe to use.
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -421,11 +504,12 @@ impl ReplayStore {
 
         // A chunked body and the body of an HTTP/2 request can be followed by trailers, so
         // their size doesn't say that all of the request arrived.
-        let has_trailers = *version >= Version::HTTP_2 || headers.contains_key(TRANSFER_ENCODING);
+        let can_have_trailers =
+            *version >= Version::HTTP_2 || headers.contains_key(TRANSFER_ENCODING);
         let mut kept_body = KeptBody {
             stated_size: headers
                 .get(CONTENT_LENGTH)
-                .filter(|_| !has_trailers)
+                .filter(|_| !can_have_trailers)
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse().ok()),
             ..Default::default()
@@ -509,32 +593,11 @@ impl ReplayStore {
                 return Err(ReplayError::NotReplayable { id, reason });
             }
 
-            let mut headers = stored.headers.clone();
-            // The response body is shown as text, so the replay asks for one that isn't
-            // compressed, unless the caller chose an encoding.
-            headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
-            for (header, value) in header_changes {
-                match value {
-                    Some(value) => headers.insert(header, value),
-                    None => headers.remove(header),
-                };
-            }
-
-            let request = HttpRequest {
-                internal_request: InternalHttpRequest {
-                    method: stored.method.clone(),
-                    uri: stored.uri.clone(),
-                    headers,
-                    version: stored.version,
-                    body: StreamingBody::from(stored.body.to_frames()),
-                },
-                // These identify the request to the agent, which never sees a replay.
-                connection_id: 0,
-                request_id: 0,
-                port: stored.port,
-            };
-
-            (request, stored.delivery.clone(), stored.replay_count)
+            (
+                stored.replay_request(header_changes),
+                stored.delivery.clone(),
+                stored.replay_count,
+            )
         };
 
         let sent_at = SystemTime::now();
@@ -549,7 +612,7 @@ impl ReplayStore {
             }
         };
 
-        let mut run = ReplayRun {
+        let mut replay = KeptReplay {
             number: replay_count + 1,
             at_ms: unix_millis(sent_at),
             response,
@@ -560,18 +623,19 @@ impl ReplayStore {
         // local application. The caller still gets the response.
         let mut state = self.state();
         let Some(stored) = state.request_mut(id) else {
-            return Ok(run);
+            return Ok(replay.to_run());
         };
 
         // Other replays of the request can finish first, so the number is taken when the replay
         // is stored.
         stored.replay_count += 1;
-        run.number = stored.replay_count;
+        replay.number = stored.replay_count;
+        let run = replay.to_run();
 
         if stored.replays.len() >= MAX_KEPT_REPLAYS {
             stored.replays.pop_front();
         }
-        stored.replays.push_back(run.clone());
+        stored.replays.push_back(replay);
 
         Ok(run)
     }
@@ -582,7 +646,7 @@ impl ReplayStore {
         &self,
         request: &HttpRequest<StreamingBody>,
         delivery: &Delivery,
-    ) -> Result<(CapturedResponse, CapturedBody), ReplayError> {
+    ) -> Result<(CapturedResponse, KeptResponseBody), ReplayError> {
         // Read on every attempt, because a local application that restarts can come back on
         // another address.
         let listening_on = self
@@ -624,12 +688,16 @@ impl CaptureHandle {
     /// Tells the store how the local application answered the current attempt to send the
     /// request.
     pub(crate) fn responded(&self, status: StatusCode, headers: &HeaderMap, duration: Duration) {
+        // Copied into text, because hyper's header values are slices of the read buffer of the
+        // connection, and keeping them would keep that whole buffer allocated.
+        let response = CapturedResponse {
+            status: status.as_u16(),
+            headers: header_pairs(headers),
+            duration_ms: millis(duration),
+        };
+
         if let Some(stored) = self.store.state().request_mut(self.id) {
-            stored.response = Some(ResponseHead {
-                status,
-                headers: headers.clone(),
-                duration,
-            });
+            stored.response = Some(response);
         }
     }
 }
@@ -667,7 +735,7 @@ async fn send_and_read(
     request: &HttpRequest<StreamingBody>,
     listening_on: &ListeningOn,
     delivery: &Delivery,
-) -> Result<(CapturedResponse, CapturedBody), LocalHttpError> {
+) -> Result<(CapturedResponse, KeptResponseBody), LocalHttpError> {
     let sent_at = Instant::now();
     let (client, mut response) = delivery
         .client_store
@@ -715,7 +783,16 @@ async fn send_and_read(
         duration_ms: millis(duration),
     };
 
-    Ok((head, captured_body(&data, size, truncated)))
+    data.shrink_to_fit();
+
+    Ok((
+        head,
+        KeptResponseBody {
+            data,
+            size,
+            truncated,
+        },
+    ))
 }
 
 /// Appends `chunk` to `kept`, the start of a body, up to [`MAX_KEPT_BODY_BYTES`] in total.
@@ -782,4 +859,326 @@ fn millis(duration: Duration) -> u64 {
 
 fn unix_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).map_or(0, millis)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        net::SocketAddr,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use rstest::rstest;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
+
+    use super::*;
+
+    const PORT: Port = 80;
+
+    fn request(
+        version: Version,
+        headers: &[(&'static str, &str)],
+        frames: Vec<InternalHttpBodyFrame>,
+    ) -> HttpRequest<StreamingBody> {
+        let mut header_map = HeaderMap::new();
+        for (name, value) in headers {
+            header_map.insert(*name, HeaderValue::from_str(value).unwrap());
+        }
+
+        HttpRequest {
+            internal_request: InternalHttpRequest {
+                method: Method::GET,
+                uri: "/items?id=1".parse().unwrap(),
+                headers: header_map,
+                version,
+                body: StreamingBody::from(frames),
+            },
+            connection_id: 1,
+            request_id: 1,
+            port: PORT,
+        }
+    }
+
+    fn data(len: usize) -> InternalHttpBodyFrame {
+        InternalHttpBodyFrame::Data(Payload(Bytes::from(vec![b'x'; len])))
+    }
+
+    fn capture(
+        store: &ReplayStore,
+        request: &HttpRequest<StreamingBody>,
+        body_is_complete: bool,
+    ) -> Option<CaptureHandle> {
+        store.capture(
+            request,
+            body_is_complete,
+            true,
+            &ClientStore::new_with_timeout(Duration::from_secs(10), None),
+            &IncomingTrafficTransportType::Tcp,
+        )
+    }
+
+    /// Starts a server that hands each connection to `serve`, and returns its address and the
+    /// number of connections that it accepted.
+    async fn server<F, Fut>(serve: F) -> (SocketAddr, Arc<AtomicUsize>)
+    where
+        F: Fn(TcpStream) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicUsize::new(0));
+
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                counter.fetch_add(1, Ordering::SeqCst);
+                serve(stream).await;
+            }
+        });
+
+        (address, accepted)
+    }
+
+    /// Reads the head of an HTTP/1 request from `stream`.
+    async fn read_head(stream: &mut TcpStream) {
+        let mut head = Vec::new();
+        let mut byte = [0; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            if stream.read(&mut byte).await.unwrap() == 0 {
+                return;
+            }
+            head.push(byte[0]);
+        }
+    }
+
+    /// Returns why the first captured request can't be replayed.
+    fn first_reason(store: &ReplayStore) -> Option<NotReplayable> {
+        store
+            .list()
+            .first()
+            .expect("a request is captured")
+            .not_replayable
+    }
+
+    fn listen_on(store: &ReplayStore, address: SocketAddr) {
+        store.set_listeners([(PORT, &ListeningOn::Socket(address))].into_iter());
+    }
+
+    #[rstest]
+    #[case::stated_size_without_end(Version::HTTP_11, &[("content-length", "5")], vec![data(5)], None)]
+    #[case::stated_size_cut_short(Version::HTTP_11, &[("content-length", "10")], vec![data(5)], Some(NotReplayable::BodyIncomplete))]
+    #[case::chunked_without_end(Version::HTTP_11, &[("transfer-encoding", "chunked")], vec![data(5)], Some(NotReplayable::BodyIncomplete))]
+    #[case::http2_without_end(Version::HTTP_2, &[("content-length", "5")], vec![data(5)], Some(NotReplayable::BodyIncomplete))]
+    #[case::trailers_without_end(Version::HTTP_11, &[("transfer-encoding", "chunked")], vec![data(5), InternalHttpBodyFrame::Trailers(HeaderMap::new())], None)]
+    #[tokio::test]
+    async fn body_without_its_end_message(
+        #[case] version: Version,
+        #[case] headers: &[(&'static str, &str)],
+        #[case] later_frames: Vec<InternalHttpBodyFrame>,
+        #[case] expected: Option<NotReplayable>,
+    ) {
+        let store = ReplayStore::default();
+        let handle = capture(&store, &request(version, headers, vec![]), false).unwrap();
+
+        handle.body_arrived(&later_frames, false);
+
+        assert_eq!(first_reason(&store), expected);
+    }
+
+    #[rstest]
+    #[case::largest_kept(MAX_KEPT_BODY_BYTES, None)]
+    #[case::too_large(MAX_KEPT_BODY_BYTES + 1, Some(NotReplayable::BodyTooLarge))]
+    #[tokio::test]
+    async fn body_size_limit(#[case] len: usize, #[case] expected: Option<NotReplayable>) {
+        let store = ReplayStore::default();
+        let headers = [("content-length", len.to_string())];
+        let headers = headers
+            .each_ref()
+            .map(|(name, value)| (*name, value.as_str()));
+        capture(
+            &store,
+            &request(Version::HTTP_11, &headers, vec![data(len)]),
+            true,
+        );
+
+        assert_eq!(first_reason(&store), expected);
+    }
+
+    #[tokio::test]
+    async fn upgraded_request_is_not_replayable() {
+        let store = ReplayStore::default();
+        let handle = capture(&store, &request(Version::HTTP_11, &[], vec![]), true).unwrap();
+
+        handle.responded(
+            StatusCode::SWITCHING_PROTOCOLS,
+            &HeaderMap::new(),
+            Duration::ZERO,
+        );
+
+        assert_eq!(first_reason(&store), Some(NotReplayable::Upgraded));
+    }
+
+    #[tokio::test]
+    async fn health_probe_is_not_captured() {
+        let store = ReplayStore::default();
+        let probe = request(
+            Version::HTTP_11,
+            &[("user-agent", "kube-probe/1.30")],
+            vec![],
+        );
+
+        assert!(capture(&store, &probe, true).is_none());
+        assert!(store.list().is_empty());
+    }
+
+    #[rstest]
+    #[case::no_query("/items", "/items")]
+    #[case::secret("/items?token=abc&id=1", "/items?token=[REDACTED]&id=1")]
+    #[case::encoded_secret("/items?%74oken=abc", "/items?%74oken=[REDACTED]")]
+    #[case::not_secret("/items?id=1", "/items?id=1")]
+    fn redacts_secrets_in_path(#[case] uri: &str, #[case] expected: &str) {
+        assert_eq!(redacted_path(&uri.parse().unwrap()), expected);
+    }
+
+    #[test]
+    fn redacts_secret_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer abc"));
+        headers.insert("x-request-id", HeaderValue::from_static("7f1c"));
+
+        assert_eq!(
+            header_pairs(&headers),
+            [
+                ("authorization".to_owned(), REDACTED.to_owned()),
+                ("x-request-id".to_owned(), "7f1c".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn options_are_read_without_a_content_type() {
+        let options = replay_options(br#"{"headers":{"authorization":null}}"#).unwrap();
+        assert_eq!(options.headers.get("authorization"), Some(&None));
+
+        assert!(replay_options(b"").unwrap().headers.is_empty());
+        assert!(matches!(
+            replay_options(b"{"),
+            Err(ReplayError::InvalidOptions(..))
+        ));
+    }
+
+    #[test]
+    fn unknown_reason_keeps_the_list_readable() {
+        let list =
+            r#"[{"id":1,"not_replayable":null},{"id":2,"not_replayable":"body_compressed"}]"#;
+
+        #[derive(serde::Deserialize)]
+        struct Summary {
+            not_replayable: Option<NotReplayable>,
+        }
+        let list: Vec<Summary> = serde_json::from_str(list).unwrap();
+
+        let reasons: Vec<_> = list.iter().map(|summary| summary.not_replayable).collect();
+        assert_eq!(reasons, [None, Some(NotReplayable::Unknown)]);
+    }
+
+    /// The local application can have handled a request whose connection it dropped, so the
+    /// replay must not send it again.
+    #[tokio::test]
+    async fn replay_is_not_retried_after_the_request_was_read() {
+        let (address, accepted) = server(|mut stream| async move {
+            read_head(&mut stream).await;
+        })
+        .await;
+        let store = ReplayStore::default();
+        capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
+        listen_on(&store, address);
+
+        let result = store.replay(1, ReplayOptions::default()).await;
+
+        assert!(matches!(result, Err(ReplayError::Send(..))), "{result:?}");
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn replay_reaches_the_current_address() {
+        let ok = |mut stream: TcpStream| async move {
+            read_head(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+                .await
+                .unwrap();
+        };
+        let (old_address, old_accepted) = server(ok).await;
+        let (new_address, new_accepted) = server(ok).await;
+        let store = ReplayStore::default();
+        listen_on(&store, old_address);
+        capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
+
+        listen_on(&store, new_address);
+        let run = store.replay(1, ReplayOptions::default()).await.unwrap();
+
+        assert_eq!(run.body.text, "ok");
+        assert_eq!(old_accepted.load(Ordering::SeqCst), 0);
+        assert_eq!(new_accepted.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_replay_says_why_the_connection_failed() {
+        let (address, _) = server(|mut stream| async move {
+            read_head(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000\r\n\r\npartial")
+                .await
+                .unwrap();
+            // Closing with a zero linger time resets the connection.
+            socket2::SockRef::from(&stream)
+                .set_linger(Some(Duration::ZERO))
+                .unwrap();
+        })
+        .await;
+        let store = ReplayStore::default();
+        capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
+        listen_on(&store, address);
+
+        let error = store
+            .replay(1, ReplayOptions::default())
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("reset"), "{error}");
+    }
+
+    /// A response that never ends, such as an event stream, is cut after
+    /// [`RESPONSE_BODY_IDLE_TIMEOUT`], and its connection isn't used again.
+    #[tokio::test]
+    async fn endless_response_is_truncated() {
+        let (address, accepted) = server(|mut stream| async move {
+            read_head(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5\r\nhello\r\n")
+                .await
+                .unwrap();
+            tokio::spawn(async move {
+                let _stream = stream;
+                std::future::pending::<()>().await;
+            });
+        })
+        .await;
+        let store = ReplayStore::default();
+        capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
+        listen_on(&store, address);
+
+        let run = store.replay(1, ReplayOptions::default()).await.unwrap();
+        assert!(run.body.truncated);
+        assert_eq!(run.body.text, "hello");
+
+        store.replay(1, ReplayOptions::default()).await.unwrap();
+        assert_eq!(accepted.load(Ordering::SeqCst), 2);
+    }
 }

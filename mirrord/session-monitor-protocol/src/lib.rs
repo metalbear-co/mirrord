@@ -117,6 +117,10 @@ pub enum NotReplayable {
     /// The session doesn't have the whole body: it is still arriving, the client stopped sending
     /// it, or the local application answered before all of it arrived.
     BodyIncomplete,
+
+    /// A reason that this version of mirrord doesn't know, sent by a newer session.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Completes the sentence "the request can't be replayed, because".
@@ -126,6 +130,7 @@ impl fmt::Display for NotReplayable {
             Self::Upgraded => "it upgraded the connection",
             Self::BodyTooLarge => "its body is larger than the session keeps",
             Self::BodyIncomplete => "the session doesn't have its whole body",
+            Self::Unknown => "of a reason that this version of mirrord doesn't know",
         })
     }
 }
