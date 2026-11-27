@@ -10,7 +10,7 @@ use base64::{Engine, engine::general_purpose};
 use chrono::{DateTime, Utc};
 use connect_params::{BranchDbNames, ConnectParams};
 use error::{OperatorApiError, OperatorApiResult, OperatorOperation};
-use http::{HeaderName, HeaderValue, request::Request};
+use http::{HeaderName, HeaderValue, StatusCode, request::Request};
 use k8s_openapi::{
     ByteString, api::apps::v1::Deployment, apimachinery::pkg::apis::meta::v1::OwnerReference,
 };
@@ -350,9 +350,9 @@ impl SessionShareReader {
 
         match result {
             Ok(view) => Ok(view.spec.session.share),
-            Err(kube::Error::Api(status)) if status.code == 404 => Ok(None),
+            Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => Ok(None),
             Err(kube::Error::Api(status))
-                if status.code == 403
+                if status.code == StatusCode::FORBIDDEN
                     && status.details.as_ref().is_some_and(|details| {
                         details.kind == SessionCrd::plural(&())
                             && details.group == SessionCrd::group(&())
@@ -360,7 +360,12 @@ impl SessionShareReader {
             {
                 Err(SessionShareReadError::MissingPermission)
             }
-            Err(kube::Error::Api(status)) if matches!(status.code, 401 | 403) => {
+            Err(kube::Error::Api(status))
+                if matches!(
+                    StatusCode::from_u16(status.code),
+                    Ok(StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+                ) =>
+            {
                 Err(SessionShareReadError::Refused(status.message.clone()))
             }
             Err(error) => Err(OperatorApiError::KubeError {
@@ -918,7 +923,7 @@ where
         ))?;
 
         match self.client.request(namespaced).await {
-            Err(kube::Error::Api(status)) if status.code == 404 => {
+            Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => {
                 let cluster = request(format!("/apis/operator.metalbear.co/v1/{resource}"))?;
 
                 self.client.request(cluster).await
@@ -2702,7 +2707,7 @@ impl OperatorApi<PreparedClientCert> {
             Err(OperatorApiError::KubeError {
                 error: kube::Error::Api(response),
                 operation: OperatorOperation::WebsocketConnection,
-            }) if response.code == 404 && reused_copy => {
+            }) if response.code == StatusCode::NOT_FOUND && reused_copy => {
                 connection_subtask.failure(Some("copied target is gone"));
                 self.reconnect_with_fresh_copy(
                     layer_config,
@@ -3163,7 +3168,11 @@ impl OperatorApi<PreparedClientCert> {
             // The rollout does not exist.
             // It might be that rollouts are not even installed in the cluster.
             // Depending on how hardened the cluster is, we might get one of these error codes.
-            Err(kube::Error::Api(response)) if [404, 403, 401].contains(&response.code) => {}
+            Err(kube::Error::Api(response))
+                if matches!(
+                    StatusCode::from_u16(response.code),
+                    Ok(StatusCode::NOT_FOUND | StatusCode::FORBIDDEN | StatusCode::UNAUTHORIZED)
+                ) => {}
             // A shared session is refused below without a copy, so saying that it will use
             // copy_target would be wrong.
             Err(error) if config.share.not() => {

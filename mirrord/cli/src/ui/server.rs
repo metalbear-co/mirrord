@@ -1113,7 +1113,9 @@ pub(crate) fn start_operator_watcher(state: AppState) {
                     *state.operator_watch_status.write().await = OperatorWatchStatus::Watching;
                     reconcile_operator_sessions(&state, &operator).await;
                 }
-                Err(ref error @ kube::Error::Api(ref response)) if response.code == 404 => {
+                Err(ref error @ kube::Error::Api(ref response))
+                    if response.code == StatusCode::NOT_FOUND =>
+                {
                     match tokio::time::timeout(
                         CLIENT_BUILD_TIMEOUT,
                         operator_installed(client.as_ref().expect("kube client was initialized")),

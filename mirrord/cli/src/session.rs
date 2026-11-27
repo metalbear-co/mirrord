@@ -3,6 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use http::StatusCode;
 use kube::{Api, api::ListParams};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
@@ -343,7 +344,9 @@ async fn load_remote_sessions(
         // Match on the HTTP code, not `Status::is_not_found`/`is_forbidden`, as they rely on the
         // `reason` string, which is not available for an empty body `404` from an un-upgraded
         // operator.
-        Err(kube::Error::Api(status)) if status.code == 403 || status.code == 404 => {
+        Err(kube::Error::Api(status))
+            if status.code == StatusCode::FORBIDDEN || status.code == StatusCode::NOT_FOUND =>
+        {
             tracing::debug!(
                 code = status.code,
                 "active-sessions API unavailable, falling back to operator status"
@@ -544,12 +547,14 @@ async fn delete_remote_session_with_name(
 ) -> Result<bool, CliError> {
     match session_api.delete(session_name, &Default::default()).await {
         Ok(_) => Ok(true),
-        Err(kube::Error::Api(status)) if status.code == 404 && status.reason.contains("parse") => {
+        Err(kube::Error::Api(status))
+            if status.code == StatusCode::NOT_FOUND && status.reason.contains("parse") =>
+        {
             Err(CliError::Session(
                 "remote session management is not supported by this operator".to_owned(),
             ))
         }
-        Err(kube::Error::Api(status)) if status.code == 404 => Ok(false),
+        Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => Ok(false),
         Err(error) => Err(CliError::Session(format!(
             "failed to kill remote session `{session_name}`: {error}"
         ))),

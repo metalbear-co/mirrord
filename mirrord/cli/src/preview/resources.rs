@@ -36,6 +36,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use http::StatusCode;
 use k8s_openapi::{
     ByteString,
     api::core::v1::{ConfigMap, Secret},
@@ -831,7 +832,7 @@ where
         Ok(live) => live
             .map(|live| to_value(&live, &object.display()))
             .transpose(),
-        Err(kube::Error::Api(response)) if response.code == 403 => {
+        Err(kube::Error::Api(response)) if response.code == StatusCode::FORBIDDEN => {
             notes.push(format!(
                 "Could not read the live {} (your credentials do not allow it); the preview uses \
                  the version from {}.",
@@ -917,10 +918,12 @@ async fn dry_run_create(
 
     match api.create(&params, &object).await {
         Ok(accepted) => to_value(&accepted, display).map(DryRun::Accepted),
-        Err(kube::Error::Api(response)) => match response.code {
-            409 => Ok(DryRun::AlreadyExists),
-            403 => Ok(DryRun::Forbidden),
-            400 | 422 => Ok(DryRun::Rejected(response.message)),
+        Err(kube::Error::Api(response)) => match StatusCode::from_u16(response.code) {
+            Ok(StatusCode::CONFLICT) => Ok(DryRun::AlreadyExists),
+            Ok(StatusCode::FORBIDDEN) => Ok(DryRun::Forbidden),
+            Ok(StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY) => {
+                Ok(DryRun::Rejected(response.message))
+            }
             _ => Err(ResourcesError::DryRun {
                 object: display.to_owned(),
                 source: Box::new(kube::Error::Api(response)),

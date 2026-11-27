@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeSet, future::Future, ops::Not, time::Duration};
 
+use http::StatusCode;
 use kube::{Api, Client, api::ListParams};
 use mirrord_config::feature::split_queues::{QueueKind, QueueMode, SplitQueuesConfig};
 use mirrord_progress::Progress;
@@ -98,7 +99,12 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
         .await
         {
             Ok(Ok(splits)) => splits.items,
-            Ok(Err(kube::Error::Api(status))) if matches!(status.code, 403 | 404) => {
+            Ok(Err(kube::Error::Api(status)))
+                if matches!(
+                    StatusCode::from_u16(status.code),
+                    Ok(StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)
+                ) =>
+            {
                 tracing::debug!(
                     ?status,
                     "Queue split view unavailable, not reporting the split"

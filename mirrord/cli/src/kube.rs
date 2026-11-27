@@ -3,6 +3,7 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
+use http::StatusCode;
 use kube::{Resource, api::ListParams, client::ClientBuilder};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
@@ -70,7 +71,7 @@ where
 {
     match resource_api.list(&ListParams::default()).await {
         Ok(branches) => Ok(Some(branches.items)),
-        Err(kube::Error::Api(err)) if err.code == 404 => {
+        Err(kube::Error::Api(err)) if err.code == StatusCode::NOT_FOUND => {
             status_progress.info(&format!(
                 "Can't list {}, assuming they're not enabled on this cluster.",
                 R::plural(&())

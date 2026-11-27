@@ -15,6 +15,7 @@ use std::{
     time::Duration,
 };
 
+use http::StatusCode;
 use mirrord_config::target::Target;
 use mirrord_operator::{
     client::{
@@ -420,7 +421,9 @@ pub(super) fn refused(error: &OperatorApiError) -> bool {
         OperatorApiError::KubeError {
             error: kube::Error::Api(status),
             ..
-        } if (400..500).contains(&status.code) && !matches!(status.code, 408 | 429)
+        } if StatusCode::from_u16(status.code).is_ok_and(|code| code.is_client_error()
+            && code != StatusCode::REQUEST_TIMEOUT
+            && code != StatusCode::TOO_MANY_REQUESTS)
     )
 }
 
