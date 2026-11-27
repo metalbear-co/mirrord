@@ -18,19 +18,7 @@ Other developers and agents keep using staging at the same time. Each Devin sess
 
 You install mirrord in Devin's machine setup and give Devin two secrets: a kubeconfig for a staging service account and a mirrord CI API key. An `AGENTS.md` file in the repository tells Devin when to verify a change, and how. For each verification, Devin makes a new session key, starts the service with `mirrord up`, sends requests with the key in a header, checks the result, and stops the session.
 
-```mermaid
-flowchart LR
-    subgraph Devin["Devin's machine"]
-        D[Devin] -->|"1. mirrord up --key KEY"| S[Changed service]
-        D -->|"2. request with x-mirrord-agent: KEY"| GW
-    end
-    subgraph Staging["Staging cluster"]
-        GW[Ingress or gateway] --> A[mirrord agent at the target pod]
-        A -.->|"requests with KEY"| S
-        A -->|"all other requests"| T[Deployed service]
-        S -->|"outgoing calls"| DEP[APIs, queues, databases]
-    end
-```
+![How Devin verifies a change against staging with mirrord](../.gitbook/assets/devin-staging-flow.svg)
 
 ## Prerequisites
 
