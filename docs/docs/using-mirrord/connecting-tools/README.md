@@ -40,3 +40,4 @@ Once the proxy is running, choose your tool below to configure the connection:
 
 * [Web Browsing](./web-browsing.md) - Using mirrord to browse using cluster networking.
 * [Postman](./postman.md) - Send API requests via postman to kubernetes services.
+* [Playwright](./playwright.md) and [Cypress](./cypress.md) - Run E2E tests against shared staging with a header filter. These guides do not use the proxy.
