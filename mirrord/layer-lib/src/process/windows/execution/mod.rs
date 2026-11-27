@@ -20,6 +20,7 @@ use winapi::{
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
     },
     um::{
+        debugapi::CheckRemoteDebuggerPresent,
         handleapi::{CloseHandle, SetHandleInformation},
         jobapi2::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject},
         minwinbase::LPSECURITY_ATTRIBUTES,
@@ -101,6 +102,23 @@ fn loader_status_name(exit_code: u32) -> Option<&'static str> {
         .iter()
         .find(|(code, _)| *code == exit_code)
         .map(|(_, name)| *name)
+}
+
+/// Whether a resume that found `previous` suspensions on the primary thread lifted only the
+/// launcher's own, so the rest belong to the attached debugger.
+///
+/// One is the launcher's alone. More are expected only while a debugger is attached: Windows
+/// suspends the primary thread of a process a debugger attaches to, until the debugger handles
+/// the attach's first event.
+///
+/// `debugger_attached` is asked only then. Zero (the thread was already running) and `u32::MAX`
+/// (the resume failed) are never the launcher's.
+fn resumed_only_ours(previous: u32, debugger_attached: impl FnOnce() -> bool) -> bool {
+    match previous {
+        1 => true,
+        0 | u32::MAX => false,
+        _ => debugger_attached(),
+    }
 }
 
 /// The injector for `method`.
@@ -1096,13 +1114,45 @@ impl LayerManagedProcess {
 
     /// Lifts the one suspension this launcher added.
     ///
+    /// A debugger that attached during the hold may still hold a suspension of its own. Windows
+    /// lifts it only once the debugger handles the attach's first event, and an IDE can release
+    /// the hold before that, as Visual Studio's Native engine does.
+    ///
+    /// That suspension is the debugger's to lift, so it is left in place. The program runs once
+    /// the debugger lets it.
+    ///
+    /// Without a debugger, a count other than one means something else suspended the process,
+    /// and the resume fails (see [`resumed_only_ours`]).
+    ///
     /// A process that already ended has nothing to resume, and that is not an error: whatever
     /// ended it (its own startup, another process) is the outcome the caller gets.
     fn resume_main_thread(&self) -> LayerResult<()> {
         let previous = unsafe { ResumeThread(self.process_info.hThread) };
+        if resumed_only_ours(previous, || self.debugger_attached()) {
+            match previous {
+                1 => {}
+                // The one suspension an attach adds.
+                2 => tracing::debug!(
+                    child_pid = self.process_info.dwProcessId,
+                    previous,
+                    "resumed; the other suspension is the attached debugger's"
+                ),
+                // More than an attach adds: someone else suspended the program too. Said loudly,
+                // so a program that stays paused is explainable from the logs.
+                _ => tracing::warn!(
+                    child_pid = self.process_info.dwProcessId,
+                    previous,
+                    "resumed only mirrord's own suspension of the program; the other {} belong to \
+                     someone else, such as the attached debugger, an antivirus or a suspend tool, \
+                     and the program stays paused until they're lifted",
+                    previous - 1
+                ),
+            }
+            return Ok(());
+        }
         // A process being ended stops answering for its threads before it is signaled, so an
         // unexpected answer gets a moment to turn into an exit.
-        if previous != 1 && self.exits_within(EXIT_GRACE_MS) {
+        if self.exits_within(EXIT_GRACE_MS) {
             tracing::debug!(
                 child_pid = self.process_info.dwProcessId,
                 "the process ended before its primary thread was resumed"
@@ -1114,12 +1164,20 @@ impl LayerManagedProcess {
                 WindowsError::last_error(),
             ));
         }
-        if previous != 1 {
-            return Err(LayerError::ProcessSynchronization(format!(
-                "expected one suspension before resume, got {previous}"
-            )));
-        }
-        Ok(())
+        Err(LayerError::ProcessSynchronization(format!(
+            "expected one suspension before resume, got {previous}"
+        )))
+    }
+
+    /// Whether a debugger is attached to the process. One that cannot be asked counts as none, so
+    /// an unexpected suspension still fails the resume.
+    fn debugger_attached(&self) -> bool {
+        let mut attached = 0;
+        // SAFETY: `hProcess` is this launcher's own open handle to the process, from its creation,
+        // and `attached` is a live local the call writes once.
+        let asked =
+            unsafe { CheckRemoteDebuggerPresent(self.process_info.hProcess, &mut attached) } != 0;
+        asked && attached != 0
     }
 
     /// Whether the process ends within `timeout_ms`.
@@ -1205,6 +1263,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use rstest::rstest;
     use utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
     use winapi::{
         shared::minwindef::FALSE,
@@ -2161,6 +2220,54 @@ mod tests {
             "{error}"
         );
         assert_ne!(launched.exit_code(), RAN, "the program never ran");
+    }
+
+    /// The suspensions a resume may find beyond the launcher's own are a debugger's, and only
+    /// while one is attached.
+    ///
+    /// Each case is the count `ResumeThread` found before lifting one, whether a debugger is
+    /// attached, and what the resume made of it.
+    #[rstest]
+    // Only the launcher's suspension: the program runs.
+    #[case::only_ours(1, Debugger::Detached, Resume::LiftedOnlyOurs)]
+    // Only the launcher's, under a debugger that has already lifted its own: the program runs.
+    #[case::only_ours_while_debugged(1, Debugger::Attached, Resume::LiftedOnlyOurs)]
+    // The launcher's plus the attach's: the debugger lifts its own after its first event.
+    #[case::the_debuggers_left_to_it(2, Debugger::Attached, Resume::LiftedOnlyOurs)]
+    // A second suspension with no debugger to explain it: something else suspended the process.
+    #[case::unexplained_second_suspension(2, Debugger::Detached, Resume::Failed)]
+    // The thread was already running, so the launcher's suspension is gone.
+    #[case::already_running(0, Debugger::Attached, Resume::Failed)]
+    // `ResumeThread` itself failed (it returns `u32::MAX`), so nothing was lifted.
+    #[case::resume_failed(u32::MAX, Debugger::Attached, Resume::Failed)]
+    fn only_a_debugger_explains_more_than_one_suspension(
+        #[case] previous: u32,
+        #[case] debugger: Debugger,
+        #[case] expected: Resume,
+    ) {
+        let resume = if resumed_only_ours(previous, || debugger == Debugger::Attached) {
+            Resume::LiftedOnlyOurs
+        } else {
+            Resume::Failed
+        };
+
+        assert_eq!(resume, expected, "{previous} suspension(s), {debugger:?}");
+    }
+
+    /// Whether a debugger is attached to the held program when it's resumed.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Debugger {
+        Attached,
+        Detached,
+    }
+
+    /// What a resume made of the suspensions it found.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Resume {
+        /// It lifted the launcher's suspension, and any left belong to the debugger.
+        LiftedOnlyOurs,
+        /// The count can't be explained, so the launch fails.
+        Failed,
     }
 
     /// A program ended while held is not resumed, and its exit is the launch's outcome, not an
