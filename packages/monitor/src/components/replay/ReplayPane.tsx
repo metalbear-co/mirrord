@@ -188,7 +188,7 @@ function RequestDetail({
         </div>
       ) : (
         <p className="text-meta text-muted-foreground leading-relaxed">
-          {s.cantReplay(s.notReplayable[request.not_replayable])}
+          {s.cantReplay(s.notReplayable(request.not_replayable))}
         </p>
       )}
 

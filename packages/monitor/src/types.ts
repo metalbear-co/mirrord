@@ -309,7 +309,12 @@ export interface ReplayRun {
   body: CapturedBody
 }
 
-export type NotReplayable = 'upgraded' | 'body_too_large' | 'body_incomplete'
+// A newer session can send a reason that this list doesn't have yet.
+export type NotReplayable =
+  | 'upgraded'
+  | 'body_too_large'
+  | 'body_incomplete'
+  | (string & {})
 
 export interface CapturedRequestSummary {
   id: number
