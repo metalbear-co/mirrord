@@ -469,25 +469,7 @@ These are the GitLab rules that this pipeline uses:
 
 In flow 1, `mirrord ci start` starts the service in the runner and connects it to a target in staging, then returns. The tests send requests to the staging service with a header that holds the session key. mirrord compares the header with the filter of each session. It sends the requests that match to the runner, and all other requests to the staging pods. In flow 2, `mirrord preview start` makes a preview pod in the cluster from the target's pod spec and the new image. The pod stays after the job ends, until the stop job or the TTL removes it.
 
-```mermaid
-sequenceDiagram
-    participant MR as Merge request
-    participant CI as GitLab pipeline
-    participant Op as mirrord operator
-    participant Stg as orders (staging pods)
-    participant Prev as Preview pod
-    MR->>CI: Open or push
-    CI->>Op: mirrord ci start (key mr-IID-pipeline)
-    CI->>Stg: Tests send requests with baggage header
-    Stg-->>CI: Requests with the key go to the service in the runner
-    CI->>Op: mirrord ci stop
-    CI->>Op: mirrord preview start (key mr-IID)
-    Op->>Prev: Create the preview pod with the new image
-    CI->>MR: Write or update the comment
-    MR->>CI: Merge or close
-    CI->>Op: mirrord preview stop -k mr-IID
-    Op->>Prev: Delete the preview pod
-```
+![GitLab CI flows with mirrord: tests on the runner and a preview pod for each merge request](../../.gitbook/assets/ci-gitlab-flow.svg)
 
 ## Behavior and limits
 

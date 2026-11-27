@@ -631,30 +631,7 @@ Push the preview image to the registry and repository that `deployment/orders` a
 
 Argo CD keeps staging equal to Git. mirrord adds sessions next to the staging workloads and does not change the fields that Git sets, with two exceptions: `scale_down` and KEDA trigger changes. For these, the operator pauses automated sync and resumes it after the session. For previews, the pull request generator makes one Application for each pull request. Its `PostSync` hook asks the operator for a preview, and its `PostDelete` hook removes the preview.
 
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant GH as GitHub
-    participant CI as CI system
-    participant AS as ApplicationSet controller
-    participant Argo as Argo CD
-    participant Job as Hook Job (mirrord CLI)
-    participant Op as mirrord operator
-    Dev->>GH: Open or push to pull request
-    GH->>CI: pull_request event
-    CI->>CI: Build and push preview-pr-N-sha
-    CI->>GH: Post or update comment
-    AS->>GH: List open pull requests
-    AS->>Argo: Create or update Application orders-pr-N
-    Argo->>Argo: Apply ConfigMap (new image tag)
-    Argo->>Job: Run PostSync hook
-    Job->>Op: mirrord preview start -k pr-N --force
-    Op->>Op: Create preview pod in staging
-    Dev->>GH: Merge or close pull request
-    AS->>Argo: Delete Application orders-pr-N
-    Argo->>Job: Run PostDelete hook
-    Job->>Op: mirrord preview stop -k pr-N
-```
+![Argo CD preview flow: the ApplicationSet and hook Jobs start and stop a preview pod for each pull request](../../.gitbook/assets/ci-argo-cd-preview-flow.svg)
 
 ## Behavior and limits
 

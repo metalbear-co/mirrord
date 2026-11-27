@@ -484,19 +484,7 @@ If you prefer a build at the moment the pull request closes, send the GitHub `pu
 
 In flow 1, `mirrord ci start` runs the service on the Jenkins agent and connects it to the `orders` target in staging. The tests send requests to the staging service with the `x-mirrord-ci` header, and mirrord sends only those requests to the agent. The service on the agent reads files, environment, and outgoing connections from the cluster, so it talks to the real staging dependencies. In flow 2, `mirrord preview start` asks the operator for a preview pod, which is a copy of the target pod spec with the new image. The pod stays after the build ends, and the operator sends it the requests whose `baggage` header has the key. The cleanup job and the TTL remove it.
 
-```mermaid
-flowchart LR
-  GH[GitHub pull request] -->|webhook| J[Jenkins Multibranch Pipeline]
-  J -->|mirrord ci start| A[Service on Jenkins agent]
-  J -->|tests with x-mirrord-ci header| S[orders Service in staging]
-  S -->|requests with the header| A
-  S -->|all other requests| D[orders Deployment]
-  J -->|mirrord preview start -k pr-N| O[mirrord operator]
-  O --> P[Preview pod pr-N]
-  R[Reviewer with baggage header] --> S
-  S -->|mirrord-session=pr-N| P
-  C[Cleanup job every 30 min] -->|preview stop for closed pull requests| O
-```
+![Jenkins flows with mirrord: tests on the Jenkins agent and a preview pod for each pull request](../../.gitbook/assets/ci-jenkins-flow.svg)
 
 ## Behavior and limits
 
