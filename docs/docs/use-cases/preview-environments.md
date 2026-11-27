@@ -430,6 +430,66 @@ operator:
 
 ***
 
+## Autoscaling Like the Target
+
+Requires operator 3.237.0 or later and CLI 3.292.0 or later.
+
+A Preview Environment runs a fixed number of pods by default: 1, or `feature.preview.replicas`.
+When the target is scaled by a `HorizontalPodAutoscaler`, the preview can scale the same way: the
+operator copies the target's autoscaler (its metrics, thresholds, and scaling behavior) onto the
+preview's pods.
+
+Autoscaling is off by default. Turn it on in the mirrord configuration:
+
+```json
+{
+  "feature": {
+    "preview": {
+      "autoscale": { "min": 4, "max": 12 }
+    }
+  }
+}
+```
+
+* `"autoscale": true` copies the target's autoscaler, scaling from 1 pod up to the target's
+  maximum.
+* `{ "min": 4, "max": 12 }`, or `{ "max": 12 }`, copies it within these bounds. `min` is 1 when
+  unset, `max` is the target's maximum when unset, and `1 <= min <= max` must hold.
+* `autoscale` and `replicas` can't both be set.
+
+The copy keeps the target's `Resource`, `ContainerResource`, and `Pods` metrics, which measure the
+preview's own pods. `Object` and `External` metrics measure something outside the preview and are
+left out; a target whose autoscaler has only those counts as having none. Preview pods are never
+`Ready`, which the autoscaler treats as still starting for CPU utilization, so a CPU-based
+autoscaler doesn't scale the preview yet; memory and custom pod metrics do.
+
+The preview's autoscaler is created with the environment and deleted with it. A target without
+an autoscaler fails the environment, with the error naming the target. `mirrord preview start`
+prints the preview's bounds once it is ready:
+
+```
+    * autoscale 4-12
+```
+
+When the target autoscales but the preview doesn't, `mirrord preview start` says so, so the
+difference isn't a surprise:
+
+```
+    * deployment/apisvc autoscales in the cluster (2-10 pods). Its preview runs 1 pod. To match,
+      set `feature.preview.autoscale` in mirrord.json.
+```
+
+With [idle mode](#auto-scaling-idle-mode), an idle environment still scales to zero pods, which
+puts its autoscaler to sleep. A woken environment starts at `min` pods, and the autoscaler takes
+over from there.
+
+`mirrord preview up` has the same setting in `mirrord-up.yaml`, for every service under `common`
+and per service under `services`. See
+[`preview`](../using-mirrord/multiple-concurrent-sessions.md#preview) in the `mirrord up`
+reference.
+
+***
+
 ## Targeting Scaled-to-Zero Services
 
 A Preview Environment that only splits queues can target a workload (Deployment, Argo Rollout,
