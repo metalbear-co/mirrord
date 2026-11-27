@@ -110,6 +110,17 @@ impl fmt::Display for StopTarget {
     }
 }
 
+/// What `mirrord ci stop` did with one session.
+#[cfg(not(target_os = "windows"))]
+enum SessionStop {
+    /// The stop held the session's lock and went over its state. `had_targets` says whether the
+    /// state had anything to stop.
+    Visited { had_targets: bool },
+
+    /// Another process held the session's lock, so the stop left the session alone.
+    Skipped,
+}
+
 /// Asks intproxy to shut down its registered layers, and kills other targets once.
 ///
 /// Intproxy completes registration quiescence after receiving `SIGTERM`; `ci stop` does not wait
@@ -324,8 +335,8 @@ impl CiStopCommandHandler {
         let mut skipped = Vec::new();
         for session_dir in Self::session_dirs(&sessions_dir).await? {
             match Self::stop_session(&session_dir, &mut remove_container, &mut failures).await {
-                Ok(had_targets) => found_targets |= had_targets,
-                Err(CiError::SessionLocked { .. }) => skipped.push(session_dir),
+                Ok(SessionStop::Visited { had_targets }) => found_targets |= had_targets,
+                Ok(SessionStop::Skipped) => skipped.push(session_dir),
                 Err(error) => failures.push((StopTarget::Session(session_dir), error)),
             }
         }
@@ -398,12 +409,13 @@ impl CiStopCommandHandler {
         Ok(session_dirs)
     }
 
-    /// Stops the session in `session_dir` if its lock is free, and returns whether it had anything
-    /// to stop. Adds each target that it could not stop to `failures`.
+    /// Stops the session in `session_dir` if its lock is free, and returns what it did with the
+    /// session. Adds each target that it could not stop to `failures`.
     ///
-    /// Fails with [`CiError::SessionLocked`] right away, without waiting, if another process holds
-    /// the lock, so that [`Self::handle_with`] can skip the session. Any other error means that
-    /// the session's lock or state could not be opened, read, written, or removed.
+    /// Returns [`SessionStop::Skipped`] right away, without waiting, if another process holds the
+    /// lock, so that [`Self::handle_with`] can skip the session. Only the first attempt to take the
+    /// lock is turned into a skip, so that a held lock met later can't hide a failure. Any error
+    /// means that the session's lock or state could not be opened, read, written, or removed.
     ///
     /// Holds the lock from before it reads the state until it writes the state back or removes the
     /// session, so that no process of the session can write the state in between. Such a write
@@ -419,16 +431,22 @@ impl CiStopCommandHandler {
         session_dir: &Path,
         remove_container: Remove,
         failures: &mut Vec<(StopTarget, CiError)>,
-    ) -> CiResult<bool>
+    ) -> CiResult<SessionStop>
     where
         Remove: FnMut(MirrordCiManagedContainer) -> Removal,
         Removal: Future<Output = CiResult<()>>,
     {
-        let Some(lock) =
-            MirrordCiStore::lock_existing_session(session_dir, Instant::now(), Duration::ZERO)
-                .await?
-        else {
-            return Ok(false);
+        let lock = match MirrordCiStore::lock_existing_session(
+            session_dir,
+            Instant::now(),
+            Duration::ZERO,
+        )
+        .await
+        {
+            Ok(Some(lock)) => lock,
+            Ok(None) => return Ok(SessionStop::Visited { had_targets: false }),
+            Err(CiError::SessionLocked { .. }) => return Ok(SessionStop::Skipped),
+            Err(error) => return Err(error),
         };
         let mut store =
             MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(session_dir))
@@ -444,7 +462,7 @@ impl CiStopCommandHandler {
             store.write_locked(session_dir, &lock).await?;
         }
 
-        Ok(had_targets)
+        Ok(SessionStop::Visited { had_targets })
     }
 
     #[cfg_attr(windows, allow(unused))]
