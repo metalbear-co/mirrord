@@ -90,8 +90,6 @@ With operator `3.240.0` or newer, you only receive the events of targets that yo
 
 Being allowed to `get` a target isn't the same as being able to run `mirrord exec` against it, because `mirrord exec` also needs `proxy` on the operator's `targets`. A per-target Role, such as the ones that the map form of the chart's `roleNamespaces` creates, grants `proxy` only on the targets that it lists. So a user who also has broader read access, such as the `view` ClusterRole, sees the events of workloads that they can't run `mirrord exec` against.
 
-A user who may `create` `mirrordclustersessions` in the whole cluster, such as a cluster administrator, receives the events of every target.
-
 The operator checks each target once per subscription, on its first event, so a permission granted or revoked while you're subscribed applies from your next subscription. If a check fails, for example because the Kubernetes API is unavailable or an authorization webhook fails, the operator waits briefly (1 second at first, growing to 30 seconds) before it makes another check. In the meantime it drops the events of every target that it has no answer for yet. A [`lagged`](#lagged) event's `count` includes dropped events of targets that you can't see.
 
 ## Options
