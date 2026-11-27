@@ -828,7 +828,10 @@ mod tests {
     #[cfg(windows)]
     use {
         tracing::span::{Attributes, Id, Record},
-        winapi::um::errhandlingapi::{GetLastError, SetLastError},
+        winapi::{
+            shared::winerror::WSAEADDRINUSE,
+            um::errhandlingapi::{GetLastError, SetLastError},
+        },
     };
 
     use super::*;
@@ -1017,7 +1020,7 @@ mod tests {
 
     /// What a hooked API leaves for its caller, and what writing a log line leaves behind.
     #[cfg(windows)]
-    const CALL_ERROR: u32 = 10048;
+    const CALL_ERROR: u32 = WSAEADDRINUSE;
     #[cfg(windows)]
     const LOGGING_ERROR: u32 = 0xDEAD;
 

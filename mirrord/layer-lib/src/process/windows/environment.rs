@@ -16,7 +16,9 @@ use std::{cmp::Ordering, collections::BTreeMap};
 use str_win::{MultiBufferChar, multi_buffer_ptr_to_strings};
 use winapi::{shared::minwindef::TRUE, um::stringapiset::CompareStringOrdinal};
 
-// `CompareStringOrdinal` results, from `winnls.h`. The winapi crate does not define them.
+// `CompareStringOrdinal` results, from `winnls.h`, as its documentation lists them:
+// <https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-comparestringordinal>.
+// The winapi crate does not define them, and this crate doesn't depend on windows-sys, which does.
 const CSTR_LESS_THAN: i32 = 1;
 const CSTR_EQUAL: i32 = 2;
 const CSTR_GREATER_THAN: i32 = 3;
