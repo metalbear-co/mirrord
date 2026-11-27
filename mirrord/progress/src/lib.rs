@@ -15,7 +15,8 @@ use crate::json::ProgressMessage;
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
 /// A progress mode that prints one line per event, the modes machines read: `simple` for
-/// `mirrord up`, `json` for the IDEs.
+/// `mirrord up`'s sessions by default, `json` for the IDEs, and for `up`'s sessions when an IDE
+/// asks for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineMode {
     /// `SimpleProgress`'s plain lines.
@@ -40,6 +41,12 @@ impl LineMode {
             "json" => Some(Self::Json),
             _ => None,
         }
+    }
+
+    /// The mode [`MIRRORD_PROGRESS_ENV`] names in this process's environment, or `None` when it's
+    /// unset or names a mode that isn't a [`LineMode`] (a tracker for people, or `off`).
+    pub fn from_env() -> Option<Self> {
+        Self::from_name(&std::env::var(MIRRORD_PROGRESS_ENV).ok()?)
     }
 }
 
