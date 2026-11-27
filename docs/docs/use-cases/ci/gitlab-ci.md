@@ -6,7 +6,7 @@ tags:
   - enterprise
 ---
 
-# How to Use mirrord in GitLab CI
+# GitLab CI
 
 This guide shows how to connect GitLab CI/CD pipelines to a shared staging cluster with mirrord. You get two flows, each with configuration that you can copy into your repository:
 
@@ -24,6 +24,7 @@ The setup in this guide needs the mirrord operator. Flow 1 can also run with ope
 - mirrord CLI `3.181.0` or later for `mirrord ci`. mirrord CLI `3.189.0` or later for `mirrord preview`. The examples pin `3.288.0`.
 - For flow 2: mirrord operator `3.142.0` or later, with `operator.previewEnv: true` in the Helm values. See [Preview Environments](../preview-environments.md#prerequisites).
 - A GitLab runner that can reach the Kubernetes API server of the staging cluster.
+- For flow 2: a runner that can run Docker-in-Docker with TLS. On the Docker executor, set `privileged = true` and add `/certs/client` to `volumes`. For other executors, see [Use Docker-in-Docker](https://docs.gitlab.com/ci/docker/docker_in_docker/).
 - A Linux runner image on `x86_64` or `aarch64` with glibc, `bash`, and `curl`. The mirrord install script needs `bash` and `curl`. The mirrord binary needs glibc, so it does not run on Alpine (musl) images, also not with `gcompat`. Use a Debian or Ubuntu image, as the examples do.
 - The Maintainer role in the GitLab project, to add CI/CD variables and access tokens.
 
@@ -151,7 +152,7 @@ The key is one line that starts with `mci-v1:`, so GitLab can mask it. Without t
 
 ### 5. Run only trusted code with the credentials
 
-A merge request pipeline runs the code of the merge request with the kubeconfig and the CI API key, so that code can read both. Thus give the variables only to pipelines that a Maintainer starts after a review. In GitLab 18.1 and later, a merge request pipeline can read protected variables only when:
+A merge request pipeline runs the code of the merge request with the kubeconfig and the CI API key, so that code can read both. Thus give the variables only to code that a Maintainer reviewed. In GitLab 18.1 and later, a merge request pipeline can read protected variables only when:
 
 - The source branch and the target branch are both protected.
 - The user who starts the pipeline can push or merge to the target branch.
@@ -160,11 +161,12 @@ A merge request pipeline runs the code of the merge request with the kubeconfig 
 Do these steps:
 
 1. In **Settings > Repository > Protected branches**, protect the target branch, for example `main`. Set **Allowed to merge** and **Allowed to push and merge** to **Maintainers**.
-2. Protect the merge request branches with a wildcard rule, for example `feature/*`. Set **Allowed to merge** and **Allowed to push and merge** to **Developers + Maintainers**.
+2. Protect the source branches for staging tests with a wildcard rule, for example `staging-test/*`. Set **Allowed to merge** and **Allowed to push and merge** to **Maintainers**.
 3. In **Settings > CI/CD > Variables**, under **Access protected resources in merge request pipelines**, select **Allow merge request pipelines to access protected variables and runners**.
-4. Review the changes of each merge request, including `.gitlab-ci.yml` and the test scripts. Then, on the **Pipelines** tab of the merge request, select **Run pipeline**.
+4. Review the changes of each merge request, including `.gitlab-ci.yml` and the test scripts.
+5. Push the reviewed commits to a protected branch, for example `staging-test/orders-fix`, and open a merge request from it. To run the tests again, select **Run pipeline** on the **Pipelines** tab of the merge request.
 
-A pipeline that a Developer starts with a push does not get the variables, so its mirrord jobs fail. A pipeline that a Maintainer starts gets the variables, both with **Run pipeline** and with a push to the source branch. Both pipelines run the latest commit of the source branch, also commits that a Developer pushed after your review. Thus review all commits of the branch before you select **Run pipeline** or push to the branch. To stop Developers from adding commits after a review, set **Allowed to push and merge** of the merge request branches to **Maintainers**. See [Control access to protected variables and runners](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/#control-access-to-protected-variables-and-runners).
+Developers push to unprotected branches. Their merge request pipelines do not get the variables. Only Maintainers can push to the protected branches, so only reviewed code gets the variables. The mirrord jobs in this guide run only when `$CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED` is `"true"`, so GitLab skips them in all other merge request pipelines. See [Control access to protected variables and runners](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/#control-access-to-protected-variables-and-runners).
 
 ## Install the mirrord CLI in a job
 
@@ -253,7 +255,7 @@ mr-staging-tests:
   image: node:22-bookworm
   interruptible: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
   variables:
     # One key for each pipeline, so two pipelines of the same MR do not share requests.
     MIRRORD_KEY: "mr-${CI_MERGE_REQUEST_IID}-${CI_PIPELINE_ID}"
@@ -373,7 +375,7 @@ build-preview-image:
     DOCKER_TLS_CERTDIR: "/certs"
   interruptible: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - docker build -t "$PREVIEW_IMAGE" .
@@ -385,7 +387,7 @@ preview-start:
   image: debian:bookworm-slim
   resource_group: preview-mr-$CI_MERGE_REQUEST_IID
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
   environment:
     name: preview/mr-$CI_MERGE_REQUEST_IID
     on_stop: preview-stop
@@ -444,7 +446,7 @@ preview-stop:
   image: debian:bookworm-slim
   resource_group: preview-mr-$CI_MERGE_REQUEST_IID
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
       when: manual
   allow_failure: true
   environment:
@@ -467,7 +469,7 @@ preview-stop:
 
 These are the GitLab rules that this pipeline uses:
 
-- **Triggers.** `$CI_PIPELINE_SOURCE == "merge_request_event"` is true when a merge request is created or updated. `$CI_MERGE_REQUEST_IID` is the merge request number from its URL.
+- **Triggers.** `$CI_PIPELINE_SOURCE == "merge_request_event"` is true when a merge request is created or updated. `$CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED` is `"true"` when its source branch is protected. `$CI_MERGE_REQUEST_IID` is the merge request number from its URL.
 - **Cleanup.** The `preview-start` job starts the `preview/mr-<IID>` environment and names `preview-stop` as its `on_stop` job. GitLab runs the stop job when the merge request is merged or closed. The stop job must have the same rules as the start job. `when: manual` also lets a reviewer stop the preview from the environment page.
 - **Second guard.** `auto_stop_in: 1 day` makes GitLab run the stop job after one day. The GitLab worker for this runs one time each hour. The preview TTL of 1440 minutes does the same in the cluster.
 - **Concurrency.** `interruptible: true` with `auto_cancel: on_new_commit: interruptible` cancels the build and test jobs of an older pipeline after a new push. `resource_group` lets only one start or stop job run for each merge request at a time. To run the newest pipeline first, set the `process_mode` of the group to `newest_first` with the [resource groups API](https://docs.gitlab.com/api/resource_groups/).
@@ -516,7 +518,7 @@ sequenceDiagram
 | The tests get answers from staging, not from the service in the runner | The header value is not the session key. Make sure the tests send `mirrord-session=$MIRRORD_KEY` and the filter uses `{{ key }}`. If the request passes through other services first, make sure they forward `baggage`. |
 | The CI API key fails after a license change | Some operator versions check the key against the operator license. Run `mirrord ci api-key` again and update the variable. |
 | `ErrImagePull` on the preview pod | The cluster cannot pull the preview image. Push it to the registry that the target already pulls from. |
-| The preview is still there after the merge request closed | The stop job did not run. Stop the environment from the environments page of the project, or run `mirrord preview stop -k mr-<IID>`. Make sure both jobs have the same rules. |
+| The preview is still there after the merge request closed | The stop job did not run. Stop the environment from the environments page of the project, or run `mirrord preview stop -k mr-<IID> -n staging`. Make sure both jobs have the same rules. |
 | A new comment appears on each push | The job did not find the earlier comment. Make sure the comment starts with the marker and the token has the `api` scope. |
 | `401` or `403` from the notes API | The project access token expired, has the wrong scope, or has a role that is too low. Make a new token. |
 | The service fails in the runner and the job log shows nothing | `mirrord ci start` writes the service output to files. Open the `mirrord-logs/` artifact of the job. |

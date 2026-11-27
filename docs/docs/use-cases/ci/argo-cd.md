@@ -6,7 +6,7 @@ tags:
   - enterprise
 ---
 
-# How to Use mirrord with Argo CD
+# Argo CD
 
 Argo CD is a continuous delivery tool. It does not build code or run tests, but it often manages the staging cluster that your tests and previews use. This guide shows two flows:
 
@@ -27,9 +27,14 @@ Each flow takes about 30 minutes to set up if the mirrord operator is already in
 
 Each flow needs a Kubernetes identity bound to the `mirrord-operator-ci` ClusterRole. The operator Helm chart creates this role for machine sessions such as `mirrord ci` and `mirrord preview`.
 
-Create the ServiceAccount, the bindings, and a token Secret. Do not put these objects in the chart of a per-PR Application, because a `PostDelete` hook runs after Argo CD deletes the resources of its Application. This guide uses the namespace `mirrord-previews`. The target `deployment/orders` is in the namespace `staging`.
+Create the namespace, the ServiceAccount, the bindings, and a token Secret. Do not put these objects in the chart of a per-PR Application, because a `PostDelete` hook runs after Argo CD deletes the resources of its Application. This guide uses the namespace `mirrord-previews`. The target `deployment/orders` is in the namespace `staging`.
 
 ```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mirrord-previews
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -676,8 +681,8 @@ sequenceDiagram
 | The start Job log shows `ErrImagePull` for the preview pod | The image is not in the registry yet, or the cluster cannot pull it. Check the tag (8 characters of the head SHA). Push to the repository the target pulls from. The sync `retry` runs the Job again. |
 | A new commit does not start a new preview | The Application did not become OutOfSync. Check that the ConfigMap holds the image tag, and that the generator sees the new `head_sha`. Without webhooks, wait for `requeueAfterSeconds`. If the Application is OutOfSync, a sync of the earlier commit can still be in retry. Wait for it to end, or stop it with `argocd app terminate-op orders-pr-<number>`. |
 | The Application of a closed pull request stays with `DeletionError` | The `PostDelete` hook failed. Read the Job logs with `kubectl -n mirrord-previews logs job/mirrord-preview-stop-pr-<number>`. Check the `mirrord-ci` ServiceAccount and its binding. |
-| The preview fails and the cause is in the application | Run `mirrord preview logs --key pr-<number>`, or read the start Job logs. `mirrord preview status --failed` lists failed sessions. |
-| Requests with the header reach the normal `orders` pods | The header value must match the key exactly. Check `mirrord preview status`. Make sure the services between the caller and `orders` [propagate the header](../../sharing-the-cluster/header-propagation.md). |
+| The preview fails and the cause is in the application | Run `mirrord preview logs --key pr-<number> -n staging`, or read the start Job logs. `mirrord preview status --failed -n staging` lists failed sessions. |
+| Requests with the header reach the normal `orders` pods | The header value must match the key exactly. Check `mirrord preview status -n staging`. Make sure the services between the caller and `orders` [propagate the header](../../sharing-the-cluster/header-propagation.md). |
 
 ## Frequently asked questions
 

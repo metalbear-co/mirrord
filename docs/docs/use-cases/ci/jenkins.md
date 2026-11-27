@@ -6,7 +6,7 @@ tags:
   - enterprise
 ---
 
-# How to Use mirrord in Jenkins
+# Jenkins
 
 This guide shows how to use mirrord in a Jenkins Multibranch Pipeline. You get two flows, each with a declarative `Jenkinsfile` that you can copy:
 
