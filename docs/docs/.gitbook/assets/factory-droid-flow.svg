@@ -83,14 +83,16 @@
   <polyline points="220,328 244,328 244,245 326,245" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <line x1="430" y1="260" x2="430" y2="306" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="440" y="289" font-size="12.5" fill="#333344" text-anchor="start">no key</text>
-  <polyline points="534,230 690,230 690,316" fill="none" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
-  <text x="640" y="218" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
-  <polyline points="630,320 630,245 534,245" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="622" y="280" font-size="12.5" fill="#333344" text-anchor="end">starts</text>
-  <text x="622" y="296" font-size="12.5" fill="#333344" text-anchor="end">the session</text>
-  <line x1="896" y1="370" x2="714" y2="370" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
-  <text x="808" y="340" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
-  <text x="808" y="360" font-size="12.5" fill="#4a44b8" text-anchor="middle">Kubernetes API</text>
+  <polyline points="534,222 700,222 700,316" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="616" y="212" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
+  <polyline points="650,316 650,245 534,245" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="642" y="280" font-size="12.5" fill="#333344" text-anchor="end">starts the session,</text>
+  <text x="642" y="296" font-size="12.5" fill="#4a44b8" text-anchor="end">outgoing calls</text>
+  <line x1="714" y1="362" x2="896" y2="362" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="805" y="352" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
+  <line x1="896" y1="380" x2="714" y2="380" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="805" y="398" font-size="12.5" fill="#4a44b8" text-anchor="middle">outgoing calls</text>
+  <text x="805" y="420" font-size="12.5" fill="#333344" text-anchor="middle">Kubernetes API</text>
 
   <!-- Kubernetes logos: what runs in the cluster -->
   <use href="#k8s" x="690" y="113" width="36" height="36"/>
