@@ -50,7 +50,7 @@ function holdsLatestReplays(
 }
 
 /** Whether the list shows something about a request that its loaded detail doesn't have yet. */
-function isStale(
+export function isStale(
   detail: CapturedRequest,
   summary: CapturedRequestSummary,
 ): boolean {
@@ -68,7 +68,10 @@ function isStale(
  * Adds the replay `run` to `request`. A refresh of the request can arrive before the answer to
  * the replay does, so the request can already hold the run, or a later one.
  */
-function withRun(request: CapturedRequest, run: ReplayRun): CapturedRequest {
+export function withRun(
+  request: CapturedRequest,
+  run: ReplayRun,
+): CapturedRequest {
   const replays = [
     ...request.replays.filter((kept) => kept.number !== run.number),
     run,
@@ -98,7 +101,7 @@ function sameSummary(
  * Returns `next` with each summary that didn't change replaced by the one in `current`, and
  * `current` itself when nothing changed, so that the rows that didn't change skip rendering.
  */
-function reuseUnchanged(
+export function reuseUnchanged(
   current: CapturedRequestSummary[],
   next: CapturedRequestSummary[],
 ): CapturedRequestSummary[] {
@@ -154,6 +157,10 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
   // dropped, because it can arrive after a newer one.
   const detailFetchRef = useRef<object | null>(null)
 
+  // The requests whose replay was merged into them and that weren't loaded from the session
+  // since. A merge can miss replays made elsewhere, so they are loaded again until that works.
+  const mergedRef = useRef(new Set<number>())
+
   useEffect(() => {
     setRequests([])
     setLoadError(false)
@@ -162,6 +169,7 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
     setSelected(null)
     setSelectedError(null)
     setSendStates({})
+    mergedRef.current.clear()
     switchCountRef.current += 1
   }, [sessionId])
 
@@ -180,6 +188,11 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         if (!isCurrent()) return
 
         // An answer that was read before a replay finished must not hide that replay again.
+        const loaded = selectedRef.current
+        if (loaded?.id === id && loaded.replay_count > request.replay_count) {
+          return
+        }
+        mergedRef.current.delete(id)
         setSelected((current) =>
           current?.id === id && current.replay_count > request.replay_count
             ? current
@@ -218,7 +231,9 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         if (
           openId !== null &&
           summary &&
-          (detail === null || isStale(detail, summary)) &&
+          (detail === null ||
+            isStale(detail, summary) ||
+            mergedRef.current.has(openId)) &&
           detailFetchRef.current === null
         ) {
           void loadSelected(openId)
@@ -278,7 +293,8 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
       )
       setSendState(undefined)
       // The merge shows the run at once, but it can't add the replays made elsewhere meanwhile,
-      // so the request is loaded again. If that fails, the merged request stays.
+      // so the request is loaded again, now and on each poll until that works.
+      mergedRef.current.add(id)
       if (selectedIdRef.current === id) void loadSelected(id)
     } catch (err) {
       if (switched()) return
