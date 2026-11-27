@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use http::StatusCode;
 use mirrord_session_monitor_client::{
-    SessionClient, SessionError, session_endpoints, sessions_dir,
+    SessionClient, SessionError, find_session_endpoint, sessions_dir,
 };
 use mirrord_session_monitor_protocol::{
     CapturedBody, CapturedRequest, CapturedRequestSummary, REPLAY_REQUESTS_ROUTE, ReplayOptions,
@@ -93,10 +93,8 @@ async fn session_client(session_id: Option<&str>) -> CliResult<SessionClient> {
         let sessions_dir = sessions_dir()
             .ok_or_else(|| CliError::Replay("could not determine home directory".to_owned()))?;
 
-        return session_endpoints(&sessions_dir)
-            .into_iter()
-            .find(|(id, _)| id == session_id)
-            .map(|(_, endpoint)| SessionClient::new(endpoint))
+        return find_session_endpoint(&sessions_dir, session_id)
+            .map(SessionClient::new)
             .ok_or_else(|| CliError::Replay(format!("no local session has id `{session_id}`")));
     }
 

@@ -31,7 +31,7 @@ use mirrord_config::{
 };
 use mirrord_intproxy::session_monitor::chaos::rules::{ChaosRule, ChaosRuleRequest};
 use mirrord_session_monitor_client::{
-    Response, SessionClient, SessionError, session_endpoints, sessions_dir,
+    Response, SessionClient, SessionError, find_session_endpoint, sessions_dir,
 };
 #[cfg(unix)]
 use nix::errno::Errno;
@@ -292,14 +292,9 @@ pub async fn chaos_command(args: ChaosArgs) -> Result<(), UiCliError> {
         )
     })?;
 
-    let client = if let Some((_id, endpoint)) = session_endpoints(&sessions_dir)
-        .iter()
-        .find(|(id, _)| id == args.session_id())
-    {
-        SessionClient::new(endpoint.clone())
-    } else {
-        return Err(ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
-    };
+    let client = find_session_endpoint(&sessions_dir, args.session_id())
+        .map(SessionClient::new)
+        .ok_or_else(|| ChaosApiError::SessionNotFound(args.session_id().to_owned()))?;
 
     let new_rules: Option<Vec<ChaosRuleRequest>> = if args.expects_rule() {
         let string_input = if let Some(file_path) = args.file_path() {
