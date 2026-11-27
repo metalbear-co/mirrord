@@ -100,7 +100,7 @@ jobs:
       - name: run UT
         run: |
           $ErrorActionPreference = "Stop"
-          cargo nextest run -p mirrord -p mirrord-layer-win -p mirrord-layer-lib -p mirrord-command -p mirrord-up -p mirrord-mcp
+          cargo nextest run -p mirrord -p mirrord-layer-win -p mirrord-layer-lib -p mirrord-debug-hold -p mirrord-command -p mirrord-up -p mirrord-mcp
       - name: mirrord intproxy UT
         run: |
           $ErrorActionPreference = "Stop"

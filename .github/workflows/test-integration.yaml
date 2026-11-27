@@ -96,6 +96,7 @@ jobs:
         with:
           command: |
             cargo xtask test-ut \
+              -p mirrord-debug-hold \
               -p mirrord-layer-lib \
               -p mirrord-layer \
               -p mirrord-protocol \

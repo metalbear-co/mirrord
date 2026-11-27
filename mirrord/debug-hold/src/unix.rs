@@ -24,7 +24,7 @@ use nix::{
 };
 use uuid::Uuid;
 
-use super::{HoldError, HoldOutcome, ReleaseGate};
+use crate::{HoldError, HoldOutcome, ReleaseGate};
 
 /// Where the per-user directory goes when `XDG_RUNTIME_DIR` isn't set, as on macOS.
 const FALLBACK_RUNTIME_DIR: &str = "/tmp";
@@ -156,7 +156,7 @@ impl Gate {
 
     /// Makes the FIFO `name` in `dir` and opens both its ends.
     ///
-    /// Both ends are open before [`hold`](super::hold) announces the path, so an IDE that writes
+    /// Both ends are open before [`hold`](crate::hold) announces the path, so an IDE that writes
     /// as soon as it reads the announcement never blocks on the FIFO, even when a debugger pauses
     /// the program right after the announcement.
     fn at(dir: PrivateDir, name: String, pid: u32) -> Result<Self, GateError> {

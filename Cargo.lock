@@ -5305,6 +5305,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirrord-debug-hold"
+version = "3.292.0"
+dependencies = [
+ "libc",
+ "nix 0.31.3",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "utils-win",
+ "uuid",
+ "winapi",
+]
+
+[[package]]
 name = "mirrord-intproxy"
 version = "3.292.0"
 dependencies = [
@@ -5494,6 +5508,7 @@ dependencies = [
  "libc",
  "mirrord-config",
  "mirrord-console",
+ "mirrord-debug-hold",
  "mirrord-intproxy-protocol",
  "mirrord-layer-macro",
  "mirrord-progress",
@@ -5514,7 +5529,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "utils-win",
- "uuid",
  "winapi",
  "windows-strings 0.4.2",
 ]
