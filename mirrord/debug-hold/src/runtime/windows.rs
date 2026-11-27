@@ -59,7 +59,7 @@ impl Listener {
             source,
         };
         let security = CurrentUserSecurityAttributes::new().map_err(failed)?;
-        let next = create_instance(&path, &security, true).map_err(failed)?;
+        let next = create_instance(&path, &security, Instance::First).map_err(failed)?;
         Ok((
             Self {
                 path,
@@ -80,7 +80,7 @@ impl Listener {
         // The next instance comes first, so a runtime that reconnects at once finds one. An
         // instance whose client left before it connected can't be reused either.
         let next = loop {
-            match create_instance(&self.path, &self.security, false) {
+            match create_instance(&self.path, &self.security, Instance::Next) {
                 Ok(next) => break next,
                 Err(error) => {
                     tracing::warn!(%error, path = self.path, "failed to create another instance of the .NET diagnostic port; retrying");
@@ -95,14 +95,23 @@ impl Listener {
     }
 }
 
+/// Which of the pipe's instances [`create_instance`] creates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Instance {
+    /// The first, which refuses a name that already exists.
+    First,
+    /// One after the first, at the name the first took.
+    Next,
+}
+
 fn create_instance(
     path: &str,
     security: &CurrentUserSecurityAttributes,
-    first: bool,
+    instance: Instance,
 ) -> io::Result<NamedPipeServer> {
     let mut options = ServerOptions::new();
     options
-        .first_pipe_instance(first)
+        .first_pipe_instance(instance == Instance::First)
         .reject_remote_clients(true);
     // SAFETY: `security` lives through the call, which copies its descriptor into the pipe.
     unsafe { options.create_with_security_attributes_raw(path, security.as_raw()) }

@@ -259,12 +259,25 @@ mod tests {
     /// A socket only counts as ours inside a `mirrord-debug-<uid>` directory: a user's own socket
     /// that happens to be named `dotnet-…` stays.
     #[rstest]
-    #[case::our_pipe("mirrord-dotnet-ab12,connect", true)]
-    #[case::our_socket("/run/user/1000/mirrord-debug-1000/dotnet-9-ab.sock", true)]
-    #[case::their_socket_named_alike("/tmp/diag/dotnet-9-ab.sock", false)]
-    #[case::their_pipe("dotnet-diagnostic-1234", false)]
-    fn only_mirrords_own_addresses_are_its_entries(#[case] entry: &str, #[case] ours: bool) {
-        assert_eq!(is_mirrord_entry(entry), ours, "{entry}");
+    #[case::our_pipe("mirrord-dotnet-ab12,connect", Owner::Mirrord)]
+    #[case::our_socket("/run/user/1000/mirrord-debug-1000/dotnet-9-ab.sock", Owner::Mirrord)]
+    #[case::their_socket_named_alike("/tmp/diag/dotnet-9-ab.sock", Owner::Theirs)]
+    #[case::their_pipe("dotnet-diagnostic-1234", Owner::Theirs)]
+    fn only_mirrords_own_addresses_are_its_entries(#[case] entry: &str, #[case] owner: Owner) {
+        assert_eq!(
+            is_mirrord_entry(entry),
+            owner == Owner::Mirrord,
+            "{entry} is {owner:?}'s"
+        );
+    }
+
+    /// Whose diagnostic-port entry an address is.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Owner {
+        /// A port `mirrord up` serves.
+        Mirrord,
+        /// Anything else, such as a tool of the user's.
+        Theirs,
     }
 
     const PARENTS: &str = "my-tool;mirrord-dotnet-ab12,connect,suspend";

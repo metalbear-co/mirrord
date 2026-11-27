@@ -301,9 +301,9 @@ impl<C: AsyncRead + AsyncWrite + Unpin + Send + 'static> Runtimes<C> {
                         connections_rx,
                         reconnect: timing.reconnect,
                     };
-                    let resumed =
+                    let served =
                         serve_runtime(advertise, connection, connections, timing, &*report).await;
-                    runtimes.finish(advertise.cookie, resumed);
+                    runtimes.finish(advertise.cookie, served);
                 }))
             }
         }
@@ -311,17 +311,29 @@ impl<C: AsyncRead + AsyncWrite + Unpin + Send + 'static> Runtimes<C> {
 
     /// Records how a runtime's task ended. A runtime that was resumed is never held again,
     /// whatever it sends; one that wasn't is forgotten, and starts over if it ever reconnects.
-    fn finish(&self, cookie: Uuid, resumed: bool) {
+    fn finish(&self, cookie: Uuid, served: Served) {
         let mut slots = self
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if resumed {
-            slots.insert(cookie, Slot::Resumed);
-        } else {
-            slots.remove(&cookie);
+        match served {
+            Served::Resumed => {
+                slots.insert(cookie, Slot::Resumed);
+            }
+            Served::NotResumed => {
+                slots.remove(&cookie);
+            }
         }
     }
+}
+
+/// How a runtime's task ended, which decides whether the port ever holds it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Served {
+    /// It was resumed, so it must never be held again.
+    Resumed,
+    /// It wasn't: it went away, or its hold or its resume failed.
+    NotResumed,
 }
 
 /// A runtime's connections after its first, in the order it made them.
@@ -352,7 +364,7 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
     mut connections: Connections<C>,
     timing: Timing,
     report: &(dyn Fn(Report) + Send + Sync),
-) -> bool {
+) -> Served {
     let pid = advertise.pid;
 
     // 1. What it runs. Each command consumes its connection, so each try waits for the next one.
@@ -368,7 +380,7 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
         drop(connection);
         connection = match connections.next().await {
             Some(next) => next,
-            None => return false,
+            None => return Served::NotResumed,
         };
         match reply {
             Ok(reply) => {
@@ -390,18 +402,18 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
     {
         let tooling = tooling.to_owned();
         if resume(connection, &mut connections, timing).await.is_err() {
-            return false;
+            return Served::NotResumed;
         }
         report(Report::Skipped {
             pid,
             entry_assembly: tooling,
         });
         idle_until_gone(&mut connections).await;
-        return true;
+        return Served::Resumed;
     }
 
     // 3. Everything else is held until the IDE releases it.
-    let resumed = match hold(&advertise, info, connection, &mut connections, report).await {
+    let served = match hold(&advertise, info, connection, &mut connections, report).await {
         Held::Released {
             connection,
             release,
@@ -413,7 +425,7 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
                     EndedOutcome::Resumed,
                     None,
                 )));
-                true
+                Served::Resumed
             }
             Err(Resume::Gone) => {
                 report(Report::Ended(Ended::new(
@@ -422,7 +434,7 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
                     EndedOutcome::Exited,
                     None,
                 )));
-                return false;
+                return Served::NotResumed;
             }
             Err(Resume::Refused(error)) => {
                 report(Report::Ended(Ended::new(
@@ -431,7 +443,7 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
                     EndedOutcome::Failed,
                     Some(error.to_string()),
                 )));
-                return false;
+                return Served::NotResumed;
             }
         },
         Held::Exited { release } => {
@@ -441,7 +453,7 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
                 EndedOutcome::Exited,
                 None,
             )));
-            return false;
+            return Served::NotResumed;
         }
         Held::Failed { release, error } => {
             report(Report::Ended(Ended::new(
@@ -450,21 +462,24 @@ async fn serve_runtime<C: AsyncRead + AsyncWrite + Unpin>(
                 EndedOutcome::Failed,
                 Some(error.to_string()),
             )));
-            return false;
+            return Served::NotResumed;
         }
         Held::CannotHold { connection, why } => {
             report(Report::Refused(format!(
                 "process {pid}'s .NET runtime couldn't be held ({why}), so it runs without the debugger"
             )));
-            resume(connection, &mut connections, timing).await.is_ok()
+            match resume(connection, &mut connections, timing).await {
+                Ok(()) => Served::Resumed,
+                Err(_) => Served::NotResumed,
+            }
         }
     };
 
     // 4. Resumed: its connections are kept idle until it exits.
-    if resumed {
+    if served == Served::Resumed {
         idle_until_gone(&mut connections).await;
     }
-    resumed
+    served
 }
 
 /// How a hold of a runtime ended.

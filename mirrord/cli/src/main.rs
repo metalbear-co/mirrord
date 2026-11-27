@@ -386,6 +386,8 @@ mod wsl;
 use error::LocalShareError;
 pub(crate) use error::{CliError, CliResult};
 #[cfg(target_os = "windows")]
+use mirrord_debug_hold::Trigger;
+#[cfg(target_os = "windows")]
 use mirrord_layer_lib::process::windows::{
     command_line::build_command_line, console, execution::LayerManagedProcess,
     injection::InjectionMethod,
@@ -632,7 +634,7 @@ async fn exec_process(
         #[cfg(not(target_os = "windows"))]
         layer_ready,
         #[cfg(target_os = "windows")]
-        debug_plan.is_some_and(|plan| plan.trigger == mirrord_debug_hold::Trigger::Process),
+        debug_plan.map(|plan| plan.trigger),
     )
     .await
 }
@@ -762,7 +764,7 @@ async fn run_process_with_mirrord<P>(
     progress: P,
     analytics: &mut AnalyticsReporter,
     _config: &LayerConfig,
-    hold_for_debugger: bool,
+    debug_trigger: Option<Trigger>,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -798,8 +800,9 @@ where
         // abrupt kill can't leave the layer-loaded child (and thus the agent) alive.
         true,
         // On Windows `exec` holds the program itself, from outside: the launch keeps it suspended
-        // once its layer is ready, until an IDE releases it.
-        hold_for_debugger,
+        // once its layer is ready, until an IDE releases it. A runtime hold needs none of that:
+        // the runtime pauses itself.
+        debug_trigger == Some(Trigger::Process),
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())

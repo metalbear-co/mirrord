@@ -69,8 +69,11 @@ impl ExecHold {
             return None;
         };
         let kind = dotnot::classify(root).map_err(|error| error.to_string());
-        let (trigger, dotnet, fallback) =
-            decide(kind, dotnet_port.is_some(), &Diagnostics::of(env));
+        let (trigger, dotnet, fallback) = decide(
+            kind,
+            DiagnosticPort::of(dotnet_port.as_deref()),
+            &Diagnostics::of(env),
+        );
         let (fallback, note) = fallback.unzip();
         Some(Plan::new(
             trigger,
@@ -122,8 +125,7 @@ impl ExecHold {
             }
         }
 
-        let holds_process = plan.is_some_and(|plan| plan.trigger == Trigger::Process);
-        match platform::layer_pid(holds_process) {
+        match platform::layer_pid(plan.map(|plan| plan.trigger)) {
             Some(pid) => process_env::set(env, MIRRORD_LAYER_DEBUG_HOLD, pid.to_string()),
             None => {
                 env.remove(MIRRORD_LAYER_DEBUG_HOLD);
@@ -144,11 +146,11 @@ impl ExecHold {
 /// # Arguments
 ///
 /// * `kind` - the root's kind, or the error that kept `dotnot` from reading it.
-/// * `has_port` - whether `mirrord up` serves a diagnostic port for the service.
+/// * `port` - whether `mirrord up` serves a diagnostic port for the service.
 /// * `diagnostics` - what the program's environment leaves on of the runtime's diagnostics.
 fn decide(
     kind: Result<DotnetKind, String>,
-    has_port: bool,
+    port: DiagnosticPort,
     diagnostics: &Diagnostics,
 ) -> (Trigger, Option<DotnetImage>, Option<(Fallback, String)>) {
     let image = match kind {
@@ -183,7 +185,7 @@ fn decide(
                  .NET program; it's held at its start, for the IDE to release"
             ),
         ),
-        _ if !has_port => (
+        _ if port == DiagnosticPort::NotServed => (
             Fallback::NoPort,
             "mirrord up serves no diagnostic port for this service, so the .NET program is held \
              at its start"
@@ -199,6 +201,26 @@ fn decide(
         Diagnostics::On => return (Trigger::Runtime, Some(image), None),
     };
     (Trigger::Process, Some(image), Some((fallback, note)))
+}
+
+/// Whether `mirrord up` serves a .NET diagnostic port for the service, for its runtimes to pause
+/// on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticPort {
+    /// It serves one, and handed its address to this `exec`.
+    Served,
+    /// It serves none, so a runtime has nothing to pause on.
+    NotServed,
+}
+
+impl DiagnosticPort {
+    /// Reads `address`, the port `mirrord up` handed to this `exec`, if any.
+    fn of(address: Option<&str>) -> Self {
+        match address {
+            Some(_) => Self::Served,
+            None => Self::NotServed,
+        }
+    }
 }
 
 /// What a program's environment leaves on of the .NET runtime's diagnostics, as the runtime reads
@@ -250,6 +272,8 @@ impl Diagnostics {
 
 #[cfg(not(target_os = "windows"))]
 mod platform {
+    use mirrord_debug_hold::Trigger;
+
     /// The pid whose layer holds the program: this process's own, when the program is held at
     /// its start.
     ///
@@ -257,15 +281,21 @@ mod platform {
     /// program's, but keeps its pid, its stdio pipes and the environment it's handed. So this pid
     /// becomes the program's pid, and the layer holds only the process it names: the program
     /// holds, and a child that inherits the variable never does.
-    pub(super) fn layer_pid(holds_process: bool) -> Option<u32> {
-        holds_process.then(std::process::id)
+    ///
+    /// # Arguments
+    ///
+    /// * `trigger` - what holds the program, `None` when nothing does.
+    pub(super) fn layer_pid(trigger: Option<Trigger>) -> Option<u32> {
+        (trigger == Some(Trigger::Process)).then(std::process::id)
     }
 }
 
 #[cfg(target_os = "windows")]
 mod platform {
+    use mirrord_debug_hold::Trigger;
+
     /// None: `exec` holds the program itself, in the launch, so no layer holds it.
-    pub(super) fn layer_pid(_holds_process: bool) -> Option<u32> {
+    pub(super) fn layer_pid(_trigger: Option<Trigger>) -> Option<u32> {
         None
     }
 }
@@ -390,21 +420,21 @@ mod tests {
     #[rstest]
     #[case::apphost(
         Ok(DotnetKind::Apphost { single_file: false }),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::On,
         (Trigger::Runtime, Some(DotnetImage::Apphost)),
         None
     )]
     #[case::single_file(
         Ok(DotnetKind::Apphost { single_file: true }),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::On,
         (Trigger::Runtime, Some(DotnetImage::SingleFile)),
         None
     )]
     #[case::muxer(
         Ok(DotnetKind::Muxer),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::On,
         (Trigger::Runtime, Some(DotnetImage::Muxer)),
         None
@@ -412,14 +442,14 @@ mod tests {
     // .NET Framework has no diagnostic port, so its runtime never pauses.
     #[case::framework(
         Ok(DotnetKind::FrameworkAssembly),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::On,
         (Trigger::Process, Some(DotnetImage::Framework)),
         None
     )]
     #[case::native(
         Ok(DotnetKind::NotDotnet),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::On,
         (Trigger::Process, None),
         None
@@ -428,7 +458,7 @@ mod tests {
     // Its debugger is off, so the plan says no debugger can attach.
     #[case::debugger_off(
         Ok(DotnetKind::Muxer),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::DebuggerOff { setting: "DOTNET_EnableDiagnostics_Debugger".to_owned() },
         (Trigger::Process, Some(DotnetImage::Muxer)),
         Some(Fallback::DiagnosticsOff)
@@ -436,7 +466,7 @@ mod tests {
     // No port to pause on changes nothing for a debugger that can't attach.
     #[case::debugger_off_without_a_port(
         Ok(DotnetKind::Muxer),
-        false,
+        DiagnosticPort::NotServed,
         Diagnostics::DebuggerOff { setting: "DOTNET_EnableDiagnostics".to_owned() },
         (Trigger::Process, Some(DotnetImage::Muxer)),
         Some(Fallback::DiagnosticsOff)
@@ -444,33 +474,33 @@ mod tests {
     // Only its diagnostic server is off: it can't pause, but a debugger attaches at its start.
     #[case::server_off(
         Ok(DotnetKind::Apphost { single_file: false }),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::ServerOff { setting: "DOTNET_EnableDiagnostics_IPC".to_owned() },
         (Trigger::Process, Some(DotnetImage::Apphost)),
         Some(Fallback::IpcOff)
     )]
     #[case::no_port(
         Ok(DotnetKind::Apphost { single_file: false }),
-        false,
+        DiagnosticPort::NotServed,
         Diagnostics::On,
         (Trigger::Process, Some(DotnetImage::Apphost)),
         Some(Fallback::NoPort)
     )]
     #[case::unreadable(
         Err("denied".to_owned()),
-        true,
+        DiagnosticPort::Served,
         Diagnostics::On,
         (Trigger::Process, None),
         Some(Fallback::UnknownKind)
     )]
     fn each_root_gets_the_trigger_that_can_hold_it(
         #[case] kind: Result<DotnetKind, String>,
-        #[case] has_port: bool,
+        #[case] port: DiagnosticPort,
         #[case] diagnostics: Diagnostics,
         #[case] expected: (Trigger, Option<DotnetImage>),
         #[case] expected_fallback: Option<Fallback>,
     ) {
-        let (trigger, dotnet, fallback) = decide(kind, has_port, &diagnostics);
+        let (trigger, dotnet, fallback) = decide(kind, port, &diagnostics);
 
         assert_eq!((trigger, dotnet), expected);
         assert_eq!(
