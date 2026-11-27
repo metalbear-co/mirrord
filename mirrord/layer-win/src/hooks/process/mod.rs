@@ -7,6 +7,9 @@
 use std::sync::OnceLock;
 
 use minhook_detours_rs::guard::DetourGuard;
+use mirrord_config::debug_hold::dotnet_ports::{
+    self, COMPLUS_DIAGNOSTIC_PORTS, DOTNET_DIAGNOSTIC_PORTS,
+};
 use mirrord_layer_lib::{
     detour::LastErrorGuard,
     error::{LayerError, LayerResult, windows::WindowsError},
@@ -125,6 +128,24 @@ unsafe fn wide_argument(argument: *const u16) -> Option<String> {
     (!argument.is_null()).then(|| unsafe { str_win::u16_ptr_to_string(argument) })
 }
 
+/// Gives `child`, the explicit environment a creator passed, the diagnostic port `mirrord up`
+/// serves this process's runtimes, when it lacks it (see [`dotnet_ports::forwarded`]). Every other
+/// variable stays as the creator wrote it.
+///
+/// Only the hook forwards it, not `exec`'s own launch: the program's layer knows its port is
+/// current, since `exec` drops any stale one from what the program gets, while `exec`'s own
+/// environment may still carry a stale one.
+fn forward_dotnet_port(parent: &WindowsEnv, child: &mut WindowsEnv) {
+    if let Some(ports) = dotnet_ports::forwarded(
+        parent.get(DOTNET_DIAGNOSTIC_PORTS),
+        parent.get(COMPLUS_DIAGNOSTIC_PORTS),
+        child.get(DOTNET_DIAGNOSTIC_PORTS),
+        child.get(COMPLUS_DIAGNOSTIC_PORTS),
+    ) {
+        child.set(DOTNET_DIAGNOSTIC_PORTS, ports);
+    }
+}
+
 /// Windows API hook for CreateProcessInternalW function.
 ///
 /// This function intercepts calls to the internal Windows process creation API and redirects
@@ -220,8 +241,13 @@ unsafe extern "system" fn create_process_internal_w_hook(
     // local disk and network directly, not come back through this layer's hooks.
     let launch = || {
         let _internal = InternalGuard::enter();
+        let parent = WindowsEnv::inherited();
+        let env_vars = env_vars.map(|mut child| {
+            forward_dotnet_port(&parent, &mut child);
+            child
+        });
         LayerManagedProcess::execute_with_closure(
-            &WindowsEnv::inherited(),
+            &parent,
             env_vars,
             injection_method,
             creation_flags,
@@ -604,6 +630,71 @@ mod tests {
         assert_eq!(
             launch_method_for("bogus"),
             Some(init_layer_injection_method().to_string())
+        );
+    }
+
+    /// A creator's explicit block gets the parent's diagnostic port when it lacks it, an empty
+    /// block included, and every other variable in it stays as the creator wrote it.
+    #[test]
+    fn an_explicit_environment_gets_the_parents_port_and_nothing_else() {
+        const OURS: &str = "mirrord-dotnet-ab12,connect,suspend";
+        let parent = WindowsEnv::from_ordered_entries([(
+            DOTNET_DIAGNOSTIC_PORTS.to_owned(),
+            format!("my-tool;{OURS}"),
+        )]);
+        // The child's block after the hook, as the names and values it's created with.
+        let forwarded_into = |child: &[(&str, &str)]| {
+            let mut child = WindowsEnv::from_ordered_entries(
+                child
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+            );
+            forward_dotnet_port(&parent, &mut child);
+            child
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect::<Vec<_>>()
+        };
+        let entries = |entries: &[(&str, &str)]| {
+            entries
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            forwarded_into(&[]),
+            entries(&[(DOTNET_DIAGNOSTIC_PORTS, OURS)]),
+            "an empty block"
+        );
+        assert_eq!(
+            forwarded_into(&[("Path", r"C:\bin")]),
+            entries(&[(DOTNET_DIAGNOSTIC_PORTS, OURS), ("Path", r"C:\bin")]),
+            "none of its own"
+        );
+        assert_eq!(
+            forwarded_into(&[
+                ("dotnet_diagnosticports", "theirs,nosuspend"),
+                ("Path", r"C:\bin"),
+            ]),
+            entries(&[
+                (DOTNET_DIAGNOSTIC_PORTS, &format!("theirs,nosuspend;{OURS}")),
+                ("Path", r"C:\bin"),
+            ]),
+            "its own value, under another casing"
+        );
+        assert_eq!(
+            forwarded_into(&[(DOTNET_DIAGNOSTIC_PORTS, OURS)]),
+            entries(&[(DOTNET_DIAGNOSTIC_PORTS, OURS)]),
+            "already ours"
+        );
+        assert_eq!(
+            forwarded_into(&[(COMPLUS_DIAGNOSTIC_PORTS, "theirs")]),
+            entries(&[
+                (COMPLUS_DIAGNOSTIC_PORTS, "theirs"),
+                (DOTNET_DIAGNOSTIC_PORTS, &format!("theirs;{OURS}")),
+            ]),
+            "the COMPlus spelling"
         );
     }
 

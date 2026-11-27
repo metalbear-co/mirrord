@@ -243,7 +243,8 @@ async fn exec_holds_the_program_until_its_release_gets_a_byte() {
 /// binding, and prints no `Ready!` of its own, even one handed the program's `Ready!` binding.
 ///
 /// The child still inherits the diagnostic port through the `execve` hook, so a .NET program a
-/// held program starts pauses at its runtime's startup.
+/// held program starts pauses at its runtime's startup. So does a child whose environment sets
+/// ports of its own, as a launch profile does: the port joins them, last.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_child_of_a_held_program_is_never_held() {
@@ -262,6 +263,12 @@ async fn a_child_of_a_held_program_is_never_held() {
             "its child's DOTNET_DiagnosticPorts: {DOTNET_PORT},connect,suspend\n"
         )),
         "the child inherits the port exec merged in:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "its child's DOTNET_DiagnosticPorts: theirs,nosuspend;{DOTNET_PORT},connect,suspend\n"
+        )),
+        "a child with ports of its own gets the port after them:\n{stdout}"
     );
     assert_eq!(
         stdout.matches("debug-hold ").count(),

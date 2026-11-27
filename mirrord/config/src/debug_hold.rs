@@ -12,8 +12,9 @@
 //! 3. [`MIRRORD_DEBUG_DOTNET_PORT`]`=<address>`: `mirrord up` serves a .NET diagnostic port for
 //!    each debugged service, and hands its address to that service's `exec`. `exec` merges it into
 //!    the program's `DOTNET_DiagnosticPorts` ([`dotnet_ports::merge`]), which every .NET runtime
-//!    in the program's tree inherits and pauses on at its startup. The program never gets the
-//!    mirrord variable itself.
+//!    in the program's tree inherits and pauses on at its startup. A child whose creator hands it
+//!    an explicit environment gets the entry from the creator's layer instead
+//!    ([`dotnet_ports::forwarded`]). The program never gets the mirrord variable itself.
 //!
 //! Two names rather than two values of one: a `mirrord exec` the program starts reads only
 //! [`MIRRORD_DEBUG_HOLD`], so nothing the program's layer is told can make that `exec` hold too,
@@ -132,6 +133,52 @@ pub mod dotnet_ports {
         }
     }
 
+    /// The `DOTNET_DiagnosticPorts` a child created with an explicit environment gets, so its
+    /// runtimes pause on the port its parent's pause on. `None` when there's nothing to change:
+    /// the parent has no port of mirrord's, or the child's environment already carries it.
+    ///
+    /// A creator that builds its child's environment itself, as `dotnet run` does from a launch
+    /// profile, can leave the variable out or set its own value, which replaces the inherited one.
+    /// The child's runtime would then never pause on `mirrord up`'s port, and a debugger would
+    /// miss its startup. So the parent's entry joins the child's ports by [`merge`]'s rules: the
+    /// child's entries first, verbatim, and the parent's last.
+    ///
+    /// NOTE: an accepted cost. A creator that empties its child's environment on purpose, to start
+    /// it clean, still gives the child mirrord's entry. The hooks can't tell that apart from a
+    /// launch profile that leaves the variable out, and only the entry joins: every other variable
+    /// stays as the creator wrote it.
+    ///
+    /// # Arguments
+    ///
+    /// * `parent_dotnet`, `parent_complus` - the creating process's [`DOTNET_DIAGNOSTIC_PORTS`]
+    ///   and [`COMPLUS_DIAGNOSTIC_PORTS`], if set. Its own runtime reads the first one set.
+    /// * `child_dotnet`, `child_complus` - the same two in the child's environment.
+    pub fn forwarded(
+        parent_dotnet: Option<&str>,
+        parent_complus: Option<&str>,
+        child_dotnet: Option<&str>,
+        child_complus: Option<&str>,
+    ) -> Option<String> {
+        let address = |entry: &str| {
+            entry
+                .split(',')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned()
+        };
+        let ours = parent_dotnet
+            .or(parent_complus)?
+            .split(';')
+            .filter(|entry| is_mirrord_entry(entry))
+            .map(address)
+            .next_back()?;
+        let carried = child_dotnet
+            .or(child_complus)
+            .is_some_and(|value| value.split(';').any(|entry| address(entry) == ours));
+        (!carried).then(|| merge(child_dotnet, child_complus, &ours))
+    }
+
     /// Drops [`REMOTE_DROPPED`] from a remote pod's environment, matching names without case so
     /// the drop holds wherever the program runs.
     pub fn drop_remote(env: &mut HashMap<String, String>) {
@@ -218,6 +265,64 @@ mod tests {
     #[case::their_pipe("dotnet-diagnostic-1234", false)]
     fn only_mirrords_own_addresses_are_its_entries(#[case] entry: &str, #[case] ours: bool) {
         assert_eq!(is_mirrord_entry(entry), ours, "{entry}");
+    }
+
+    const PARENTS: &str = "my-tool;mirrord-dotnet-ab12,connect,suspend";
+
+    /// What a child created with an explicit environment gets, for each value of its own. It
+    /// keeps its entries, and gains the parent's port only when it doesn't carry it already.
+    #[rstest]
+    #[case::none_of_its_own(None, None, Some("mirrord-dotnet-ab12,connect,suspend"))]
+    #[case::its_own_value(
+        Some("theirs,listen,nosuspend"),
+        None,
+        Some("theirs,listen,nosuspend;mirrord-dotnet-ab12,connect,suspend")
+    )]
+    #[case::already_ours(Some("theirs;mirrord-dotnet-ab12,connect,suspend"), None, None)]
+    // The runtime reads the old spelling when the new one is unset, so its entries move to the
+    // variable that's written, as `merge` does.
+    #[case::the_complus_spelling(
+        None,
+        Some("theirs"),
+        Some("theirs;mirrord-dotnet-ab12,connect,suspend")
+    )]
+    // The odd one out: a port of another `mirrord up` is stale, and gives way to the parent's.
+    #[case::a_stale_port_of_ours(
+        Some("mirrord-dotnet-old,connect,suspend"),
+        None,
+        Some("mirrord-dotnet-ab12,connect,suspend")
+    )]
+    fn a_child_with_its_own_environment_gets_the_parents_port(
+        #[case] child_dotnet: Option<&str>,
+        #[case] child_complus: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        assert_eq!(
+            forwarded(Some(PARENTS), None, child_dotnet, child_complus).as_deref(),
+            expected
+        );
+    }
+
+    /// Only a parent whose runtime reads a port of mirrord's hands one on, whichever spelling it
+    /// reads.
+    #[rstest]
+    #[case::no_ports(None, None, None)]
+    #[case::only_its_own_ports(Some("my-tool"), None, None)]
+    #[case::ours_in_the_complus_spelling(
+        None,
+        Some(PARENTS),
+        Some("mirrord-dotnet-ab12,connect,suspend")
+    )]
+    #[case::ours_hidden_by_the_dotnet_spelling(Some("my-tool"), Some(PARENTS), None)]
+    fn only_a_parent_with_our_port_forwards_it(
+        #[case] parent_dotnet: Option<&str>,
+        #[case] parent_complus: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        assert_eq!(
+            forwarded(parent_dotnet, parent_complus, None, None).as_deref(),
+            expected
+        );
     }
 
     /// A pod's diagnostic ports name sockets inside the pod: a local runtime would pause on them
