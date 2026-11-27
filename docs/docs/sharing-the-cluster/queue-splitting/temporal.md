@@ -221,7 +221,7 @@ The mirrord operator can only read consumer's environment variables if they are 
 
 ## Keeping the split after the last session
 
-When the last session against a target ends, the operator removes the split and restarts the deployed worker back onto the real task queue. Tasks that are still buffered for a session go to the main virtual task queue first, so the deployed worker processes them.
+When the last session against a target ends, the operator removes the split and restarts the deployed worker back onto the real task queue. Tasks that are still buffered for a session go to the main virtual task queue first. The operator does not wait for in-flight work to finish.
 
 To keep the split for a time so that a new session reuses it with no restart, set `spec.ttl` on the `MirrordSplitConfig`:
 
