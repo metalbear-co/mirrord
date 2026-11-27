@@ -48,9 +48,17 @@ impl FromSplit for ServerlessTarget {
         })?;
 
         match (split.next(), split.next()) {
-            (Some("container"), Some(container)) => Ok(Self {
+            // A replica id can contain `/`: an ECS replica's is its task ARN,
+            // `arn:aws:ecs:<region>:<account>:task/<cluster>/<task-id>`. So the replica id is the
+            // rest of the path, rather than one segment.
+            (Some("container"), Some(first)) => Ok(Self {
                 serverless: service.to_owned(),
-                container: Some(container.to_owned()),
+                container: Some(
+                    std::iter::once(first)
+                        .chain(split)
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                ),
             }),
             (None, None) => Ok(Self {
                 serverless: service.to_owned(),

@@ -1,0 +1,1 @@
+A serverless target path can pin an ECS task by its task ARN, the default replica id, as in `serverless/orders/container/arn:aws:ecs:us-east-1:123456789012:task/my-cluster/0123abcd`. The ARN contains `/`, so mirrord rejected such a path, or before 3.291.2 kept only the part of the ARN before its first `/`.
