@@ -348,7 +348,8 @@ async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports(
 
     let dir = tempfile::tempdir().expect("a temp dir");
     let mut local = vec![("MIRRORD_FILE_MODE", "local")];
-    let mut env_config = serde_json::json!({ "load_from_process": true });
+    let mut env_config = serde_json::Map::new();
+    env_config.insert("load_from_process".to_owned(), serde_json::json!(true));
     match users_own {
         UsersOwn::Unset => {}
         UsersOwn::Local(value) => local.push((name, value)),
@@ -356,9 +357,13 @@ async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports(
             let env_file = dir.path().join("app.env");
             std::fs::write(&env_file, format!("{name}={value}\n"))
                 .expect("the env file is written");
-            env_config["env_file"] = serde_json::json!(env_file);
+            env_config.insert("env_file".to_owned(), serde_json::json!(env_file));
         }
-        UsersOwn::Override(value) => env_config["override"][name] = serde_json::json!(value),
+        UsersOwn::Override(value) => {
+            let mut overrides = serde_json::Map::new();
+            overrides.insert(name.to_owned(), serde_json::json!(value));
+            env_config.insert("override".to_owned(), serde_json::Value::Object(overrides));
+        }
     }
     let config = dir.path().join("mirrord.json");
     std::fs::write(
