@@ -262,6 +262,9 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         .add("num_selected_services", args.services.len());
 
     up_config
+        .override_targets(&args.target, &args.target_namespace)
+        .map_err(UpError::from)?;
+    up_config
         .select_services(&args.services, &args.debug)
         .map_err(UpError::from)?;
 
@@ -429,6 +432,7 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::Up(UpError::Mode(_))
             | UpCliError::Up(UpError::BuiltinModeName(_))
             | UpCliError::Up(UpError::UnknownMode(_))
+            | UpCliError::Up(UpError::TargetOverride(_))
             | UpCliError::Up(UpError::NoInferredTarget { .. })
             | UpCliError::Up(UpError::WindowsUnsupported(_)) => Self::ConfigValidation,
             UpCliError::Up(UpError::ServiceCrashed { .. }) => Self::ServiceCrash,

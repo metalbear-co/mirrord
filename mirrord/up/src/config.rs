@@ -1732,6 +1732,124 @@ impl UpConfig {
         Ok(())
     }
 
+    /// Overrides services' `target` for this run, from `--target <service>=<path>` (`paths`) and
+    /// `--target-namespace <service>=<namespace>` (`namespaces`). The config file is never
+    /// written.
+    ///
+    /// Each flag replaces only its own field, as `mirrord exec`'s `--target` and
+    /// `--target-namespace` do for `mirrord.json`: `--target` alone keeps the file's namespace,
+    /// and `--target-namespace` alone keeps the file's path, or sets the namespace the workload
+    /// named after the service is looked up in. IDEs pass the target a user picked this way,
+    /// rather than editing the user's file.
+    ///
+    /// Each flag also wins over the same field of a target the service's `config_patch` sets, which
+    /// otherwise wins over `target`.
+    ///
+    /// Meant to be called *before* [`Self::select_services`], so a service that's in the config
+    /// but not launched isn't taken for an unknown one. Fails, changing nothing, on a value that
+    /// isn't `<service>=<value>`, a service the config doesn't define, a service given twice
+    /// for the same flag, or a path that isn't a target.
+    pub fn override_targets(
+        &mut self,
+        paths: &[String],
+        namespaces: &[String],
+    ) -> Result<(), TargetOverrideError> {
+        let paths = self
+            .flag_values(TargetFlag::Target, paths)?
+            .into_iter()
+            .map(|(service, path)| {
+                path.parse::<Target>()
+                    .map(|path| (service, path))
+                    .map_err(|source| TargetOverrideError::InvalidTarget {
+                        service: service.to_owned(),
+                        source: Box::new(source),
+                    })
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
+        let namespaces = self.flag_values(TargetFlag::TargetNamespace, namespaces)?;
+
+        for (name, service) in &mut self.services {
+            let path = paths.get(name.as_ref()).cloned();
+            let namespace = namespaces.get(name.as_ref()).copied().map(Arc::<str>::from);
+            if path.is_none() && namespace.is_none() {
+                continue;
+            }
+
+            // The patch is merged over the generated target, so the fields the flags set go from
+            // it: they win over a `config_patch` target too, as `mirrord exec`'s flags win over
+            // `mirrord.json`. What's left of it still wins over `target`.
+            if let Some(patch_target) = service
+                .config_patch
+                .as_mut()
+                .and_then(|patch| patch.get_mut("target"))
+            {
+                // The merge reads the short form as a path, and `null` as no target at all.
+                if let Some(patch_path) = patch_target.as_str().map(str::to_owned) {
+                    *patch_target = serde_json::json!({ "path": patch_path });
+                } else if patch_target.is_null() {
+                    *patch_target = serde_json::json!({ "path": null, "namespace": null });
+                }
+                if let Some(fields) = patch_target.as_object_mut() {
+                    if path.is_some() {
+                        fields.remove("path");
+                    }
+                    if namespace.is_some() {
+                        fields.remove("namespace");
+                    }
+                }
+            }
+
+            let file = match &service.target {
+                TargetConfig::Targetless => SpecifiedTarget {
+                    path: Some(Target::Targetless),
+                    namespace: None,
+                },
+                TargetConfig::Specified(specified) => specified.clone(),
+            };
+            service.target = TargetConfig::Specified(SpecifiedTarget {
+                path: path.or(file.path),
+                namespace: namespace.or(file.namespace),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Splits each of `values`, given to `flag`, into its service and its value, checking the
+    /// service is in the config and given only once.
+    fn flag_values<'a>(
+        &self,
+        flag: TargetFlag,
+        values: &'a [String],
+    ) -> Result<HashMap<&'a str, &'a str>, TargetOverrideError> {
+        let mut by_service = HashMap::new();
+        for value in values {
+            let (service, service_value) = value
+                .split_once('=')
+                .filter(|(service, service_value)| {
+                    service.is_empty().not() && service_value.is_empty().not()
+                })
+                .ok_or_else(|| TargetOverrideError::InvalidFlag {
+                    flag,
+                    value: value.clone(),
+                })?;
+            if self.services.contains_key(service).not() {
+                return Err(TargetOverrideError::UnknownService {
+                    flag,
+                    service: service.to_owned(),
+                    available: self.service_names(),
+                });
+            }
+            if by_service.insert(service, service_value).is_some() {
+                return Err(TargetOverrideError::DuplicateService {
+                    flag,
+                    service: service.to_owned(),
+                });
+            }
+        }
+        Ok(by_service)
+    }
+
     /// Restrict which services will be launched.
     ///
     /// When `selected` is non-empty, keeps exactly those services,
@@ -2134,6 +2252,67 @@ pub enum SelectError {
     },
 }
 
+/// The `mirrord up` flags that override a service's target for one run, see
+/// [`UpConfig::override_targets`]. Displays as the flag's long name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Display)]
+#[strum(serialize_all = "kebab-case")]
+pub enum TargetFlag {
+    /// `--target <service>=<path>`.
+    Target,
+    /// `--target-namespace <service>=<namespace>`.
+    TargetNamespace,
+}
+
+/// Error produced by [`UpConfig::override_targets`].
+#[derive(Debug, Error, Diagnostic)]
+pub enum TargetOverrideError {
+    /// A value isn't `<service>=<value>` with both parts set.
+    #[error("invalid `--{flag} {value}`: expected `<service>=<value>`")]
+    #[diagnostic(help(
+        "For example `--target api=deployment/api` or `--target-namespace api=dev`."
+    ))]
+    InvalidFlag {
+        /// The flag the value was given to.
+        flag: TargetFlag,
+        /// The value as given.
+        value: String,
+    },
+
+    /// A value names a service the config doesn't define.
+    #[error("`--{flag}` for unknown service `{service}`")]
+    #[diagnostic(help("Available services: {}", available.join(", ")))]
+    UnknownService {
+        /// The flag the value was given to.
+        flag: TargetFlag,
+        /// The name that wasn't found.
+        service: String,
+        /// The service names defined in the config.
+        available: Vec<String>,
+    },
+
+    /// Two values of the same flag name the same service.
+    #[error("`--{flag}` is given twice for service `{service}`")]
+    DuplicateService {
+        /// The flag given twice.
+        flag: TargetFlag,
+        /// The service it was given for.
+        service: String,
+    },
+
+    /// A `--target` path isn't one `mirrord exec --target` would take.
+    #[error("invalid `--target` for service `{service}`")]
+    #[diagnostic(help(
+        "Use a path such as `deployment/api`, `pod/api-7d9f/container/app` or `targetless`."
+    ))]
+    InvalidTarget {
+        /// The service the path was given for.
+        service: String,
+        /// Why the path doesn't parse. Boxed, so [`UpError`] stays small.
+        #[source]
+        source: Box<ConfigError>,
+    },
+}
+
 /// The environment variable that sets the image of `service` for `mirrord preview up` and
 /// `mirrord preview sync`: `MIRRORD_<SERVICE>_IMAGE`, with the service name in upper case and
 /// every character that isn't an ASCII letter or digit turned into `_` (`cake-maker` reads
@@ -2415,7 +2594,9 @@ impl CollectAnalytics for &UpConfig {
 mod tests {
     use std::{collections::HashSet, str::FromStr};
 
-    use mirrord_config::feature::split_queues::QueueKind;
+    use mirrord_config::{
+        feature::split_queues::QueueKind, target::TargetConfig as LayerTargetConfig,
+    };
     use rstest::rstest;
 
     use super::*;
@@ -3257,6 +3438,323 @@ mod tests {
             layer_value(yaml, "target.path"),
             serde_json::Value::Null,
             "a targetless service runs without a path"
+        );
+    }
+
+    /// The target `mirrord up` runs `service` of `config` against, or the lookup by name it
+    /// would do first.
+    fn run_target(config: &UpConfig, service: &str) -> Result<LayerTargetConfig, UnresolvedTarget> {
+        config.services[service].resolve_target(&service.into(), UpKubeContext::default())
+    }
+
+    /// A run against `path` in `namespace`, with no lookup.
+    fn runs_against(
+        path: &str,
+        namespace: Option<&str>,
+    ) -> Result<LayerTargetConfig, UnresolvedTarget> {
+        Ok(LayerTargetConfig {
+            path: Some(Target::from_str(path).expect("a test path parses")),
+            namespace: namespace.map(Into::into),
+        })
+    }
+
+    /// `--target` and `--target-namespace` win over the file's `target` for the run, each for
+    /// its own field only, as `mirrord exec`'s flags do over `mirrord.json`.
+    #[rstest]
+    // The case IDEs pass: a service with no `target.path` runs against the picked one, without
+    // looking up a workload named after it.
+    #[case::path_for_an_inferred_target(
+        "inferred",
+        &["inferred=deployment/api"],
+        &[],
+        runs_against("deployment/api", None),
+    )]
+    // The file's namespace stays, as `mirrord exec -t` keeps `mirrord.json`'s.
+    #[case::path_keeps_the_files_namespace(
+        "explicit",
+        &["explicit=pod/api-7d9f"],
+        &[],
+        runs_against("pod/api-7d9f", Some("prod")),
+    )]
+    // A service the file opts out with `target: none` runs against the picked target.
+    #[case::path_wins_over_target_none(
+        "opted-out",
+        &["opted-out=deployment/api"],
+        &[],
+        runs_against("deployment/api", None),
+    )]
+    // The picker's "no target", which runs as `target: none` does, without a path.
+    #[case::targetless_wins_over_a_path(
+        "explicit",
+        &["explicit=targetless"],
+        &[],
+        Ok(LayerTargetConfig {
+            path: None,
+            namespace: Some("prod".to_owned()),
+        }),
+    )]
+    // The file's path stays, as `mirrord exec -n` keeps `mirrord.json`'s.
+    #[case::namespace_keeps_the_files_path(
+        "explicit",
+        &[],
+        &["explicit=dev"],
+        runs_against("deployment/web", Some("dev")),
+    )]
+    // Without a path, the workload named after the service is looked up in the given namespace.
+    #[case::namespace_moves_the_lookup(
+        "inferred-ns",
+        &[],
+        &["inferred-ns=dev"],
+        Err(unresolved_target("inferred-ns", Some("dev"), None)),
+    )]
+    // Both flags for one service replace both fields.
+    #[case::path_and_namespace(
+        "explicit",
+        &["explicit=deployment/api"],
+        &["explicit=dev"],
+        runs_against("deployment/api", Some("dev")),
+    )]
+    // The odd one out: an override of another service leaves this one as the file has it.
+    #[case::other_services_keep_the_files_target(
+        "inferred",
+        &["explicit=deployment/api"],
+        &["explicit=dev"],
+        Err(unresolved_target("inferred", None, None)),
+    )]
+    fn target_overrides_win_over_the_files_target(
+        #[case] service: &str,
+        #[case] paths: &[&str],
+        #[case] namespaces: &[&str],
+        #[case] expected: Result<LayerTargetConfig, UnresolvedTarget>,
+    ) {
+        let mut config = resolution_fixture();
+        config
+            .override_targets(&owned(paths), &owned(namespaces))
+            .expect("every override names a known service with a valid value");
+        assert_eq!(
+            run_target(&config, service),
+            expected,
+            "each flag replaces only its own field of `{service}`'s target"
+        );
+    }
+
+    /// A value that can't override a target fails with the error that says why, and no
+    /// service's target changes, though the value before it was valid.
+    #[rstest]
+    // A bare target, with no service to give it to.
+    #[case::no_equals_sign(&["api=deployment/api", "deployment/web"], &[])]
+    // An `=` with nothing before it.
+    #[case::empty_service(&["api=deployment/api", "=deployment/web"], &[])]
+    // An `=` with nothing after it, for `--target`.
+    #[case::empty_target(&["api=deployment/api", "web="], &[])]
+    // The same, for `--target-namespace`, after a valid `--target`.
+    #[case::empty_namespace(&["api=deployment/api"], &["api="])]
+    fn a_value_without_a_service_and_a_value_is_rejected(
+        #[case] paths: &[&str],
+        #[case] namespaces: &[&str],
+    ) {
+        let mut config = target_override_fixture();
+        let error = config
+            .override_targets(&owned(paths), &owned(namespaces))
+            .expect_err("a value without both sides can't override anything");
+        assert!(
+            matches!(error, TargetOverrideError::InvalidFlag { .. }),
+            "expected InvalidFlag, got {error:?}"
+        );
+        assert_files_targets(&config);
+    }
+
+    /// A service the up file doesn't define is an error that lists the ones it does.
+    #[rstest]
+    // An unknown service given to `--target`.
+    #[case::target(TargetFlag::Target, &["nope=deployment/api"], &[])]
+    // The same, given to `--target-namespace`.
+    #[case::namespace(TargetFlag::TargetNamespace, &[], &["nope=dev"])]
+    fn a_target_for_an_unknown_service_is_rejected(
+        #[case] expected_flag: TargetFlag,
+        #[case] paths: &[&str],
+        #[case] namespaces: &[&str],
+    ) {
+        let mut config = target_override_fixture();
+        match config
+            .override_targets(&owned(paths), &owned(namespaces))
+            .expect_err("`nope` isn't in the up file")
+        {
+            TargetOverrideError::UnknownService {
+                flag,
+                service,
+                available,
+            } => {
+                assert_eq!(
+                    flag, expected_flag,
+                    "the error names the flag the value came from"
+                );
+                assert_eq!(service, "nope", "the error names the unknown service");
+                assert_eq!(
+                    available,
+                    ["api", "web"],
+                    "the error lists the services the up file defines"
+                );
+            }
+            other => panic!("expected UnknownService, got {other:?}"),
+        }
+        assert_files_targets(&config);
+    }
+
+    /// The same service twice for one flag is ambiguous, so it's rejected rather than one value
+    /// winning.
+    #[test]
+    fn a_service_given_twice_is_rejected() {
+        let mut config = target_override_fixture();
+        let error = config
+            .override_targets(&owned(&["api=deployment/api", "api=pod/api-7d9f"]), &[])
+            .expect_err("two targets for one service");
+        assert!(
+            matches!(
+                error,
+                TargetOverrideError::DuplicateService { flag: TargetFlag::Target, ref service } if service == "api"
+            ),
+            "expected DuplicateService for `api`, got {error:?}"
+        );
+        assert_files_targets(&config);
+    }
+
+    /// A path `mirrord exec --target` wouldn't take is rejected with its parse error, naming the
+    /// service.
+    #[test]
+    fn an_invalid_target_path_is_rejected() {
+        let mut config = target_override_fixture();
+        let error = config
+            .override_targets(&owned(&["api=deployment/api", "web=api"]), &[])
+            .expect_err("`api` has no target type prefix");
+        assert!(
+            matches!(
+                error,
+                TargetOverrideError::InvalidTarget { ref service, .. } if service == "web"
+            ),
+            "expected InvalidTarget for `web`, got {error:?}"
+        );
+        assert_files_targets(&config);
+    }
+
+    /// The override is checked against the whole file, so one for a service this run doesn't
+    /// launch is no error, and doesn't make the service launch.
+    #[test]
+    fn a_target_for_a_service_not_launched_is_accepted() {
+        let mut config = target_override_fixture();
+        config
+            .override_targets(&owned(&["web=deployment/web"]), &[])
+            .expect("`web` is in the up file");
+        config
+            .select_services(&owned(&["api"]), &[])
+            .expect("`api` is in the up file");
+        assert_eq!(service_names(&config), HashSet::from(["api".to_owned()]));
+    }
+
+    /// `--target` and `--target-namespace` win over the target a service's `config_patch` sets,
+    /// each for its own field only, as they do over `target`. What the flags leave of the patch's
+    /// target still wins over `target`.
+    #[rstest]
+    // The odd one out: without a flag, the patch wins over `target`.
+    #[case::no_flag_keeps_the_patch(
+        "api",
+        &[],
+        &[],
+        runs_against("deployment/patched", Some("patch-ns")),
+    )]
+    // The patch's namespace stays, since only the path is given.
+    #[case::path_over_the_patch(
+        "api",
+        &["api=deployment/cli"],
+        &[],
+        runs_against("deployment/cli", Some("patch-ns")),
+    )]
+    // The patch's path stays, since only the namespace is given.
+    #[case::namespace_over_the_patch(
+        "api",
+        &[],
+        &["api=cli-ns"],
+        runs_against("deployment/patched", Some("cli-ns")),
+    )]
+    // Both flags replace all of the patch's target.
+    #[case::path_and_namespace_over_the_patch(
+        "api",
+        &["api=deployment/cli"],
+        &["api=cli-ns"],
+        runs_against("deployment/cli", Some("cli-ns")),
+    )]
+    // The short form is a path alone, so `target`'s namespace stays.
+    #[case::path_over_a_short_patch(
+        "short",
+        &["short=deployment/cli"],
+        &[],
+        runs_against("deployment/cli", Some("file-ns")),
+    )]
+    // The short form's path stays, though the namespace isn't in the patch.
+    #[case::namespace_over_a_short_patch(
+        "short",
+        &[],
+        &["short=cli-ns"],
+        runs_against("deployment/patched", Some("cli-ns")),
+    )]
+    // A patch's `target: null` clears what the flag doesn't set.
+    #[case::path_over_a_cleared_patch(
+        "cleared",
+        &["cleared=deployment/cli"],
+        &[],
+        runs_against("deployment/cli", None),
+    )]
+    fn target_overrides_win_over_a_patched_target(
+        #[case] service: &str,
+        #[case] paths: &[&str],
+        #[case] namespaces: &[&str],
+        #[case] expected: Result<LayerTargetConfig, UnresolvedTarget>,
+    ) {
+        let mut config = parse(include_str!("testdata/target-override-patched.yaml"));
+        config
+            .override_targets(&owned(paths), &owned(namespaces))
+            .expect("every override names a known service with a valid value");
+        let up_context = UpKubeContext {
+            command_arg: None,
+            common_context: None,
+        };
+        let assembled = config
+            .service_configs(
+                &EnvKey::Provided("key".to_owned()),
+                &mut HashMap::new(),
+                up_context,
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .expect("every service has a target, and every patch merges");
+        let target = assembled
+            .into_iter()
+            .find(|subprocess| &*subprocess.service_name == service)
+            .expect("the service is in the up file")
+            .config
+            .target;
+        assert_eq!(
+            Ok(target),
+            expected,
+            "each flag replaces only its own field of `{service}`'s patched target"
+        );
+    }
+
+    /// Two services, `api` with no target and `web` with `target: none`.
+    fn target_override_fixture() -> UpConfig {
+        parse(include_str!("testdata/target-override.yaml"))
+    }
+
+    /// The targets of [`target_override_fixture`] are as its file has them.
+    fn assert_files_targets(config: &UpConfig) {
+        assert_eq!(
+            config.services["api"].target,
+            TargetConfig::UNSPECIFIED,
+            "a failed override changes no target"
+        );
+        assert_eq!(
+            config.services["web"].target,
+            TargetConfig::Targetless,
+            "a failed override changes no target"
         );
     }
 

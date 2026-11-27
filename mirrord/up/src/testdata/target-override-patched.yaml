@@ -1,0 +1,29 @@
+# Each service's `config_patch` sets a target over the one in `target`: `api` in the long form,
+# `short` in the short form, which is a path alone, and `cleared` as `null`, which is no target.
+services:
+  api:
+    target:
+      path: deployment/file
+      namespace: file-ns
+    config_patch:
+      target:
+        path: deployment/patched
+        namespace: patch-ns
+    run:
+      command: ["echo", "api"]
+  short:
+    target:
+      path: deployment/file
+      namespace: file-ns
+    config_patch:
+      target: deployment/patched
+    run:
+      command: ["echo", "short"]
+  cleared:
+    target:
+      path: deployment/file
+      namespace: file-ns
+    config_patch:
+      target: null
+    run:
+      command: ["echo", "cleared"]

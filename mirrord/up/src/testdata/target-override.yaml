@@ -1,0 +1,9 @@
+# `api` has no target, so `mirrord up` looks up a workload named `api`; `web` runs targetless.
+services:
+  api:
+    run:
+      command: ["echo", "api"]
+  web:
+    target: none
+    run:
+      command: ["echo", "web"]

@@ -22,8 +22,9 @@ pub use config::{
     DbBranching, IncompatibleTarget, ModeConfig, PrepareConfig, PreviewImageError,
     PreviewImageSource, PreviewImages, PreviewRun, QueueSplitMode, RequestOrigin, RunConfig,
     RunType, SERVICE_LAYER_PATHS, SelectError, ServiceConfig, ServiceError, ServiceMode,
-    SkipReason, SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig,
-    TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
+    SkipReason, SubprocessCfg, SyncConfig, SyncEntry, SyncRestart, SyncRunConfig, TargetFlag,
+    TargetOverrideError, TargetValidationError, UnknownMode, UpConfig, WindowsSupportError,
+    preview_image_env,
 };
 use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
@@ -167,6 +168,11 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     UnknownMode(#[from] UnknownMode),
+
+    /// A `--target` or `--target-namespace` value can't override a service's target.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    TargetOverride(#[from] TargetOverrideError),
 
     /// One or more services cannot use their resolved targets.
     #[error("target validation failed")]
