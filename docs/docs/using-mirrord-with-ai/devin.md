@@ -114,7 +114,7 @@ Run all the commands below in one shell that has the secrets KUBECONFIG_B64 and 
    export MIRRORD_SESSION_KEY=$(cat /proc/sys/kernel/random/uuid)
 3. Start the service in the background, and keep the log:
    MIRRORD_PROGRESS_MODE=simple nohup mirrord up --no-ui --key "$MIRRORD_SESSION_KEY" > /tmp/mirrord-up.log 2>&1 & echo $! > /tmp/mirrord-up.pid
-4. Wait until /tmp/mirrord-up.log shows the line "orders: Ready!". If the log shows an error, stop and report it.
+4. Wait until /tmp/mirrord-up.log shows the line "orders: Ready!", and then until `curl -fs http://localhost:8080/healthz` answers. If the log shows an error, stop and report it.
 5. Send requests to https://orders.staging.example.com with the header x-mirrord-agent: $MIRRORD_SESSION_KEY.
 6. Check the real responses and the service log. If the result is not correct, fix the code, stop the session as in step 7, and repeat from step 2.
 7. Stop the session: kill -INT "$(cat /tmp/mirrord-up.pid)"
@@ -153,7 +153,7 @@ The first session on a cluster takes longer, because mirrord starts its agent po
 
 ## Use the mirrord MCP server (optional)
 
-Devin can use MCP servers over stdio ([Devin docs](https://docs.devin.ai/work-with-devin/mcp.md)). The [mirrord MCP server](./mcp-server.md) gives Devin the mirrord skills and validates every mirrord config that Devin writes.
+Devin can use MCP servers over stdio ([Devin docs](https://docs.devin.ai/work-with-devin/mcp.md)). The [mirrord MCP server](./mcp-server.md) gives Devin the mirrord skills and a `validate_config` tool. The server does not watch the files that Devin writes, so tell Devin in `AGENTS.md` to call `validate_config` before it writes or changes a mirrord config.
 
 1. In Devin, open **Customize > MCPs**.
 2. Click **+** and choose **New MCP**.
@@ -167,7 +167,7 @@ Devin starts STDIO servers in the session machine, so the blueprint in step 1 mu
 - Sessions that use the CI API key do not take up seats. They count towards the concurrent machine sessions of your [plan](https://metalbear.com/mirrord/pricing/).
 - `mirrord up` stops when it gets an interrupt, or when one of its services stops.
 - Devin's session gets only the requests that carry its key. To also isolate queue messages and database writes, use [queue splitting](../sharing-the-cluster/queue-splitting.md) and [DB branching](../sharing-the-cluster/db-branching.md).
-- mirrord reads files from the pod by default. The service reads the pod's configuration files, not the files in Devin's machine.
+- mirrord reads most files from the pod by default, but some paths, such as the working directory, stay local. A service that loads `./config.json` reads Devin's checkout. To read such a file from the pod, add its path to `feature.fs.read_only`. See [Reading and Writing Remote Files](../using-mirrord/file-operations.md).
 - Sessions that use a CI API key do not support Windows. Devin's machine must run Linux.
 
 ## Troubleshooting
