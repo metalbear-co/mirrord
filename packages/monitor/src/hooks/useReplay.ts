@@ -83,6 +83,40 @@ function withRun(request: CapturedRequest, run: ReplayRun): CapturedRequest {
   }
 }
 
+function sameSummary(
+  a: CapturedRequestSummary,
+  b: CapturedRequestSummary,
+): boolean {
+  const keys = Object.keys(b) as (keyof CapturedRequestSummary)[]
+  return (
+    keys.length === Object.keys(a).length &&
+    keys.every((key) => a[key] === b[key])
+  )
+}
+
+/**
+ * Returns `next` with each summary that didn't change replaced by the one in `current`, and
+ * `current` itself when nothing changed, so that the rows that didn't change skip rendering.
+ */
+function reuseUnchanged(
+  current: CapturedRequestSummary[],
+  next: CapturedRequestSummary[],
+): CapturedRequestSummary[] {
+  const byId = new Map(current.map((summary) => [summary.id, summary]))
+  let changed = current.length !== next.length
+  const merged = next.map((summary, index) => {
+    const previous = byId.get(summary.id)
+    if (previous === undefined || !sameSummary(previous, summary)) {
+      changed = true
+      return summary
+    }
+    if (current[index] !== previous) changed = true
+    return previous
+  })
+
+  return changed ? merged : current
+}
+
 /** A replay of one request that waits for the application, or why the last one failed. */
 type SendState = 'sending' | { error: string }
 
@@ -171,7 +205,7 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         if (cancelled) return
 
         const next = listed ?? []
-        setRequests(next)
+        setRequests((current) => reuseUnchanged(current, next))
         setUnsupported(listed === null)
         setLoadError(false)
 

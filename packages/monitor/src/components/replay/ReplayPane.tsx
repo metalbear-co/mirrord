@@ -98,13 +98,13 @@ function RequestRow({
   onSelect,
 }: {
   request: CapturedRequestSummary
-  onSelect: () => void
+  onSelect: (id: number) => void
 }) {
   const s = strings.replay
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => onSelect(request.id)}
       className="border-border hover:bg-muted/50 flex w-full items-center gap-2 border-b px-3 py-2 text-left"
     >
       <span className="text-meta text-muted-foreground w-12 shrink-0 font-mono font-semibold">
@@ -126,6 +126,8 @@ function RequestRow({
     </button>
   )
 }
+
+const MemoRequestRow = memo(RequestRow)
 
 function RequestDetail({
   request,
@@ -320,10 +322,10 @@ function ReplayPane({ replay }: { replay: UseReplay }) {
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {newestFirst.map((request) => (
-          <RequestRow
+          <MemoRequestRow
             key={request.id}
             request={request}
-            onSelect={() => replay.select(request.id)}
+            onSelect={replay.select}
           />
         ))}
         {replay.requests.length === 0 && !replay.loadError && (
