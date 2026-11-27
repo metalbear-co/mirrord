@@ -13,6 +13,7 @@ pub mod process;
 pub mod proxy_connection;
 pub mod setup;
 pub mod socket;
+pub mod timings;
 pub mod trace_only;
 
 pub use error::*;

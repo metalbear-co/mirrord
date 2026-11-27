@@ -224,6 +224,17 @@ pub struct ExperimentalConfig {
         deprecated = "`guard_std_fds` is deprecated and enabled by default."
     )]
     pub guard_std_fds: bool,
+
+    /// ### _experimental_ call_timings {#experimental-call_timings}
+    ///
+    /// Keeps a running count of the calls your application waits on mirrord for (name lookups,
+    /// file operations, outgoing connections), with the total and the longest wait per kind.
+    /// `mirrord diagnose timings` prints the summary of the latest session.
+    ///
+    /// Counting costs two clock reads per remote call. Set this to `false` to turn it off: the
+    /// session then keeps no summary at all.
+    #[config(default = true)]
+    pub call_timings: bool,
 }
 
 impl CollectAnalytics for &ExperimentalConfig {
@@ -256,6 +267,7 @@ impl CollectAnalytics for &ExperimentalConfig {
             analytics.add("go_asmcgocall", go_asmcgocall);
         }
         analytics.add("guard_std_fds", self.guard_std_fds);
+        analytics.add("call_timings", self.call_timings);
     }
 }
 

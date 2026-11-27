@@ -20,6 +20,11 @@ use mirrord_protocol::{
 #[cfg(feature = "codec")]
 pub mod codec;
 mod macros;
+mod timings;
+
+pub use timings::{
+    CallKind, CallTimingsSnapshot, KindTimings, MAX_SLOW_CALLS, MAX_SUBJECT_BYTES, SlowCall,
+};
 
 /// An identifier for a message sent from the layer to the internal proxy.
 /// The layer uses this to match proxy responses with awaiting requests.
@@ -52,6 +57,8 @@ pub enum LayerToProxyMessage {
     Incoming(IncomingRequest),
     /// Fetch environment variables from the target.
     GetEnv(GetEnvVarsRequest),
+    /// How long the application waited on mirrord so far. The proxy sends no response.
+    CallTimings(CallTimingsSnapshot),
 }
 
 /// Layer process information
@@ -665,4 +672,9 @@ impl_request!(
     res = RemoteResult<()>,
     req_path = LayerToProxyMessage::File => FileRequest::Fchmod,
     res_path = ProxyToLayerMessage::File => FileResponse::Fchmod,
+);
+
+impl_request!(
+    req = CallTimingsSnapshot,
+    req_path = LayerToProxyMessage::CallTimings,
 );

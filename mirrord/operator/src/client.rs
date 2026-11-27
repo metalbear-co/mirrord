@@ -115,6 +115,7 @@ pub mod error;
 pub mod preview_sync;
 pub mod preview_wake;
 mod queue_split_progress;
+pub mod session_start;
 pub mod split_config_branches;
 
 pub use access::{

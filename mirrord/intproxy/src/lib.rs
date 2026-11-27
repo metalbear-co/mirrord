@@ -4,7 +4,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     ops::ControlFlow,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use background_tasks::{BackgroundTasks, TaskSender, TaskUpdate};
@@ -50,6 +50,7 @@ use crate::{
     failover_strategy::FailoverStrategy,
     main_tasks::{ConnectionRefresh, LayerClosed},
     session_monitor::{MonitorEvent, MonitorTx, RedactedVarNames, chaos::ChaosWatcherRx},
+    timings::{CallTimingsRecorder, WRITE_INTERVAL, take_queued_snapshots},
 };
 
 pub mod agent_conn;
@@ -66,6 +67,7 @@ mod remote_resources;
 mod request_queue;
 pub mod session_monitor;
 pub mod sidecar_protocol;
+pub mod timings;
 
 /// Extracts the primary file path from a [`FileRequest`] variant, if one exists.
 ///
@@ -158,6 +160,13 @@ pub struct IntProxy {
 
     /// Session monitor event sender
     monitor_tx: MonitorTx,
+
+    /// Keeps the session's call timings and writes them to a file. [`None`] when nobody asked
+    /// for the file, in which case the layers' snapshots are dropped.
+    call_timings: Option<CallTimingsRecorder>,
+
+    /// When to hand the call timings out for writing if they changed.
+    call_timings_tick: Interval,
 }
 
 /// Timing configuration for [`IntProxy`] maintenance tasks.
@@ -429,6 +438,11 @@ impl IntProxy {
         let mut process_logging_interval = time::interval(intervals.process_logging);
         process_logging_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
+        // A proxy busy with traffic may miss ticks; the next one still writes the newest numbers,
+        // so there is nothing to catch up on.
+        let mut call_timings_tick = time::interval(WRITE_INTERVAL);
+        call_timings_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
         Self {
             any_connection_accepted: false,
             background_tasks,
@@ -455,7 +469,15 @@ impl IntProxy {
             process_logging_interval,
             agent_tx,
             monitor_tx,
+            call_timings: None,
+            call_timings_tick,
         }
+    }
+
+    /// Makes the proxy keep the session's call timings in `recorder`'s file.
+    pub fn with_call_timings(mut self, recorder: CallTimingsRecorder) -> Self {
+        self.call_timings = Some(recorder);
+        self
     }
 
     /// Check if any layer connections are still alive
@@ -572,6 +594,12 @@ impl IntProxy {
                     );
                 }
 
+                _ = proxy.call_timings_tick.tick(), if proxy.call_timings.is_some() => {
+                    if let Some(recorder) = &mut proxy.call_timings {
+                        recorder.publish_if_changed();
+                    }
+                }
+
                 result = idle.expired(proxy.any_connection_accepted) => break Some(result),
             }
         };
@@ -593,6 +621,10 @@ impl IntProxy {
         std::mem::drop(shutdown_layers);
 
         std::mem::drop(proxy.task_txs);
+
+        if let Some(recorder) = proxy.call_timings.take() {
+            recorder.finish().await;
+        }
 
         tracing::info!("Collecting background task results before exiting");
         let results = proxy.background_tasks.results().await;
@@ -645,6 +677,11 @@ impl IntProxy {
                 });
                 self.connected_layers
                     .insert(new_layer.id, new_layer.process_info);
+                // The session's file exists from the moment its application starts, before the
+                // first numbers arrive, so the command can tell "no calls yet" from "no session".
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder.publish();
+                }
                 let tx = self.background_tasks.register(
                     LayerConnection::new(new_layer.stream, new_layer.id),
                     MainTaskId::LayerConnection(new_layer.id),
@@ -678,6 +715,7 @@ impl IntProxy {
                     msg.message,
                     LayerToProxyMessage::File(FileRequest::Close(_) | FileRequest::CloseDir(_))
                         | LayerToProxyMessage::Incoming(IncomingRequest::PortUnsubscribe(_))
+                        | LayerToProxyMessage::CallTimings(_)
                 ) {
                     self.pending_layers.insert((msg.layer_id, msg.message_id));
                 }
@@ -690,6 +728,14 @@ impl IntProxy {
                     layer_id,
                 } = msg;
                 self.pending_layers.remove(&(layer_id, message_id));
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder.timings().layer_response(
+                        layer_id,
+                        message_id,
+                        &message,
+                        Instant::now(),
+                    );
+                }
                 if let Some(tx) = self.task_txs.layers.get(&layer_id) {
                     tx.send(LocalMessage {
                         message_id,
@@ -745,6 +791,19 @@ impl IntProxy {
                 self.task_txs.layers.remove(&LayerId(id));
                 self.connected_layers.remove(&LayerId(id));
                 self.pending_layers.retain(|(layer_id, _)| layer_id.0 != id);
+                if let Some(recorder) = &mut self.call_timings {
+                    // A snapshot the layer sent during a reconnect is its last word, so it
+                    // counts now and does not stay behind to be replayed after the close.
+                    let queued = self
+                        .reconnect_task_queue
+                        .as_mut()
+                        .and_then(|queue| take_queued_snapshots(queue, LayerId(id)));
+                    if let Some(snapshot) = queued {
+                        recorder.timings().layer_snapshot(LayerId(id), snapshot);
+                    }
+                    recorder.timings().layer_closed(LayerId(id));
+                    recorder.publish_now();
+                }
             }
 
             (task_id, TaskUpdate::Finished(res)) => match res {
@@ -914,6 +973,12 @@ impl IntProxy {
             message,
         } = message;
 
+        if let Some(recorder) = &mut self.call_timings {
+            recorder
+                .timings()
+                .layer_request(layer_id, message_id, &message, Instant::now());
+        }
+
         match message {
             LayerToProxyMessage::File(req) => {
                 self.monitor_tx.emit(MonitorEvent::FileOp {
@@ -962,6 +1027,12 @@ impl IntProxy {
                     .simple
                     .send(SimpleProxyMessage::GetEnvReq(message_id, layer_id, req))
                     .await
+            }
+            LayerToProxyMessage::CallTimings(snapshot) => {
+                if let Some(recorder) = &mut self.call_timings {
+                    recorder.timings().layer_snapshot(layer_id, snapshot);
+                    recorder.publish();
+                }
             }
             other => Err(ProxyRuntimeError::UnexpectedLayerMessage(other))?,
         }

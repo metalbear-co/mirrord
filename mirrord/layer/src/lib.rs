@@ -110,6 +110,7 @@ use mirrord_layer_lib::{
     proxy_connection::{PROXY_CONNECTION, ProxyConnection},
     setup::{LayerSetup, init_layer_setup, setup},
     socket::dns::reverse_dns::REMOTE_DNS_REVERSE_MAPPING,
+    timings,
     trace_only::is_trace_only_mode,
 };
 use mirrord_layer_macro::{hook_fn, hook_guard_fn};
@@ -482,6 +483,11 @@ fn layer_start(config: LayerConfig) {
         PROXY_CONNECTION
             .set(new_connection)
             .expect("setting PROXY_CONNECTION singleton")
+    }
+
+    // Before the first remote call, so fetching the remote environment below is counted too.
+    if state.experimental().call_timings {
+        timings::enable();
     }
 
     let fetch_env = setup().env_config().load_from_process.unwrap_or(false)
@@ -971,6 +977,7 @@ unsafe fn fork_with_detour_guard() -> pid_t {
         match res.cmp(&0) {
             Ordering::Equal => {
                 tracing::debug!("Child process initializing layer.");
+                timings::reset();
                 #[allow(static_mut_refs)]
                 let parent_connection = match PROXY_CONNECTION.take() {
                     Some(conn) => conn,

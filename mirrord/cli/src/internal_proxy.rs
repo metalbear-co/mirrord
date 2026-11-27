@@ -20,7 +20,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     ops::Not,
     sync::{Arc, Weak},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use mirrord_analytics::{
@@ -39,6 +39,7 @@ use mirrord_intproxy::{
         MonitorTx,
         chaos::{ChaosWatcherRx, ChaosWatcherTx, analytics::ChaosAnalyticsReporter},
     },
+    timings::{CallTimingsRecorder, SessionLabel},
 };
 use mirrord_operator::client::{NoClientCert, OperatorAccess, OperatorApi};
 use mirrord_protocol::{ClientMessage, DaemonMessage, LogLevel, LogMessage};
@@ -61,6 +62,7 @@ use crate::util::detach_io;
 use crate::{
     connection::AGENT_CONNECT_INFO_ENV_KEY,
     data::{StoredLogin, UserData},
+    diagnose::timings::timings_dir,
     error::{CliResult, InternalProxyError},
     execution::MIRRORD_EXECUTION_KIND_ENV,
     util::create_listen_socket,
@@ -184,6 +186,30 @@ pub(crate) fn install_ci_shutdown_handler(
     Ok(IntProxyShutdown { token, signal_task })
 }
 
+/// The namespace and the kube context the session's client resolved, as `(namespace, context)`.
+///
+/// The records a session keeps (the session monitor's, the call timings summary) take these from
+/// here, so the session's cluster can still be told after the current context has moved on.
+async fn session_kube_route(config: &LayerConfig) -> (Option<String>, Option<String>) {
+    // The same resolution the run used: a login has no kube context and no current namespace
+    // of its own, so the session shows the operator's defaults rather than an unrelated kubeconfig.
+    match OperatorApi::<NoClientCert>::base_client_config(config).await {
+        Ok((_, OperatorAccess::Login(_))) => (config.target.namespace.clone(), None),
+        Ok((kube_config, OperatorAccess::Kubeconfig { context })) => (
+            config
+                .target
+                .namespace
+                .clone()
+                .or(Some(kube_config.default_namespace)),
+            context,
+        ),
+        Err(error) => {
+            tracing::debug!(?error, "Failed to resolve the session's kube context");
+            (config.target.namespace.clone(), config.kube_context.clone())
+        }
+    }
+}
+
 /// Starts the session monitor API server if enabled.
 ///
 /// `@reporter`: a reference to the reporter for chaos metrics which will not prevent the session
@@ -191,6 +217,7 @@ pub(crate) fn install_ci_shutdown_handler(
 /// [`Weak::new()`].
 async fn start_session_monitor(
     config: &LayerConfig,
+    (namespace, context): (Option<String>, Option<String>),
     is_operator: bool,
     reporter: Weak<RwLock<ChaosAnalyticsReporter>>,
     session_id: String,
@@ -216,24 +243,6 @@ async fn start_session_monitor(
         .as_ref()
         .map(|t| t.to_string())
         .unwrap_or_else(|| "targetless".to_owned());
-
-    // The same resolution the run used: a login has no kube context and no current namespace
-    // of its own, so the session shows the operator's defaults rather than an unrelated kubeconfig.
-    let (namespace, context) = match OperatorApi::<NoClientCert>::base_client_config(config).await {
-        Ok((_, OperatorAccess::Login(_))) => (config.target.namespace.clone(), None),
-        Ok((kube_config, OperatorAccess::Kubeconfig { context })) => (
-            config
-                .target
-                .namespace
-                .clone()
-                .or(Some(kube_config.default_namespace)),
-            context,
-        ),
-        Err(error) => {
-            tracing::debug!(?error, "Failed to resolve the session's kube context");
-            (config.target.namespace.clone(), config.kube_context.clone())
-        }
-    };
 
     let config_value = config_as_diff(config);
 
@@ -377,8 +386,11 @@ pub(crate) async fn proxy(
     // Keep the only strong reference in the intproxy so analytics are flushed when the session
     // ends, while the session monitor receives a weak reference for chaos metrics.
     let chaos_reporter = Arc::new(RwLock::new(ChaosAnalyticsReporter::new(analytics)));
+    // Resolved once, so everything that records the session names the same context.
+    let (session_namespace, kube_context) = session_kube_route(&config).await;
     let (monitor_tx, chaos_rx) = start_session_monitor(
         &config,
+        (session_namespace, kube_context.clone()),
         is_operator,
         Arc::downgrade(&chaos_reporter),
         local_session_id.clone(),
@@ -426,7 +438,37 @@ pub(crate) async fn proxy(
     let process_logging_interval =
         Duration::from_secs(config.internal_proxy.process_logging_interval);
 
-    let res = IntProxy::new_with_connection(
+    // In a container the proxy's home directory is the sidecar's own, so a file written there
+    // is out of reach of `mirrord diagnose timings` on the user's machine. No summary is kept
+    // then.
+    let keep_call_timings = config.experimental.call_timings && container_mode.not();
+    let call_timings = match timings_dir().filter(|_| keep_call_timings) {
+        Some(dir) => CallTimingsRecorder::start(
+            dir,
+            SessionLabel {
+                session_id: local_session_id.clone(),
+                target: config
+                    .target
+                    .path
+                    .as_ref()
+                    .map(|target| target.to_string())
+                    .unwrap_or_else(|| "targetless".to_owned()),
+                mirrord_version: env!("CARGO_PKG_VERSION").to_owned(),
+                started_at: humantime::format_rfc3339_seconds(SystemTime::now()).to_string(),
+                operator: is_operator,
+                kube_context,
+                kubeconfig: config
+                    .kubeconfig
+                    .clone()
+                    .or_else(|| env::var("KUBECONFIG").ok()),
+                namespace: config.target.namespace.clone(),
+                baggage: config.baggage.clone(),
+            },
+        ),
+        None => None,
+    };
+
+    let proxy = IntProxy::new_with_connection(
         agent_conn,
         listener,
         config.feature.fs.readonly_file_buffer,
@@ -444,14 +486,19 @@ pub(crate) async fn proxy(
         &config.experimental,
         monitor_tx,
         chaos_rx,
-    )
-    .run_with_shutdown(
-        first_connection_timeout,
-        consecutive_connection_timeout,
-        shutdown,
-    )
-    .await
-    .map_err(From::from);
+    );
+    let proxy = match call_timings {
+        Some(recorder) => proxy.with_call_timings(recorder),
+        None => proxy,
+    };
+    let res = proxy
+        .run_with_shutdown(
+            first_connection_timeout,
+            consecutive_connection_timeout,
+            shutdown,
+        )
+        .await
+        .map_err(From::from);
 
     if res.is_err()
         && tokio::time::timeout(Duration::from_secs(1), async {

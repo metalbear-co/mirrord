@@ -18,6 +18,7 @@ use crate::{
 
 #[cfg(target_os = "macos")]
 pub(crate) mod sip;
+pub(crate) mod timings;
 
 /// Sends a ping the connection and expects a pong.
 async fn ping(connection: &mut AgentConnection) -> CliResult<()> {
@@ -182,6 +183,11 @@ pub(crate) async fn diagnose_command(
     match args.command {
         DiagnoseCommand::Latency { config_file } => diagnose_latency(config_file.as_deref()).await,
         DiagnoseCommand::License => diagnose_license().await,
+        DiagnoseCommand::Timings {
+            session,
+            config_file,
+            json,
+        } => timings::diagnose_timings(session, config_file, json).await,
         #[cfg(target_os = "macos")]
         DiagnoseCommand::SipReport => sip::send_sip_report(_watch, _user_data.machine_id()).await,
     }

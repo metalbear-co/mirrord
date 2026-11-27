@@ -22,6 +22,7 @@ use crate::{
     error::{HookError, HookResult},
     mutex::Mutex,
     proxy_connection::responses::ResponseManager,
+    timings::{self, CallTimer},
 };
 
 mod responses;
@@ -128,17 +129,37 @@ impl ProxyConnection {
     }
 
     pub fn send(&self, message: LayerToProxyMessage) -> Result<MessageId> {
-        let message_id = self.next_message_id();
         let message = LocalMessage {
-            message_id,
+            message_id: self.next_message_id(),
             inner: message,
         };
+        self.send_message(&message)?;
+
+        Ok(message.message_id)
+    }
+
+    /// Sends a message the caller keeps, so a request can still be described after its response
+    /// arrived.
+    ///
+    /// A call timings snapshot that is due goes out first, in the same locked write. This is the
+    /// only place one is sent: the application is about to wait on this connection anyway, so
+    /// the snapshot adds no wait of its own. A send after an answered call, or at exit, would
+    /// have a thread of the application wait behind whatever another thread is writing, for a
+    /// message the application never asked for.
+    fn send_message(&self, message: &LocalMessage<LayerToProxyMessage>) -> Result<()> {
+        let snapshot = timings::take_ready_snapshot().map(|snapshot| LocalMessage {
+            message_id: self.next_message_id(),
+            inner: LayerToProxyMessage::CallTimings(snapshot),
+        });
 
         let mut guard = self.sender.lock()?;
-        guard.send(&message)?;
+        if let Some(snapshot) = &snapshot {
+            guard.send(snapshot)?;
+        }
+        guard.send(message)?;
         guard.flush()?;
 
-        Ok(message_id)
+        Ok(())
     }
 
     pub fn receive(&self, response_id: u64) -> Result<ProxyToLayerMessage> {
@@ -162,9 +183,20 @@ impl ProxyConnection {
         T: IsLayerRequestWithResponse + Debug,
         T::Response: Debug,
     {
-        let response_id = self.send(request.wrap())?;
-        let response = self.receive(response_id)?;
-        T::try_unwrap_response(response)
+        let message = LocalMessage {
+            message_id: self.next_message_id(),
+            inner: request.wrap(),
+        };
+        let timer = CallTimer::start(&message.inner);
+        let response = self
+            .send_message(&message)
+            .and_then(|()| self.receive(message.message_id));
+        // A call that failed or timed out kept the application waiting just the same.
+        if let Some(timer) = timer {
+            timer.finish(&message.inner);
+        }
+
+        T::try_unwrap_response(response?)
             .map_err(Box::new)
             .map_err(ProxyError::UnexpectedResponse)
     }
@@ -638,6 +670,156 @@ pub fn make_proxy_request_no_response<T: IsLayerRequest + Debug>(
     proxy_connection()?
         .make_request_no_response(request)
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod call_timings_tests {
+    use std::{net::TcpListener, sync::mpsc, thread, time::Duration};
+
+    use mirrord_intproxy_protocol::ProcessInfo;
+    use mirrord_protocol::{
+        FileRequest, FileResponse,
+        file::{CloseFileRequest, XstatRequest, XstatResponse},
+    };
+
+    use super::*;
+
+    /// How long the test waits for a message that must arrive.
+    const ARRIVES: Duration = Duration::from_secs(10);
+
+    /// How long the test waits for a message that must not arrive.
+    const NOTHING_ARRIVES: Duration = Duration::from_millis(300);
+
+    fn stat() -> XstatRequest {
+        XstatRequest {
+            path: Some("/app/settings.yaml".into()),
+            fd: None,
+            follow_symlink: true,
+        }
+    }
+
+    /// The layer's side of a connection to a stand-in for the internal proxy, which answers the
+    /// handshake and every `stat`, and hands every message it reads to the test.
+    fn connect() -> (ProxyConnection, mpsc::Receiver<LayerToProxyMessage>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        // The stand-in proxy sends the test each message of the layer, in the order it read them.
+        let (seen_tx, seen_rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let (mut sender, mut receiver) = codec::make_sync_framed::<
+                LocalMessage<ProxyToLayerMessage>,
+                LocalMessage<LayerToProxyMessage>,
+            >(stream)
+            .unwrap();
+
+            while let Ok(Some(message)) = receiver.receive() {
+                let response = match &message.inner {
+                    LayerToProxyMessage::NewSession(_) => {
+                        Some(ProxyToLayerMessage::NewSession(LayerId(1)))
+                    }
+                    LayerToProxyMessage::File(FileRequest::Xstat(_)) => Some(
+                        ProxyToLayerMessage::File(FileResponse::Xstat(Ok(XstatResponse {
+                            metadata: Default::default(),
+                        }))),
+                    ),
+                    _ => None,
+                };
+                if let Some(inner) = response {
+                    sender
+                        .send(&LocalMessage {
+                            message_id: message.message_id,
+                            inner,
+                        })
+                        .unwrap();
+                    sender.flush().unwrap();
+                }
+                if seen_tx.send(message.inner).is_err() {
+                    return;
+                }
+            }
+        });
+
+        let connection = ProxyConnection::new(
+            address,
+            NewSessionRequest {
+                parent_layer: None,
+                process_info: ProcessInfo {
+                    pid: 1,
+                    parent_pid: 0,
+                    name: "test".to_owned(),
+                    cmdline: Vec::new(),
+                    loaded: true,
+                },
+            },
+            ARRIVES,
+        )
+        .unwrap();
+        assert!(matches!(
+            seen_rx.recv_timeout(ARRIVES),
+            Ok(LayerToProxyMessage::NewSession(_))
+        ));
+
+        (connection, seen_rx)
+    }
+
+    /// A call that has just been answered must give its thread back to the application. When it
+    /// sent a due snapshot itself, it waited for the connection behind whatever another thread
+    /// was writing: an `open` that had its answer sat behind a large `write` of another thread
+    /// and never reached the close it owed, so a `fork` that waits for such closes went ahead
+    /// without it (`fork_waits_for_replaced_file_close` in the layer tests). The snapshot now
+    /// leaves in front of the next request, whichever kind that is.
+    #[test]
+    fn a_due_snapshot_leaves_with_the_next_request_not_after_an_answer() {
+        let _turn = timings::exclusive_for_test();
+        let (connection, seen_rx) = connect();
+        timings::enable();
+
+        connection
+            .make_request_with_response(stat())
+            .unwrap()
+            .unwrap();
+        // Past the delay of a young process's first snapshot, so the next call finds one due.
+        thread::sleep(Duration::from_millis(100));
+        connection
+            .make_request_with_response(stat())
+            .unwrap()
+            .unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                seen_rx.recv_timeout(ARRIVES),
+                Ok(LayerToProxyMessage::File(FileRequest::Xstat(_)))
+            ));
+        }
+        assert!(
+            seen_rx.recv_timeout(NOTHING_ARRIVES).is_err(),
+            "the answered call sent nothing more on its own"
+        );
+
+        // A request the layer waits for no answer to carries the snapshot just the same.
+        connection
+            .make_request_no_response(CloseFileRequest { fd: 7 })
+            .unwrap();
+
+        let LayerToProxyMessage::CallTimings(snapshot) = seen_rx.recv_timeout(ARRIVES).unwrap()
+        else {
+            panic!("the snapshot goes out in front of the request");
+        };
+        assert_eq!(
+            snapshot
+                .kinds
+                .iter()
+                .map(|kind| kind.calls)
+                .collect::<Vec<_>>(),
+            [2]
+        );
+        assert!(matches!(
+            seen_rx.recv_timeout(ARRIVES),
+            Ok(LayerToProxyMessage::File(FileRequest::Close(_)))
+        ));
+    }
 }
 
 #[cfg(all(test, target_os = "windows", target_arch = "x86_64"))]

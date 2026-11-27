@@ -1309,6 +1309,40 @@ pub(super) enum DiagnoseCommand {
     /// The fingerprint is what the operator uses to identify individual users (e.g. for seat
     /// counting). One fingerprint is shown per operator license the machine has connected to.
     License,
+    /// Show where a session's time went: its start, and the calls mirrord answered for the
+    /// application.
+    ///
+    /// "Session start" is what the operator did before your application could start, phase by
+    /// phase. It is there for sessions that use an operator which records it.
+    ///
+    /// "Application calls" is what your application then waited on mirrord for. mirrord counts
+    /// every call it does not leave to your machine: name lookups, file operations (open, read,
+    /// write, stat and the like), outgoing connections, port subscriptions and the fetch of the
+    /// remote environment. Those go through mirrord to the cluster, except a read that mirrord
+    /// answers from data it already fetched, which is counted too and shows as a fast call. It
+    /// prints how many there were of each kind, the total wait, the slowest one, and what the
+    /// slowest single calls were for. Calls mirrord leaves to your machine are not counted, and
+    /// neither is your application's own code.
+    ///
+    /// The calls are counted where mirrord intercepts them, so the language of the application
+    /// does not matter. Go programs are covered too: on Linux through the hooks on the Go
+    /// runtime's own system calls, on macOS through the system library Go uses there.
+    ///
+    /// Everything shown about the application comes from a file on this machine, and stays on
+    /// it.
+    Timings {
+        /// Show this session instead of the latest one of this machine. The id is what `mirrord
+        /// exec` prints as "session ID".
+        #[arg(long)]
+        session: Option<String>,
+        /// Config file to use for reaching the operator. Without it the session's own cluster
+        /// is asked.
+        #[arg(short = 'f', long, value_hint = ValueHint::FilePath, default_missing_value = "./.mirrord/mirrord.json", num_args = 0..=1)]
+        config_file: Option<PathBuf>,
+        /// Print one JSON object with a key per section.
+        #[arg(long)]
+        json: bool,
+    },
     /// Send the stored report for protected macOS binaries that required Rosetta.
     #[cfg(target_os = "macos")]
     SipReport,
