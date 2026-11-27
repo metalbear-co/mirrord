@@ -2215,7 +2215,10 @@ pub(super) struct UpArgs {
     pub context: Option<Arc<str>>,
 
     /// Experimental: hold this service's program at its entry point until an IDE releases it, so
-    /// a debugger attaches before its first line runs.
+    /// a debugger attaches before its first line runs. A .NET program, and every .NET program the
+    /// service starts, is held at its runtime's startup instead, on a diagnostic port `up` serves.
+    /// That pause needs .NET 5 or later: an older runtime doesn't read the port, and runs on
+    /// without being held.
     ///
     /// Repeat it to hold several services, e.g. `--debug api --debug web`. Each one must be
     /// among the services launched, and run with `type: exec`.

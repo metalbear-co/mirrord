@@ -24,7 +24,7 @@ use nix::{
 };
 use uuid::Uuid;
 
-use super::{HoldError, HoldOutcome, ReleaseGate};
+use crate::{HoldError, HoldOutcome, ReleaseGate};
 
 /// Where the per-user directory goes when `XDG_RUNTIME_DIR` isn't set, as on macOS.
 const FALLBACK_RUNTIME_DIR: &str = "/tmp";
@@ -103,13 +103,20 @@ pub enum GateError {
 
     #[error("the debug release FIFO {path} reached its end without a release")]
     Closed { path: PathBuf },
+
+    #[error("failed to watch the debug release FIFO {path}")]
+    Watch {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// The per-user directory, checked through this open descriptor rather than by its path.
 #[derive(Debug)]
-struct PrivateDir {
-    fd: OwnedFd,
-    path: PathBuf,
+pub(crate) struct PrivateDir {
+    pub(crate) fd: OwnedFd,
+    pub(crate) path: PathBuf,
 }
 
 /// A FIFO in the private directory, removed when dropped.
@@ -156,7 +163,7 @@ impl Gate {
 
     /// Makes the FIFO `name` in `dir` and opens both its ends.
     ///
-    /// Both ends are open before [`hold`](super::hold) announces the path, so an IDE that writes
+    /// Both ends are open before [`hold`](crate::hold) announces the path, so an IDE that writes
     /// as soon as it reads the announcement never blocks on the FIFO, even when a debugger pauses
     /// the program right after the announcement.
     fn at(dir: PrivateDir, name: String, pid: u32) -> Result<Self, GateError> {
@@ -261,17 +268,56 @@ impl Gate {
     }
 }
 
+#[cfg(feature = "runtime-pause")]
+impl Gate {
+    /// Takes the IDE's release byte if one arrived, without blocking: for a caller that waits for
+    /// the gate to be readable itself, as `mirrord up` does while it also watches a runtime.
+    ///
+    /// `Ok(false)` when nothing arrived yet. The read end stays non-blocking for this, since only
+    /// [`Gate::wait`] makes it blocking.
+    pub(crate) fn try_take_release(&self) -> Result<bool, GateError> {
+        let path = || PathBuf::from(&self.fifo.path);
+        let mut byte = [0; 1];
+        loop {
+            match read(&self.read, &mut byte) {
+                Ok(0) => return Err(GateError::Closed { path: path() }),
+                Ok(_) => return Ok(true),
+                Err(Errno::EAGAIN) => return Ok(false),
+                Err(Errno::EINTR) => continue,
+                Err(source) => {
+                    return Err(GateError::Read {
+                        path: path(),
+                        source,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// The release FIFO's read end, which turns readable once the IDE wrote its byte.
+#[cfg(feature = "runtime-pause")]
+impl std::os::fd::AsRawFd for Gate {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        std::os::fd::AsRawFd::as_raw_fd(&self.read)
+    }
+}
+
+/// Where this user's private directory goes: `XDG_RUNTIME_DIR`, or `/tmp` where it isn't set,
+/// as on macOS.
+pub(crate) fn runtime_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .unwrap_or_else(|| PathBuf::from(FALLBACK_RUNTIME_DIR))
+}
+
 impl ReleaseGate for Gate {
     /// Nothing: the process that waits is the held one, so it can't exit while it waits.
     type Holder<'a> = ();
 
     fn create(pid: u32) -> Result<Self, HoldError> {
-        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute())
-            .unwrap_or_else(|| PathBuf::from(FALLBACK_RUNTIME_DIR));
-
-        Self::create_in(&runtime_dir, pid).map_err(|source| HoldError::Create { pid, source })
+        Self::create_in(&runtime_dir(), pid).map_err(|source| HoldError::Create { pid, source })
     }
 
     fn release_name(&self) -> &str {
@@ -328,7 +374,7 @@ fn release_pid(name: &str) -> Option<Pid> {
 ///
 /// The directory is opened once, and checked and used only through that descriptor, so a path
 /// swapped after the check can't redirect the FIFO.
-fn private_dir(runtime_dir: &Path) -> Result<PrivateDir, GateError> {
+pub(crate) fn private_dir(runtime_dir: &Path) -> Result<PrivateDir, GateError> {
     // SAFETY: `getuid` has no preconditions and always succeeds.
     let uid = unsafe { libc::getuid() };
     let path = runtime_dir.join(format!("mirrord-debug-{uid}"));

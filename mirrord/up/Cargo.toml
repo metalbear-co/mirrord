@@ -17,6 +17,7 @@ categories.workspace = true
 mirrord-analytics = { path = "../analytics" }
 mirrord-command = { path = "../command", features = ["tokio"] }
 mirrord-config = { path = "../config" }
+mirrord-debug-hold = { path = "../debug-hold", features = ["runtime-pause"] }
 mirrord-kube = { path = "../kube" }
 mirrord-progress = { path = "../progress/" }
 
@@ -37,6 +38,7 @@ strum_macros.workspace = true
 strsim.workspace = true
 strum.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time"] }
+tracing.workspace = true
 dunce.workspace = true
 inquire.workspace = true
 uuid.workspace = true

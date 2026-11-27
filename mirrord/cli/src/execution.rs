@@ -19,7 +19,7 @@ use mirrord_command::resolve_tokio_command;
 use mirrord_config::MIRRORD_LAYER_CRASH_REPORTING;
 use mirrord_config::{
     LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, MIRRORD_LAYER_TARGET_CONTAINER_PORTS,
-    MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError,
+    MIRRORD_TEST_INTPROXY_ADDR, config::ConfigError, debug_hold::dotnet_ports,
     external_proxy::MIRRORD_EXTPROXY_TLS_SETUP_PEM, feature::env::mapper::EnvVarsRemapper,
     util::GIT_BRANCH,
 };
@@ -1009,7 +1009,7 @@ impl MirrordExecution {
             (None, None) => (HashSet::new(), HashSet::from(EnvVars("*".to_owned()))),
         };
 
-        let mut env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
+        let env_vars = if !env_vars_exclude.is_empty() || !env_vars_include.is_empty() {
             let communication_timeout =
                 Duration::from_secs(config.agent.communication_timeout.unwrap_or(30).into());
 
@@ -1024,7 +1024,23 @@ impl MirrordExecution {
             Default::default()
         };
 
+        Self::program_env(config, env_vars)
+    }
+
+    /// The environment the program gets of the session: `env_vars`, the pod's, without what can't
+    /// work outside the pod, and then the user's env file, mapping and overrides.
+    ///
+    /// The pod's values are cleaned before the user's are applied, so a variable the user sets
+    /// survives a drop that the pod's own value of it doesn't.
+    fn program_env(
+        config: &LayerConfig,
+        mut env_vars: HashMap<String, String>,
+    ) -> CliResult<HashMap<String, String>> {
         config.sanitize_remote_env(&mut env_vars);
+        // Debugged or not: a pod's own ports name sockets inside the pod, which no local runtime
+        // can reach, and one with `suspend` keeps it paused for good. A debugged program's
+        // runtimes pause on the port `mirrord up` serves instead.
+        dotnet_ports::drop_remote(&mut env_vars);
 
         if let Some(file) = &config.feature.env.env_file {
             let envs_from_file = dotenvy::from_path_iter(file)
@@ -1142,7 +1158,56 @@ fn session_log_directory(configured: Option<&OsStr>) -> Option<(String, bool)> {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING};
+    use mirrord_config::{
+        LayerConfig, config::ConfigContext, debug_hold::dotnet_ports::DOTNET_DIAGNOSTIC_PORTS,
+    };
+    use rstest::rstest;
+
+    use super::{CrashReporting, MIRRORD_LAYER_CRASH_REPORTING, MirrordExecution};
+    use crate::process_env;
+
+    /// A pod's diagnostic ports reach no session's program, debugged or not: they name sockets
+    /// inside the pod, and one with `suspend` keeps the runtime paused for good. The user's own
+    /// value stays, whether it's set where `exec` runs or in the config's `env.override`.
+    ///
+    /// This test's process carries no debug request, so it's a Run session.
+    #[rstest]
+    #[case::unset_by_the_user(None, None, None)]
+    #[case::set_where_exec_runs(Some("my-tool,nosuspend"), None, Some("my-tool,nosuspend"))]
+    #[case::overridden_in_the_config(None, Some("my-tool"), Some("my-tool"))]
+    fn a_run_session_drops_only_the_pods_diagnostic_ports(
+        #[case] local: Option<&str>,
+        #[case] overridden: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        let mut config = LayerConfig::resolve(&mut ConfigContext::default().strict_env(true))
+            .expect("the default config resolves");
+        config.feature.env.r#override = overridden
+            .map(|value| HashMap::from([(DOTNET_DIAGNOSTIC_PORTS.to_owned(), value.to_owned())]));
+        let pod = HashMap::from([
+            (DOTNET_DIAGNOSTIC_PORTS.to_owned(), "x,suspend".to_owned()),
+            ("DOTNET_gcServer".to_owned(), "1".to_owned()),
+        ]);
+
+        let session = MirrordExecution::program_env(&config, pod).expect("no env file to read");
+        let program = crate::compose_exec_environment(
+            process_env::from_entries(
+                local.map(|value| (DOTNET_DIAGNOSTIC_PORTS, value.to_owned())),
+            ),
+            &session,
+            &[],
+        );
+
+        assert_eq!(
+            process_env::get(&program, DOTNET_DIAGNOSTIC_PORTS),
+            expected
+        );
+        assert_eq!(
+            process_env::get(&program, "DOTNET_gcServer"),
+            Some("1"),
+            "the rest of the pod's environment stays"
+        );
+    }
 
     /// A relative log path names a different directory in every working directory, so the
     /// session's processes get it made absolute against the CLI's, and an absolute one as is.
