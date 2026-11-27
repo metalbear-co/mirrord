@@ -497,17 +497,7 @@ Redis does not keep messages, so there are no buffered messages to move. A messa
 
 When the first session starts, the operator creates a temporary main channel for the deployed workload. It replaces the pods of the workload with pods whose channel environment variable is that channel. The operator then subscribes to the original channel with the same command as the application (`SUBSCRIBE`, `PSUBSCRIBE`, or `SSUBSCRIBE`). For each message, the operator checks the session filters. A message that matches a filter goes to the temporary channel of that session. All other messages go to the main channel. Redis creates channels when a message is published, so there are no Redis objects to delete after the sessions end.
 
-```mermaid
-flowchart LR
-    P[Producer] -->|PUBLISH notifications| O[(Redis channel<br/>notifications)]
-    O -->|SUBSCRIBE| OP[mirrord operator<br/>filters on JSON payload]
-    OP -->|mirrord-session=alice| A[(mirrord-tmp-...-notifications<br/>alice session)]
-    OP -->|mirrord-session=bob| B[(mirrord-tmp-...-notifications<br/>bob session)]
-    OP -->|no filter matches| M[(mirrord-tmp-...-main-notifications)]
-    A --> LA[Local consumer: alice]
-    B --> LB[Local consumer: bob]
-    M --> D[Deployed consumer<br/>redis-consumer]
-```
+![Redis Pub/Sub splitting with two sessions](../../.gitbook/assets/redis-pubsub-tutorial.svg)
 
 ## Behavior and tradeoffs
 

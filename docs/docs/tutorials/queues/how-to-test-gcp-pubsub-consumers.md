@@ -457,18 +457,7 @@ Publish one more message. The deployed consumer gets it from `orders-sub`:
 
 When the first session starts, the operator creates temporary topics and subscriptions: one set for the deployed consumer and one set for each local consumer. It patches the subscription variable of the deployed consumer to read from its temporary subscription, and gives the local process the name of the local temporary subscription. Then the operator drains the original subscription. For each message, it checks the filters of the active sessions, and publishes the message to the temporary topic of the session that matches. Messages that match no filter go to the temporary topic of the deployed consumer.
 
-```mermaid
-flowchart LR
-    P["Producers"] --> T[("Topic: orders")]
-    T --> S[("Subscription: orders-sub")]
-    S --> O["mirrord operator"]
-    O -- "mirrord-session=alice" --> TA[("Temporary topic and subscription (alice)")]
-    O -- "mirrord-session=bob" --> TB[("Temporary topic and subscription (bob)")]
-    O -- "no match" --> TD[("Temporary topic and subscription (deployed)")]
-    TA --> LA["Local consumer (alice)"]
-    TB --> LB["Local consumer (bob)"]
-    TD --> D["Deployed consumer"]
-```
+![Two Pub/Sub splitting sessions on the orders-sub subscription](../../.gitbook/assets/gcp-pubsub-tutorial.svg)
 
 ## Behavior and tradeoffs
 

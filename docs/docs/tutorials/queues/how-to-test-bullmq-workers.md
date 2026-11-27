@@ -498,17 +498,7 @@ kubectl -n bullmq-demo logs deploy/bullmq-worker
 
 When the first session starts, the operator creates a temporary main queue for the deployed worker. It restarts the pods of the workload with `BULLMQ_QUEUE` set to this queue. It also creates one temporary queue for each session and gives that name to the local worker. A forwarder in the operator takes each job ID from the wait list of the original queue (`bull:orders:wait`). It reads the `data` field of the job hash as JSON, applies the filters of the sessions, and adds the job to the queue of the matching session. A job that no filter matches goes to the main queue. Producers do not change, and they continue to write to `orders`.
 
-```mermaid
-flowchart LR
-    P[Producers in staging] -->|queue.add| O[(bull:orders:wait)]
-    O -->|take job ID| F[mirrord operator forwarder]
-    F -->|data has mirrord-session=alice| A[(mirrord-tmp-...-orders<br/>session of alice)]
-    F -->|data has mirrord-session=bob| B[(mirrord-tmp-...-orders<br/>session of bob)]
-    F -->|no match| M[(mirrord-tmp-...-main-orders)]
-    A --> LA[Local worker: alice]
-    B --> LB[Local worker: bob]
-    M --> D[Deployed bullmq-worker]
-```
+![BullMQ queue splitting on the orders queue](../../.gitbook/assets/bullmq-tutorial.svg)
 
 ## Behavior and tradeoffs
 
