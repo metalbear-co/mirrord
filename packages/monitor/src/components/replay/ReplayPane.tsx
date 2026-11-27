@@ -37,8 +37,8 @@ function withoutJsonWhitespace(json: string): string {
   )
 }
 
-// The embeddings, overrides and isolates of the Unicode bidirectional algorithm.
-const DIRECTION_CHANGES = /[\u202a-\u202e\u2066-\u2069]/g
+// The marks, embeddings, overrides and isolates of the Unicode bidirectional algorithm.
+const DIRECTION_CHANGES = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
 const HEX = 16
 
 /**
