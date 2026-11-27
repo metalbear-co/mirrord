@@ -28,10 +28,6 @@ You install mirrord in Devin's machine setup and give Devin two secrets: a kubec
 - A kubeconfig for that service account, with a context named `devin-staging`. [Preview Environments in CI](../use-cases/preview-environments-in-ci.md#2-build-a-kubeconfig-from-the-token) shows how to build one from a token.
 - Network access from Devin's machine to the Kubernetes API server of the staging cluster. If your API server allows only known IP addresses, add the addresses that Devin publishes for allowlists ([Devin docs](https://docs.devin.ai/admin/common-issues.md)). Traffic from Devin's sessions comes from the `140.232.64.0/26` range on that list.
 
-{% hint style="warning" %}
-Use a **staging or development** cluster. Do not give Devin a kubeconfig for a production cluster.
-{% endhint %}
-
 ## 1. Install mirrord in Devin's machine setup
 
 Devin boots each session from a snapshot that its repository setup builds ([Devin docs](https://docs.devin.ai/onboard-devin/environment.md)). The setup is a blueprint, and its `initialize` steps install tools ([blueprint reference](https://docs.devin.ai/onboard-devin/environment/blueprint-reference.md)). Install mirrord there, so every session has the CLI.
