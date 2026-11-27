@@ -303,14 +303,14 @@ finally:
 
 ## Modal
 
-Modal runs containers in an isolated sandbox with "primitives like gVisor or microVMs" ([Security](https://modal.com/docs/guide/security)), and Modal uses gVisor as its container runtime ([Modal and gVisor](https://modal.com/blog/modal-gvisor-maintainer)). gVisor implements the Linux system calls in user space, and some calls have only partial support ([gVisor compatibility](https://gvisor.dev/docs/user_guide/compatibility/linux/amd64/)).
+Modal runs containers in an isolated sandbox with "primitives like gVisor or microVMs" ([Security](https://modal.com/docs/guide/security)), and Modal uses gVisor as its container runtime ([Modal and gVisor](https://modal.com/blog/modal-gvisor-maintainer)). gVisor implements the Linux system calls in user space, and some calls have only partial support ([gVisor compatibility](https://gvisor.dev/docs/user_guide/compatibility/linux/amd64/)). With `runtime="vm"`, `Sandbox.create` runs the sandbox in a VM with its own Linux kernel, and the mirrord layer works as on other Linux VMs.
 
 `Sandbox.create` does not block the network by default (`block_network=False`). If you set `outbound_cidr_allowlist`, include the CIDR of the Kubernetes API server and of `STAGING_URL` ([modal.Sandbox](https://modal.com/docs/reference/modal.Sandbox)). `Image.debian_slim` is a Debian image, so it has glibc ([Images](https://modal.com/docs/guide/images)). Modal gives the keys of a secret to the sandbox as environment variables ([Secrets](https://modal.com/docs/guide/secrets)).
 
 {% hint style="warning" %}
-Under gVisor, the mirrord layer has these limits:
+The script creates the sandbox with `runtime="vm"`. Under the gVisor runtime (`runtime="gvisor"`), the mirrord layer has these limits:
 
-- A Python service stops with a segmentation fault (`SIGSEGV`) when it imports the `socket` module, also with all mirrord features off. Use a service that is not written in Python, or use E2B.
+- A Python service stops with a segmentation fault (`SIGSEGV`) when it imports the `socket` module, also with all mirrord features off.
 - The sandbox has no IPv6 loopback address. The service must listen on an IPv4 address, such as `0.0.0.0`, not on `::`.
 - With the default `fs` mode, `busybox httpd` stops with `memory allocation of ... bytes failed` when it answers a request. Set `feature.fs` to `local` if your service stops with this error.
 
@@ -365,6 +365,8 @@ sandbox = modal.Sandbox.create(
         "EXPECTED": EXPECTED,
     },
     timeout=900,
+    # Under the gVisor runtime, a Python service stops with a segmentation fault.
+    runtime="vm",
 )
 try:
     for name in ("mirrord.json", "check.sh"):
@@ -387,7 +389,7 @@ finally:
 
 ## Behavior and limits
 
-- **The platform must allow the layer.** mirrord loads its layer into the service with `LD_PRELOAD`. A microVM with its own Linux kernel, such as an E2B sandbox, and a container, such as a Daytona sandbox, behave like a Linux VM. A gVisor sandbox, such as a Modal sandbox, implements the Linux system calls itself, and a Python service does not work there. See [Modal](#modal).
+- **The platform must allow the layer.** mirrord loads its layer into the service with `LD_PRELOAD`. A sandbox with its own Linux kernel, such as an E2B sandbox or a Modal sandbox with `runtime="vm"`, and a container, such as a Daytona sandbox, behave like a Linux VM. A gVisor sandbox, such as a Modal sandbox with the gVisor runtime, implements the Linux system calls itself, and a Python service does not work there. See [Modal](#modal).
 - **The image needs glibc.** The mirrord Linux binary needs glibc. Images based on Alpine or another musl distribution do not work, also with `gcompat`. Use a Debian or Ubuntu image.
 - **mirrord runs on Linux x86_64 and aarch64 only.** The install script stops on other architectures.
 - **The sandbox must reach the Kubernetes API server.** mirrord connects to the Operator through the Kubernetes API, so the sandbox needs no other path into the cluster. If your API server accepts only some source addresses, add the egress addresses of the sandbox platform. E2B and Daytona do not publish fixed egress addresses ([E2B egress IP ranges](https://docs.e2b.dev/faq/egress-ip-ranges)). Modal gives fixed egress addresses with a Proxy on the Team and Enterprise plans ([Proxy IPs](https://modal.com/docs/guide/proxy-ips)).
@@ -407,8 +409,8 @@ finally:
 | `... is forbidden: User "system:serviceaccount:..." cannot ...` | The agent identity does not have the permission. Bind it to `mirrord-operator-ci`, and give it `get` on the target deployment and `list` on pods. |
 | A timeout when mirrord connects to the Kubernetes API. | The platform or the cluster blocks the connection. Allow the API server in the egress settings of the sandbox, and allow the platform in the authorized networks of the cluster. |
 | `finding operator failed with ServiceError: client error (Connect)` on Daytona. | The organization is on Tier 1 or Tier 2, which limits outbound access. Move the organization to Tier 3 or higher. |
-| The service stops with a segmentation fault on Modal. | The service is written in Python. A Python service does not work under mirrord in gVisor. |
-| `Cannot assign requested address (os error 99)` in the answer on Modal. | The service listens on `::`, and the sandbox has no IPv6 loopback address. Make the service listen on `0.0.0.0`. |
+| The service stops with a segmentation fault on Modal. | The sandbox uses the gVisor runtime, and the service is written in Python. Create the sandbox with `runtime="vm"`. |
+| `Cannot assign requested address (os error 99)` in the answer on Modal. | The sandbox uses the gVisor runtime, which has no IPv6 loopback address, and the service listens on `::`. Create the sandbox with `runtime="vm"`, or make the service listen on `0.0.0.0`. |
 | `executable "gke-gcloud-auth-plugin" not found` or a similar error. | The kubeconfig uses an auth plugin that is not in the image. Use a kubeconfig with a service account token. |
 | `x509: certificate signed by unknown authority` on Daytona. | A domain allow list intercepts HTTPS. Use `network_allow_list` with a CIDR. |
 | The staging service, not the sandbox, answers the request. | The steal is not active yet, or the header does not match. Send requests again for some seconds, and check the key and the header name. Also check that the ingress forwards the header. |
@@ -419,7 +421,7 @@ For logs, see [Collecting logs](../troubleshooting/collecting-logs.md). `mirrord
 
 ### Can I use mirrord in an E2B, Daytona, or Modal sandbox?
 
-Yes. Install mirrord in the sandbox image, and give the sandbox a kubeconfig and a CI API key. The sandbox must reach the Kubernetes API server of your cluster. On Modal, a Python service does not work. See [Modal](#modal).
+Yes. Install mirrord in the sandbox image, and give the sandbox a kubeconfig and a CI API key. The sandbox must reach the Kubernetes API server of your cluster. On Modal, create the sandbox with `runtime="vm"`. See [Modal](#modal).
 
 ### Does each sandbox take a mirrord seat?
 
@@ -431,7 +433,7 @@ Yes. Give each sandbox a different session key. Each session then steals only th
 
 ### Does mirrord work in a gVisor or Firecracker sandbox?
 
-A Firecracker microVM has its own Linux kernel, so mirrord works there as on other Linux VMs. gVisor implements the Linux system calls in user space. Under gVisor, a Python service stops with a segmentation fault, and the service must listen on IPv4. See [Modal](#modal).
+A Firecracker microVM has its own Linux kernel, so mirrord works there as on other Linux VMs. gVisor implements the Linux system calls in user space. Under gVisor, a Python service stops with a segmentation fault, and the service must listen on IPv4. On Modal, use `runtime="vm"`. See [Modal](#modal).
 
 ### Why use `mirrord ci start` and not `mirrord exec` in a sandbox?
 
