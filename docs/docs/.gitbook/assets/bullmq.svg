@@ -63,9 +63,9 @@
 
   <!-- Forwarder -->
   <rect x="350" y="180" width="220" height="190" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="366" y="194" width="22" height="40"/>
-  <text x="474" y="214" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
-  <text x="474" y="236" font-size="12.5" fill="#ffffff" text-anchor="middle">BullMQ forwarder</text>
+  <use href="#mirrord" x="361.0" y="186.0" width="32.0" height="57.0"/>
+  <text x="477.8" y="214" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
+  <text x="477.8" y="236" font-size="12.5" fill="#ffffff" text-anchor="middle">BullMQ forwarder</text>
   <text x="460" y="280" font-size="12.5" fill="#ffffff" text-anchor="middle"><tspan font-family="Menlo, Consolas, monospace">HGETALL</tspan> reads job data</text>
   <text x="460" y="302" font-size="12.5" fill="#ffffff" text-anchor="middle">inspects the <tspan font-family="Menlo, Consolas, monospace">data</tspan> JSON field</text>
   <text x="460" y="324" font-size="12.5" fill="#ffffff" text-anchor="middle">checks the users' filters</text>

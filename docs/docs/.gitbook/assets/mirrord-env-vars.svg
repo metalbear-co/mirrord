@@ -50,7 +50,7 @@
   <text x="200" y="124" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local process</text>
   <text x="200" y="144" font-size="12.5" fill="#ffffff" text-anchor="middle">variables set before it starts</text>
   <rect x="70" y="170" width="260" height="96" rx="8" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="92" y="198" width="22" height="40"/>
+  <use href="#mirrord" x="87.0" y="189.5" width="32.0" height="57.0"/>
   <text x="214" y="224" font-size="16" font-weight="700" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">mirrord-layer</text>
 
   <!-- Layer and agent -->
@@ -62,8 +62,8 @@
 
   <!-- mirrord agent -->
   <rect x="590" y="150" width="200" height="120" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="608" y="190" width="22" height="40"/>
-  <text x="702" y="216" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
+  <use href="#mirrord" x="603.0" y="181.5" width="32.0" height="57.0"/>
+  <text x="705.4" y="216" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord agent</text>
 
   <!-- Agent and target pod -->
   <line x1="790" y1="196" x2="906" y2="196" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>

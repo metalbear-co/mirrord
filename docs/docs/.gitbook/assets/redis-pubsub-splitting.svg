@@ -52,8 +52,8 @@
   <line x1="342" y1="144" x2="428" y2="144" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="387" y="132" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#333344" text-anchor="middle">SUBSCRIBE</text>
   <rect x="432" y="40" width="210" height="208" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="526" y="66" width="22" height="40"/>
-  <text x="537" y="122" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
+  <use href="#mirrord" x="521.0" y="49.0" width="32.0" height="57.0"/>
+  <text x="542.0" y="122" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
   <text x="537" y="142" font-size="12.5" fill="#ffffff" text-anchor="middle">subscribes to orders</text>
   <text x="537" y="160" font-size="12.5" fill="#ffffff" text-anchor="middle">evaluates session filters</text>
   <text x="537" y="178" font-size="12.5" fill="#ffffff" text-anchor="middle">re-publishes to temp channels</text>
@@ -79,9 +79,9 @@
   <line x1="952" y1="208" x2="988" y2="208" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <rect x="992" y="168" width="208" height="80" rx="10" fill="#232141"/><rect x="1000" y="176" width="192" height="64" rx="4" fill="#756DF3"/>
   <path d="M992 248 H1200 L1216 262 H976 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="1002" y1="253" x2="1190" y2="253" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1080" y="256.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="972" y="262" width="248" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="1006" y="188" width="22" height="40"/>
-  <text x="1109" y="204" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local developer</text>
-  <text x="1109" y="224" font-size="12.5" fill="#ffffff" text-anchor="middle">mirrord exec</text>
+  <use href="#mirrord" x="1008.0" y="186.6" width="24.0" height="42.7"/>
+  <text x="1112.0" y="204" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Local developer</text>
+  <text x="1112.0" y="224" font-size="12.5" fill="#ffffff" text-anchor="middle">mirrord exec</text>
   <!-- Messages -->
   <use href="#envelope" x="150" y="134" width="28" height="20"/>
   <!-- Kubernetes logos: what runs in the cluster -->

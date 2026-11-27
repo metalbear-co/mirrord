@@ -58,9 +58,9 @@
   <polyline points="485,200 130,200 130,288" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="300" y="190" font-size="12.5" fill="#333344" text-anchor="middle">consume messages</text>
   <rect x="20" y="290" width="220" height="300" rx="12" fill="#756DF3" stroke="#232141" stroke-width="2"/>
-  <use href="#mirrord" x="40" y="410" width="22" height="40"/>
-  <text x="144" y="437" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
-  <text x="130" y="457" font-size="12.5" fill="#ffffff" text-anchor="middle">routes by filter</text>
+  <use href="#mirrord" x="35.0" y="401.5" width="32.0" height="57.0"/>
+  <text x="149.0" y="437" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">mirrord operator</text>
+  <text x="135.0" y="457" font-size="12.5" fill="#ffffff" text-anchor="middle">routes by filter</text>
   <text x="130" y="489" font-size="12.5" fill="#ffffff" text-anchor="middle">a message that matches</text>
   <text x="130" y="505" font-size="12.5" fill="#ffffff" text-anchor="middle">both filters goes to</text>
   <text x="130" y="521" font-size="12.5" fill="#ffffff" text-anchor="middle">only one of the sessions</text>
@@ -79,10 +79,10 @@
   <text x="840" y="320" font-size="12.5" fill="#4a44b8" text-anchor="middle">consume messages</text>
   <rect x="920" y="290" width="260" height="80" rx="10" fill="#232141"/><rect x="928" y="298" width="244" height="64" rx="4" fill="#756DF3"/>
   <path d="M920 370 H1180 L1196 384 H904 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="930" y1="375" x2="1170" y2="375" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1034" y="378.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="900" y="384" width="300" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="934" y="310" width="22" height="40"/>
-  <text x="1064" y="318" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Application</text>
-  <text x="1064" y="338" font-size="12.5" fill="#ffffff" text-anchor="middle">running locally with mirrord</text>
-  <text x="1064" y="355" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">filter x</text>
+  <use href="#mirrord" x="936.0" y="308.6" width="24.0" height="42.7"/>
+  <text x="1066.0" y="318" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Application</text>
+  <text x="1066.0" y="338" font-size="12.5" fill="#ffffff" text-anchor="middle">running locally with mirrord</text>
+  <text x="1066.0" y="355" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">filter x</text>
 
   <!-- Session y: temporary queue and local application -->
   <line x1="240" y1="440" x2="483" y2="440" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
@@ -98,10 +98,10 @@
   <text x="840" y="430" font-size="12.5" fill="#4a44b8" text-anchor="middle">consume messages</text>
   <rect x="920" y="400" width="260" height="80" rx="10" fill="#232141"/><rect x="928" y="408" width="244" height="64" rx="4" fill="#756DF3"/>
   <path d="M920 480 H1180 L1196 494 H904 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="930" y1="485" x2="1170" y2="485" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1034" y="488.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="900" y="494" width="300" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="934" y="420" width="22" height="40"/>
-  <text x="1064" y="428" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Application</text>
-  <text x="1064" y="448" font-size="12.5" fill="#ffffff" text-anchor="middle">running locally with mirrord</text>
-  <text x="1064" y="465" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">filter y</text>
+  <use href="#mirrord" x="936.0" y="418.6" width="24.0" height="42.7"/>
+  <text x="1066.0" y="428" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Application</text>
+  <text x="1066.0" y="448" font-size="12.5" fill="#ffffff" text-anchor="middle">running locally with mirrord</text>
+  <text x="1066.0" y="465" font-size="12.5" font-family="Menlo, Consolas, monospace" fill="#ffffff" text-anchor="middle">filter y</text>
 
   <!-- Temporary queue and deployed application -->
   <line x1="240" y1="550" x2="483" y2="550" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>

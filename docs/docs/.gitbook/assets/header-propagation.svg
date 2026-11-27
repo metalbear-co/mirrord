@@ -71,7 +71,7 @@
   <rect x="980" y="250" width="200" height="80" rx="10" fill="#232141"/>
   <rect x="988" y="258" width="184" height="64" rx="4" fill="#756DF3"/>
   <path d="M980 330 H1180 L1196 344 H964 Z" fill="#ffffff" stroke="#232141" stroke-width="2" stroke-linejoin="round"/><line x1="990" y1="335" x2="1170" y2="335" stroke="#232141" stroke-width="3" stroke-dasharray="6 3"/><rect x="1064" y="338.5" width="32" height="3.5" rx="1.5" fill="#232141"/><rect x="960" y="344" width="240" height="5" rx="2.5" fill="#232141"/>
-  <use href="#mirrord" x="998" y="270" width="22" height="40"/>
+  <use href="#mirrord" x="996.0" y="264.0" width="29.2" height="52.0"/>
   <text x="1094" y="282" font-size="16" font-weight="700" fill="#ffffff" text-anchor="middle">Your machine</text>
   <text x="1094" y="300" font-size="12.5" fill="#ffffff" text-anchor="middle">runs billing-api</text>
   <text x="1094" y="315" font-size="12.5" fill="#ffffff" text-anchor="middle">with mirrord</text>
