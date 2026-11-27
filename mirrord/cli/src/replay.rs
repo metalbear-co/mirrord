@@ -179,8 +179,32 @@ fn replay_error(error: SessionError) -> CliError {
 }
 
 fn print_json<T: Serialize>(value: &T) -> CliResult<()> {
-    println!("{}", serde_json::to_string(value)?);
+    println!("{}", escaped_json(&serde_json::to_string(value)?));
     Ok(())
+}
+
+/// Returns `json` with every control character and every character that changes the direction of
+/// text written as a `\u` escape, which JSON reads as the same character.
+///
+/// serde_json only escapes the control characters up to U+001F, so DEL, the C1 controls and the
+/// direction changes would reach the terminal.
+fn escaped_json(json: &str) -> String {
+    let mut escaped = String::with_capacity(json.len());
+    for c in json.chars() {
+        if c.is_control() || is_direction_change(c) {
+            escaped.push_str(&format!("\\u{:04x}", u32::from(c)));
+        } else {
+            escaped.push(c);
+        }
+    }
+
+    escaped
+}
+
+/// Returns whether `c` is one of the embeddings, overrides and isolates of the Unicode
+/// bidirectional algorithm.
+fn is_direction_change(c: char) -> bool {
+    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 fn print_list(requests: &[CapturedRequestSummary]) {
@@ -303,9 +327,7 @@ fn printable(text: &str) -> String {
             '\n' | '\t' => true,
             // On its own, a carriage return moves the cursor back over what is already printed.
             '\r' => chars.peek() == Some(&'\n'),
-            // The embeddings, overrides and isolates of the Unicode bidirectional algorithm.
-            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => false,
-            c => !c.is_control(),
+            c => !c.is_control() && !is_direction_change(c),
         };
 
         if keep {
@@ -329,4 +351,34 @@ fn age(unix_millis: u64) -> String {
         .unwrap_or_default();
 
     humantime::format_duration(Duration::from_secs(elapsed.as_secs())).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::escape_sequence("a\u{1b}[31mb", "a\\u{1b}[31mb")]
+    #[case::bell("a\u{7}b", "a\\u{7}b")]
+    #[case::osc_52("\u{1b}]52;c;aGk=\u{7}", "\\u{1b}]52;c;aGk=\\u{7}")]
+    #[case::lone_carriage_return("a\rb", "a\\rb")]
+    #[case::delete_and_c1("a\u{7f}b\u{9b}c", "a\\u{7f}b\\u{9b}c")]
+    #[case::right_to_left_override("a\u{202e}b", "a\\u{202e}b")]
+    #[case::isolate("a\u{2066}b", "a\\u{2066}b")]
+    #[case::line_breaks_and_tabs("a\r\nb\tc\nd", "a\r\nb\tc\nd")]
+    #[case::zero_width_space("a\u{200b}b", "a\u{200b}b")]
+    fn printable_escapes_what_a_terminal_would_run(#[case] text: &str, #[case] expected: &str) {
+        assert_eq!(printable(text), expected);
+    }
+
+    #[test]
+    fn json_escapes_what_a_terminal_would_run() {
+        let text = "a\u{7f}b\u{9b}c\u{202e}d\u{1b}e";
+        let json = escaped_json(&serde_json::to_string(text).unwrap());
+
+        assert_eq!(json, r#""a\u007fb\u009bc\u202ed\u001be""#);
+        assert_eq!(serde_json::from_str::<String>(&json).unwrap(), text);
+    }
 }
