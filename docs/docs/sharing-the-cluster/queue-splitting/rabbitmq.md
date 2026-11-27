@@ -219,7 +219,7 @@ The mirrord operator can only read consumer's environment variables if they are 
 
 When the **last** session on a workload ends, the operator does not remove the split at once. It passes through two windows before it deletes the temporary queues and restarts the workload back onto the original queue:
 
-1. **Idle window - `spec.ttl`.** The split stays live: the operator keeps forwarding the original queue into the temporary queue that the patched workload reads. A session that starts in this window reuses the split with no restart.
+1. **Idle window - `spec.ttl`.** The split stays in place, but the operator stops reading the original queue. New messages wait on the original queue until a session starts again or the split is removed. A session that starts in this window reuses the split with no restart.
 2. **Drain window - limited by `spec.drainTimeout`.** The operator stops forwarding new messages and lets the patched workload read what is already in its temporary queue. The window ends early when that queue is empty.
 
 Both fields are optional and in seconds, on the `MirrordSplitConfig`:
@@ -229,10 +229,10 @@ Both fields are optional and in seconds, on the `MirrordSplitConfig`:
 | `spec.ttl` | `N`: keep the split live for up to `N` seconds after the last session ends. `0` or unset: go straight to the drain window. |
 | `spec.drainTimeout` | `N`: wait up to `N` seconds for the patched workload to read its temporary queue. `0`: remove the split at once; unread messages can be lost. Unset: no limit; wait until the queue is empty. |
 
-When the split ends, the operator does not delete a temporary queue that still holds messages or has a consumer. It keeps that queue and reports it in a `Drained` condition on the `MirrordSplitConfig`.
+When the split ends, the operator does not delete the queue that the patched workload reads while it still holds messages. It keeps that queue and reports it in a `Drained` condition on the `MirrordSplitConfig`. If a pod still reads the queue, the operator deletes it after that pod is gone.
 
 {% hint style="warning" %}
-When one session ends and other sessions continue, the operator deletes the temporary queue of that session. Messages that the local consumer did not read are lost. They do not go back to the deployed consumer.
+When a session ends, the operator deletes the temporary queue of that session, even when it is the last session. Messages that the local consumer did not read are lost. They do not go back to the deployed consumer.
 {% endhint %}
 
 ## Temporary queue names
