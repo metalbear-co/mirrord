@@ -2,13 +2,6 @@
 
 #[cfg(feature = "implementations")]
 pub mod implementations;
-#[cfg_attr(
-    not(feature = "implementations"),
-    allow(
-        dead_code,
-        reason = "without the renderers, only a finished task is ever printed"
-    )
-)]
 mod json;
 pub mod messages;
 
@@ -48,6 +41,18 @@ impl LineMode {
             _ => None,
         }
     }
+}
+
+/// Whether `line` reports a session [`messages::SESSION_READY_MESSAGE`] in either line mode:
+/// `Ready!` alone, or a successful `FinishedTask` whose message is `Ready!`.
+///
+/// The task's name isn't checked, since `mirrord exec` and `mirrord container` finish different
+/// tasks with it.
+pub fn is_session_ready_line(line: &str) -> bool {
+    let line = line.trim();
+    line == messages::SESSION_READY_MESSAGE
+        || serde_json::from_str::<ProgressMessage>(line)
+            .is_ok_and(|message| message.is_success_with(messages::SESSION_READY_MESSAGE))
 }
 
 /// The line that finishing `task` successfully with `message` prints in `mode`, newline included.

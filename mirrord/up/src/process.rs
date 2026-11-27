@@ -12,6 +12,8 @@ use std::{
 };
 
 use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
+use mirrord_progress::is_session_ready_line;
+#[cfg(test)]
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
 #[cfg(unix)]
 use nix::sys::signal::killpg;
@@ -40,8 +42,9 @@ use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 /// How long an exited session's stdout is still read before telling whether it got as far as
-/// [`SESSION_READY_MESSAGE`]. The exit can be seen before the forwarding task has read the last
-/// lines, and a descendant still holding the pipe open must not hold up the error.
+/// [`SESSION_READY_MESSAGE`](mirrord_progress::messages::SESSION_READY_MESSAGE). The exit can be
+/// seen before the forwarding task has read the last lines, and a descendant still holding the
+/// pipe open must not hold up the error.
 const STDOUT_DRAIN: Duration = Duration::from_secs(1);
 
 /// How the line a held program's `mirrord exec` prints starts: `debug-hold pid=<pid>
@@ -104,8 +107,10 @@ struct Service {
     /// Unix process-group ID retained to probe surviving descendants.
     #[cfg(unix)]
     group: Pid,
-    /// Set once the session printed [`SESSION_READY_MESSAGE`], i.e. it got as far as launching
-    /// the service's process. Tells a session that failed to start from a service that crashed.
+    /// Set once the session printed
+    /// [`SESSION_READY_MESSAGE`](mirrord_progress::messages::SESSION_READY_MESSAGE), i.e. it got as
+    /// far as launching the service's process. Tells a session that failed to start from a service
+    /// that crashed.
     started: Arc<AtomicBool>,
     /// Set once the session printed its [`DEBUG_HOLD_LINE_PREFIX`] line, i.e. the program is held
     /// and an IDE may attach. From then on a debugged program's exit is the debugger's doing.
@@ -490,7 +495,7 @@ async fn forward_output(
                         .unwrap_or(&buffer),
                 );
                 if let Some(session) = &session {
-                    if counted.not() && line.trim() == SESSION_READY_MESSAGE {
+                    if counted.not() && is_session_ready_line(&line) {
                         counted = true;
                         session.started.store(true, Ordering::Relaxed);
                         session.readiness.mark();
@@ -677,6 +682,8 @@ mod test_support;
 
 #[cfg(test)]
 mod output_tests {
+    use rstest::rstest;
+
     use super::*;
 
     /// A line in another encoding (`£` in a Windows console's code page 850, here) doesn't stop
@@ -715,6 +722,72 @@ mod output_tests {
             "the readiness marker comes after the bad byte, so it must still be read"
         );
         assert_eq!(readiness.count.load(Ordering::Relaxed), 1);
+    }
+
+    /// Whether a session's output counted it ready.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Counted {
+        Ready,
+        NotReady,
+    }
+
+    /// Only a `Ready!` line counts a session ready: `Ready!` alone in `simple` mode, or in `json`
+    /// a successful finish whose message is `Ready!`, whatever its task. No other progress
+    /// message does.
+    #[rstest]
+    // `simple` mode prints the running task's finish as its message alone.
+    #[case::simple_ready(include_str!("testdata/session-output/simple-ready.txt"), Counted::Ready)]
+    // `json` mode finishes the running task with `Ready!`.
+    #[case::json_ready(include_str!("testdata/session-output/json-ready.txt"), Counted::Ready)]
+    // The running task started, but the layer never reported.
+    #[case::json_running_task_alone(
+        include_str!("testdata/session-output/json-running-task.txt"),
+        Counted::NotReady
+    )]
+    // A failed finish isn't ready, even with `Ready!` as its message.
+    #[case::json_failed_with_ready(
+        include_str!("testdata/session-output/json-failed-ready.txt"),
+        Counted::NotReady
+    )]
+    // With `apc` or `iat`, the running task finishes at the handoff, before the layer reports:
+    // a successful finish with another message isn't ready.
+    #[case::json_handoff_without_ready(
+        include_str!("testdata/session-output/json-handoff.txt"),
+        Counted::NotReady
+    )]
+    #[tokio::test]
+    async fn only_a_ready_line_counts_as_ready(#[case] output: &str, #[case] expected: Counted) {
+        let readiness = Arc::new(Readiness {
+            count: AtomicUsize::new(0),
+            total: 1,
+            start: Instant::now(),
+            tracker: ReadyTracker::default(),
+        });
+        let started = Arc::new(AtomicBool::new(false));
+        let (closed, _receiver) = oneshot::channel();
+
+        forward_output(
+            output.as_bytes(),
+            Arc::from("shop"),
+            Some(SessionOutput {
+                readiness: readiness.clone(),
+                started: started.clone(),
+                held: Arc::new(AtomicBool::new(false)),
+                _closed: closed,
+            }),
+        )
+        .await;
+
+        let counted = match readiness.count.load(Ordering::Relaxed) {
+            0 => Counted::NotReady,
+            _ => Counted::Ready,
+        };
+        assert_eq!(counted, expected, "the session's output was {output:?}");
+        assert_eq!(
+            started.load(Ordering::Relaxed),
+            expected == Counted::Ready,
+            "a session got as far as its program exactly when it counted ready"
+        );
     }
 }
 
