@@ -105,13 +105,21 @@ async fn get_request(
 }
 
 // The options hold header values, which can be secrets, so they stay out of the logs.
-#[tracing::instrument(level = Level::DEBUG, skip(state, options), err)]
+#[tracing::instrument(level = Level::DEBUG, skip(state, body), err)]
 async fn replay_request(
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    options: Option<Json<ReplayOptions>>,
+    body: Bytes,
 ) -> Result<Json<ReplayRun>, ReplayError> {
-    let Json(options) = options.unwrap_or_default();
+    // Read whatever the content type, because a client that sends options without one expects
+    // them to apply.
+    let options = if body.is_empty() {
+        ReplayOptions::default()
+    } else {
+        Json::<ReplayOptions>::from_bytes(&body)
+            .map_err(|rejection| ReplayError::InvalidOptions(rejection.body_text()))?
+            .0
+    };
 
     state.replay_store.replay(id, options).await.map(Json)
 }
@@ -124,6 +132,9 @@ pub(crate) enum ReplayError {
 
     #[error("request {id} can't be replayed: {reason}")]
     NotReplayable { id: u64, reason: NotReplayable },
+
+    #[error("the replay options are invalid: {0}")]
+    InvalidOptions(String),
 
     #[error("header `{0}` has an invalid name or value")]
     InvalidHeader(String),
@@ -143,7 +154,9 @@ impl IntoResponse for ReplayError {
         let status = match self {
             Self::NotFound(..) => StatusCode::NOT_FOUND,
             Self::NotReplayable { .. } => StatusCode::CONFLICT,
-            Self::InvalidHeader(..) | Self::BodyHeader(..) => StatusCode::BAD_REQUEST,
+            Self::InvalidOptions(..) | Self::InvalidHeader(..) | Self::BodyHeader(..) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::NotListening(..) | Self::Send(..) => StatusCode::BAD_GATEWAY,
         };
 
