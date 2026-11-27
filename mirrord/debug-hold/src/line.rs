@@ -5,17 +5,23 @@
 //! - `debug-hold {…}`: a program is held, and the IDE may attach to it, then release it
 //!   ([`Announcement`]).
 //! - `debug-hold-ended {…}`: a hold is over ([`Ended`]).
+//! - `debug-plan {…}`: once per debugged service, before its program starts, what will hold it
+//!   ([`Plan`]).
 //!
 //! `mirrord up` prefixes every line with the service's name and `: `, like the rest of the
 //! service's output. The objects carry [`LINE_VERSION`] as `v`. Fields are only ever added, so an
 //! IDE ignores the ones it doesn't know, and every field but `v`, `trigger`, `pid` and `release`
-//! may be `null`.
+//! may be `null`. The one exception is `debug-plan`'s `fallback`, which is left out when there is
+//! none.
 
 use std::fmt;
 
 use serde::Serialize;
 
 /// The version of the lines' JSON, the `v` of every object.
+///
+/// An added field, such as `debug-plan`'s `fallback`, leaves it as it is: an IDE that doesn't
+/// know the field ignores it.
 pub const LINE_VERSION: u32 = 2;
 
 /// How [`Announcement`]'s line starts, before its JSON.
@@ -23,6 +29,9 @@ pub const ANNOUNCEMENT_PREFIX: &str = "debug-hold ";
 
 /// How [`Ended`]'s line starts, before its JSON.
 pub const ENDED_PREFIX: &str = "debug-hold-ended ";
+
+/// How [`Plan`]'s line starts, before its JSON.
+pub const PLAN_PREFIX: &str = "debug-plan ";
 
 /// What holds the program, which tells the IDE when its attach can complete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -172,6 +181,93 @@ impl fmt::Display for Ended {
     }
 }
 
+/// What kind of .NET program a root is, from its image's bytes.
+///
+/// A process hold's engine follows from it: managed (.NET Framework) for
+/// [`Framework`](Self::Framework), native for no kind at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DotnetImage {
+    /// A .NET apphost, which starts CoreCLR.
+    Apphost,
+    /// A single-file .NET bundle, which starts CoreCLR.
+    SingleFile,
+    /// The `dotnet` muxer, which starts CoreCLR for `dotnet App.dll` and `dotnet run`.
+    Muxer,
+    /// A .NET Framework program, which has no diagnostic port to pause on.
+    Framework,
+}
+
+/// Why a root is held at its start, as a process, when its kind asks for a runtime hold or `exec`
+/// couldn't tell its kind. An IDE matches it; [`Plan::note`] says the same in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Fallback {
+    /// The program's environment turns the runtime's debugger off, with `EnableDiagnostics` or
+    /// `EnableDiagnostics_Debugger` set to 0 in its `DOTNET_` or `COMPlus_` spelling. No debugger
+    /// can attach, so the IDE releases the hold without one.
+    DiagnosticsOff,
+    /// The program's environment turns off only the runtime's diagnostic server, with
+    /// `EnableDiagnostics_IPC` set to 0. The runtime can't pause, but a debugger attaches at the
+    /// process hold as usual.
+    IpcOff,
+    /// `mirrord up` serves no diagnostic port for the service, so there is nothing to pause on.
+    NoPort,
+    /// `exec` couldn't read the image to tell whether it's .NET.
+    UnknownKind,
+}
+
+/// `debug-plan {…}`: what `mirrord exec` will hold of a debugged service, before the program
+/// starts.
+///
+/// It tells the IDE what to expect: a process hold for the root, or runtime holds for each .NET
+/// runtime in the program's tree, and for a process hold, the engine to attach with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Plan {
+    /// Always [`LINE_VERSION`].
+    v: u32,
+    /// What holds the root.
+    pub trigger: Trigger,
+    /// What kind of .NET program the root is, `None` for none.
+    pub dotnet: Option<DotnetImage>,
+    /// The root's image, as `exec` resolved it.
+    pub image: Option<String>,
+    /// Why the root is held as a process instead of the way its kind asks for. Left out of the
+    /// line, rather than `null`, when nothing fell back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<Fallback>,
+    /// Why the plan isn't the one the root's kind asks for, such as diagnostics turned off, in
+    /// words for a person.
+    pub note: Option<String>,
+}
+
+impl Plan {
+    /// The plan for a root whose image is `image`.
+    pub fn new(
+        trigger: Trigger,
+        dotnet: Option<DotnetImage>,
+        image: Option<String>,
+        fallback: Option<Fallback>,
+        note: Option<String>,
+    ) -> Self {
+        Self {
+            v: LINE_VERSION,
+            trigger,
+            dotnet,
+            image,
+            fallback,
+            note,
+        }
+    }
+}
+
+/// The whole line, without its newline: `debug-plan {…}`.
+impl fmt::Display for Plan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_line(f, PLAN_PREFIX, self)
+    }
+}
+
 fn write_line(f: &mut fmt::Formatter<'_>, prefix: &str, value: &impl Serialize) -> fmt::Result {
     // Strings and numbers only, so serializing can't fail; JSON escapes every newline in them.
     let json = serde_json::to_string(value).map_err(|_| fmt::Error)?;
@@ -181,9 +277,40 @@ fn write_line(f: &mut fmt::Formatter<'_>, prefix: &str, value: &impl Serialize) 
 #[cfg(test)]
 #[allow(clippy::indexing_slicing)]
 mod tests {
+    use rstest::rstest;
     use serde_json::Value;
 
     use super::*;
+
+    /// An IDE matches a fallback by a fixed snake_case value, and a plan that didn't fall back has
+    /// no `fallback` at all, so an IDE reading the v2 line it always read sees nothing new.
+    #[rstest]
+    #[case::diagnostics_off(Some(Fallback::DiagnosticsOff), Some("diagnostics_off"))]
+    #[case::ipc_off(Some(Fallback::IpcOff), Some("ipc_off"))]
+    #[case::no_port(Some(Fallback::NoPort), Some("no_port"))]
+    #[case::unknown_kind(Some(Fallback::UnknownKind), Some("unknown_kind"))]
+    #[case::none(None, None)]
+    fn a_plan_names_its_fallback_only_when_it_fell_back(
+        #[case] fallback: Option<Fallback>,
+        #[case] expected: Option<&str>,
+    ) {
+        let line = Plan::new(
+            Trigger::Process,
+            Some(DotnetImage::Muxer),
+            None,
+            fallback,
+            fallback.map(|_| "a note".to_owned()),
+        )
+        .to_string();
+
+        let json = json_of(&line, PLAN_PREFIX);
+        assert_eq!(json["v"], 2, "an added field keeps the version: {line}");
+        assert_eq!(
+            json.get("fallback").map(|value| value.as_str()),
+            expected.map(Some),
+            "{line}"
+        );
+    }
 
     fn json_of(line: &str, prefix: &str) -> Value {
         let json = line
