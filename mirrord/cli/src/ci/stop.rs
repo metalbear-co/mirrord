@@ -19,7 +19,7 @@ use nix::{
     sys::signal::{Signal, kill, killpg},
     unistd::Pid,
 };
-use tokio::fs;
+use tokio::{fs, time::Instant};
 use tracing::Level;
 
 use super::CiResult;
@@ -424,7 +424,9 @@ impl CiStopCommandHandler {
         Remove: FnMut(MirrordCiManagedContainer) -> Removal,
         Removal: Future<Output = CiResult<()>>,
     {
-        let Some(lock) = MirrordCiStore::lock_existing_session(session_dir, Duration::ZERO).await?
+        let Some(lock) =
+            MirrordCiStore::lock_existing_session(session_dir, Instant::now(), Duration::ZERO)
+                .await?
         else {
             return Ok(false);
         };

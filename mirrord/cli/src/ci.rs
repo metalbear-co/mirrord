@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::AsyncWriteExt,
-    time::{Instant, sleep},
+    time::{Instant, sleep, timeout_at},
 };
 #[cfg(not(target_os = "windows"))]
 use tokio::{
@@ -302,22 +302,28 @@ impl MirrordCiStore {
     /// The directory is created again only when it is gone. A lock file that can't be opened in a
     /// directory that exists is returned as an error, because creating the directory again
     /// wouldn't change the outcome of the next open.
+    ///
+    /// The deadline covers the whole call, but the lock is tried at least once after each open of
+    /// the lock file, so a zero `lock_timeout` fails only if another process holds the lock.
     async fn lock_or_create_session(
         session_dir: &Path,
         lock_timeout: Duration,
     ) -> CiResult<CiStoreLock> {
+        let deadline = Instant::now() + lock_timeout;
         loop {
             fs::create_dir_all(session_dir).await?;
             // `None` means that `mirrord ci stop` removed the session's directory after
             // `create_dir_all` made sure that it exists, so it is created again for the state that
             // the caller is about to write.
-            if let Some(lock) = Self::lock_existing_session(session_dir, lock_timeout).await? {
+            if let Some(lock) =
+                Self::lock_existing_session(session_dir, deadline, lock_timeout).await?
+            {
                 return Ok(lock);
             }
         }
     }
 
-    /// Takes the lock of the session in `session_dir`, waiting up to `lock_timeout` for another
+    /// Takes the lock of the session in `session_dir`, waiting until `deadline` for another
     /// holder to release it, or returns `None` when the session's directory doesn't exist.
     ///
     /// The directory is never created here, so a `mirrord ci stop` that reaches a session that
@@ -325,13 +331,16 @@ impl MirrordCiStore {
     /// file that can't be opened in a directory that exists is an error rather than `None`, so that
     /// a session the caller can't lock is never taken for one that another stop removed.
     ///
-    /// Only the wait for a held lock counts against `lock_timeout`, not the file operations, so a
-    /// zero `lock_timeout` tries the lock once and fails only if another process holds it.
+    /// The caller computes `deadline` once, so that every wait of the call, including the one
+    /// after a reopen of a lock file that a stop deleted, counts against it. The lock is still
+    /// tried at least once after each open of the lock file, so a deadline that has already passed
+    /// fails only if another process holds the lock. The failure is [`CiError::SessionLocked`]
+    /// with `lock_timeout`, the timeout that the caller computed `deadline` from.
     async fn lock_existing_session(
         session_dir: &Path,
+        deadline: Instant,
         lock_timeout: Duration,
     ) -> CiResult<Option<CiStoreLock>> {
-        let deadline = Instant::now() + lock_timeout;
         loop {
             let lock_file = match fs::OpenOptions::new()
                 .create(true)
@@ -358,15 +367,18 @@ impl MirrordCiStore {
                 }
                 Err(error) => return Err(error.into()),
             };
-            while lock_file.try_lock_exclusive()?.not() {
-                let now = Instant::now();
-                if now >= deadline {
-                    return Err(CiError::SessionLocked {
-                        timeout: lock_timeout,
-                    });
+            // `timeout_at` polls the wait before it checks the deadline, so the lock is tried at
+            // least once after each open, even past the deadline.
+            timeout_at(deadline, async {
+                while lock_file.try_lock_exclusive()?.not() {
+                    sleep(Self::LOCK_RETRY_INTERVAL).await;
                 }
-                sleep(Self::LOCK_RETRY_INTERVAL.min(deadline - now)).await;
-            }
+                io::Result::Ok(())
+            })
+            .await
+            .map_err(|_| CiError::SessionLocked {
+                timeout: lock_timeout,
+            })??;
             if Self::holds_current_lock_file(session_dir, &lock_file).await? {
                 return Ok(Some(CiStoreLock { _file: lock_file }));
             }
