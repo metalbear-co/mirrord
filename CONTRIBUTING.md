@@ -900,7 +900,6 @@ Releases are fully automated. Under normal circumstances no manual steps are req
    - Creates the GitHub release (with tag and release notes from `CHANGELOG.md`).
    - Publishes to Homebrew and Chocolatey.
    - Starts the [Release WinGet workflow](/.github/workflows/release-winget.yaml), which submits the release to WinGet.
-   - Publishes `docs/` and `guides/` to the `docs-published` and `guides-published` branches, which GitBook builds the docs site from.
    - Updates the `latest` git tag and notifies the infra repository.
 
 ## Triggering a release PR manually
@@ -990,6 +989,59 @@ When a submission warns or fails:
     --skip-pr-check --submit
   ```
 
-## Publishing docs between releases
+## Publishing docs, guides and skills
 
-A merged pull request from this repository with the `publish-docs` label publishes `docs/` and `guides/` from `main`, including pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing-a-fix-between-releases) says how to publish without those pages.
+GitBook's Documentation and Guides spaces sync `docs/` and `guides/` on `main`, so every merge publishes them, including
+pages for changes that aren't released yet. [`docs/AGENTS.md`](/docs/AGENTS.md#publishing) says how to check that
+GitBook imported a merge, and what to do when an import fails.
+
+The [Publish skills workflow](/.github/workflows/publish-skills.yaml) copies `skills/` to
+[metalbear-co/skills](https://github.com/metalbear-co/skills) on every merge to `main` that changes it, because the
+Claude Code and Codex marketplaces, `npx skills add` and `install.sh` install the skills from that repository. Each
+publish adds one commit to `main` of `metalbear-co/skills`, whose content is exactly `skills/` at the tip of `main` when
+the run starts, so the next publish replaces a change made in that repository directly, and the change stays only in
+its history. A failed run posts to `#ci-alerts`.
+
+`npx skills add` and `install.sh` clone `metalbear-co/skills`, so they get every merge, but Claude Code updates an
+installed plugin only when the plugin's `version` changes. A pull request that changes `skills/skills/` or
+`skills/.claude-plugin/`, the files that Claude Code installs, must raise `version` in
+`skills/.claude-plugin/plugin.json`, and the `plan` job of `ci.yaml` fails one that doesn't.
+[`skills/CONTRIBUTING.md`](/skills/CONTRIBUTING.md#plugin-version) says what to do when that check fails in the merge
+queue.
+
+To publish again, for example after a failed run, re-run that run, or run the workflow from `main` with `dry_run` off.
+Either one publishes the current tip of `main`, not the commit that started the failed run. The first command below is
+a dry run: it lists the files that would change in the run's summary, and pushes nothing. The second command
+publishes:
+
+```bash
+gh workflow run publish-skills.yaml --repo metalbear-co/mirrord --ref main
+gh workflow run publish-skills.yaml --repo metalbear-co/mirrord --ref main --field dry_run=false
+```
+
+The setup that the Publish skills workflow relies on:
+
+- The Cubby GitHub App is installed on `metalbear-co/skills` with write access to its contents. The workflow creates its
+  token from the `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets, as the other workflows that use Cubby do.
+- The `main-pr-required` ruleset of `metalbear-co/skills` holds only the rule that requires a pull request for the
+  default branch, and Cubby is its bypass actor, with the bypass mode **Always**, so that its push doesn't need a pull
+  request. The mode **For pull requests only** doesn't exempt a direct push. The `default` ruleset refuses force pushes
+  and deletion of `main` and has no bypass actor. The workflow needs none there, because it only fast-forwards `main`.
+- `metalbear-co/skills` has no `.github/workflows`, because the Cubby token has no Workflows permission, so a publish
+  that would delete them fails. That means removing all three old workflows: `check-fence-tags.yml`, which the
+  `content_check` job of mirrord replaces, and `docs-sync.yml` and `update-references.yml`, which open weekly pull
+  requests that the next publish would replace. Without `update-references.yml`, nothing refreshes the reference
+  snapshots under `skills/*/references/`.
+
+When a run fails:
+
+- If the error names `.github/workflows`, the workflows in `metalbear-co/skills` differ from `skills/.github/workflows`,
+  which mirrord doesn't have. Delete (or change) the files that the error lists with a pull request in
+  `metalbear-co/skills`, then re-run the failed run.
+- If git rejected the push as non-fast-forward, someone pushed to `metalbear-co/skills` during the run. Re-run the
+  failed run.
+- If a ruleset rejected the push, check that Cubby is still a bypass actor of the `main-pr-required` ruleset, with
+  the bypass mode **Always**. The `default` ruleset rejects only a force push or a deletion, which the workflow never
+  makes.
+- If creating the token failed, check that Cubby is still installed on `metalbear-co/skills`, and that the
+  `CUBBY_CLIENT_ID` and `CUBBY_PRIVATE_KEY` secrets are set.

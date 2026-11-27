@@ -7,7 +7,9 @@ use kube::{Api, api::ListParams};
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
-    client::{MaybeClientCert, NoClientCert, OperatorApi, error::OperatorOperation},
+    client::{
+        MaybeClientCert, NoClientCert, OperatorAccess, OperatorApi, error::OperatorOperation,
+    },
     crd::{Session as OperatorStatusSession, SessionCrd, escape_field_selector_value},
 };
 use mirrord_progress::{NullProgress, messages::AGENT_OPERATOR_HINT};
@@ -314,12 +316,14 @@ async fn load_remote_sessions(
     let current_namespace = match (common.all_namespaces, &layer_config.target.namespace) {
         (true, _) => None,
         (false, Some(namespace)) => Some(namespace.clone()),
-        (false, None) => Some(
-            crate::kube::kube_client_from_layer_config(&layer_config)
-                .await?
-                .default_namespace()
-                .to_owned(),
-        ),
+        // A login names no namespace, so it lists everywhere the operator lets this user see,
+        // where a kubeconfig has a current namespace to fall back on.
+        (false, None) => {
+            match OperatorApi::<NoClientCert>::base_client_config(&layer_config).await? {
+                (_, OperatorAccess::Login(_)) => None,
+                (config, OperatorAccess::Kubeconfig { .. }) => Some(config.default_namespace),
+            }
+        }
     };
 
     let progress = NullProgress {};

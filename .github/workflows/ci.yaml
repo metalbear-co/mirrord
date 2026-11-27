@@ -206,6 +206,16 @@ jobs:
         with:
           files: |
             mirrord/protocol/Cargo.toml
+      # Claude Code installs the plugin from all of `skills/`, because the marketplace entry's `source`
+      # is `./`, but only the skills and `.claude-plugin/` change what its users get. The READMEs, the
+      # ports and the Codex and Cursor manifests there don't.
+      - name: get Claude Code plugin changes
+        id: changed-claude-plugin
+        uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
+        with:
+          files: |
+            skills/skills/**
+            skills/.claude-plugin/**
       - name: get dockerfile changes
         id: changed-dockerfile
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -240,6 +250,35 @@ jobs:
             echo "Error: Protocol has changed but Cargo.toml has not. Please update Cargo.toml."
             exit 1
           fi
+      # Claude Code caches an installed plugin by its version and updates it only when the version
+      # changes, so a change to the plugin's files that keeps the version never reaches Claude Code
+      # users. Only pull requests and the merge queue have a base commit to compare the version with.
+      - name: verify Claude Code plugin version bump
+        env:
+          PLUGIN_CHANGED: ${{ steps.changed-claude-plugin.outputs.any_changed }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        shell: bash
+        run: |
+          if [ "$PLUGIN_CHANGED" != "true" ] || [ -z "$BASE" ]; then
+            exit 0
+          fi
+          plugin=skills/.claude-plugin/plugin.json
+          old=$(git show "$BASE:$plugin" | jq -r '.version // "no version"')
+          new=$(jq -r '.version // "no version"' "$plugin")
+          semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if ! [[ "$new" =~ $semver ]]; then
+            echo "::error file=$plugin::The version in $plugin is '$new', which isn't of the form major.minor.patch."
+            exit 1
+          fi
+          if ! [[ "$old" =~ $semver ]]; then
+            echo "::error::The version in $plugin at the base commit $BASE is '$old', which isn't of the form major.minor.patch."
+            exit 1
+          fi
+          if [ "$new" = "$old" ] || [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -n 1)" != "$new" ]; then
+            echo "::error file=$plugin::The Claude Code plugin's files in skills/skills/ or skills/.claude-plugin/ changed, but the version in $plugin is $new, and the base commit $BASE already has $old. Raise it above $old, or Claude Code users don't get the change."
+            exit 1
+          fi
+          echo "$plugin: version $old -> $new"
       - name: get docs, guides and skills changes
         id: changed-content
         uses: metalbear-co/changed-files@db1aaf2ad42e3c3035f04afd76630172ef6743eb
@@ -290,6 +329,7 @@ jobs:
           echo ${{ steps.changed-ci.outputs.all_changed_files }};
           echo ${{ steps.changed-protocol.outputs.any_changed }};
           echo ${{ steps.changed-protocol-toml.outputs.any_changed }};
+          echo ${{ steps.changed-claude-plugin.outputs.any_changed }};
           echo ${{ steps.changed-windows.outputs.any_changed }};
           echo ${{ steps.changed-dockerfile.outputs.any_changed }};
           echo ${{ steps.changed-config-schema.outputs.any_changed }};

@@ -5228,6 +5228,40 @@
       ],
       "x-mirrord-plan": "oss"
     },
+    "PreviewAutoscaleConfig": {
+      "description": "Whether, and within which bounds, a preview copies its target's `HorizontalPodAutoscaler`.\n\nEither a flag (`true` copies the target's autoscaler from 1 pod to its maximum) or a range\nwith optional `min` and `max` bounds, which is how a range is set in `mirrord-up.yaml` too.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/PreviewAutoscaleRange"
+        }
+      ]
+    },
+    "PreviewAutoscaleRange": {
+      "description": "The bounds a preview's copied autoscaler scales within. Both are optional: `min` falls back\nto 1 pod and `max` to the target autoscaler's maximum.",
+      "type": "object",
+      "properties": {
+        "max": {
+          "description": "The most pods the preview scales up to. The target autoscaler's maximum when unset.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "min": {
+          "description": "The fewest pods the preview runs while it isn't idle. 1 when unset.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        }
+      },
+      "additionalProperties": false
+    },
     "PreviewCronJobFileConfig": {
       "description": "CronJob-target settings for preview sessions.\n\n```json\n{\n  \"target\": \"cronjob/nightly-scan\",\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"myrepo/scan:pr-4821\",\n      \"cronjob\": {\n        \"schedule\": \"*/30 * * * *\"\n      }\n    }\n  }\n}\n```",
       "type": "object",
@@ -5255,6 +5289,18 @@
       "description": "Controls the lifetime and creation behavior of preview sessions.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"image\": \"my-registry/my-app:latest\",\n      \"ttl_mins\": 60,\n      \"creation_timeout_secs\": 60\n    }\n  }\n}\n```",
       "type": "object",
       "properties": {
+        "autoscale": {
+          "title": "feature.preview.autoscale {#feature-preview-autoscale}",
+          "description": "Scale the preview pods the way the target scales: the operator copies the target's\n`HorizontalPodAutoscaler` (metrics, thresholds and scaling behavior) onto the preview's\npods, so a preview under load grows and shrinks like the service it previews.\n\n- `false`, or unset: the preview runs a fixed number of pods\n  ([`replicas`](#feature-preview-replicas), 1 by default).\n- `true`: copy the target's autoscaler, scaling from 1 pod up to the target's maximum.\n- `{ \"min\": 4, \"max\": 12 }`, or `{ \"max\": 12 }`: copy the target's autoscaler with\n  these bounds. `min` is 1 when unset, `max` is the target's maximum when unset, and\n  `1 <= min <= max` must hold.\n\nCannot be combined with `replicas`. A target without an autoscaler fails the preview.\nWith [idle mode](#feature-preview-idle), an idle preview still scales to zero pods, and\na woken preview starts at `min` pods and lets the autoscaler take over from there.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"autoscale\": { \"min\": 4, \"max\": 12 }\n    }\n  }\n}\n```",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewAutoscaleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "config_mounts": {
           "title": "feature.preview.config_mounts {#feature-preview-config_mounts}",
           "description": "Files to mount into the preview pod at session start.\n\nEach entry projects a single file at an absolute path inside the\ncontainer's filesystem, without shadowing the surrounding directory's\nother contents. Useful for overriding individual config files\n(`/etc/app/config.yaml`, `/etc/nginx/conf.d/custom.conf`, ...) without\nrebuilding the image.\n\nFiles are read once at session creation and never refreshed — re-run\n`mirrord preview start` with the same `key` to change them.\n\n`config_mounts` is not a confidentiality boundary: the `payload` is\nstored on the `PreviewSession` resource and is visible to anyone with\n`get` permission on it. Do not put credentials or secrets here.\n\nEach entry sources its content one of two ways:\n- **Inline:** set `type` (`\"text\"` or `\"binary\"`) and `payload` directly.\n- **From file:** set `from_file` to a path on the local filesystem. The file is read at\n  session creation time; valid UTF-8 contents are sent as `\"text\"`, anything else is\n  base64-encoded and sent as `\"binary\"`. The local path is not transmitted to the operator.\n\n`payload`/`type` and `from_file` are mutually exclusive on a single entry.\n\n```json\n{\n  \"feature\": {\n    \"preview\": {\n      \"config_mounts\": [\n        {\n          \"mount_at\": \"/etc/app/config.yaml\",\n          \"type\": \"text\",\n          \"payload\": \"server:\\n  listen: 8080\\n\"\n        },\n        {\n          \"mount_at\": \"/usr/local/bin/probe\",\n          \"from_file\": \"./build/probe\"\n        }\n      ]\n    }\n  }\n}\n```\n\n##### Implementation\n\nEach session creates one `ConfigMap` owned by the `PreviewSession`,\nholding all mount payloads. The ConfigMap is mounted into the preview pod\nwith one per-file `subPath` bind per entry, so each mount overlays a\nsingle path without shadowing the surrounding directory. An entry inside\na ConfigMap, Secret, downward API, or projected volume the container\nalready mounts is projected into that volume instead. The ConfigMap is\ngarbage-collected automatically when the session ends.\n\nBecause both the `PreviewSession` resource and the generated `ConfigMap`\nlive in etcd, the **combined size of all `payload` payloads in a single\nsession is bound by Kubernetes' ~1 MiB per-object limit**. For `\"text\"`\npayloads that's roughly 1 MiB of content; for `\"binary\"`, base64\ninflates the encoded form by ~33%, leaving roughly 750 KiB of raw bytes.\nExceeding the limit causes the apiserver to reject the session at\ncreation time.",

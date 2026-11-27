@@ -160,7 +160,7 @@ Map from service id → `ServiceConfig`. Each entry is one mirrord process.
 
 Fields: `path`, `namespace` (same meaning as in `mirrord.json`).
 
-When **`path` is omitted**, `mirrord up` infers it from the service id by searching the cluster for a deployment, statefulset, rollout, or pod with that name. If found, it is used; otherwise the CLI prompts for namespace and workload and can save the choice back into `mirrord-up.yaml`.
+When **`path` is omitted**, `mirrord up` infers it from the service id by searching the cluster for a deployment, statefulset, rollout, or pod with that name. If found, it is used; otherwise the CLI prompts for namespace and workload and can save the choice back into `mirrord-up.yaml`. Without a terminal to prompt in, such as an IDE or an AI coding tool's shell, `mirrord up` fails instead and names the service, so set `target.path` there.
 
 To run **without a target** (outgoing only): `target: none`.
 

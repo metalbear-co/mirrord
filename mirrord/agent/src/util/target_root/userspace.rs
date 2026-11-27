@@ -1,6 +1,6 @@
 //! Manually resolves paths the way `openat2(2)` does with `RESOLVE_IN_ROOT` or
-//! `RESOLVE_BENEATH`, and `RESOLVE_NO_MAGICLINKS`. Used only as a fallback on kernels older than
-//! Linux 5.6.
+//! `RESOLVE_BENEATH`, and `RESOLVE_NO_MAGICLINKS`. Used as a fallback on kernels older than
+//! Linux 5.6, and when `openat2(2)` fails with `EACCES`.
 //!
 //! The walk opens one component at a time with `O_PATH | O_NOFOLLOW`, relative to the
 //! descriptor of the previous one, so the kernel never resolves more than a single name and never

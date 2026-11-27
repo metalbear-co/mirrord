@@ -29,7 +29,7 @@ In the default `steal` mode a matched message goes only to the session's tempora
 
 Delivery is at-least-once: a message is acknowledged on the original consumer only after the JetStream server has acknowledged the republish, so a message can be redelivered but never silently dropped.
 
-When sessions end, their temporary streams are deleted, and when the whole split ends the main-output stream is deleted too. Cleanup is crash-safe: every temporary resource is tracked in a `MirrordClusterExternalResource`, so it is removed even if the operator restarts mid-session.
+When sessions end, their temporary streams are deleted. When the whole split ends, the deployed workload first drains the main-output stream (capped by [`drainTimeout`](kafka.md#configuring-workload-restart)), then the operator unpatches the pods and deletes the main-output stream. Cleanup is crash-safe: every temporary resource is tracked in a `MirrordClusterExternalResource`, so it is removed even if the operator restarts mid-session.
 
 ## Enabling NATS Splitting in Your Cluster
 

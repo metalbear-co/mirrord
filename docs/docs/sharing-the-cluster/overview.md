@@ -25,7 +25,7 @@ These conflicts and more are resolved by the mirrord Operator, available in the 
 
 ## What capabilities does mirrord have to allow concurrent usage of the same cluster?
 
-![Using clusters concurrently with mirrord](../.gitbook/assets/shared-cluster.png)
+![Using clusters concurrently with mirrord](../.gitbook/assets/shared-cluster.svg)
 
 ### 1. Concurrently debug the same HTTP server with HTTP filters
 

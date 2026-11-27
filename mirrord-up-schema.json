@@ -106,6 +106,18 @@
             "null"
           ]
         },
+        "preview": {
+          "description": "Preview environment settings for every service of `mirrord preview up`. A service's own\n`preview` takes precedence, setting by setting.\n\n```yaml\npreview:\n  autoscale: true\n```",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewUpConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-mirrord-plan": "team"
+        },
         "telemetry": {
           "description": "Whether mirrord sends telemetry data to MetalBear cloud.",
           "type": [
@@ -390,6 +402,58 @@
       "required": [
         "command"
       ]
+    },
+    "PreviewAutoscaleConfig": {
+      "description": "Whether, and within which bounds, a preview copies its target's `HorizontalPodAutoscaler`.\n\nEither a flag (`true` copies the target's autoscaler from 1 pod to its maximum) or a range\nwith optional `min` and `max` bounds, which is how a range is set in `mirrord-up.yaml` too.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/PreviewAutoscaleRange"
+        }
+      ]
+    },
+    "PreviewAutoscaleRange": {
+      "description": "The bounds a preview's copied autoscaler scales within. Both are optional: `min` falls back\nto 1 pod and `max` to the target autoscaler's maximum.",
+      "type": "object",
+      "properties": {
+        "max": {
+          "description": "The most pods the preview scales up to. The target autoscaler's maximum when unset.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "min": {
+          "description": "The fewest pods the preview runs while it isn't idle. 1 when unset.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PreviewUpConfig": {
+      "description": "Preview environment settings of `mirrord preview up`, under `common.preview` for every service\nand under `services.*.preview` for one.",
+      "type": "object",
+      "properties": {
+        "autoscale": {
+          "description": "Scale the service's preview pods the way the target scales, by copying the target's\n`HorizontalPodAutoscaler`. Maps to\n[`feature.preview.autoscale`](https://metalbear.com/mirrord/docs/config/options#feature-preview-autoscale):\n`false` (the default) runs 1 pod, `true` copies the target's autoscaler from 1 pod up to\nits maximum, and `{ min: 4, max: 12 }` or `{ max: 12 }` copies it within these bounds.\n\nUnder `common`, a service whose target has no autoscaler runs 1 pod; under a service, such\na target fails the service's preview.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewAutoscaleConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "QueueSplitMode": {
       "description": "How a custom mode splits the service's queues.",
@@ -727,6 +791,18 @@
             "minimum": 0
           },
           "uniqueItems": true
+        },
+        "preview": {
+          "description": "Preview environment settings of this service for `mirrord preview up`, which take\nprecedence over `common.preview` setting by setting.\n\n`mirrord up` ignores this.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewUpConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-mirrord-plan": "team"
         },
         "run": {
           "description": "How to launch the service's local process.",

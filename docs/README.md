@@ -12,7 +12,7 @@ The root of the GitBook docs is `./docs`, as defined in `.gitbook.yaml`. See [th
 
 ### Development
 
-GitBook builds the site from the `docs-published` branch, which every mirrord release updates from this directory, so a merged change reaches the site with the next mirrord release. `AGENTS.md` says how to publish a fix sooner. GitBook doesn't build pull requests to the mirrord repository, so they get no preview.
+GitBook syncs this directory on the mirrord repository's `main` branch, so a merged change reaches the site once GitBook imports it, while `mirrord mcp` gets it with the next mirrord release. A pull request into `main` from a branch of the mirrord repository gets a preview, linked from its `GitBook (./docs) - metalbear.com/mirrord/docs/` status, and a pull request from a fork gets none. `AGENTS.md` says what to do when GitBook fails to import a change.
 
 Changes to **content and basic structure** can be made in this directory. Other changes, such as a space's settings, must be made via the [GitBook platform](https://app.gitbook.com), because GitBook doesn't store them in this directory. To do so, you will need access to the MetalBear organisation.
 
@@ -20,6 +20,10 @@ When **changing the structure** of the docs, like creating a new page, you must 
 
 **Every feature page needs a plan tag.** Pages under `docs/using-mirrord`, `docs/sharing-the-cluster` and `docs/use-cases` must list at least one of `oss`, `team` or `enterprise` in their `tags` frontmatter, alongside `alpha` or `beta` where relevant. `mirrord mcp` reads these tags to tell users which plan a feature needs. The `content_check` job of the mirrord repository's CI runs `.github/scripts/check_plan_tags.py` on every PR that changes the docs and fails on any page in those directories without one, so a new page cannot ship untagged.
 
+### Diagrams
+
+All diagrams use one style. Read [DIAGRAMS.md](DIAGRAMS.md) before you add or change a diagram.
+
 ### GitBook
 
-Each tab on the docs site corresponds to a GitBook "space". Adding a space is done through GitBook, and GitHub sync must be set up to sync changes between the space's repo and the website. Note that changes made in GitBook may be live. The next publish replaces the content of the `docs-published` branch, so a page edited and merged in GitBook is lost unless the same change is also made here.
+Each tab on the docs site corresponds to a GitBook "space". Adding a space is done through GitBook, and GitHub sync must be set up to sync changes between the space's repo and the website. Note that changes made in GitBook may be live. GitBook can't push to the mirrord repository's `main`, which only takes pull requests, so a change request merged in the GitBook editor doesn't reach `main` directly. The export fails, or GitBook opens a pull request for it, and the next import from `main` replaces the edit on the site. Make page changes here.
