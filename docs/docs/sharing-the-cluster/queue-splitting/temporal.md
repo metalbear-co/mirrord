@@ -26,6 +26,8 @@ Each user who starts a session gets their own **session virtual task queue**. Th
 
 If two users' filters both match the same task, only one of them gets it: the task goes to whichever of those sessions started most recently.
 
+The operator applies the filter to each task, not to each workflow. A `workflow_id` filter matches the workflow tasks and the activity tasks of a workflow, because both carry the workflow ID. An `activity_type` filter matches activity tasks only, so the workflow tasks of the same workflow go to the deployed worker.
+
 ![Temporal queue splitting detailed system flow](../../.gitbook/assets/temporal-detailed-flow.svg)
 
 ## Enabling Temporal Splitting in Your Cluster
@@ -126,7 +128,7 @@ TLS applies to the connection between the **operator** and the Temporal frontend
 {% endhint %}
 
 {% hint style="warning" %}
-The operator's Temporal proxy does not support gRPC compression. Python's `temporalio` SDK enables gzip by default, which fails with `grpc compression not supported`. Disable compression on the worker client, for example `grpc_compression=GrpcCompression.NONE` on `Client.connect`.
+Operator `3.205.0` and later accept gzip and deflate compressed gRPC requests from workers. Earlier operators do not support gRPC compression. Python's `temporalio` SDK enables gzip by default, which fails on those operators with `grpc compression not supported`. On an operator earlier than `3.205.0`, disable compression on the worker client, for example `grpc_compression=GrpcCompression.NONE` on `Client.connect`.
 {% endhint %}
 {% endstep %}
 
@@ -217,19 +219,22 @@ The mirrord operator can only read consumer's environment variables if they are 
 {% endstep %}
 {% endstepper %}
 
-## Drain timeout
+## Keeping the split after the last session
 
-After the last session against a target ends, the operator keeps the split's temporary resources alive for the drain timeout so a new session can reuse them, then tears them down. It does not wait for in-flight work to finish first.
+When the last session against a target ends, the operator removes the split and restarts the deployed worker back onto the real task queue. Tasks that are still buffered for a session go to the main virtual task queue first, so the deployed worker processes them.
 
-| Setting                                         | Unit    | Scope     | Effect                              |
-| ----------------------------------------------- | ------- | --------- | ----------------------------------- |
-| `spec.drainTimeout` on the `MirrordSplitConfig` | seconds | One split | Wins over the cluster-wide default. |
+To keep the split for a time so that a new session reuses it with no restart, set `spec.ttl` on the `MirrordSplitConfig`:
 
-| `drainTimeout` | Behavior                                                  |
-| -------------- | --------------------------------------------------------- |
-| unset (both)   | Tear down as soon as the last session ends (same as `0`). |
-| `0`            | Tear down immediately. In-flight work may be lost.        |
-| `N`            | Keep resources for up to `N` seconds, then tear down.     |
+| `spec.ttl`  | Behavior                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| `N`         | Keep the split for up to `N` seconds. A session that starts in that time reuses it.        |
+| `0` / unset | Remove the split as soon as the last session ends.                                         |
+
+Temporal splitting has no drain step, so `spec.drainTimeout` has no effect on a Temporal split.
+
+{% hint style="info" %}
+`spec.ttl` requires mirrord operator `3.194.0` or later.
+{% endhint %}
 
 ## Queue mode
 
