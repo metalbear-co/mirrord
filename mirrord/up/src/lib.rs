@@ -49,7 +49,7 @@ use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
-use mirrord_progress::MIRRORD_PROGRESS_ENV;
+use mirrord_progress::{LineMode, MIRRORD_PROGRESS_ENV};
 use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
@@ -966,6 +966,10 @@ pub async fn resolve_preview_services(
 /// `debug` names the services whose programs are held for a debugger (see [`MIRRORD_DEBUG_HOLD`]).
 /// [`UpConfig::select_services`] has checked that each is one of the services launched.
 ///
+/// Each session reports its progress in `simple` mode, or in `json` when `mirrord up`'s own
+/// [`MIRRORD_PROGRESS_ENV`] asks for it. An IDE then reads each session's steps as it reads a
+/// `mirrord exec` of its own, behind the service's prefix.
+///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
@@ -973,18 +977,21 @@ pub async fn launch(
     debug: &[String],
     ready: ReadyTracker,
 ) -> Result<(), UpError> {
-    let commands = service_commands(service_configs, correlation_id, debug)?;
+    let line_mode = LineMode::from_env().unwrap_or(LineMode::Simple);
+    let commands = service_commands(service_configs, correlation_id, debug, line_mode)?;
     process::run(commands, ready).await
 }
 
 /// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
 ///
 /// Only the services named in `debug` get [`MIRRORD_DEBUG_HOLD`]. The others never inherit it from
-/// `mirrord up`'s own environment, so they run as usual whatever it holds.
+/// `mirrord up`'s own environment, so they run as usual whatever it holds. Every session reports
+/// its progress in `line_mode`.
 fn service_commands(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
     debug: &[String],
+    line_mode: LineMode,
 ) -> Result<Vec<process::ServiceCommands>, UpError> {
     service_configs
         .into_iter()
@@ -1017,7 +1024,7 @@ fn service_commands(
                 cmd.env_remove(MIRRORD_DEBUG_HOLD);
             }
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
-                .env(MIRRORD_PROGRESS_ENV, "simple")
+                .env(MIRRORD_PROGRESS_ENV, line_mode.as_str())
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
                 .env(SERVICE_NAME_ENV, &*service_name)
                 .arg(Into::<&'static str>::into(r#type))
@@ -1260,8 +1267,8 @@ services:
             .expect("assemble the services");
 
         let debug = ["worker".to_owned(), "api".to_owned()];
-        let commands =
-            service_commands(service_configs, Uuid::nil(), &debug).expect("build the commands");
+        let commands = service_commands(service_configs, Uuid::nil(), &debug, LineMode::Simple)
+            .expect("build the commands");
 
         let holds: HashMap<_, _> = commands
             .iter()

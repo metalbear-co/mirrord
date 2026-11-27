@@ -35,9 +35,10 @@ pub const EXEC_CONTAINER_BINARY: &str = "`mirrord exec <docker|podman|nerdctl> .
 /// user's program; on Linux and macOS the layer prints it itself in `simple` and
 /// `json` modes, and `exec` prints it before `execve` in a terminal).
 ///
-/// `mirrord up` parses child stdout for this exact line (in `simple` progress
-/// mode) to detect when a session is ready. Keep the emitters and that parser
-/// in sync via this constant.
+/// `mirrord up` reads it off each session's stdout to detect when the session is
+/// ready: alone in `simple` mode, or as a successful finish's message in `json`
+/// (see [`crate::is_session_ready_line`]). Keep the emitters and that parser in
+/// sync via this constant.
 pub const SESSION_READY_MESSAGE: &str = "Ready!";
 
 /// The task `mirrord exec` runs the user's program under, which finishes with
