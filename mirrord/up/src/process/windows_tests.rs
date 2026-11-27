@@ -194,7 +194,10 @@ fn child_helper() {
         println!("{SESSION_READY_MESSAGE}");
     }
     if mode == "held-crash" {
-        println!("debug-hold pid={} release=test", std::process::id());
+        println!(
+            r#"debug-hold {{"v":2,"trigger":"process","pid":{},"release":"test"}}"#,
+            std::process::id()
+        );
     }
 
     match mode.as_str() {

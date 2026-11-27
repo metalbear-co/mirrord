@@ -44,9 +44,8 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 /// lines, and a descendant still holding the pipe open must not hold up the error.
 const STDOUT_DRAIN: Duration = Duration::from_secs(1);
 
-/// How the line a held program's `mirrord exec` prints starts: `debug-hold pid=<pid>
-/// release=<release>`. `mirrord-layer-lib`'s debug hold prints it once the program is held and
-/// an IDE may attach.
+/// How the line a held program's `mirrord exec` prints starts: `debug-hold {json}`.
+/// `mirrord-debug-hold` prints it once the program is held and an IDE may attach.
 const DEBUG_HOLD_LINE_PREFIX: &str = "debug-hold ";
 
 /// Records when every service has emitted its session-ready marker.
@@ -980,7 +979,10 @@ mod tests {
     /// its siblings, as any exit does, but isn't a crash.
     #[tokio::test]
     async fn debugged_service_exit_stops_siblings_without_a_crash() {
-        let result = supervise_debugged_exit(Some("debug-hold pid=1 release=test")).await;
+        let result = supervise_debugged_exit(Some(
+            r#"debug-hold {"v":2,"trigger":"process","pid":1,"release":"test"}"#,
+        ))
+        .await;
         assert!(
             result.is_ok(),
             "the program was held, so its exit is the debugger's doing: {result:?}"
