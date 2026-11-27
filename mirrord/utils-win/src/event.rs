@@ -1,6 +1,6 @@
 //! Named Windows events that one process creates and another sets, the one primitive behind both
 //! mirrord's layer readiness handshake (`mirrord_layer_lib::process::windows::sync`) and its debug
-//! hold (`mirrord_layer_lib::process::hold`).
+//! hold (`mirrord_debug_hold`).
 //!
 //! A launcher creates the event unset, under a name the other side can derive or read, and waits
 //! on it together with the process it launched, so a process that dies turns into an outcome

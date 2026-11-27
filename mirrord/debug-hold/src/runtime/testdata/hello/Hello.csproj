@@ -1,0 +1,11 @@
+<!--
+  The smallest .NET app, for the test that pauses a real runtime on the port. The test copies it
+  to a temporary directory and builds it there, offline: the installed SDK's own packs are all a
+  build needs, and the target framework follows that SDK.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+  </PropertyGroup>
+</Project>

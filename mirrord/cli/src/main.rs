@@ -449,7 +449,7 @@ async fn exec_process(
     // `mirrord up --debug` asks this on the `mirrord exec` of each service it names.
     let debug_hold = ExecHold::from_env();
     #[cfg(not(target_os = "windows"))]
-    if debug_hold == ExecHold::Requested
+    if debug_hold.is_requested()
         && let Some(reason) = no_layer
     {
         return Err(CliError::DebugHoldWithoutLayer {
@@ -459,7 +459,7 @@ async fn exec_process(
     }
     // The hold is bound to this pid, which only an `execve`d program keeps.
     #[cfg(not(target_os = "windows"))]
-    if debug_hold == ExecHold::Requested
+    if debug_hold.is_requested()
         && mirrord_for_ci
             .as_ref()
             .is_some_and(|ci| ci.spawns_the_program(&config.ci))
@@ -512,7 +512,7 @@ async fn exec_process(
             .then_some(NoLayer::UnpatchedSip)
     });
     #[cfg(target_os = "macos")]
-    if debug_hold == ExecHold::Requested
+    if debug_hold.is_requested()
         && let Some(reason) = no_layer
     {
         return Err(CliError::DebugHoldWithoutLayer {
@@ -529,7 +529,16 @@ async fn exec_process(
         &execution_info.environment,
         &execution_info.env_to_unset,
     );
-    debug_hold.hand_to_program(&mut env_vars);
+    // Decided on the final environment, which may turn the runtime's diagnostics off. A program
+    // that can't be found has no plan: the launch below fails on it anyway.
+    let debug_plan = process_which(&args.binary)
+        .ok()
+        .and_then(|root| debug_hold.plan(&root, &env_vars));
+    debug_hold.hand_to_program(debug_plan.as_ref(), &mut env_vars);
+    if let Some(plan) = &debug_plan {
+        // Before the program starts, so the IDE knows what to wait for.
+        println!("{plan}");
+    }
 
     // Put original executable in argv[0] even if actually running patched version.
     let binary_args = std::iter::once(&args.binary)
@@ -623,7 +632,7 @@ async fn exec_process(
         #[cfg(not(target_os = "windows"))]
         layer_ready,
         #[cfg(target_os = "windows")]
-        debug_hold,
+        debug_plan.is_some_and(|plan| plan.trigger == mirrord_debug_hold::Trigger::Process),
     )
     .await
 }
@@ -753,7 +762,7 @@ async fn run_process_with_mirrord<P>(
     progress: P,
     analytics: &mut AnalyticsReporter,
     _config: &LayerConfig,
-    debug_hold: ExecHold,
+    hold_for_debugger: bool,
 ) -> CliResult<()>
 where
     P: Progress,
@@ -790,7 +799,7 @@ where
         true,
         // On Windows `exec` holds the program itself, from outside: the launch keeps it suspended
         // once its layer is ready, until an IDE releases it.
-        debug_hold == ExecHold::Requested,
+        hold_for_debugger,
         Some(progress),
     )
     .and_then(|managed_process| managed_process.wait_until_exit())

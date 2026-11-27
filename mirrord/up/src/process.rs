@@ -5,13 +5,17 @@ use std::{
     io,
     ops::Not,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
+use mirrord_debug_hold::{
+    ANNOUNCEMENT_PREFIX, PLAN_PREFIX, Trigger,
+    runtime::{DiagnosticPort, Report},
+};
 use mirrord_progress::is_session_ready_line;
 #[cfg(test)]
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
@@ -46,11 +50,6 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 /// seen before the forwarding task has read the last lines, and a descendant still holding the
 /// pipe open must not hold up the error.
 const STDOUT_DRAIN: Duration = Duration::from_secs(1);
-
-/// How the line a held program's `mirrord exec` prints starts: `debug-hold pid=<pid>
-/// release=<release>`. `mirrord-layer-lib`'s debug hold prints it once the program is held and
-/// an IDE may attach.
-const DEBUG_HOLD_LINE_PREFIX: &str = "debug-hold ";
 
 /// Records when every service has emitted its session-ready marker.
 ///
@@ -112,9 +111,12 @@ struct Service {
     /// far as launching the service's process. Tells a session that failed to start from a service
     /// that crashed.
     started: Arc<AtomicBool>,
-    /// Set once the session printed its [`DEBUG_HOLD_LINE_PREFIX`] line, i.e. the program is held
-    /// and an IDE may attach. From then on a debugged program's exit is the debugger's doing.
+    /// Set once something of the service is held and an IDE may attach: the session printed its
+    /// [`ANNOUNCEMENT_PREFIX`] line, or a .NET runtime paused on the service's diagnostic port.
+    /// From then on a debugged program's exit is the debugger's doing.
     held: Arc<AtomicBool>,
+    /// What the session's `debug-plan` line said holds its program, once it said it.
+    planned: Arc<Mutex<Option<Trigger>>>,
     /// Resolves once the forwarding of the session's stdout ended, so `started` and `held` are
     /// final.
     stdout_closed: Option<oneshot::Receiver<()>>,
@@ -125,6 +127,7 @@ struct SessionOutput {
     readiness: Arc<Readiness>,
     started: Arc<AtomicBool>,
     held: Arc<AtomicBool>,
+    planned: Arc<Mutex<Option<Trigger>>>,
     /// Dropped when forwarding ends, which resolves [`Service::stdout_closed`].
     _closed: oneshot::Sender<()>,
 }
@@ -134,9 +137,11 @@ impl Service {
     ///
     /// Only a session child's stdout carries the readiness marker, so a
     /// pre-command (one with a `then`) doesn't count toward `readiness`.
+    #[allow(clippy::too_many_arguments)]
     fn spawn(
         name: Arc<str>,
         debugged: bool,
+        held: Arc<AtomicBool>,
         command: Command,
         then: Option<Command>,
         readiness: &Arc<Readiness>,
@@ -157,7 +162,7 @@ impl Service {
             .map(|pid| Pid::from_raw(pid as i32))
             .ok_or_else(|| io::Error::other("spawned child has no process ID"))?;
         let started = Arc::new(AtomicBool::new(false));
-        let held = Arc::new(AtomicBool::new(false));
+        let planned = Arc::new(Mutex::new(None));
         let mut stdout_closed = None;
         if let Some(stdout) = child.stdout().take() {
             let session = then.is_none().then(|| {
@@ -167,6 +172,7 @@ impl Service {
                     readiness: readiness.clone(),
                     started: started.clone(),
                     held: held.clone(),
+                    planned: planned.clone(),
                     _closed: closed,
                 }
             });
@@ -184,8 +190,30 @@ impl Service {
             group,
             started,
             held,
+            planned,
             stdout_closed,
         })
+    }
+
+    /// Says so when the session's program was to pause at its .NET runtime's startup, but nothing
+    /// ever paused: the IDE then knows to stop waiting, and why nothing was attached.
+    ///
+    /// A runtime that never connects can't be told apart from one still starting, so this is said
+    /// only once the session is gone.
+    fn say_if_no_runtime_paused(&self) {
+        let planned = *self
+            .planned
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.debugged
+            && planned == Some(Trigger::Runtime)
+            && self.held.load(Ordering::Relaxed).not()
+        {
+            println!(
+                "{}: debug: no .NET runtime paused in this service",
+                self.name
+            );
+        }
     }
 
     /// Gracefully signals the Unix process group, escalating after `grace`.
@@ -379,6 +407,9 @@ pub(super) struct ServiceCommands {
     pub(super) debugged: bool,
     /// `run.pre_command`, run to completion without mirrord before `session`.
     pub(super) pre: Option<Command>,
+    /// The .NET diagnostic port of a debugged service, whose address `session` carries. Its
+    /// runtimes pause on it, and are held until the IDE releases them.
+    pub(super) dotnet_port: Option<DiagnosticPort>,
     /// The `mirrord exec`/`mirrord container` child that runs `run.command`.
     pub(super) session: Command,
 }
@@ -423,12 +454,14 @@ async fn wait_for_first_exit(
             };
             let Some(session) = service.then.take() else {
                 if status.success() {
+                    service.say_if_no_runtime_paused();
                     return Ok(());
                 }
                 if let Some(closed) = service.stdout_closed.take() {
                     let _ = tokio::time::timeout(STDOUT_DRAIN, closed).await;
                 }
                 let name = service.name.clone();
+                service.say_if_no_runtime_paused();
                 let started = service.started.load(Ordering::Relaxed);
                 // A hold that failed before announcing never reached a debugger, so its exit
                 // still reports as a crash or a failed start.
@@ -451,6 +484,7 @@ async fn wait_for_first_exit(
                 *service = Service::spawn(
                     service.name.clone(),
                     service.debugged,
+                    service.held.clone(),
                     session,
                     None,
                     readiness,
@@ -466,6 +500,41 @@ async fn wait_for_first_exit(
             }
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The trigger a `debug-plan` line's JSON names, or `None` for one that doesn't parse.
+fn planned_trigger(plan: &str) -> Option<Trigger> {
+    let plan = serde_json::from_str::<serde_json::Value>(plan).ok()?;
+    match plan.get("trigger")?.as_str()? {
+        "runtime" => Some(Trigger::Runtime),
+        "process" => Some(Trigger::Process),
+        _ => None,
+    }
+}
+
+/// Prints what a service's diagnostic port reports, prefixed with the service's name like the
+/// service's own output, and marks the service `held` once a runtime is.
+fn report_runtime_holds(
+    name: Arc<str>,
+    held: Arc<AtomicBool>,
+) -> impl Fn(Report) + Send + Sync + 'static {
+    move |report| match report {
+        Report::Held(announcement) => {
+            held.store(true, Ordering::Relaxed);
+            println!("{name}: {announcement}");
+        }
+        Report::Ended(ended) => println!("{name}: {ended}"),
+        Report::Refused(why) => println!("{name}: debug: {why}"),
+        Report::Skipped {
+            pid,
+            entry_assembly,
+        } => tracing::debug!(
+            service = %name,
+            pid,
+            entry_assembly,
+            "resumed a paused .NET runtime of the SDK without holding it"
+        ),
     }
 }
 
@@ -510,9 +579,15 @@ async fn forward_output(
                                 .record_db_branches(name.clone(), branches);
                         }
                         continue;
-                    } else if line.starts_with(DEBUG_HOLD_LINE_PREFIX) {
+                    } else if line.starts_with(ANNOUNCEMENT_PREFIX) {
                         // Still printed: the IDE reads the hold line from `mirrord up`'s output.
                         session.held.store(true, Ordering::Relaxed);
+                    } else if let Some(plan) = line.strip_prefix(PLAN_PREFIX) {
+                        *session
+                            .planned
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                            planned_trigger(plan);
                     }
                 }
                 println!("{name}: {line}");
@@ -556,13 +631,21 @@ async fn supervise_with_second_signal(
     let mut spawn_error = None;
     let mut pre_command_spawn_error = None;
 
+    // Each debugged service's diagnostic port, served until supervision ends. Dropping the set
+    // closes them, after the services' processes are gone.
+    let mut ports = JoinSet::new();
     for ServiceCommands {
         name,
         debugged,
         pre,
+        dotnet_port,
         session,
     } in commands
     {
+        let held = Arc::new(AtomicBool::new(false));
+        if let Some(port) = dotnet_port {
+            ports.spawn(port.serve(report_runtime_holds(name.clone(), held.clone())));
+        }
         let spawned = match pre {
             Some(pre) => {
                 println!("{name}: running `run.pre_command`");
@@ -571,6 +654,7 @@ async fn supervise_with_second_signal(
                 match Service::spawn(
                     name.clone(),
                     debugged,
+                    held,
                     pre,
                     Some(session),
                     &readiness,
@@ -587,7 +671,7 @@ async fn supervise_with_second_signal(
                     spawned => spawned,
                 }
             }
-            None => Service::spawn(name, debugged, session, None, &readiness, &mut output),
+            None => Service::spawn(name, debugged, held, session, None, &readiness, &mut output),
         };
         match spawned {
             Ok(service) => services.push(service),
@@ -712,6 +796,7 @@ mod output_tests {
                 readiness: readiness.clone(),
                 started: started.clone(),
                 held: Arc::new(AtomicBool::new(false)),
+                planned: Arc::new(Mutex::new(None)),
                 _closed: closed,
             }),
         )
@@ -773,6 +858,7 @@ mod output_tests {
                 readiness: readiness.clone(),
                 started: started.clone(),
                 held: Arc::new(AtomicBool::new(false)),
+                planned: Arc::new(Mutex::new(None)),
                 _closed: closed,
             }),
         )
@@ -823,6 +909,7 @@ mod tests {
             name: Arc::from("test"),
             debugged: false,
             pre: None,
+            dotnet_port: None,
             session: command,
         }
     }
@@ -1053,7 +1140,10 @@ mod tests {
     /// its siblings, as any exit does, but isn't a crash.
     #[tokio::test]
     async fn debugged_service_exit_stops_siblings_without_a_crash() {
-        let result = supervise_debugged_exit(Some("debug-hold pid=1 release=test")).await;
+        let result = supervise_debugged_exit(Some(
+            r#"debug-hold {"v":2,"trigger":"process","pid":1,"release":"test"}"#,
+        ))
+        .await;
         assert!(
             result.is_ok(),
             "the program was held, so its exit is the debugger's doing: {result:?}"
@@ -1099,6 +1189,7 @@ mod tests {
             name: Arc::from("missing"),
             debugged: false,
             pre: None,
+            dotnet_port: None,
             session: resolve_tokio_command(directory.path().join("missing")),
         };
         let result = supervise(

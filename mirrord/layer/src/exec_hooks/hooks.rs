@@ -1,5 +1,10 @@
+use std::sync::OnceLock;
+
 use base64::prelude::*;
 use libc::{c_char, c_int};
+use mirrord_config::debug_hold::dotnet_ports::{
+    self, COMPLUS_DIAGNOSTIC_PORTS, DOTNET_DIAGNOSTIC_PORTS,
+};
 #[cfg(not(target_os = "macos"))]
 use mirrord_layer_core::{envp::Envp, hooks::ProbedCall};
 use mirrord_layer_lib::detour::{Bypass, Detour, DetourError, DetourExt};
@@ -41,8 +46,37 @@ pub(crate) fn prepare_execve_envp(env_vars: Detour<Argv>) -> Detour<Argv> {
     })?;
 
     env_vars.insert_env(SHARED_SOCKETS_ENV_VAR, &encoded_shared_sockets()?)?;
+    if let Some(ports) = forwarded_dotnet_port(|key| env_vars.get_env(key)) {
+        env_vars.insert_env(DOTNET_DIAGNOSTIC_PORTS, &ports)?;
+    }
 
     Ok(env_vars)
+}
+
+/// This process's own `DOTNET_DiagnosticPorts` and `COMPlus_DiagnosticPorts`, read when the exec
+/// hooks are enabled.
+///
+/// Read once, up front: the `execve` hook can run in the child of a `fork`, where a lock another
+/// thread held at the fork is never released, so reading the environment there could wait
+/// forever.
+static DOTNET_PORTS: OnceLock<[Option<String>; 2]> = OnceLock::new();
+
+/// The `DOTNET_DiagnosticPorts` a new image gets, so its runtimes pause on the port `mirrord up`
+/// serves this process's (see [`dotnet_ports::forwarded`]). `None` leaves `envp` as it is.
+///
+/// # Arguments
+///
+/// * `child` - reads a variable of the `envp` the new image is started with.
+fn forwarded_dotnet_port<'envp>(
+    child: impl Fn(&'static str) -> Option<&'envp str>,
+) -> Option<String> {
+    let [dotnet, complus] = DOTNET_PORTS.get()?;
+    dotnet_ports::forwarded(
+        dotnet.as_deref(),
+        complus.as_deref(),
+        child(DOTNET_DIAGNOSTIC_PORTS),
+        child(COMPLUS_DIAGNOSTIC_PORTS),
+    )
 }
 
 /// Encodes [`SOCKETS`] as the value of [`SHARED_SOCKETS_ENV_VAR`], which the layer in the new
@@ -81,22 +115,28 @@ unsafe extern "C" fn execv_detour(path: *const c_char, argv: *const *const c_cha
     }
 }
 
-/// Adds socket metadata for the new image to Linux `execve`'s environment.
+/// Adds socket metadata for the new image to Linux `execve`'s environment, and the diagnostic port
+/// `mirrord up` serves this process's runtimes when the caller's `envp` lacks it.
 ///
-/// [`Envp`] reuses the caller's strings and allocates only the new entry and the pointer list,
+/// [`Envp`] reuses the caller's strings and allocates only the new entries and the pointer list,
 /// which leak once per spawn. In glibc's `posix_spawn`, this runs on the small stack of the `vfork`
 /// child (about 36 KiB), so keep large values off the stack.
 #[cfg(not(target_os = "macos"))]
 fn on_execve(call: &ProbedCall<'_>) {
     const ENVP: u32 = 2;
 
-    let Ok(encoded) = encoded_shared_sockets() else {
-        return;
-    };
-
     // SAFETY: `execve` requires `envp` to be null or a null-terminated array of C strings.
     let mut envp = unsafe { Envp::from_raw(call.arg(ENVP) as *const *const c_char) };
-    envp.set(SHARED_SOCKETS_ENV_VAR, encoded.as_bytes());
+    if let Ok(encoded) = encoded_shared_sockets() {
+        envp.set(SHARED_SOCKETS_ENV_VAR, encoded.as_bytes());
+    }
+    let ports = forwarded_dotnet_port(|key| {
+        envp.get(key)
+            .and_then(|value| std::str::from_utf8(value).ok())
+    });
+    if let Some(ports) = ports {
+        envp.set(DOTNET_DIAGNOSTIC_PORTS, ports.as_bytes());
+    }
     if let Some(envp) = envp.into_raw() {
         call.set_arg(ENVP, envp as usize);
     }
@@ -149,6 +189,10 @@ pub(crate) unsafe extern "C" fn execve_detour(
 
 /// Enables `exec` hooks.
 pub(crate) unsafe fn enable_exec_hooks(hook_manager: &mut HookManager) {
+    DOTNET_PORTS.get_or_init(|| {
+        [DOTNET_DIAGNOSTIC_PORTS, COMPLUS_DIAGNOSTIC_PORTS].map(|name| std::env::var(name).ok())
+    });
+
     // A replacement hook leaves frida's per-thread state behind when the function never returns,
     // as after a successful `exec` in a `vfork` child, so `execv` is replaced only as a fallback.
     #[cfg(not(target_os = "macos"))]

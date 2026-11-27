@@ -138,17 +138,25 @@ const HELD_PROGRAM_RAN: &str = "the held program runs";
 #[cfg(unix)]
 const CHILD_RAN: &str = "its child runs";
 
+/// The diagnostic port `mirrord up` would hand the held program's `mirrord exec`.
+#[cfg(unix)]
+const DOTNET_PORT: &str = "/tmp/mirrord-debug-0/dotnet-1-layertest.sock";
+
 /// Starts `tests/apps/exec_debug_hold.py` under `mirrord exec`, held for a debugger the way
 /// `mirrord up --debug` asks for it, and waits for the hold's announcement.
 ///
 /// Returns the process, its intproxy, and the release path the announcement names.
 #[cfg(unix)]
+#[allow(clippy::indexing_slicing)]
 async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let process = exec_python(
         listener.local_addr().unwrap(),
         "exec_debug_hold.py",
-        vec![("MIRRORD_DEBUG_HOLD", "1")],
+        vec![
+            ("MIRRORD_DEBUG_HOLD", "1"),
+            ("MIRRORD_DEBUG_DOTNET_PORT", DOTNET_PORT),
+        ],
     )
     .await;
     let intproxy = TestIntProxy::new(listener, None).await;
@@ -156,17 +164,8 @@ async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     let release = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             // Only a whole line: the path may still be arriving.
-            let release = process
-                .get_stdout()
-                .await
-                .split_inclusive('\n')
-                .filter_map(|line| line.strip_suffix('\n')?.strip_prefix("debug-hold "))
-                .find_map(|fields| {
-                    fields
-                        .split_whitespace()
-                        .find_map(|field| field.strip_prefix("release="))
-                        .map(str::to_owned)
-                });
+            let release = held_announcement(&process.get_stdout().await)
+                .and_then(|hold| hold["release"].as_str().map(str::to_owned));
             match release {
                 Some(release) => break release,
                 None => tokio::time::sleep(Duration::from_millis(20)).await,
@@ -177,6 +176,15 @@ async fn start_held_program() -> (TestProcess, TestIntProxy, String) {
     .expect("the held program never announced its hold");
 
     (process, intproxy, release)
+}
+
+/// The JSON of the first whole `debug-hold {json}` line in `stdout`, as an IDE reads it.
+#[cfg(unix)]
+fn held_announcement(stdout: &str) -> Option<serde_json::Value> {
+    stdout
+        .split_inclusive('\n')
+        .filter_map(|line| line.strip_suffix('\n')?.strip_prefix("debug-hold "))
+        .find_map(|json| serde_json::from_str(json).ok())
 }
 
 /// What an IDE does once its debugger is attached: write one byte to the announced release.
@@ -194,6 +202,7 @@ fn release(path: &str) {
 /// runs only once a byte is written to the release.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(clippy::indexing_slicing)]
 async fn exec_holds_the_program_until_its_release_gets_a_byte() {
     let (mut process, _intproxy, release_path) = start_held_program().await;
 
@@ -206,10 +215,12 @@ async fn exec_holds_the_program_until_its_release_gets_a_byte() {
     );
     // `execve` keeps `mirrord exec`'s pid, so the program holds under it.
     let pid = process.child.id().unwrap();
-    assert!(
-        stdout.contains(&format!("debug-hold pid={pid} ")),
+    let hold = held_announcement(&stdout).expect("announced");
+    assert_eq!(
+        hold["pid"], pid,
         "the program is held under its own pid, {pid}:\n{stdout}"
     );
+    assert_eq!(hold["trigger"], "process", "{stdout}");
 
     let ran_while_held = tokio::time::timeout(Duration::from_secs(1), async {
         while process.get_stdout().await.contains(HELD_PROGRAM_RAN).not() {
@@ -230,6 +241,10 @@ async fn exec_holds_the_program_until_its_release_gets_a_byte() {
 
 /// Only the program is held: a child it starts runs at once, even one handed the program's hold
 /// binding, and prints no `Ready!` of its own, even one handed the program's `Ready!` binding.
+///
+/// The child still inherits the diagnostic port through the `execve` hook, so a .NET program a
+/// held program starts pauses at its runtime's startup. So does a child whose environment sets
+/// ports of its own, as a launch profile does: the port joins them, last.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_child_of_a_held_program_is_never_held() {
@@ -243,6 +258,18 @@ async fn a_child_of_a_held_program_is_never_held() {
         .expect("the program's child was held too");
     let stdout = process.get_stdout().await;
     assert!(stdout.contains(CHILD_RAN), "the child ran:\n{stdout}");
+    assert!(
+        stdout.contains(&format!(
+            "its child's DOTNET_DiagnosticPorts: {DOTNET_PORT},connect,suspend\n"
+        )),
+        "the child inherits the port exec merged in:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "its child's DOTNET_DiagnosticPorts: theirs,nosuspend;{DOTNET_PORT},connect,suspend\n"
+        )),
+        "a child with ports of its own gets the port after them:\n{stdout}"
+    );
     assert_eq!(
         stdout.matches("debug-hold ").count(),
         1,
@@ -253,4 +280,104 @@ async fn a_child_of_a_held_program_is_never_held() {
         1,
         "only the program prints Ready!:\n{stdout}"
     );
+}
+
+/// With `feature.env.load_from_process`, the layer fetches the pod's environment itself, and
+/// drops the pod's .NET diagnostic ports as `exec`'s own fetch does: they name sockets inside the
+/// pod, and one with `suspend` keeps a local runtime paused for good. The user's own values stay,
+/// whether set locally, in the env file or in `env.override`, and the rest of the pod's
+/// environment arrives.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_layers_own_env_fetch_drops_only_the_pods_diagnostic_ports() {
+    use mirrord_protocol::{ClientMessage, DaemonMessage, RemoteEnvVars};
+
+    let dir = tempfile::tempdir().unwrap();
+    let env_file = dir.path().join("app.env");
+    std::fs::write(&env_file, "COMPlus_DiagnosticPorts=from-env-file\n").unwrap();
+    let config = dir.path().join("mirrord.json");
+    std::fs::write(
+        &config,
+        serde_json::json!({
+            "feature": {
+                "env": {
+                    "load_from_process": true,
+                    "env_file": env_file,
+                    "override": { "DOTNET_DefaultDiagnosticPortSuspend": "0" },
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let pod = [
+        ("DOTNET_DiagnosticPorts", "/pod/monitor.sock,suspend"),
+        ("COMPlus_DiagnosticPorts", "/pod/monitor.sock,suspend"),
+        ("DOTNET_DefaultDiagnosticPortSuspend", "1"),
+        ("COMPlus_DefaultDiagnosticPortSuspend", "1"),
+        // The drop matches names without case, as the CLI's does.
+        ("dotnet_diagnosticports", "/pod/other.sock"),
+        ("DOTNET_gcServer", "1"),
+    ];
+    // What the program reads of each, `None` for unset.
+    let expected = [
+        ("DOTNET_DiagnosticPorts", "mine,nosuspend"),
+        ("COMPlus_DiagnosticPorts", "from-env-file"),
+        ("DOTNET_DefaultDiagnosticPortSuspend", "0"),
+        ("COMPlus_DefaultDiagnosticPortSuspend", "None"),
+        ("dotnet_diagnosticports", "None"),
+        ("DOTNET_gcServer", "1"),
+    ];
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let env = get_env(
+        listener.local_addr().unwrap(),
+        vec![
+            ("MIRRORD_FILE_MODE", "local"),
+            ("DOTNET_DiagnosticPorts", "mine,nosuspend"),
+        ],
+    );
+    let env = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let names = expected.map(|(name, _)| name);
+    let cmdline = vec![
+        Application::get_python3_executable().await,
+        "-c".to_owned(),
+        format!(
+            "import os\nfor name in {names:?}:\n    print(f'{{name}}={{os.environ.get(name)}}')"
+        ),
+    ];
+    let mut process = run_exec(
+        cmdline,
+        None,
+        None,
+        Some(vec!["--config-file", config.to_str().unwrap()]),
+        Some(env),
+        None,
+    )
+    .await;
+    let mut intproxy = TestIntProxy::new(listener, None).await;
+
+    match intproxy.recv().await {
+        ClientMessage::GetEnvVarsRequest(..) => {}
+        other => panic!("the layer fetches the pod's environment first, not {other:?}"),
+    }
+    intproxy
+        .send(DaemonMessage::GetEnvVarsResponse(Ok(RemoteEnvVars(
+            pod.iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+        ))))
+        .await;
+
+    process.wait_assert_success().await;
+    let stdout = process.get_stdout().await;
+    for (name, value) in expected {
+        assert!(
+            stdout.contains(&format!("{name}={value}\n")),
+            "the program reads {name}={value}:\n{stdout}"
+        );
+    }
 }

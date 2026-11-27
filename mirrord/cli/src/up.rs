@@ -444,6 +444,7 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))
+            | UpCliError::Up(UpError::DiagnosticPort { .. })
             | UpCliError::Up(UpError::Panic(_))
             | UpCliError::Up(UpError::Kube(_))
             | UpCliError::Up(UpError::Inquire(_))

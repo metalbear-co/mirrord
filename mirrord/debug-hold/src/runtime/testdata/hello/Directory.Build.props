@@ -1,0 +1,2 @@
+<!-- Stops MSBuild's upward search, so no Directory.Build.props above the copy applies. -->
+<Project />

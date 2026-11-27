@@ -117,6 +117,7 @@ pub enum Application {
     PythonSelfConnect,
     PythonSocketPair,
     PythonCor1401Seqpacket,
+    PythonDotnetDiagnosticPort,
     PythonDontLoad,
     PythonListen,
     RustFileOps,
@@ -242,6 +243,7 @@ impl Application {
             | Application::PythonSelfConnect
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
+            | Application::PythonDotnetDiagnosticPort
             | Application::PythonDontLoad
             | Application::PythonListen => Self::get_python3_executable().await,
             Application::PythonFastApiHTTP | Application::PythonIssue864 => String::from("uvicorn"),
@@ -525,6 +527,10 @@ impl Application {
                     COR_1401_SEQPACKET_SOCKET.to_owned(),
                 ]
             }
+            Application::PythonDotnetDiagnosticPort => {
+                app_path.push("dotnet_diagnostic_port.py");
+                vec![String::from("-u"), app_path.to_string_lossy().to_string()]
+            }
             Application::GoHTTP(..)
             | Application::GoDir(..)
             | Application::GoFileOps(..)
@@ -687,6 +693,7 @@ impl Application {
             | Application::PosixSpawnSharedSockets
             | Application::PythonSocketPair
             | Application::PythonCor1401Seqpacket
+            | Application::PythonDotnetDiagnosticPort
             | Application::UnixConnectAddrlen
             | Application::Connectx
             | Application::DnsSd => unimplemented!("shouldn't get here"),
