@@ -41,9 +41,10 @@ winapi = { workspace = true, optional = true }
 winapi.workspace = true
 
 [dev-dependencies]
+mirrord-command = { path = "../command", features = ["tokio"] }
 rstest.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "time"] }
 
 [lib]
 doctest = false

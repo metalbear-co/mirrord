@@ -5321,6 +5321,7 @@ name = "mirrord-debug-hold"
 version = "3.292.0"
 dependencies = [
  "libc",
+ "mirrord-command",
  "nix 0.31.3",
  "rstest",
  "serde",
