@@ -1179,40 +1179,50 @@ mod tests {
     /// own, not the number of a replay that finished meanwhile.
     #[tokio::test]
     async fn replay_finishing_after_eviction_gets_its_own_number() {
-        let (address, accepted) = server(|mut stream| async move {
-            read_head(&mut stream).await;
-            tokio::spawn(async move {
-                // The first connection answers late, the others at once.
-                if FIRST.swap(false, Ordering::SeqCst) {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+        // The first connection answers once `release` is notified, the others at once.
+        let release = Arc::new(tokio::sync::Notify::new());
+        let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (address, accepted) = server({
+            let release = release.clone();
+            move |mut stream| {
+                let release = release.clone();
+                let first = first.clone();
+                async move {
+                    read_head(&mut stream).await;
+                    tokio::spawn(async move {
+                        if first.swap(false, Ordering::SeqCst) {
+                            release.notified().await;
+                        }
+                        stream
+                            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+                            .await
+                            .unwrap();
+                    });
                 }
-                stream
-                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
-                    .await
-                    .unwrap();
-            });
+            }
         })
         .await;
-        static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
         let store = ReplayStore::default();
         capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
         listen_on(&store, address);
 
-        let slow = tokio::spawn({
+        let held = tokio::spawn({
             let store = store.clone();
             async move { store.replay(1, ReplayOptions::default()).await }
         });
         while accepted.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let fast = store.replay(1, ReplayOptions::default()).await.unwrap();
+        let finished = store.replay(1, ReplayOptions::default()).await.unwrap();
         for _ in 0..MAX_KEPT_REQUESTS {
             capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
         }
-        let slow = slow.await.unwrap().unwrap();
+        assert!(store.list().iter().all(|summary| summary.id != 1));
+        release.notify_one();
+        let held = held.await.unwrap().unwrap();
 
-        assert_eq!(fast.number, 1);
-        assert_eq!(slow.number, 2);
+        assert_eq!(finished.number, 1);
+        assert_eq!(held.number, 2);
     }
 
     /// A response that never ends, such as an event stream, is cut after
