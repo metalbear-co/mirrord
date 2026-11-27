@@ -174,7 +174,7 @@ impl FakeRuntime {
             (PROCESS_INFO3, Info::EntryAssembly(name)) => process_info3_reply(name),
             (PROCESS_INFO2, _) => recorded(include_str!("testdata/processinfo2.hex")),
             // An unknown command, as an older runtime answers ProcessInfo3.
-            _ => error_reply(0x8013_1384),
+            _ => error_reply(ipc::DS_IPC_E_UNKNOWN_COMMAND),
         }
     }
 

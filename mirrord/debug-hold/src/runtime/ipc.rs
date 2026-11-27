@@ -31,6 +31,12 @@ const SERVER: u8 = 0xFF;
 
 const OK: u8 = 0x00;
 
+/// `DS_IPC_E_UNKNOWN_COMMAND`, the HRESULT a runtime answers a command it doesn't know with, as
+/// one older than .NET 8 answers ProcessInfo3. No crate defines it; dotnet/runtime does, in
+/// [`ds-types.h`](https://github.com/dotnet/runtime/blob/feda17e1e6a4f90aeb7285d1d8528342799515c9/src/native/eventpipe/ds-types.h#L129).
+#[cfg(test)]
+pub(super) const DS_IPC_E_UNKNOWN_COMMAND: u32 = 0x8013_1385;
+
 /// What a runtime says when it connects, before any command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Advertise {
@@ -405,12 +411,12 @@ mod tests {
         reply.extend_from_slice(&24u16.to_le_bytes());
         // The Server set's error.
         reply.extend_from_slice(&[SERVER, 0xFF, 0, 0]);
-        reply.extend_from_slice(&0x8013_1384u32.to_le_bytes());
+        reply.extend_from_slice(&DS_IPC_E_UNKNOWN_COMMAND.to_le_bytes());
 
         assert!(matches!(
             read_response(&mut reply.as_slice()).await,
             Err(IpcError::Refused {
-                hresult: 0x8013_1384
+                hresult: DS_IPC_E_UNKNOWN_COMMAND
             })
         ));
     }
