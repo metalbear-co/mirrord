@@ -67,6 +67,7 @@ The [`ports/`](./ports/) directory carries the same core content as drop-in rule
 | [mirrord-up](./skills/mirrord-up/) | Multiple concurrent local sessions from `mirrord-up.yaml` — compose-style multi-service debugging. |
 | [mirrord-beyond](./skills/mirrord-beyond/) | mirrord Beyond: wire Amazon ECS services to mirrord through MetalBear Cloud, and run a local service against them with `mirrord up`. |
 | [mirrord-chaos](./skills/mirrord-chaos/) | Chaos testing: inject latency or connection errors into a session's outgoing traffic via per-session rules, interactively or in CI. |
+| [mirrord-replay](./skills/mirrord-replay/) | Replay: send an HTTP request that a session already received to the local application again, to check a code change without triggering the request through the cluster. |
 | [mirrord-header-propagation](./skills/mirrord-header-propagation/) | Propagate the `baggage` session header across HTTP, gRPC, queues (Kafka, RabbitMQ, SQS, Pub/Sub, ...) and storage-triggered flows, reusing existing OpenTelemetry/Datadog where possible, and report the flows that still drop it. |
 | [mirrord-propagation-discovery](./skills/mirrord-propagation-discovery/) | Scan live traffic with `mirrord dump` to find which identifier (baggage, request id, tenant id, trace id, JWT claim, cookie, path, body field) survives every hop and is yours to set, then produce the matching `http_filter` and a per-hop report of where it's dropped. |
 

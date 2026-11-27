@@ -26,6 +26,7 @@
         "./skills/mirrord-up",
         "./skills/mirrord-beyond",
         "./skills/mirrord-chaos",
+        "./skills/mirrord-replay",
         "./skills/mirrord-header-propagation",
         "./skills/mirrord-propagation-discovery"
       ]
