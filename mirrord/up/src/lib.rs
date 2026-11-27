@@ -27,6 +27,7 @@ pub use config::{
 };
 use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
 use futures::TryStreamExt;
+use http::StatusCode;
 pub use init::{
     InitError, PickedService, PickedWorkload, RenderError, SkeletonError, detect_ports,
     list_workloads_for_mode, render_skeleton, run_wizard, service_name_for,
@@ -617,7 +618,9 @@ async fn list_workloads(
     // Kubernetes API access.
     let listings = futures::future::try_join_all(kinds.iter().map(|&kind| async move {
         match seeker.filtered(vec![kind], true).await {
-            Err(KubeApiError::KubeError(kube::Error::Api(status))) if status.code == 403 => {
+            Err(KubeApiError::KubeError(kube::Error::Api(status)))
+                if status.code == StatusCode::FORBIDDEN =>
+            {
                 Ok(Vec::new())
             }
             listing => listing,
@@ -645,7 +648,7 @@ async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> 
         Ok(namespaces) => Ok(namespaces),
         // Users whose permissions are limited to some namespaces can't list
         // namespaces, but can still pick a workload in their default one.
-        Err(kube::Error::Api(status)) if status.code == 403 => {
+        Err(kube::Error::Api(status)) if status.code == StatusCode::FORBIDDEN => {
             let namespace = client.default_namespace().to_owned();
             println!(
                 "You can't list the namespaces of the cluster, using namespace \"{namespace}\"."

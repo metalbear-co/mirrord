@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, fs, io::Read, ops::Not, path::Path, sync::Arc, 
 
 use flate2::read::GzDecoder;
 use futures::{SinkExt, StreamExt};
+use http::StatusCode;
 use mirrord_config::{
     LayerConfig,
     config::ConfigContext,
@@ -1384,10 +1385,24 @@ fn a_refused_connection_isnt_retried() {
         })
     };
 
-    for code in [400, 401, 403, 404, 409] {
-        assert!(matches!(stop(code), Stop::Fatal(_)), "{code}");
+    for code in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::UNAUTHORIZED,
+        StatusCode::FORBIDDEN,
+        StatusCode::NOT_FOUND,
+        StatusCode::CONFLICT,
+    ] {
+        assert!(matches!(stop(code.as_u16()), Stop::Fatal(_)), "{code}");
     }
-    for code in [408, 429, 500, 503] {
-        assert!(matches!(stop(code), Stop::Disconnected(_)), "{code}");
+    for code in [
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        assert!(
+            matches!(stop(code.as_u16()), Stop::Disconnected(_)),
+            "{code}"
+        );
     }
 }

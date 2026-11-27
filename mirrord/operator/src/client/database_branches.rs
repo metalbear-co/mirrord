@@ -5,6 +5,7 @@ use std::{
 };
 
 use flate2::{Compression, write::GzEncoder};
+use http::StatusCode;
 use k8s_openapi::ByteString;
 use kube::{
     Api, Resource, ResourceExt,
@@ -1185,7 +1186,7 @@ pub async fn create_branches<P: Progress>(
             Ok(branch) => {
                 created_branches.insert(name, branch);
             }
-            Err(kube::Error::Api(ref err)) if err.code == 409 => {
+            Err(kube::Error::Api(ref err)) if err.code == StatusCode::CONFLICT => {
                 // The lookup before this create came back empty, so another session minted the
                 // branch in between. Say so, or the user sees "1 to create" followed by a reuse
                 // with no explanation.

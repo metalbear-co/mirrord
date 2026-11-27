@@ -322,6 +322,10 @@ use rust_embed as _;
 use semver::Version;
 use tracing::{error, info, trace, warn};
 use which::which;
+// Suppressor for the `unused-extern-crate` lint: the Windows dev-dependency `winapi` is only
+// used by the integration test `tests/up_without_terminal.rs`.
+#[cfg(all(test, windows))]
+use winapi as _;
 
 #[cfg(windows)]
 mod attach;
@@ -726,7 +730,7 @@ async fn run_process_with_mirrord<P: Progress>(
             analytics.set_error(AnalyticsError::BinaryExecuteFailed);
 
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            if errno == Errno::from_raw(86) {
+            if errno == Errno::EBADARCH {
                 // "Bad CPU type in executable"
                 if _did_sip_patch {
                     return Err(CliError::RosettaMissing(binary));

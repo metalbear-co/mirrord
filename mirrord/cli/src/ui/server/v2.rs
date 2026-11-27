@@ -29,6 +29,7 @@ use axum::{
     extract::{Path, Query, State},
     routing::get,
 };
+use http::StatusCode;
 use k8s_openapi::api::{authentication::v1::SelfSubjectReview, core::v1::Namespace};
 use kube::{
     Api, Client,
@@ -244,7 +245,8 @@ async fn fetch_operator(
         Ok(Err(err)) => {
             // The cached client may be the cause; drop it so the next poll rebuilds it.
             evict_client(state, context).await;
-            if matches!(&err, kube::Error::Api(response) if response.code == 404) {
+            if matches!(&err, kube::Error::Api(response) if response.code == StatusCode::NOT_FOUND)
+            {
                 return match tokio::time::timeout(
                     OPERATOR_READ_TIMEOUT,
                     operator_installed(&client),

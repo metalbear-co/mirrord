@@ -3,6 +3,8 @@ use std::{borrow::Cow, fmt, sync::LazyLock};
 use chrono::NaiveDate;
 #[cfg(feature = "crd")]
 use chrono::{DateTime, Utc};
+#[cfg(feature = "client")]
+use http::StatusCode;
 #[cfg(feature = "crd")]
 use kube::core::response::StatusCause;
 use schemars::JsonSchema;
@@ -82,7 +84,7 @@ impl PaidFeatureGate {
     /// Only the structured operator contract identifies a license refusal. Ordinary Kubernetes
     /// authorization errors and legacy reason-only responses keep their original diagnostics.
     pub fn from_status(status: &kube::core::Status) -> Option<Self> {
-        if status.code != 403 || status.reason != Self::STATUS_REASON {
+        if status.code != StatusCode::FORBIDDEN || status.reason != Self::STATUS_REASON {
             return None;
         }
         let mut causes = status

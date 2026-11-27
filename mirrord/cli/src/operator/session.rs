@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use http::StatusCode;
 use kube::Api;
 use mirrord_analytics::NullReporter;
 use mirrord_config::{LayerConfig, config::ConfigContext};
@@ -118,7 +119,7 @@ impl SessionCommandHandler {
         .map_err(|kube_fail| match kube_fail {
             // The random `reason` we get when the operator returns from a "missing route".
             kube::Error::Api(status)
-                if status.code == 404 && status.reason.contains("parse") =>
+                if status.code == StatusCode::NOT_FOUND && status.reason.contains("parse") =>
             {
                 OperatorApiError::UnsupportedFeature {
                     feature: NewOperatorFeature::SessionManagement,

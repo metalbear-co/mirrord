@@ -231,7 +231,7 @@ pub(crate) async fn operator_installed(client: &Client) -> kube::Result<bool> {
 
     match discovery::oneshot::pinned_kind(client, &gvk).await {
         Ok(..) => Ok(true),
-        Err(kube::Error::Api(response)) if response.code == 404 => Ok(false),
+        Err(kube::Error::Api(response)) if response.code == StatusCode::NOT_FOUND => Ok(false),
         Err(error) => Err(error),
     }
 }

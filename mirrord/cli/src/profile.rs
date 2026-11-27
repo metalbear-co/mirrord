@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, str::FromStr};
 
+use http::StatusCode;
 use kube::{Api, client::ClientBuilder};
 use miette::Diagnostic;
 use mirrord_config::{
@@ -301,7 +302,7 @@ async fn fetch_profile(
         kube::Error::Api(status) if let Some(gate) = PaidFeatureGate::from_status(&status) => {
             CliError::PaidFeatureRequiresPlan { gate }
         }
-        kube::Error::Api(status) if status.code == 404 => {
+        kube::Error::Api(status) if status.code == StatusCode::NOT_FOUND => {
             CliError::ProfileError(ProfileError::ProfileNotFound)
         }
         error => fetch_error(KubeApiError::from(error)),

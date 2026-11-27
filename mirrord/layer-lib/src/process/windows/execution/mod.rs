@@ -18,6 +18,10 @@ use winapi::{
     shared::{
         minwindef::{BOOL, DWORD, LPVOID},
         ntdef::{HANDLE, LPCWSTR, LPWSTR},
+        ntstatus::{
+            STATUS_DLL_INIT_FAILED, STATUS_DLL_NOT_FOUND, STATUS_ENTRYPOINT_NOT_FOUND,
+            STATUS_INVALID_IMAGE_FORMAT, STATUS_INVALID_IMAGE_HASH, STATUS_ORDINAL_NOT_FOUND,
+        },
     },
     um::{
         handleapi::{CloseHandle, SetHandleInformation},
@@ -81,18 +85,26 @@ const LAYER_INIT_TIMEOUT_MS: u32 = 1_500;
 /// How long a failed resume waits to see whether the process is ending anyway.
 const EXIT_GRACE_MS: u32 = 1_000;
 
+/// Pairs each `NTSTATUS` with its own name, as an exit code, so neither the value nor the name is
+/// written by hand. `GetExitCodeProcess` reports the status's bits as a `u32`.
+macro_rules! named_statuses {
+    ($($status:ident),* $(,)?) => {
+        &[$(($status as u32, stringify!($status))),*]
+    };
+}
+
 /// Exit codes the Windows loader ends a process with when it cannot finish loading it, by name.
 ///
 /// A heuristic, not a proof: a program may exit with one of these on its own, and the loader can
 /// fail for a module that has nothing to do with mirrord. Seen while the layer is loading, it is
 /// still the likeliest sign that Windows refused the layer or one of the modules it needs.
-const LOADER_STATUSES: &[(u32, &str)] = &[
-    (0xC000_007B, "STATUS_INVALID_IMAGE_FORMAT"),
-    (0xC000_0135, "STATUS_DLL_NOT_FOUND"),
-    (0xC000_0138, "STATUS_ORDINAL_NOT_FOUND"),
-    (0xC000_0139, "STATUS_ENTRYPOINT_NOT_FOUND"),
-    (0xC000_0142, "STATUS_DLL_INIT_FAILED"),
-    (0xC000_0428, "STATUS_INVALID_IMAGE_HASH"),
+const LOADER_STATUSES: &[(u32, &str)] = named_statuses![
+    STATUS_INVALID_IMAGE_FORMAT,
+    STATUS_DLL_NOT_FOUND,
+    STATUS_ORDINAL_NOT_FOUND,
+    STATUS_ENTRYPOINT_NOT_FOUND,
+    STATUS_DLL_INIT_FAILED,
+    STATUS_INVALID_IMAGE_HASH,
 ];
 
 /// The name of a loader exit code. See [`LOADER_STATUSES`].
@@ -1205,6 +1217,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use rstest::rstest;
     use utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
     use winapi::{
         shared::minwindef::FALSE,
@@ -2191,5 +2204,29 @@ mod tests {
                 report => panic!("{policy:?} filed {report:?}"),
             }
         }
+    }
+
+    /// Each exit code the loader ends a process with, as `GetExitCodeProcess` reports it, reads
+    /// as its own `NTSTATUS` name. The codes are the ones `ntstatus.h` documents.
+    #[rstest]
+    #[case::invalid_image_format(0xC000_007B, "STATUS_INVALID_IMAGE_FORMAT")]
+    #[case::dll_not_found(0xC000_0135, "STATUS_DLL_NOT_FOUND")]
+    #[case::ordinal_not_found(0xC000_0138, "STATUS_ORDINAL_NOT_FOUND")]
+    #[case::entrypoint_not_found(0xC000_0139, "STATUS_ENTRYPOINT_NOT_FOUND")]
+    #[case::dll_init_failed(0xC000_0142, "STATUS_DLL_INIT_FAILED")]
+    #[case::invalid_image_hash(0xC000_0428, "STATUS_INVALID_IMAGE_HASH")]
+    fn a_loader_exit_code_is_named_after_its_status(#[case] exit_code: u32, #[case] name: &str) {
+        assert_eq!(
+            loader_status_name(exit_code),
+            Some(name),
+            "{exit_code:#x} is a loader failure"
+        );
+    }
+
+    /// An exit code the loader doesn't use has no loader name, so a program's own failure isn't
+    /// blamed on loading.
+    #[test]
+    fn an_ordinary_exit_code_has_no_loader_name() {
+        assert_eq!(loader_status_name(1), None);
     }
 }

@@ -254,6 +254,8 @@ mod tests {
     };
 
     use log::Log;
+    #[cfg(windows)]
+    use winapi::shared::winerror::WSAEADDRINUSE;
 
     use super::*;
 
@@ -392,7 +394,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn logging_keeps_the_last_error() {
-        const CALL_ERROR: u32 = 10048;
+        const CALL_ERROR: u32 = WSAEADDRINUSE;
 
         let assert_kept = |log: &dyn Fn()| {
             unsafe { SetLastError(CALL_ERROR) };

@@ -139,5 +139,9 @@ tokio-tungstenite.workspace = true
 flate2.workspace = true
 tar.workspace = true
 
+# The `up` test without a terminal takes its process creation flag from here.
+[target.'cfg(windows)'.dev-dependencies]
+winapi.workspace = true
+
 [features]
 windows_build = []

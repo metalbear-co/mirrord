@@ -26,6 +26,7 @@ use kube::{
 use mirrord_command::resolve_tokio_command;
 use mirrord_operator::crd::{MirrordOperatorCrd, OPERATOR_STATUS_NAME};
 use mirrord_test_utils::run_command::run_mirrord;
+use reqwest::StatusCode;
 use rstest::rstest;
 use tempfile::TempDir;
 
@@ -124,7 +125,9 @@ async fn release_objects(client: &Client) -> Vec<String> {
             {
                 Ok(list) => list,
                 // Discovery can still list the resources of a CRD that was just deleted.
-                Err(kube::Error::Api(status)) if status.code == 404 => return Vec::new(),
+                Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => {
+                    return Vec::new()
+                }
                 Err(error) => panic!("failed to list {}: {error}", resource.plural),
             };
 
@@ -328,7 +331,7 @@ async fn allow_operator_pods(client: &Client) {
     ] {
         match result {
             Ok(()) => {}
-            Err(kube::Error::Api(status)) if status.code == 404 => {}
+            Err(kube::Error::Api(status)) if status.code == StatusCode::NOT_FOUND => {}
             Err(error) => panic!("failed to delete the admission policy: {error}"),
         }
     }

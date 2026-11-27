@@ -1,6 +1,7 @@
 use std::{ops::Not, sync::LazyLock, time::Instant};
 
 use futures::TryStreamExt;
+use http::StatusCode;
 use k8s_openapi::api::core::v1::Namespace;
 use kube::{
     Api,
@@ -339,7 +340,7 @@ fn tolerate_forbidden_namespace(
 ) -> kube::Result<Vec<TargetCrd>> {
     match listed {
         Ok(list) => Ok(list.items),
-        Err(kube::Error::Api(status)) if rich_output && status.code == 403 => {
+        Err(kube::Error::Api(status)) if rich_output && status.code == StatusCode::FORBIDDEN => {
             tracing::warn!(
                 namespace,
                 message = %status.message,
@@ -578,12 +579,12 @@ mod tests {
         );
     }
 
-    fn forbidden(code: u16) -> kube::Result<ObjectList<TargetCrd>> {
+    fn forbidden(code: StatusCode) -> kube::Result<ObjectList<TargetCrd>> {
         Err(kube::Error::Api(Box::new(kube::core::Status {
             status: Some(kube::core::response::StatusSummary::Failure),
             message: "targets.operator.metalbear.co is forbidden".to_owned(),
             reason: "Forbidden".to_owned(),
-            code,
+            code: code.as_u16(),
             ..Default::default()
         })))
     }
@@ -593,10 +594,21 @@ mod tests {
     /// namespaces still reach the picker; the plain listing, and any other error, still fail.
     #[test]
     fn a_forbidden_current_namespace_empties_the_rich_listing_only() {
-        let rich = tolerate_forbidden_namespace(forbidden(403), true, "default").unwrap();
+        let rich = tolerate_forbidden_namespace(forbidden(StatusCode::FORBIDDEN), true, "default")
+            .unwrap();
         assert!(rich.is_empty());
 
-        assert!(tolerate_forbidden_namespace(forbidden(403), false, "default").is_err());
-        assert!(tolerate_forbidden_namespace(forbidden(500), true, "default").is_err());
+        assert!(
+            tolerate_forbidden_namespace(forbidden(StatusCode::FORBIDDEN), false, "default")
+                .is_err()
+        );
+        assert!(
+            tolerate_forbidden_namespace(
+                forbidden(StatusCode::INTERNAL_SERVER_ERROR),
+                true,
+                "default"
+            )
+            .is_err()
+        );
     }
 }

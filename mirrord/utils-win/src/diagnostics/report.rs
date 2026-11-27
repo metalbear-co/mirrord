@@ -36,7 +36,7 @@ use std::{
 };
 
 use winapi::shared::{
-    ntdef::{NT_ERROR, NTSTATUS},
+    ntdef::{APPLICATION_ERROR_MASK, NT_ERROR, NTSTATUS},
     ntstatus,
 };
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
@@ -107,7 +107,9 @@ const STATUS_CONTROL_C_EXIT: u32 = ntstatus::STATUS_CONTROL_C_EXIT as u32;
 /// the customer bit off. A runtime that mints its own codes sets it: a .NET exception
 /// (`0xE0434352`) and a C++ EH throw (`0xE06D7363`) both start with nibble `E` = `1110b` (severity
 /// 11, customer 1), so both read as application-level and are not treated as mirrord crashes.
-const STATUS_APPLICATION_BIT: u32 = 0x2000_0000;
+///
+/// The SDK names this bit `APPLICATION_ERROR_MASK`.
+const STATUS_APPLICATION_BIT: u32 = APPLICATION_ERROR_MASK;
 
 /// One process in the session, as seen by the monitor's registrations.
 ///
@@ -919,16 +921,22 @@ pub fn finalize_session_archive(archive: &SessionArchive) {
 mod tests {
     use super::*;
 
-    // Representative NTSTATUS codes, by class.
-    const ACCESS_VIOLATION: u32 = 0xC000_0005;
-    const STACK_OVERFLOW: u32 = 0xC000_00FD;
-    const FAIL_FAST: u32 = 0xC000_0409;
-    const HEAP_CORRUPTION: u32 = 0xC000_0374;
-    const DIVIDE_BY_ZERO: u32 = 0xC000_0094; // a native fault we do not name
-    const CTRL_C: u32 = 0xC000_013A;
-    const MANAGED_DOTNET: u32 = 0xE043_4352; // customer bit set
-    const CPP_EH: u32 = 0xE06D_7363; // customer bit set
-    const BREAKPOINT: u32 = 0x8000_0003; // warning severity, not error
+    // Representative NTSTATUS codes, by class, as the `u32` exit codes the classifiers take.
+    const ACCESS_VIOLATION: u32 = ntstatus::STATUS_ACCESS_VIOLATION as u32;
+    const STACK_OVERFLOW: u32 = ntstatus::STATUS_STACK_OVERFLOW as u32;
+    const FAIL_FAST: u32 = ntstatus::STATUS_STACK_BUFFER_OVERRUN as u32;
+    const HEAP_CORRUPTION: u32 = ntstatus::STATUS_HEAP_CORRUPTION as u32;
+    // A native fault we do not name.
+    const DIVIDE_BY_ZERO: u32 = ntstatus::STATUS_INTEGER_DIVIDE_BY_ZERO as u32;
+    const CTRL_C: u32 = ntstatus::STATUS_CONTROL_C_EXIT as u32;
+    /// The code a managed .NET exception raises, customer bit set. No crate defines it; the .NET
+    /// runtime's [`corexcep.h`](https://github.com/dotnet/runtime/blob/main/src/coreclr/inc/corexcep.h)
+    /// does.
+    const EXCEPTION_COMPLUS: u32 = 0xE043_4352;
+    /// The code a C++ `throw` raises, customer bit set. No crate defines it; the .NET runtime's
+    /// [`corexcep.h`](https://github.com/dotnet/runtime/blob/main/src/coreclr/inc/corexcep.h) does.
+    const EXCEPTION_MSVC: u32 = 0xE06D_7363;
+    const BREAKPOINT: u32 = ntstatus::STATUS_BREAKPOINT as u32; // warning severity, not error
     const CLEAN: u32 = 0x0;
     const APP_EXIT: u32 = 0x1;
 
@@ -947,8 +955,8 @@ mod tests {
             // where the in-process gate (`is_native_fault`) and the monitor verdict
             // (`is_crash_code`) diverge.
             (CTRL_C, true, false, true),
-            (MANAGED_DOTNET, false, false, true),
-            (CPP_EH, false, false, true),
+            (EXCEPTION_COMPLUS, false, false, true),
+            (EXCEPTION_MSVC, false, false, true),
             (BREAKPOINT, false, false, false),
             (CLEAN, false, false, false),
             (APP_EXIT, false, false, false),
@@ -1205,7 +1213,7 @@ mod tests {
     #[test]
     fn format_tree_marks_a_dead_parent() {
         let nodes = [
-            dead_node(20, 10, "node.exe", 0xC000_0409),
+            dead_node(20, 10, "node.exe", FAIL_FAST),
             node(50, 20, "crasher.exe"),
         ];
         let report = report(

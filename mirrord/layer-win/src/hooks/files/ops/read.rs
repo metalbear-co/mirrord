@@ -81,7 +81,7 @@ use std::ffi::c_void;
 
 use mirrord_layer_lib::proxy_connection::make_proxy_request_with_response;
 use mirrord_protocol::file::{ReadFileRequest, SeekFromInternal};
-use phnt::ffi::{_IO_STATUS_BLOCK, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_NONALERT};
+use phnt::ffi::{self, _IO_STATUS_BLOCK, FILE_SYNCHRONOUS_IO_ALERT, FILE_SYNCHRONOUS_IO_NONALERT};
 use winapi::shared::{
     ntdef::{HANDLE, NTSTATUS, PLARGE_INTEGER, PULONG, PVOID, ULONG},
     ntstatus::{
@@ -105,7 +105,10 @@ use crate::{
 /// async handles must instead provide an explicit offset, so the
 /// layer rejects this sentinel on async handles with
 /// `STATUS_INVALID_PARAMETER`.
-const FILE_USE_FILE_POINTER_POSITION: i64 = -2;
+///
+/// phnt gives the sentinel's `LowPart` (`0xFFFF_FFFE`); its `HighPart` is -1. Going through `i32`
+/// sign-extends it into the whole `QuadPart`, -2.
+const FILE_USE_FILE_POINTER_POSITION: i64 = ffi::FILE_USE_FILE_POINTER_POSITION as i32 as i64;
 
 /// Returns `true` iff `create_options` lacks both sync-IO flags. Async
 /// handles enforce stricter `NtReadFile` preconditions (non-NULL

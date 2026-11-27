@@ -54,6 +54,7 @@ use winapi::{
     shared::{
         minwindef::{DWORD, LPHANDLE},
         ntdef::HANDLE,
+        ntstatus,
         winerror::NO_ERROR,
         ws2def::{ADDRINFOEXW, PADDRINFOEXW},
     },
@@ -81,8 +82,11 @@ type CompletionRoutineFn = unsafe extern "system" fn(DWORD, DWORD, LPWSAOVERLAPP
 // converter, so we report only success vs. generic failure here; the precise
 // error code is delivered to the caller via the completion routine's `dwError`
 // argument (which is what .NET and the MSDN sample actually consume).
-const STATUS_SUCCESS: usize = 0x0000_0000;
-const STATUS_UNSUCCESSFUL: usize = 0xC000_0001;
+//
+// `Internal` is a `ULONG_PTR`. Going through `u32` zero-extends the `i32` status into it; a plain
+// `as usize` would sign-extend `STATUS_UNSUCCESSFUL` to `0xFFFF_FFFF_C000_0001`.
+const STATUS_SUCCESS: usize = ntstatus::STATUS_SUCCESS as u32 as usize;
+const STATUS_UNSUCCESSFUL: usize = ntstatus::STATUS_UNSUCCESSFUL as u32 as usize;
 
 /// One in-flight async `GetAddrInfoExW`.
 ///
@@ -443,7 +447,10 @@ mod tests {
     };
 
     use winapi::{
-        shared::ws2def::{AF_INET, AI_NUMERICHOST, NS_DNS, SOCKADDR_IN},
+        shared::{
+            minwindef::MAKEWORD,
+            ws2def::{AF_INET, AI_NUMERICHOST, NS_DNS, SOCKADDR_IN},
+        },
         um::{
             handleapi::CloseHandle,
             minwinbase::OVERLAPPED,
@@ -663,7 +670,11 @@ mod tests {
     #[test]
     fn managed_chain_matches_native_addrinfoexw() {
         let mut wsa: WSADATA = unsafe { std::mem::zeroed() };
-        assert_eq!(unsafe { WSAStartup(0x0202, &mut wsa) }, 0, "WSAStartup");
+        assert_eq!(
+            unsafe { WSAStartup(MAKEWORD(2, 2), &mut wsa) },
+            0,
+            "WSAStartup"
+        );
 
         // Native, numeric, single stream entry.
         let name: Vec<u16> = "127.0.0.1".encode_utf16().chain(Some(0)).collect();
