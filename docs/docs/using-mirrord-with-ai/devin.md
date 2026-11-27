@@ -113,11 +113,11 @@ Run all the commands below in one shell that has the secrets KUBECONFIG_B64 and 
 2. Make a new session key for this verification:
    export MIRRORD_SESSION_KEY=$(cat /proc/sys/kernel/random/uuid)
 3. Start the service in the background, and keep the log:
-   MIRRORD_PROGRESS_MODE=simple nohup mirrord up --no-ui --key "$MIRRORD_SESSION_KEY" > /tmp/mirrord-up.log 2>&1 &
+   MIRRORD_PROGRESS_MODE=simple nohup mirrord up --no-ui --key "$MIRRORD_SESSION_KEY" > /tmp/mirrord-up.log 2>&1 & echo $! > /tmp/mirrord-up.pid
 4. Wait until /tmp/mirrord-up.log shows the line "orders: Ready!". If the log shows an error, stop and report it.
 5. Send requests to https://orders.staging.example.com with the header x-mirrord-agent: $MIRRORD_SESSION_KEY.
-6. Check the real responses and the service log. Fix the code and repeat from step 3 until the result is correct.
-7. Stop the session: kill -INT %1, or kill -INT the mirrord up process.
+6. Check the real responses and the service log. If the result is not correct, fix the code, stop the session as in step 7, and repeat from step 2.
+7. Stop the session: kill -INT "$(cat /tmp/mirrord-up.pid)"
 8. In the pull request, write the requests you sent and the results you got.
 
 Rules:
