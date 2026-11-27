@@ -518,18 +518,7 @@ order=alice-1 x-user=alice subject=orders.created
 
 When the first session starts, the operator makes a main-output stream and a durable consumer that copy the settings of the originals. It restarts the workload pods with stream and consumer environment variables that point to these copies. For each session, the operator makes one more temporary stream and consumer. Then it reads each message through the original durable consumer and republishes the message to `<temporary stream>.<original subject>`. A message that matches a session filter goes to that session stream. A message that matches no filter goes to the main-output stream. The operator acknowledges a message on the original consumer only after JetStream acknowledges the republish.
 
-```mermaid
-flowchart LR
-    P[Producer] -->|orders.created| S[(Stream ORDERS)]
-    S --> C[Durable consumer order-processor]
-    C --> O{mirrord operator<br/>checks filters}
-    O -->|mirrord-session=alice| A[(Session stream<br/>mirrord-tmp-...-order-processor)]
-    O -->|mirrord-session=bob| B[(Session stream<br/>mirrord-tmp-...-order-processor)]
-    O -->|no match| M[(Main-output stream<br/>mirrord-tmp-...-main-order-processor)]
-    A --> LA[Alice local consumer]
-    B --> LB[Bob local consumer]
-    M --> D[Deployed order-processor pod]
-```
+![NATS JetStream splitting with two sessions](../../.gitbook/assets/nats-tutorial.svg)
 
 The operator records each temporary resource in a `MirrordClusterExternalResource`. Thus, it removes the resources even when the operator restarts during a session.
 

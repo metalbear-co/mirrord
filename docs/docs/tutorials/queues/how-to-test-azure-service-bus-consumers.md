@@ -510,17 +510,7 @@ If you do not set `drainTimeout`, the operator waits until the temporary queue o
 
 When the first session starts, the operator creates two temporary queues in your Service Bus namespace: one for the deployed consumer and one for your local consumer. It changes the queue name environment variable in each consumer so that each reads only its own temporary queue. The operator then reads every message from the original `orders` queue, compares its application properties with the filter of each session, and sends it to the temporary queue of the session that matches. Messages that match no filter go to the temporary queue of the deployed consumer. Each new session adds one more temporary queue and one more filter.
 
-```mermaid
-flowchart LR
-    P[Producer] -->|"mirrord-session=alice / mirrord-session=bob / no property"| Q[(orders queue)]
-    Q --> O[mirrord operator<br/>compares application properties<br/>with session filters]
-    O -->|"no filter matches"| TD[(temporary queue<br/>deployed)]
-    O -->|"mirrord-session=alice"| TA[(temporary queue<br/>alice session)]
-    O -->|"mirrord-session=bob"| TB[(temporary queue<br/>bob session)]
-    TD --> D[Deployed consumer<br/>in the cluster]
-    TA --> LA[alice: local consumer<br/>with mirrord up]
-    TB --> LB[bob: local consumer<br/>with mirrord up]
-```
+![Azure Service Bus queue splitting with two sessions](../../.gitbook/assets/azure-service-bus-queue-splitting.svg)
 
 ## Behavior and tradeoffs
 

@@ -491,17 +491,7 @@ Do not stop a session while your local consumer has unread messages that you nee
 
 When the first session starts, the operator creates two temporary queues: one for the deployed consumer and one for your local consumer. It patches the target workload so that `QUEUE_NAME` holds the name of the deployed consumer's temporary queue. Your local consumer gets the name of its own temporary queue. The operator then reads the original queue and sends each message to the temporary queue whose filter matches. Messages that match no filter go to the deployed consumer's temporary queue. Each new session adds one more temporary queue and one more filter.
 
-```mermaid
-flowchart LR
-    P[Producer] --> Q[(orders)]
-    Q --> O[mirrord operator]
-    O -- "mirrord-session=alice" --> QA[(temporary queue: alice)]
-    O -- "mirrord-session=bob" --> QB[(temporary queue: bob)]
-    O -- "no match" --> QD[(temporary queue: deployed)]
-    QA --> LA[Local consumer: alice]
-    QB --> LB[Local consumer: bob]
-    QD --> D[orders-consumer pod]
-```
+![Two RabbitMQ splitting sessions on the orders queue](../../.gitbook/assets/rabbitmq-tutorial.svg)
 
 ## Behavior and tradeoffs
 

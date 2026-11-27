@@ -603,19 +603,7 @@ polling task_queue=orders address=temporal-frontend.temporal-demo.svc.cluster.lo
 
 When the first session starts, the operator polls the real task queue and keeps the tasks in memory. It patches the deployed worker to poll the main virtual task queue through the operator's Temporal proxy. For each task, the operator applies the filter of each session. A task that matches a filter goes to the virtual task queue of that session. All other tasks go to the main virtual task queue. The proxy serves polls for the virtual task queues from the buffered tasks, and sends all other calls (task completions, heartbeats) to the real frontend with no change.
 
-```mermaid
-flowchart LR
-    starter[starter.py] -->|start workflow| frontend[Temporal frontend<br/>task queue: orders]
-    operator[mirrord operator] -->|polls real task queue| frontend
-    operator --> filter{Session filter<br/>matches?}
-    filter -->|yes| sessionq[Session virtual<br/>task queue]
-    filter -->|no| mainq[Main virtual<br/>task queue]
-    sessionq --> proxy[Operator Temporal proxy]
-    mainq --> proxy
-    proxy -->|poll| local[Local worker<br/>mirrord up]
-    proxy -->|poll| deployed[Deployed worker<br/>orders-worker]
-    proxy -->|completions, heartbeats| frontend
-```
+![Temporal task queue splitting with one session](../../.gitbook/assets/temporal-task-queue-splitting.svg)
 
 ## Behavior and tradeoffs
 
