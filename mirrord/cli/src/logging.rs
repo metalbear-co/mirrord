@@ -1,6 +1,7 @@
 use std::{fs::OpenOptions, future::Future, ops::Not, path::Path};
 
 use futures::StreamExt;
+use miette::{Diagnostic, JSONReportHandler, ReportHandler, set_hook};
 use mirrord_config::LayerConfig;
 use mirrord_up::OutputFormat;
 use tokio::io::AsyncWriteExt;
@@ -18,6 +19,17 @@ pub(crate) fn reports_json_errors(command: &Commands) -> bool {
         command,
         Commands::ListTargets(_) | Commands::ExtensionExec(_) | Commands::ExtensionContainer(_)
     )
+}
+
+/// The handler [`report_errors_as_json`] installs, for every error the process reports.
+fn json_report_handler(_: &(dyn Diagnostic + 'static)) -> Box<dyn ReportHandler> {
+    Box::new(JSONReportHandler::new())
+}
+
+/// Makes the process's final error print as miette's JSON report, for a reader that parses it.
+fn report_errors_as_json() {
+    // Fails only when a hook is installed already, which then reports the error instead.
+    let _ = set_hook(Box::new(json_report_handler));
 }
 
 /// Tries to initialize tracing in the current process.
@@ -38,7 +50,7 @@ pub async fn init_tracing_registry(
         // They should log only when explicitly instructed.
         command if reports_json_errors(command) => {
             // The final error has to be in the JSON format.
-            let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
+            report_errors_as_json();
 
             std::env::var("MIRRORD_FORCE_LOG")
                 .ok()
@@ -51,7 +63,7 @@ pub async fn init_tracing_registry(
         Commands::Exec(_) | Commands::Container(_)
             if OutputFormat::of_session() == OutputFormat::Json =>
         {
-            let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
+            report_errors_as_json();
             true
         }
 
