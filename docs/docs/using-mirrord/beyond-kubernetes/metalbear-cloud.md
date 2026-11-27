@@ -123,7 +123,7 @@ mirrord stores the credentials on their machine, in `~/.mirrord/auth.json`, and 
 
 ## Troubleshooting
 
-The workload's messages appear in the application container's logs, and the developer's in mirrord's output. To see which sessions-manager a workload registers with, and why, set `MIRRORD_AGENT_RUST_LOG=info` on it. The bootstrap then logs its choice when it starts, for example `Registering with the MetalBear Cloud sessions-manager, since neither MIRRORD_OPERATOR_API_URL nor MIRRORD_SESSIONS_MANAGER_URL is set`.
+The workload's messages appear in the application container's logs ([Collecting Logs](../../troubleshooting/collecting-logs.md#workloads-outside-kubernetes)), and the developer's in mirrord's output. To see which sessions-manager a workload registers with, and why, set `MIRRORD_AGENT_RUST_LOG=info` on it. The workload-companion then logs its choice when it starts, for example `Registering with the MetalBear Cloud sessions-manager, since neither MIRRORD_OPERATOR_API_URL nor MIRRORD_SESSIONS_MANAGER_URL is set`.
 
 | Symptom | Likely cause |
 | --- | --- |

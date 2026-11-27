@@ -147,7 +147,7 @@ and reference it from each application container instead of listing those variab
 
 ## Troubleshooting
 
-These apply in every deployment mode. For connection and authentication problems, see your deployment mode's guide, such as [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting). The bootstrap's messages appear in the application container's logs.
+These apply in every deployment mode. For connection and authentication problems, see your deployment mode's guide, such as [Connecting ECS to the Operator](ecs-operator-hosted.md#troubleshooting). mirrord's messages appear in the application container's logs. The bootstrap logs only when the container's `environment` sets `MIRRORD_LOG` ([Collecting Logs](../../troubleshooting/collecting-logs.md#workloads-outside-kubernetes)).
 
 | Symptom | Likely cause |
 | --- | --- |
@@ -156,3 +156,4 @@ These apply in every deployment mode. For connection and authentication problems
 | The task registers, but mirrord fails with `timed out connecting to the serverless target's agent through sessions-manager` | `MIRRORD_REMOTE_SERVICE`/`MIRRORD_REMOTE_ENVIRONMENT` on the task don't match `target.path`/`target.namespace` in `mirrord-up.yaml`. |
 | `Read-only file system` or `Permission denied` under `/tmp` | The application container has no writable `/tmp` ([Prerequisites](#prerequisites)). |
 | The application container stops at startup: version `GLIBC_2.30` not found, required by `libmirrord_remote_bootstrap.so` | The application image's glibc is older than 2.30 ([Prerequisites](#prerequisites)). |
+| Your local process reaches the task's server on `localhost` instead of your own, for example your local nginx reaching the task's php-fpm | Set [`feature.network.outgoing.ignore_localhost`](https://metalbear.com/mirrord/docs/config/options#feature-network-outgoing-ignore_localhost) to `true`. |
