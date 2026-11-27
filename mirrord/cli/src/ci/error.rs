@@ -1,4 +1,8 @@
-use std::time::Duration;
+use std::{
+    io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use miette::Diagnostic;
 use mirrord_auth::error::ApiKeyError;
@@ -11,6 +15,16 @@ use crate::ci::stop::StopTarget;
 pub(crate) enum CiError {
     #[error("File operation failed: {0}!")]
     IO(#[from] std::io::Error),
+
+    /// A file operation on the state of a CI session failed. A session's directory holds several
+    /// files (the lock file, the state file, and the temporary state file), so the error names the
+    /// operation and the path that it failed on.
+    #[error("failed to {operation} {}: {source}", path.display())]
+    SessionFile {
+        operation: &'static str,
+        path: PathBuf,
+        source: io::Error,
+    },
 
     #[error(transparent)]
     CiApiKey(#[from] ApiKeyError),
@@ -82,6 +96,22 @@ pub(crate) enum CiError {
     #[cfg(not(target_os = "windows"))]
     #[error("`mirrord ci container` runtime command `{command}` failed with {message}")]
     ContainerRuntimeCommand { command: String, message: String },
+}
+
+impl CiError {
+    /// Turns the [`io::Error`] of `operation` on `path` into [`CiError::SessionFile`], for use in
+    /// `map_err`.
+    pub(crate) fn session_file(
+        operation: &'static str,
+        path: &Path,
+    ) -> impl FnOnce(io::Error) -> Self {
+        let path = path.to_owned();
+        move |source| Self::SessionFile {
+            operation,
+            path,
+            source,
+        }
+    }
 }
 
 #[cfg(test)]

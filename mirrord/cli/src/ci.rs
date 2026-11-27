@@ -316,7 +316,9 @@ impl MirrordCiStore {
     ) -> CiResult<SessionLock> {
         let deadline = Instant::now() + lock_timeout;
         loop {
-            fs::create_dir_all(session_dir).await?;
+            fs::create_dir_all(session_dir)
+                .await
+                .map_err(CiError::session_file("create", session_dir))?;
             // `None` means that `mirrord ci stop` removed the session's directory after
             // `create_dir_all` made sure that it exists, so it is created again for the state that
             // the caller is about to write.
@@ -346,12 +348,14 @@ impl MirrordCiStore {
         deadline: Instant,
         lock_timeout: Duration,
     ) -> CiResult<Option<SessionLock>> {
+        let lock_path = Self::lock_path(session_dir);
+        let lock_file_error = |operation| CiError::session_file(operation, &lock_path);
         loop {
             let lock_file = match fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(false)
-                .open(Self::lock_path(session_dir))
+                .open(&lock_path)
                 .await
             {
                 Ok(lock_file) => lock_file,
@@ -367,10 +371,10 @@ impl MirrordCiStore {
                 {
                     return match fs::symlink_metadata(session_dir).await {
                         Err(missing) if missing.kind() == io::ErrorKind::NotFound => Ok(None),
-                        _ => Err(error.into()),
+                        _ => Err(lock_file_error("open")(error)),
                     };
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(lock_file_error("open")(error)),
             };
             // `timeout_at` polls the wait before it checks the deadline, so the lock is tried at
             // least once after each open, even past the deadline.
@@ -383,8 +387,12 @@ impl MirrordCiStore {
             .await
             .map_err(|_| CiError::SessionLocked {
                 timeout: lock_timeout,
-            })??;
-            if Self::holds_current_lock_file(session_dir, &lock_file).await? {
+            })?
+            .map_err(lock_file_error("lock"))?;
+            if Self::holds_current_lock_file(session_dir, &lock_file)
+                .await
+                .map_err(lock_file_error("inspect"))?
+            {
                 return Ok(Some(SessionLock {
                     session_dir: session_dir.to_owned(),
                     _file: lock_file,
@@ -415,7 +423,7 @@ impl MirrordCiStore {
         match fs::read(path).await {
             Ok(contents) => Ok(serde_json::from_slice(&contents)?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(error) => Err(error.into()),
+            Err(error) => Err(CiError::session_file("read", path)(error)),
         }
     }
 
@@ -468,26 +476,50 @@ impl SessionLock {
         let temporary_path = self
             .session_dir
             .join(MirrordCiStore::TEMPORARY_STATE_FILE_NAME);
+        let temporary_file_error = |operation| CiError::session_file(operation, &temporary_path);
         // `remove_file` removes a symlink itself rather than its target.
-        remove_file_if_exists(&temporary_path).await?;
+        remove_file_if_exists(&temporary_path)
+            .await
+            .map_err(temporary_file_error("remove"))?;
         let mut options = fs::OpenOptions::new();
         options.create_new(true).write(true);
         // The state file takes this file's mode when it is replaced, and the temporary directory
         // is readable by other users.
         #[cfg(unix)]
         options.mode(0o600);
-        let mut temporary_file = options.open(&temporary_path).await?;
-        temporary_file.write_all(&contents).await?;
-        temporary_file.flush().await?;
-        temporary_file.sync_all().await?;
+        let mut temporary_file = options
+            .open(&temporary_path)
+            .await
+            .map_err(temporary_file_error("create"))?;
+        temporary_file
+            .write_all(&contents)
+            .await
+            .map_err(temporary_file_error("write"))?;
+        temporary_file
+            .flush()
+            .await
+            .map_err(temporary_file_error("write"))?;
+        temporary_file
+            .sync_all()
+            .await
+            .map_err(temporary_file_error("sync"))?;
         drop(temporary_file);
         fs::rename(
             &temporary_path,
             MirrordCiStore::state_path(&self.session_dir),
         )
-        .await?;
+        .await
+        .map_err(temporary_file_error("rename"))?;
         #[cfg(target_os = "linux")]
-        fs::File::open(&self.session_dir).await?.sync_all().await?;
+        {
+            let session_dir_error = |operation| CiError::session_file(operation, &self.session_dir);
+            fs::File::open(&self.session_dir)
+                .await
+                .map_err(session_dir_error("open"))?
+                .sync_all()
+                .await
+                .map_err(session_dir_error("sync"))?;
+        }
         Ok(())
     }
 
@@ -503,14 +535,16 @@ impl SessionLock {
     /// signal. It may also have started writing in the directory, so a directory that isn't empty
     /// stays.
     async fn remove_session(&self) -> CiResult<()> {
-        remove_file_if_exists(
-            &self
-                .session_dir
+        for path in [
+            self.session_dir
                 .join(MirrordCiStore::TEMPORARY_STATE_FILE_NAME),
-        )
-        .await?;
-        remove_file_if_exists(&MirrordCiStore::state_path(&self.session_dir)).await?;
-        remove_file_if_exists(&MirrordCiStore::lock_path(&self.session_dir)).await?;
+            MirrordCiStore::state_path(&self.session_dir),
+            MirrordCiStore::lock_path(&self.session_dir),
+        ] {
+            remove_file_if_exists(&path)
+                .await
+                .map_err(CiError::session_file("remove", &path))?;
+        }
         match fs::remove_dir(&self.session_dir).await {
             Err(error)
                 if matches!(
@@ -520,7 +554,7 @@ impl SessionLock {
             {
                 Ok(())
             }
-            result => Ok(result?),
+            result => result.map_err(CiError::session_file("remove", &self.session_dir)),
         }
     }
 }
