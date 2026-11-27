@@ -219,7 +219,7 @@ impl HttpFilter {
 
 async fn eval_jaq(query: JqQuery, payload: String) -> Result<bool, String> {
     static TIME_LIMIT: LazyLock<Duration> = LazyLock::new(|| {
-        Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(500))
+        Duration::from_secs(JAQ_TIME_LIMIT.try_from_env().ok().flatten().unwrap_or(1))
     });
 
     let span = tracing::warn_span!("jaq eval", ?query);

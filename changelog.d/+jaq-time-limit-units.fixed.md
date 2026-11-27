@@ -1,0 +1,1 @@
+`agent.jaq_time_limit` is documented in seconds with its real default of 1 second, instead of milliseconds and 500ms, and the agent's fallback when the variable is missing is 1 second instead of 500 seconds.
