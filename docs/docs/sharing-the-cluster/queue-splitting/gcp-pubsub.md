@@ -8,6 +8,8 @@ tags:
 
 This page covers queue splitting for [Google Cloud Pub/Sub](https://cloud.google.com/pubsub). For the general concepts and the message filter reference shared by all queue services, see the [Queue Splitting overview](../queue-splitting.md).
 
+For a walkthrough with a sample app, see the [tutorial](../../tutorials/queues/how-to-test-gcp-pubsub-consumers.md).
+
 The word "queue" on this page refers to a Pub/Sub subscription.
 
 {% hint style="info" %}

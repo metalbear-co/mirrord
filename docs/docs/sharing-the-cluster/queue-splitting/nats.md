@@ -8,6 +8,8 @@ tags:
 
 This page covers queue splitting for [NATS](https://nats.io). Most of it describes [JetStream](https://docs.nats.io/nats-concepts/jetstream) (persisted streams consumed through a durable pull consumer); [core NATS pub/sub](#core-nats-pubsub-no-jetstream) (plain subject subscriptions) is covered in its own section. For the general concepts and the message filter reference shared by all queue services, see the [Queue Splitting overview](../queue-splitting.md).
 
+For a walkthrough with a sample app, see the [tutorial](../../tutorials/queues/how-to-test-nats-consumers.md).
+
 Unless the [core pub/sub](#core-nats-pubsub-no-jetstream) section says otherwise, "queue" on this page refers to a JetStream stream consumed through a durable pull consumer.
 
 {% hint style="info" %}

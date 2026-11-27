@@ -1,5 +1,6 @@
 #![warn(clippy::indexing_slicing)]
 
+mod agent;
 mod argo_rollout;
 mod cleanup;
 #[cfg(feature = "cli")]
