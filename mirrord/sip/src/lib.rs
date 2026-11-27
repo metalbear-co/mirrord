@@ -567,7 +567,10 @@ mod main {
         Ok(patched_path)
     }
 
-    const SF_RESTRICTED: u32 = 0x00080000; // entitlement required for writing, from stat.h (macos)
+    /// Entitlement required for writing, from macOS's
+    /// [`sys/stat.h`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/stat.h).
+    /// libc doesn't define it.
+    const SF_RESTRICTED: u32 = 0x00080000;
 
     /// Extract shebang from first line of file.
     fn get_shebang_from_string(first_line: &str) -> Option<ScriptShebang> {
@@ -953,7 +956,7 @@ mod main {
 
             Ok(NoSip) => Ok(None),
 
-            Err(SipError::IO(err)) if err.raw_os_error() == Some(24) => {
+            Err(SipError::IO(err)) if err.raw_os_error() == Some(libc::EMFILE) => {
                 // The full error is: `{ code: 24, kind: Uncategorized, message: "Too many open
                 // files" }`. This error was encountered in the past when using mirrord with Air
                 // (hot reloader). We can't recover from this, but we can't `graceful_exit!` within
