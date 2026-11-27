@@ -31,7 +31,7 @@ use mirrord_operator::{
     crd::NewOperatorFeature,
 };
 use mirrord_progress::NullProgress;
-use mirrord_up::{RequestOrigin, SubprocessCfg};
+use mirrord_up::{Printer, RequestOrigin, SubprocessCfg};
 use thiserror::Error;
 
 use super::UpCliError;
@@ -101,13 +101,17 @@ impl Unservable {
 
 /// A request from the mode's `db_branching` line fails the run. Any other one is dropped, saying
 /// so, and the service runs against the source databases.
-fn drop_or_fail(service: &mut SubprocessCfg, reason: Unservable) -> Result<(), UpCliError> {
+fn drop_or_fail(
+    service: &mut SubprocessCfg,
+    reason: Unservable,
+    printer: &Printer,
+) -> Result<(), UpCliError> {
     if service.db_branches_origin == RequestOrigin::ModeLine {
         return Err(reason.mode_error(service));
     }
-    println!(
-        "{}: {reason}, running against the source DB",
-        service.service_name
+    printer.note(
+        Some(&service.service_name),
+        &format!("{reason}, running against the source DB"),
     );
     service.config.feature.db_branches = DatabaseBranchesConfig::default();
     Ok(())
@@ -153,6 +157,7 @@ pub(super) async fn usable_operators(services: &[SubprocessCfg]) -> Result<Opera
 pub(super) fn check_queue_splits(
     services: &[SubprocessCfg],
     operators: &Operators,
+    printer: &Printer,
 ) -> Result<(), UpCliError> {
     for service in services {
         let Some(operator) = operators.get(&operator_key(&service.config)) else {
@@ -184,10 +189,9 @@ pub(super) fn check_queue_splits(
                 });
             }
             (RequestOrigin::Default, Ok(_)) if splits_queues.not() => {
-                println!(
-                    "{}: the mirrord operator doesn't split queues, running without queue \
-                     splitting",
-                    service.service_name
+                printer.note(
+                    Some(&service.service_name),
+                    "the mirrord operator doesn't split queues, running without queue splitting",
                 );
             }
             _ => {}
@@ -236,6 +240,7 @@ pub(crate) fn resolves_default_db_branches(operator: &OperatorApi<NoClientCert>)
 pub(super) async fn check_db_branches(
     services: &mut [SubprocessCfg],
     apis: &mut Operators,
+    printer: &Printer,
 ) -> Result<Vec<Arc<str>>, UpCliError> {
     for service in services.iter_mut() {
         if service
@@ -249,16 +254,13 @@ pub(super) async fn check_db_branches(
         }
         let key = operator_key(&service.config);
         match apis.get(&key) {
-            Some(Err(reason)) => drop_or_fail(service, Unservable::NoOperator(*reason))?,
+            Some(Err(reason)) => drop_or_fail(service, Unservable::NoOperator(*reason), printer)?,
             // One the user set fails below, as it would in a session.
             Some(Ok(api))
                 if service.db_branches_origin == RequestOrigin::Default
                     && resolves_default_db_branches(api).not() =>
             {
-                println!(
-                    "{}: {DEFAULT_DB_BRANCHES_UNSUPPORTED}",
-                    service.service_name
-                );
+                printer.note(Some(&service.service_name), DEFAULT_DB_BRANCHES_UNSUPPORTED);
                 service.config.feature.db_branches = DatabaseBranchesConfig::default();
             }
             _ => {}
@@ -291,10 +293,10 @@ pub(super) async fn check_db_branches(
         .map(|(service, ..)| service.service_name.clone())
         .collect::<Vec<_>>();
     for service in &requested {
-        println!("{service}: requesting DB branching");
+        printer.note(Some(service), "requesting DB branching");
     }
     for service in &inline {
-        println!("{service}: using its own DB branch definitions");
+        printer.note(Some(service), "using its own DB branch definitions");
     }
 
     // The lookups are independent, so they run at once: the run waits about one round trip to
@@ -397,7 +399,11 @@ pub(super) async fn check_db_branches(
                 .path
                 .clone()
                 .unwrap_or(Target::Targetless);
-            drop_or_fail(service, Unservable::NoDefinitions { target, namespace })?;
+            drop_or_fail(
+                service,
+                Unservable::NoDefinitions { target, namespace },
+                printer,
+            )?;
             continue;
         }
 
@@ -412,7 +418,7 @@ pub(super) async fn check_db_branches(
         if let Some(feature) = disabled
             && service.db_branches_origin != RequestOrigin::Config
         {
-            drop_or_fail(service, Unservable::Unsupported(feature))?;
+            drop_or_fail(service, Unservable::Unsupported(feature), printer)?;
             continue;
         }
 
@@ -486,9 +492,13 @@ pub(super) async fn check_db_branches(
             })
             .collect::<Vec<_>>()
             .join("; ");
-        println!(
-            "DB branch `{entry}` is requested from more than one namespace ({services_by_namespace}); \
-             each namespace gets its own branch, so those branches are not shared"
+        printer.note(
+            None,
+            &format!(
+                "DB branch `{entry}` is requested from more than one namespace \
+                 ({services_by_namespace}); each namespace gets its own branch, so those \
+                 branches are not shared"
+            ),
         );
     }
 

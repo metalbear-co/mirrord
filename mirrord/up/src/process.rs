@@ -5,7 +5,7 @@ use std::{
     io,
     ops::Not,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -13,12 +13,12 @@ use std::{
 
 use mirrord_analytics::{UP_DB_BRANCHES_REPORT_PREFIX, UpSessionDbBranch};
 use mirrord_debug_hold::{
-    ANNOUNCEMENT_PREFIX, PLAN_PREFIX, Trigger,
+    ANNOUNCEMENT_PREFIX, ENDED_PREFIX, PLAN_PREFIX, Trigger,
     runtime::{DiagnosticPort, Report},
 };
-use mirrord_progress::is_session_ready_line;
 #[cfg(test)]
 use mirrord_progress::messages::SESSION_READY_MESSAGE;
+use mirrord_progress::{is_progress_line, is_session_ready_line};
 #[cfg(unix)]
 use nix::sys::signal::killpg;
 #[cfg(unix)]
@@ -28,6 +28,10 @@ use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
+use serde_json::{
+    Map, Value,
+    value::{RawValue, to_raw_value},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
@@ -35,7 +39,13 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{ReadyTracker, UpError};
+use crate::{
+    ReadyTracker, UpError,
+    output::{
+        Event, ExitReason, OutputFormat, PreCommandStage, Printer, Remaining, ServiceState, Source,
+        Stream, session_error, session_error_line,
+    },
+};
 
 mod platform;
 use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
@@ -45,11 +55,21 @@ use platform::{ShutdownSignal, SignalStreams, receive_signal, signal_streams};
 // kills the runtime client that is responsible for removing the container.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
-/// How long an exited session's stdout is still read before telling whether it got as far as
-/// [`SESSION_READY_MESSAGE`](mirrord_progress::messages::SESSION_READY_MESSAGE). The exit can be
-/// seen before the forwarding task has read the last lines, and a descendant still holding the
-/// pipe open must not hold up the error.
-const STDOUT_DRAIN: Duration = Duration::from_secs(1);
+/// How long an exited process's output is still read before saying how it ended, such as whether
+/// a session got as far as
+/// [`SESSION_READY_MESSAGE`](mirrord_progress::messages::SESSION_READY_MESSAGE).
+///
+/// The exit can be seen before the forwarding tasks have read the last lines, and a descendant
+/// still holding a pipe open must not hold up the error.
+///
+/// Under `--output json`, it also gives a line after a session's error report the time to show the
+/// report wasn't the session's last.
+const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
+
+/// How long after a debugged session's program started `up` says that none of its .NET runtimes
+/// has paused yet, when one was to. A runtime pauses as it starts, but `dotnet run` builds first,
+/// so it's only a note: the runtime may still come.
+const NO_RUNTIME_PAUSED_AFTER: Duration = Duration::from_secs(15);
 
 /// Records when every service has emitted its session-ready marker.
 ///
@@ -107,29 +127,81 @@ struct Service {
     #[cfg(unix)]
     group: Pid,
     /// Set once the session printed
-    /// [`SESSION_READY_MESSAGE`](mirrord_progress::messages::SESSION_READY_MESSAGE), i.e. it got as
-    /// far as launching the service's process. Tells a session that failed to start from a service
-    /// that crashed.
-    started: Arc<AtomicBool>,
+    /// [`SESSION_READY_MESSAGE`](mirrord_progress::messages::SESSION_READY_MESSAGE), to when it
+    /// did, i.e. once it got as far as launching the service's process. Tells a session that
+    /// failed to start from a service that crashed.
+    started: Arc<OnceLock<Instant>>,
     /// Set once something of the service is held and an IDE may attach: the session printed its
     /// [`ANNOUNCEMENT_PREFIX`] line, or a .NET runtime paused on the service's diagnostic port.
     /// From then on a debugged program's exit is the debugger's doing.
     held: Arc<AtomicBool>,
     /// What the session's `debug-plan` line said holds its program, once it said it.
     planned: Arc<Mutex<Option<Trigger>>>,
-    /// Resolves once the forwarding of the session's stdout ended, so `started` and `held` are
+    /// The final error the session's `mirrord exec` reported, under `--output json`, once its
+    /// stderr closed.
+    error: Arc<Mutex<Option<Box<RawValue>>>>,
+    /// Whether `up` already said no .NET runtime paused while the service runs.
+    runtime_note: RuntimeNote,
+    /// Resolves once the forwarding of the child's stdout and stderr ended, so what they report is
     /// final.
-    stdout_closed: Option<oneshot::Receiver<()>>,
+    output_closed: oneshot::Receiver<()>,
+    /// Writes what `up` says about the service.
+    printer: Printer,
 }
+
+/// Whether [`Service::say_if_no_runtime_paused_yet`] said so already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeNote {
+    Pending,
+    Said,
+}
+
+/// Which of a child's streams a forwarding task reads, and what it reports back.
+enum Forwarded {
+    /// A pre-command's stream, which reports nothing.
+    PreCommand { stream: Stream, _closing: Closing },
+    /// A session's stdout.
+    SessionStdout(SessionOutput),
+    /// A session's stderr.
+    SessionStderr(SessionErrors),
+}
+
+/// Dropped by each of a child's two forwarding tasks when it ends; the last one dropped resolves
+/// [`Service::output_closed`].
+type Closing = Arc<oneshot::Sender<()>>;
 
 /// What forwarding a session's stdout (not a pre-command's) reports back.
 struct SessionOutput {
     readiness: Arc<Readiness>,
-    started: Arc<AtomicBool>,
+    started: Arc<OnceLock<Instant>>,
     held: Arc<AtomicBool>,
     planned: Arc<Mutex<Option<Trigger>>>,
-    /// Dropped when forwarding ends, which resolves [`Service::stdout_closed`].
-    _closed: oneshot::Sender<()>,
+    _closing: Closing,
+}
+
+/// What forwarding a session's stderr reports back.
+struct SessionErrors {
+    /// Under `--output json`, the session's final error: its last line so far, while that's an
+    /// error report. Taking it makes it the error, and the line then isn't printed as output.
+    error: Arc<Mutex<Option<Box<RawValue>>>>,
+    _closing: Closing,
+}
+
+impl Forwarded {
+    fn stream(&self) -> Stream {
+        match self {
+            Self::PreCommand { stream, .. } => *stream,
+            Self::SessionStdout(_) => Stream::Stdout,
+            Self::SessionStderr(_) => Stream::Stderr,
+        }
+    }
+
+    fn source(&self) -> Source {
+        match self {
+            Self::PreCommand { .. } => Source::PreCommand,
+            Self::SessionStdout(_) | Self::SessionStderr(_) => Source::Session,
+        }
+    }
 }
 
 impl Service {
@@ -146,6 +218,7 @@ impl Service {
         then: Option<Command>,
         readiness: &Arc<Readiness>,
         output: &mut JoinSet<()>,
+        printer: &Printer,
     ) -> io::Result<Self> {
         // Terminal Ctrl-C must reach the supervisor first so child signal exits
         // cannot race it and become spurious service-crash telemetry.
@@ -161,25 +234,49 @@ impl Service {
             .id()
             .map(|pid| Pid::from_raw(pid as i32))
             .ok_or_else(|| io::Error::other("spawned child has no process ID"))?;
-        let started = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(OnceLock::new());
         let planned = Arc::new(Mutex::new(None));
-        let mut stdout_closed = None;
+        let error = Arc::new(Mutex::new(None));
+        let (closing, output_closed) = oneshot::channel();
+        let closing = Arc::new(closing);
         if let Some(stdout) = child.stdout().take() {
-            let session = then.is_none().then(|| {
-                let (closed, receiver) = oneshot::channel();
-                stdout_closed = Some(receiver);
-                SessionOutput {
+            let forwarded = match then {
+                Some(_) => Forwarded::PreCommand {
+                    stream: Stream::Stdout,
+                    _closing: closing.clone(),
+                },
+                None => Forwarded::SessionStdout(SessionOutput {
                     readiness: readiness.clone(),
                     started: started.clone(),
                     held: held.clone(),
                     planned: planned.clone(),
-                    _closed: closed,
-                }
-            });
-            output.spawn(forward_output(stdout, name.clone(), session));
+                    _closing: closing.clone(),
+                }),
+            };
+            output.spawn(forward_output(
+                stdout,
+                name.clone(),
+                printer.clone(),
+                forwarded,
+            ));
         }
         if let Some(stderr) = child.stderr().take() {
-            output.spawn(forward_output(stderr, name.clone(), None));
+            let forwarded = match then {
+                Some(_) => Forwarded::PreCommand {
+                    stream: Stream::Stderr,
+                    _closing: closing,
+                },
+                None => Forwarded::SessionStderr(SessionErrors {
+                    error: error.clone(),
+                    _closing: closing,
+                }),
+            };
+            output.spawn(forward_output(
+                stderr,
+                name.clone(),
+                printer.clone(),
+                forwarded,
+            ));
         }
         Ok(Self {
             name,
@@ -191,28 +288,77 @@ impl Service {
             started,
             held,
             planned,
-            stdout_closed,
+            error,
+            runtime_note: RuntimeNote::Pending,
+            output_closed,
+            printer: printer.clone(),
         })
+    }
+
+    /// Waits, for up to [`OUTPUT_DRAIN`], until the child's output was all read.
+    async fn drain_output(&mut self) {
+        let _ = tokio::time::timeout(OUTPUT_DRAIN, &mut self.output_closed).await;
+    }
+
+    /// Whether the session's program is to pause at its .NET runtime's startup, and nothing has.
+    fn no_runtime_paused(&self) -> bool {
+        let planned = *self
+            .planned
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.debugged
+            && planned == Some(Trigger::Runtime)
+            && self.held.load(Ordering::Relaxed).not()
+    }
+
+    /// Says so once, while the service runs, when its program started `after` ago and none of
+    /// its .NET runtimes paused, though one was to. The IDE can then tell the user, instead of
+    /// waiting in silence.
+    fn say_if_no_runtime_paused_yet(&mut self, after: Duration) {
+        let started_long_ago = self
+            .started
+            .get()
+            .is_some_and(|started| started.elapsed() >= after);
+        if self.runtime_note == RuntimeNote::Pending && started_long_ago && self.no_runtime_paused()
+        {
+            self.runtime_note = RuntimeNote::Said;
+            self.printer.print(&Event::DebugNoRuntimePaused {
+                service: &self.name,
+                service_state: ServiceState::Running,
+            });
+        }
     }
 
     /// Says so when the session's program was to pause at its .NET runtime's startup, but nothing
     /// ever paused: the IDE then knows to stop waiting, and why nothing was attached.
     ///
-    /// A runtime that never connects can't be told apart from one still starting, so this is said
-    /// only once the session is gone.
+    /// A runtime that never connects can't be told apart from one still starting, so this is
+    /// final only once the session is gone. [`Self::say_if_no_runtime_paused_yet`] says it
+    /// earlier, as a note.
     fn say_if_no_runtime_paused(&self) {
-        let planned = *self
-            .planned
+        if self.no_runtime_paused() {
+            self.printer.print(&Event::DebugNoRuntimePaused {
+                service: &self.name,
+                service_state: ServiceState::Exited,
+            });
+        }
+    }
+
+    /// Prints the session's held-back error report as the stderr line it was, when no `exited`
+    /// took it: another session ended the run first, or `up` was stopped.
+    fn print_unreported_error(&self) {
+        let error = self
+            .error
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if self.debugged
-            && planned == Some(Trigger::Runtime)
-            && self.held.load(Ordering::Relaxed).not()
-        {
-            println!(
-                "{}: debug: no .NET runtime paused in this service",
-                self.name
-            );
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(error) = error {
+            self.printer.print(&Event::Output {
+                service: &self.name,
+                source: Source::Session,
+                stream: Stream::Stderr,
+                line: &session_error_line(&error),
+            });
         }
     }
 
@@ -417,14 +563,16 @@ pub(super) struct ServiceCommands {
 pub(super) async fn run(
     commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
+    printer: Printer,
 ) -> Result<(), UpError> {
     let shutdown = shutdown_signals()?;
     let (result, forced_signal) = supervise_with_second_signal(
         commands,
         ready,
+        printer,
         receive_first_signal(shutdown.first),
         receive_second_signal(shutdown.second),
-        SHUTDOWN_GRACE,
+        Timing::default(),
     )
     .await?;
     if let Some(signal) = forced_signal {
@@ -433,6 +581,24 @@ pub(super) async fn run(
         std::process::exit(exit_code);
     }
     result
+}
+
+/// The waits of supervision, which only tests shorten.
+#[derive(Debug, Clone, Copy)]
+struct Timing {
+    /// How long services get to exit on their own before they're killed.
+    grace: Duration,
+    /// See [`NO_RUNTIME_PAUSED_AFTER`].
+    no_runtime_paused: Duration,
+}
+
+impl Default for Timing {
+    fn default() -> Self {
+        Self {
+            grace: SHUTDOWN_GRACE,
+            no_runtime_paused: NO_RUNTIME_PAUSED_AFTER,
+        }
+    }
 }
 
 /// Returns when the first session child exits.
@@ -444,43 +610,61 @@ async fn wait_for_first_exit(
     services: &mut Vec<Service>,
     readiness: &Arc<Readiness>,
     output: &mut JoinSet<()>,
+    printer: &Printer,
+    no_runtime_paused_after: Duration,
 ) -> Result<(), UpError> {
+    // JSON events stay in order, so an exit is said after the last line the child wrote. Text
+    // output reads it only to tell how a session failed.
+    let drains_every_exit = printer.format() == OutputFormat::Json;
     loop {
         let mut index = 0;
         while let Some(service) = services.get_mut(index) {
             let Some(status) = service.child.try_wait()? else {
+                service.say_if_no_runtime_paused_yet(no_runtime_paused_after);
                 index += 1;
                 continue;
             };
             let Some(session) = service.then.take() else {
-                if status.success() {
-                    service.say_if_no_runtime_paused();
-                    return Ok(());
+                if status.success().not() || drains_every_exit {
+                    service.drain_output().await;
                 }
-                if let Some(closed) = service.stdout_closed.take() {
-                    let _ = tokio::time::timeout(STDOUT_DRAIN, closed).await;
-                }
-                let name = service.name.clone();
                 service.say_if_no_runtime_paused();
-                let started = service.started.load(Ordering::Relaxed);
                 // A hold that failed before announcing never reached a debugger, so its exit
                 // still reports as a crash or a failed start.
-                if service.debugged && service.held.load(Ordering::Relaxed) {
-                    println!("{name}: exited with {status} while debugged, stopping");
-                    return Ok(());
-                }
-                return Err(if started {
-                    UpError::ServiceCrashed { name, status }
+                let reason = if status.success() {
+                    ExitReason::Succeeded
+                } else if service.debugged && service.held.load(Ordering::Relaxed) {
+                    ExitReason::WhileDebugged
+                } else if service.started.get().is_some() {
+                    ExitReason::Crashed
                 } else {
-                    UpError::ServiceFailedToStart { name }
-                });
+                    ExitReason::FailedToStart
+                };
+                let error = service
+                    .error
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                let name = service.name.clone();
+                printer.print(&Event::exited(&name, reason, status, error.as_deref()));
+                return match reason {
+                    ExitReason::Succeeded | ExitReason::WhileDebugged => Ok(()),
+                    ExitReason::Crashed => Err(UpError::ServiceCrashed { name, status }),
+                    ExitReason::FailedToStart => Err(UpError::ServiceFailedToStart { name }),
+                };
             };
             // Only the leader has exited. Anything it left running in its tree
             // would outlive `mirrord up`, because shutdown only reaches the
             // trees of services still supervised here.
             service.force_stop().await?;
+            if drains_every_exit {
+                service.drain_output().await;
+            }
             if status.success() {
-                println!("{}: `run.pre_command` succeeded, starting", service.name);
+                printer.print(&Event::pre_command(
+                    &service.name,
+                    PreCommandStage::Succeeded,
+                ));
                 *service = Service::spawn(
                     service.name.clone(),
                     service.debugged,
@@ -489,14 +673,20 @@ async fn wait_for_first_exit(
                     None,
                     readiness,
                     output,
+                    printer,
                 )?;
                 index += 1;
             } else {
                 let name = services.swap_remove(index).name;
-                if services.is_empty() {
+                let remaining = if services.is_empty() {
+                    Remaining::NoneLeft
+                } else {
+                    Remaining::Others
+                };
+                printer.print(&Event::pre_command_failed(&name, status, remaining));
+                if remaining == Remaining::NoneLeft {
                     return Err(UpError::PreCommandFailed { name, status });
                 }
-                eprintln!("{name}: `run.pre_command` failed with {status}, not starting");
             }
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -518,14 +708,33 @@ fn planned_trigger(plan: &str) -> Option<Trigger> {
 fn report_runtime_holds(
     name: Arc<str>,
     held: Arc<AtomicBool>,
+    printer: Printer,
 ) -> impl Fn(Report) + Send + Sync + 'static {
     move |report| match report {
         Report::Held(announcement) => {
             held.store(true, Ordering::Relaxed);
-            println!("{name}: {announcement}");
+            let text = announcement.to_string();
+            let hold =
+                to_raw_value(&announcement).expect("a hold announcement always serializes to JSON");
+            printer.print(&Event::DebugHold {
+                service: &name,
+                hold: &hold,
+                text: &text,
+            });
         }
-        Report::Ended(ended) => println!("{name}: {ended}"),
-        Report::Refused(why) => println!("{name}: debug: {why}"),
+        Report::Ended(ended) => {
+            let text = ended.to_string();
+            let ended = to_raw_value(&ended).expect("a hold's end always serializes to JSON");
+            printer.print(&Event::DebugHoldEnded {
+                service: &name,
+                ended: &ended,
+                text: &text,
+            });
+        }
+        Report::Refused(why) => printer.print(&Event::DebugNote {
+            service: &name,
+            message: &why,
+        }),
         Report::Skipped {
             pid,
             entry_assembly,
@@ -538,8 +747,66 @@ fn report_runtime_holds(
     }
 }
 
-/// Prints each line of `stream` prefixed with the service's name. On a session's stdout, also
-/// picks up the readiness marker and the branch databases report, which is not printed.
+/// The event that passes on `line` of a session's stdout: a progress message, a debug line, or
+/// the program's own output.
+///
+/// A debug line whose JSON isn't an object with a version `v`, as `mirrord_debug_hold` writes every
+/// one, is passed on as output, as is any other line.
+fn session_line_event<'a>(service: &'a str, line: &'a str) -> Event<'a> {
+    let payload = |prefix: &str| {
+        let json = line.strip_prefix(prefix)?;
+        serde_json::from_str::<Map<String, Value>>(json)
+            .ok()?
+            .get("v")
+            .is_some_and(Value::is_u64)
+            .then(|| serde_json::from_str::<&RawValue>(json).ok())
+            .flatten()
+    };
+    if let Some(hold) = payload(ANNOUNCEMENT_PREFIX) {
+        Event::DebugHold {
+            service,
+            hold,
+            text: line,
+        }
+    } else if let Some(ended) = payload(ENDED_PREFIX) {
+        Event::DebugHoldEnded {
+            service,
+            ended,
+            text: line,
+        }
+    } else if let Some(plan) = payload(PLAN_PREFIX) {
+        Event::DebugPlan {
+            service,
+            plan,
+            text: line,
+        }
+    } else if let Some(progress) = is_progress_line(line)
+        .then(|| serde_json::from_str::<&RawValue>(line).ok())
+        .flatten()
+    {
+        Event::Progress {
+            service,
+            progress,
+            text: line,
+        }
+    } else {
+        Event::Output {
+            service,
+            source: Source::Session,
+            stream: Stream::Stdout,
+            line,
+        }
+    }
+}
+
+/// Passes on each line of `stream` as the service's: in text, prefixed with the service's name.
+/// On a session's stdout, also picks up the readiness marker and the branch databases report,
+/// which is not printed.
+///
+/// Under `--output json`, a session's last stderr line is its final error when it's an error
+/// report. It's held back, and its report put in [`SessionErrors::error`] at once, so `exited`
+/// finds it even while a descendant keeps the pipe open. A next line shows it wasn't the last: it's
+/// then printed as output, unless `exited` already took it.
 ///
 /// Lines are decoded lossily: a program may write in another encoding (a Windows console's code
 /// page, say), and one bad byte must not stop the forwarding, which would close the pipe on the
@@ -547,8 +814,28 @@ fn report_runtime_holds(
 async fn forward_output(
     stream: impl AsyncRead + Unpin,
     name: Arc<str>,
-    session: Option<SessionOutput>,
+    printer: Printer,
+    forwarded: Forwarded,
 ) {
+    let source = forwarded.source();
+    let stream_name = forwarded.stream();
+    let output = |line: &str| {
+        printer.print(&Event::Output {
+            service: &name,
+            source,
+            stream: stream_name,
+            line,
+        })
+    };
+    let error_slot = match &forwarded {
+        Forwarded::SessionStderr(errors) if printer.format() == OutputFormat::Json => {
+            Some(&errors.error)
+        }
+        _ => None,
+    };
+    // The line whose report is in `error_slot`.
+    let mut held_back: Option<String> = None;
+
     let mut reader = BufReader::new(stream);
     let mut buffer = Vec::new();
     let mut counted = false;
@@ -563,37 +850,62 @@ async fn forward_output(
                         .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
                         .unwrap_or(&buffer),
                 );
-                if let Some(session) = &session {
-                    if counted.not() && is_session_ready_line(&line) {
-                        counted = true;
-                        session.started.store(true, Ordering::Relaxed);
-                        session.readiness.mark();
-                    } else if let Some(report) = line.strip_prefix(UP_DB_BRANCHES_REPORT_PREFIX) {
-                        // Only analytics read the report, so one that doesn't parse is dropped
-                        // rather than shown.
-                        if let Ok(branches) = serde_json::from_str::<Vec<UpSessionDbBranch>>(report)
-                        {
-                            session
-                                .readiness
-                                .tracker
-                                .record_db_branches(name.clone(), branches);
-                        }
+                let Forwarded::SessionStdout(session) = &forwarded else {
+                    let Some(slot) = error_slot else {
+                        output(&line);
                         continue;
-                    } else if line.starts_with(ANNOUNCEMENT_PREFIX) {
-                        // Still printed: the IDE reads the hold line from `mirrord up`'s output.
-                        session.held.store(true, Ordering::Relaxed);
-                    } else if let Some(plan) = line.strip_prefix(PLAN_PREFIX) {
-                        *session
-                            .planned
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                            planned_trigger(plan);
+                    };
+                    let mut slot = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    // An empty slot means `exited` took the report as the session's error.
+                    if let Some(previous) = held_back.take()
+                        && slot.take().is_some()
+                    {
+                        output(&previous);
                     }
+                    match session_error(&line) {
+                        Some(error) => {
+                            *slot = Some(error);
+                            held_back = Some(line.into_owned());
+                        }
+                        None => output(&line),
+                    }
+                    continue;
+                };
+                let ready = counted.not() && is_session_ready_line(&line);
+                if ready {
+                    counted = true;
+                    let _ = session.started.set(Instant::now());
+                    session.readiness.mark();
+                } else if let Some(report) = line.strip_prefix(UP_DB_BRANCHES_REPORT_PREFIX) {
+                    // Only analytics read the report, so one that doesn't parse is dropped
+                    // rather than shown.
+                    if let Ok(branches) = serde_json::from_str::<Vec<UpSessionDbBranch>>(report) {
+                        session
+                            .readiness
+                            .tracker
+                            .record_db_branches(name.clone(), branches);
+                    }
+                    continue;
+                } else if line.starts_with(ANNOUNCEMENT_PREFIX) {
+                    // Still printed: the IDE reads the hold line from `mirrord up`'s output.
+                    session.held.store(true, Ordering::Relaxed);
+                } else if let Some(plan) = line.strip_prefix(PLAN_PREFIX) {
+                    *session
+                        .planned
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = planned_trigger(plan);
                 }
-                println!("{name}: {line}");
+                printer.print(&session_line_event(&name, &line));
+                if ready {
+                    printer.print(&Event::Ready { service: &name });
+                }
             }
             Err(error) => {
-                eprintln!("{name} output error: {error}");
+                printer.print(&Event::OutputError {
+                    service: &name,
+                    stream: stream_name,
+                    error: error.to_string(),
+                });
                 break;
             }
         }
@@ -607,17 +919,32 @@ async fn supervise(
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     grace: Duration,
 ) -> Result<(), UpError> {
-    supervise_with_second_signal(commands, ready, shutdown, std::future::pending(), grace)
-        .await?
-        .0
+    let timing = Timing {
+        grace,
+        ..Timing::default()
+    };
+    supervise_with_second_signal(
+        commands,
+        ready,
+        Printer::new(OutputFormat::Text),
+        shutdown,
+        std::future::pending(),
+        timing,
+    )
+    .await?
+    .0
 }
 
 async fn supervise_with_second_signal(
     commands: Vec<ServiceCommands>,
     ready: ReadyTracker,
+    printer: Printer,
     shutdown: impl Future<Output = io::Result<ShutdownSignal>>,
     second_shutdown: impl Future<Output = io::Result<SignalDelivery>>,
-    grace: Duration,
+    Timing {
+        grace,
+        no_runtime_paused,
+    }: Timing,
 ) -> Result<(Result<(), UpError>, Option<SignalDelivery>), UpError> {
     let total = commands.len();
     let readiness = Arc::new(Readiness {
@@ -644,11 +971,15 @@ async fn supervise_with_second_signal(
     {
         let held = Arc::new(AtomicBool::new(false));
         if let Some(port) = dotnet_port {
-            ports.spawn(port.serve(report_runtime_holds(name.clone(), held.clone())));
+            ports.spawn(port.serve(report_runtime_holds(
+                name.clone(),
+                held.clone(),
+                printer.clone(),
+            )));
         }
         let spawned = match pre {
             Some(pre) => {
-                println!("{name}: running `run.pre_command`");
+                printer.print(&Event::pre_command(&name, PreCommandStage::Started));
                 // Like a failing pre-command, one that can't start (e.g. its
                 // program is not on PATH) only drops its own service.
                 match Service::spawn(
@@ -659,9 +990,10 @@ async fn supervise_with_second_signal(
                     Some(session),
                     &readiness,
                     &mut output,
+                    &printer,
                 ) {
                     Err(error) => {
-                        eprintln!("{name}: `run.pre_command` failed to start: {error}");
+                        printer.print(&Event::pre_command_spawn_failed(&name, &error));
                         pre_command_spawn_error = Some(UpError::PreCommandSpawn {
                             name,
                             source: error,
@@ -671,7 +1003,16 @@ async fn supervise_with_second_signal(
                     spawned => spawned,
                 }
             }
-            None => Service::spawn(name, debugged, held, session, None, &readiness, &mut output),
+            None => Service::spawn(
+                name,
+                debugged,
+                held,
+                session,
+                None,
+                &readiness,
+                &mut output,
+                &printer,
+            ),
         };
         match spawned {
             Ok(service) => services.push(service),
@@ -692,7 +1033,13 @@ async fn supervise_with_second_signal(
         (Err(error), None)
     } else {
         {
-            let exits = wait_for_first_exit(&mut services, &readiness, &mut output);
+            let exits = wait_for_first_exit(
+                &mut services,
+                &readiness,
+                &mut output,
+                &printer,
+                no_runtime_paused,
+            );
             tokio::select! {
                 // A deliberate signal wins a same-poll tie so the session remains
                 // successful for telemetry regardless of a coincident child exit.
@@ -734,6 +1081,9 @@ async fn supervise_with_second_signal(
     })
     .await;
     output.shutdown().await;
+    for service in &services {
+        service.print_unreported_error();
+    }
 
     let (forced_signal, second_shutdown_error) = if let Some(signal) = forced_signal {
         (Some(signal), None)
@@ -753,7 +1103,9 @@ async fn supervise_with_second_signal(
     // A failed cleanup is useful diagnostic information, not evidence that a
     // deliberate user stop or an already-recorded service crash changed outcome.
     if let Some(error) = cleanup_error {
-        eprintln!("Failed to stop a mirrord up child: {error}");
+        printer.print(&Event::StopFailed {
+            error: error.to_string(),
+        });
     }
     if let Some(error) = second_shutdown_error {
         return Err(UpError::Io(error));
@@ -767,8 +1119,10 @@ mod test_support;
 #[cfg(test)]
 mod output_tests {
     use rstest::rstest;
+    use tokio::io::AsyncWriteExt;
 
     use super::*;
+    use crate::output::Printed;
 
     /// A line in another encoding (`£` in a Windows console's code page 850, here) doesn't stop
     /// the forwarding: the readiness marker after it is still read.
@@ -780,8 +1134,8 @@ mod output_tests {
             start: Instant::now(),
             tracker: ReadyTracker::default(),
         });
-        let started = Arc::new(AtomicBool::new(false));
-        let (closed, _receiver) = oneshot::channel();
+        let started = Arc::new(OnceLock::new());
+        let (closing, _closed) = oneshot::channel();
         let output = [
             b"price: \x9c5\r\n".as_slice(),
             SESSION_READY_MESSAGE.as_bytes(),
@@ -792,18 +1146,19 @@ mod output_tests {
         forward_output(
             output.as_slice(),
             Arc::from("shop"),
-            Some(SessionOutput {
+            Printer::new(OutputFormat::Text),
+            Forwarded::SessionStdout(SessionOutput {
                 readiness: readiness.clone(),
                 started: started.clone(),
                 held: Arc::new(AtomicBool::new(false)),
                 planned: Arc::new(Mutex::new(None)),
-                _closed: closed,
+                _closing: Arc::new(closing),
             }),
         )
         .await;
 
         assert!(
-            started.load(Ordering::Relaxed),
+            started.get().is_some(),
             "the readiness marker comes after the bad byte, so it must still be read"
         );
         assert_eq!(readiness.count.load(Ordering::Relaxed), 1);
@@ -848,18 +1203,19 @@ mod output_tests {
             start: Instant::now(),
             tracker: ReadyTracker::default(),
         });
-        let started = Arc::new(AtomicBool::new(false));
-        let (closed, _receiver) = oneshot::channel();
+        let started = Arc::new(OnceLock::new());
+        let (closing, _closed) = oneshot::channel();
 
         forward_output(
             output.as_bytes(),
             Arc::from("shop"),
-            Some(SessionOutput {
+            Printer::new(OutputFormat::Text),
+            Forwarded::SessionStdout(SessionOutput {
                 readiness: readiness.clone(),
                 started: started.clone(),
                 held: Arc::new(AtomicBool::new(false)),
                 planned: Arc::new(Mutex::new(None)),
-                _closed: closed,
+                _closing: Arc::new(closing),
             }),
         )
         .await;
@@ -870,12 +1226,287 @@ mod output_tests {
         };
         assert_eq!(counted, expected, "the session's output was {output:?}");
         assert_eq!(
-            started.load(Ordering::Relaxed),
+            started.get().is_some(),
             expected == Counted::Ready,
             "a session got as far as its program exactly when it counted ready"
         );
     }
+
+    /// A session's progress, debug lines, readiness and the program's own lines, from
+    /// `session-stdout.txt`.
+    const SESSION_STDOUT: &str = include_str!("testdata/output/session-stdout.txt");
+
+    /// Forwards `output` as the stdout of the session of a service called `api`, and returns what
+    /// was printed and the tracker of what the session reported.
+    async fn forward_session_stdout(
+        output: &str,
+        format: OutputFormat,
+    ) -> (Vec<Printed>, ReadyTracker) {
+        let tracker = ReadyTracker::default();
+        let readiness = Arc::new(Readiness {
+            count: AtomicUsize::new(0),
+            total: 1,
+            start: Instant::now(),
+            tracker: tracker.clone(),
+        });
+        let (printer, printed) = Printer::captured(format);
+        let (closing, _closed) = oneshot::channel();
+        forward_output(
+            output.as_bytes(),
+            Arc::from("api"),
+            printer,
+            Forwarded::SessionStdout(SessionOutput {
+                readiness,
+                started: Arc::new(OnceLock::new()),
+                held: Arc::new(AtomicBool::new(false)),
+                planned: Arc::new(Mutex::new(None)),
+                _closing: Arc::new(closing),
+            }),
+        )
+        .await;
+        let printed = printed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        (printed, tracker)
+    }
+
+    /// Under `--output json`, each line of a session's stdout is its event: progress and debug
+    /// lines carry their object as `mirrord exec` printed it, `Ready!` is followed by `ready`,
+    /// and the rest, a line that only looks like a debug line or progress included, is output.
+    /// The branch databases report is read, not printed.
+    #[tokio::test]
+    async fn json_turns_each_session_line_into_its_event() {
+        let (printed, tracker) = forward_session_stdout(SESSION_STDOUT, OutputFormat::Json).await;
+
+        let lines = printed
+            .iter()
+            .map(|printed| {
+                assert_eq!(printed.stream, Stream::Stdout, "every event goes to stdout");
+                printed.line.as_str()
+            })
+            .collect::<Vec<_>>();
+        let expected = include_str!("testdata/output/session-stdout.events.jsonl")
+            .lines()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            lines, expected,
+            "each session line becomes the event in `session-stdout.events.jsonl`"
+        );
+        assert_eq!(
+            tracker.db_branches().get("api").map(Vec::len),
+            Some(1),
+            "the report was read"
+        );
+    }
+
+    /// Without `--output json`, every line of a session's stdout is printed as it was, behind the
+    /// service's name, except the branch databases report.
+    #[tokio::test]
+    async fn text_passes_each_session_line_on_as_it_was() {
+        let (printed, _) = forward_session_stdout(SESSION_STDOUT, OutputFormat::Text).await;
+
+        let expected = SESSION_STDOUT
+            .lines()
+            .filter(|line| line.starts_with(UP_DB_BRANCHES_REPORT_PREFIX).not())
+            .map(|line| Printed {
+                stream: Stream::Stdout,
+                line: format!("api: {line}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            printed, expected,
+            "text output passes each line on as it was, behind the service's name"
+        );
+    }
+
+    /// What forwarding a session's stderr kept as its final error.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Kept {
+        /// The last line, which was an error report, and isn't printed.
+        LastLine,
+        /// No error: every line was printed.
+        Nothing,
+    }
+
+    /// Under `--output json`, a session's last stderr line is its final error only if it's an
+    /// error report: it then goes on `exited`, not printed. Every other line is printed as
+    /// output, a report that isn't last too. Text output keeps nothing back.
+    #[rstest]
+    #[case::report_last(
+        include_str!("testdata/output/stderr-error-last.txt"),
+        OutputFormat::Json,
+        Kept::LastLine
+    )]
+    // The program printed a report and went on, so the report isn't the session's error.
+    #[case::report_not_last(
+        include_str!("testdata/output/stderr-error-not-last.txt"),
+        OutputFormat::Json,
+        Kept::Nothing
+    )]
+    // The program's last line is JSON, but no error report.
+    #[case::json_that_is_no_report(
+        include_str!("testdata/output/stderr-json-not-a-report.txt"),
+        OutputFormat::Json,
+        Kept::Nothing
+    )]
+    // `Error: ` and JSON, but no miette report: it has no `message`.
+    #[case::report_without_a_message(
+        include_str!("testdata/output/stderr-error-without-message.txt"),
+        OutputFormat::Json,
+        Kept::Nothing
+    )]
+    // Without the flag no session reports JSON errors, so a report-like line is the program's.
+    #[case::text_keeps_nothing(
+        include_str!("testdata/output/stderr-error-last.txt"),
+        OutputFormat::Text,
+        Kept::Nothing
+    )]
+    #[tokio::test]
+    async fn only_a_last_report_line_is_kept_as_the_session_error(
+        #[case] stderr: &str,
+        #[case] format: OutputFormat,
+        #[case] expected: Kept,
+    ) {
+        let (printer, printed) = Printer::captured(format);
+        let error = Arc::new(Mutex::new(None));
+        let (closing, _closed) = oneshot::channel();
+        forward_output(
+            stderr.as_bytes(),
+            Arc::from("api"),
+            printer,
+            Forwarded::SessionStderr(SessionErrors {
+                error: error.clone(),
+                _closing: Arc::new(closing),
+            }),
+        )
+        .await;
+
+        let lines = stderr.lines().collect::<Vec<_>>();
+        let printed_lines = match expected {
+            Kept::LastLine => lines.split_last().map(|(_, rest)| rest).unwrap_or_default(),
+            Kept::Nothing => lines.as_slice(),
+        };
+        // JSON lines compare as values, so the test doesn't depend on the order of their keys.
+        let expected_printed = printed_lines
+            .iter()
+            .map(|line| match format {
+                OutputFormat::Json => serde_json::json!({
+                    "type": "output",
+                    "service": "api",
+                    "source": "session",
+                    "stream": "stderr",
+                    "line": line,
+                }),
+                OutputFormat::Text => serde_json::Value::from(format!("api: {line}")),
+            })
+            .collect::<Vec<_>>();
+        let printed = printed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .map(|printed| match format {
+                OutputFormat::Json => {
+                    serde_json::from_str(&printed.line).expect("every JSON line parses")
+                }
+                OutputFormat::Text => serde_json::Value::from(printed.line.clone()),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            printed, expected_printed,
+            "every line but a kept report is printed as output"
+        );
+
+        let kept = error
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        match expected {
+            Kept::LastLine => {
+                let kept = kept.expect("the last line was a report");
+                let last = lines.last().expect("the fixture has lines");
+                assert_eq!(
+                    Some(kept.get()),
+                    last.strip_prefix("Error: "),
+                    "the report is kept as it was printed"
+                );
+            }
+            Kept::Nothing => assert!(kept.is_none(), "kept {kept:?}"),
+        }
+    }
+
+    /// Under `--output json`, a session's error report is its error as soon as it's the last line
+    /// so far, so `exited` finds it though a descendant keeps the session's stderr open past the
+    /// drain. Once taken, a later line doesn't print it as output too.
+    #[tokio::test]
+    async fn a_report_is_the_session_error_while_stderr_stays_open() {
+        let (printer, printed) = Printer::captured(OutputFormat::Json);
+        let error = Arc::new(Mutex::new(None));
+        let (closing, _closed) = oneshot::channel();
+        let (mut stderr, read_end) = tokio::io::duplex(64 * 1024);
+        let forwarding = tokio::spawn(forward_output(
+            read_end,
+            Arc::from("api"),
+            printer,
+            Forwarded::SessionStderr(SessionErrors {
+                error: error.clone(),
+                _closing: Arc::new(closing),
+            }),
+        ));
+        let report = include_str!("testdata/output/ls-error.txt");
+        stderr
+            .write_all(report.as_bytes())
+            .await
+            .expect("the forwarding reads the pipe");
+
+        let taken = tokio::time::timeout(test_support::TIMEOUT, async {
+            loop {
+                let taken = error
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                if let Some(taken) = taken {
+                    break taken;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the report is the error while the pipe is still open");
+        assert_eq!(
+            Some(taken.get()),
+            report.trim_end().strip_prefix("Error: "),
+            "the report is kept as it was printed"
+        );
+
+        stderr
+            .write_all(b"a descendant's line\n")
+            .await
+            .expect("the forwarding reads the pipe");
+        drop(stderr);
+        forwarding.await.expect("the forwarding doesn't panic");
+        let lines = printed
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .map(|printed| {
+                serde_json::from_str::<serde_json::Value>(&printed.line)
+                    .expect("every JSON line parses")
+                    .get("line")
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            lines,
+            [Some(serde_json::Value::from("a descendant's line"))],
+            "the report `exited` took isn't output too"
+        );
+    }
 }
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod event_tests;
 
 #[cfg(all(test, windows))]
 mod windows_tests;
@@ -1008,9 +1639,13 @@ mod tests {
             supervise_with_second_signal(
                 vec![command],
                 ReadyTracker::default(),
+                Printer::new(OutputFormat::Text),
                 first_shutdown,
                 second_shutdown,
-                TEST_GRACE,
+                Timing {
+                    grace: TEST_GRACE,
+                    ..Timing::default()
+                },
             ),
         )
         .await
@@ -1228,7 +1863,13 @@ mod tests {
             },
             directory,
         );
-        run(vec![command], ready.clone()).await.unwrap();
+        run(
+            vec![command],
+            ready.clone(),
+            Printer::new(OutputFormat::Text),
+        )
+        .await
+        .unwrap();
         assert!(ready.time_to_ready().is_some());
         if std::env::var_os("MIRRORD_UP_SIGNAL_TEST_DRAIN").is_some() {
             std::fs::write(directory.join("draining"), []).unwrap();

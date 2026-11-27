@@ -29,7 +29,7 @@ kube.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_yaml.workspace = true
 serde-saphyr.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 schemars.workspace = true
 miette = { workspace = true, features = ["fancy"] }
 process-wrap.workspace = true

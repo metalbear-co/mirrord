@@ -1,0 +1,11 @@
+{"type":"progress","service":"api","progress":{"type":"NewTask","name":"running process","parent":"mirrord exec"}}
+{"type":"debug_plan","service":"api","plan":{"v":2,"trigger":"process","dotnet":null,"image":"C:\\app\\api.exe","note":null}}
+{"type":"debug_hold","service":"api","hold":{"v":2,"trigger":"process","pid":4242,"release":"Local\\mirrord-debug-hold-4242","image":"C:\\app\\api.exe","parent_pid":4000,"command_line":"api.exe","runtime":null,"entry_assembly":null,"runtime_version":null,"os":null,"arch":null,"rid":null}}
+{"type":"debug_hold_ended","service":"api","ended":{"v":2,"release":"Local\\mirrord-debug-hold-4242","pid":4242,"outcome":"resumed","error":null}}
+{"type":"progress","service":"api","progress":{"type":"FinishedTask","name":"running process","success":true,"message":"Ready!"}}
+{"type":"ready","service":"api"}
+{"type":"output","service":"api","source":"session","stream":"stdout","line":"listening on :8080"}
+{"type":"output","service":"api","source":"session","stream":"stdout","line":"debug-hold the program's own line, not a hold"}
+{"type":"output","service":"api","source":"session","stream":"stdout","line":"debug-hold {}"}
+{"type":"output","service":"api","source":"session","stream":"stdout","line":"debug-plan null"}
+{"type":"output","service":"api","source":"session","stream":"stdout","line":"{\"type\":\"Telemetry\",\"value\":1}"}

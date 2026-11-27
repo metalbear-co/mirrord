@@ -249,6 +249,7 @@ async fn supervisor_helper() {
     run(
         vec![service(&directory, "service", &service_mode)],
         ready.clone(),
+        Printer::new(OutputFormat::Text),
     )
     .await
     .unwrap();
@@ -512,9 +513,13 @@ async fn second_shutdown_error_forces_cleanup_before_returning() {
         supervise_with_second_signal(
             vec![service(directory.path(), "serving", "serve")],
             ReadyTracker::default(),
+            Printer::new(OutputFormat::Text),
             first_shutdown,
             second_shutdown,
-            TEST_GRACE,
+            Timing {
+                grace: TEST_GRACE,
+                ..Timing::default()
+            },
         ),
     )
     .await

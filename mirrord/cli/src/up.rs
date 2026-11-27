@@ -15,7 +15,7 @@ use mirrord_analytics::{
 use mirrord_config::config::EnvKey;
 use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_up::{
-    InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
+    InitError, Printer, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
     load_up_config, run_wizard,
 };
 use thiserror::Error;
@@ -199,7 +199,9 @@ pub(crate) async fn up_command(
     // `config_validation` event; downgrade once the config is read.
     let mut analytics = AnalyticsReporter::for_up_event(true, watch, user_data.machine_id());
 
-    let result = normalize_cancellation(run_up(args, &mut analytics).await);
+    let printer = Printer::new(args.output.into());
+    let result = normalize_cancellation(run_up(args, &mut analytics, &printer).await);
+    printer.finished(result.as_ref().err().map(|error| error as &dyn Diagnostic));
 
     record_outcome(&result, analytics.get_mut());
     result
@@ -248,7 +250,11 @@ async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliE
     Ok(())
 }
 
-async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
+async fn run_up(
+    args: UpArgs,
+    analytics: &mut AnalyticsReporter,
+    printer: &Printer,
+) -> Result<(), UpCliError> {
     let key = session_key(args.key.clone())?;
     let mut up_config = load_config(&args, &key)?;
 
@@ -311,25 +317,34 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     }
 
     // IDEs run `up` without a terminal on stdin. A prompt then waits on a console no one sees, or
-    // fails as "not a TTY" when there's none, so a missing target fails at once instead.
-    let interactive = std::io::stdin().is_terminal();
+    // fails as "not a TTY" when there's none, so a missing target fails at once instead. JSON
+    // output never prompts either: its reader is a program, and a prompt would print text.
+    let interactive = std::io::stdin().is_terminal() && printer.can_prompt();
     let mut services = mirrord_up::resolve_services(
         up_config,
         &args.config_file,
         args.context,
         &key,
         interactive,
+        printer,
     )
     .await?;
     let mut operators = checks::usable_operators(&services).await?;
-    checks::check_queue_splits(&services, &operators)?;
-    let requesting = checks::check_db_branches(&mut services, &mut operators).await?;
+    checks::check_queue_splits(&services, &operators, printer)?;
+    let requesting = checks::check_db_branches(&mut services, &mut operators, printer).await?;
     let modes = services
         .iter()
         .map(|service| (service.service_name.clone(), service.mode.clone()))
         .collect::<Vec<_>>();
 
-    let result = mirrord_up::launch(services, correlation_id, &args.debug, ready.clone()).await;
+    let result = mirrord_up::launch(
+        services,
+        correlation_id,
+        &args.debug,
+        ready.clone(),
+        printer.clone(),
+    )
+    .await;
 
     analytics.get_mut().add(
         "services",

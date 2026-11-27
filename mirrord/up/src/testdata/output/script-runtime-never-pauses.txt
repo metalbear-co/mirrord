@@ -1,0 +1,3 @@
+stdout debug-plan {"v":2,"trigger":"runtime","dotnet":"apphost","image":"api.exe","note":null}
+stdout Ready!
+wait

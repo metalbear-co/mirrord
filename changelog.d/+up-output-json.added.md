@@ -1,0 +1,1 @@
+Experimental: `mirrord up --output json --no-ui` prints every line as one JSON event for IDEs: each service's output, progress, debug holds and end, and the run's error last. Without the flag, the output doesn't change.

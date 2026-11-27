@@ -1,0 +1,2 @@
+stdout Ready!
+exit 0

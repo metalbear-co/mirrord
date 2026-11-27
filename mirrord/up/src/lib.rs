@@ -60,11 +60,13 @@ use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
 
 use crate::kube_context::UpKubeContext;
+pub use crate::output::{OutputFormat, Printer, SESSION_OUTPUT_ENV, SESSION_OUTPUT_JSON};
 
 mod config;
 mod init;
 mod kube_context;
 mod list;
+mod output;
 mod process;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
@@ -530,6 +532,7 @@ async fn resolve_unresolved_workloads(
     config_path: &Path,
     up_context: UpKubeContext,
     resolution: Resolution,
+    printer: &Printer,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -572,7 +575,7 @@ async fn resolve_unresolved_workloads(
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 if resolution != Resolution::Quiet {
-                    println!("{name}: using {path}");
+                    printer.note(Some(name), &format!("using {path}"));
                 }
                 ResolvedTarget {
                     resolved: SpecifiedTarget {
@@ -890,6 +893,7 @@ pub async fn resolve_services(
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
     interactive: bool,
+    printer: &Printer,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
     let config_directory = config_directory(config_path)?;
@@ -897,11 +901,14 @@ pub async fn resolve_services(
         let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
         for (service, config) in &up_config.services {
             if config.run.directory.is_none() {
-                println!(
-                    "{service}: no `run.directory` set, running from {} ({} is in {})",
-                    invocation_directory.display(),
-                    Path::new(config_name).display(),
-                    config_directory.display(),
+                printer.note(
+                    Some(service),
+                    &format!(
+                        "no `run.directory` set, running from {} ({} is in {})",
+                        invocation_directory.display(),
+                        Path::new(config_name).display(),
+                        config_directory.display(),
+                    ),
                 );
             }
         }
@@ -917,9 +924,14 @@ pub async fn resolve_services(
     } else {
         Resolution::Fail
     };
-    let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), resolution)
-            .await?;
+    let mut resolved_targets = resolve_unresolved_workloads(
+        &up_config,
+        config_path,
+        up_context.clone(),
+        resolution,
+        printer,
+    )
+    .await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -955,6 +967,7 @@ pub async fn resolve_preview_services(
         config_path,
         up_context.clone(),
         Resolution::Quiet,
+        &Printer::new(OutputFormat::Text),
     )
     .await?;
 
@@ -978,8 +991,9 @@ pub async fn resolve_preview_services(
 /// [`UpConfig::select_services`] has checked that each is one of the services launched.
 ///
 /// Each session reports its progress in `simple` mode, or in `json` when `mirrord up`'s own
-/// [`MIRRORD_PROGRESS_ENV`] asks for it. An IDE then reads each session's steps as it reads a
-/// `mirrord exec` of its own, behind the service's prefix.
+/// [`MIRRORD_PROGRESS_ENV`] asks for it, or `printer` writes JSON. An IDE then reads each
+/// session's steps as it reads a `mirrord exec` of its own, behind the service's prefix, or as
+/// the service's `progress` events.
 ///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
@@ -987,10 +1001,20 @@ pub async fn launch(
     correlation_id: Uuid,
     debug: &[String],
     ready: ReadyTracker,
+    printer: Printer,
 ) -> Result<(), UpError> {
-    let line_mode = LineMode::from_env().unwrap_or(LineMode::Simple);
-    let commands = service_commands(service_configs, correlation_id, debug, line_mode)?;
-    process::run(commands, ready).await
+    let line_mode = match printer.format() {
+        OutputFormat::Json => LineMode::Json,
+        OutputFormat::Text => LineMode::from_env().unwrap_or(LineMode::Simple),
+    };
+    let commands = service_commands(
+        service_configs,
+        correlation_id,
+        debug,
+        line_mode,
+        printer.format(),
+    )?;
+    process::run(commands, ready, printer).await
 }
 
 /// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
@@ -999,7 +1023,7 @@ pub async fn launch(
 /// diagnostic port made for each of them, [`MIRRORD_DEBUG_DOTNET_PORT`]. Nothing else `up` starts
 /// gets either, nor inherits them from `mirrord up`'s own environment, so it runs as usual whatever
 /// that holds: a pre-command builds without anything pausing. Every session reports its progress
-/// in `line_mode`.
+/// in `line_mode`, and its final error as `up`'s `output` asks ([`SESSION_OUTPUT_ENV`]).
 ///
 /// Must be called within a tokio runtime, which the ports register with.
 fn service_commands(
@@ -1007,6 +1031,7 @@ fn service_commands(
     correlation_id: Uuid,
     debug: &[String],
     line_mode: LineMode,
+    output: OutputFormat,
 ) -> Result<Vec<process::ServiceCommands>, UpError> {
     service_configs
         .into_iter()
@@ -1045,6 +1070,10 @@ fn service_commands(
                 cmd.env_remove(MIRRORD_DEBUG_HOLD)
                     .env_remove(MIRRORD_DEBUG_DOTNET_PORT);
                 None
+            };
+            match output {
+                OutputFormat::Json => cmd.env(SESSION_OUTPUT_ENV, SESSION_OUTPUT_JSON),
+                OutputFormat::Text => cmd.env_remove(SESSION_OUTPUT_ENV),
             };
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
                 .env(MIRRORD_PROGRESS_ENV, line_mode.as_str())
@@ -1415,9 +1444,14 @@ services:
             .expect("assemble the services");
 
         let debug = ["worker".to_owned(), "api".to_owned()];
-        let mut commands =
-            service_commands(service_configs, Uuid::nil(), &debug, LineMode::Simple)
-            .expect("build the commands");
+        let mut commands = service_commands(
+            service_configs,
+            Uuid::nil(),
+            &debug,
+            LineMode::Simple,
+            OutputFormat::Text,
+        )
+        .expect("build the commands");
         commands.sort_by(|a, b| a.name.cmp(&b.name));
         commands
     }

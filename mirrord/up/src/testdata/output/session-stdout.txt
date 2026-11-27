@@ -1,0 +1,11 @@
+{"type":"NewTask","name":"running process","parent":"mirrord exec"}
+debug-plan {"v":2,"trigger":"process","dotnet":null,"image":"C:\\app\\api.exe","note":null}
+debug-hold {"v":2,"trigger":"process","pid":4242,"release":"Local\\mirrord-debug-hold-4242","image":"C:\\app\\api.exe","parent_pid":4000,"command_line":"api.exe","runtime":null,"entry_assembly":null,"runtime_version":null,"os":null,"arch":null,"rid":null}
+debug-hold-ended {"v":2,"release":"Local\\mirrord-debug-hold-4242","pid":4242,"outcome":"resumed","error":null}
+{"type":"FinishedTask","name":"running process","success":true,"message":"Ready!"}
+mirrord-up-db-branches:[{"name":"api-branch","cluster":"https://cluster.example","created":true}]
+listening on :8080
+debug-hold the program's own line, not a hold
+debug-hold {}
+debug-plan null
+{"type":"Telemetry","value":1}
