@@ -149,9 +149,9 @@ With an operator on the Enterprise plan, `mirrord ci` commands need a CI API key
 
 The key is one line that starts with `mci-v1:`, so GitLab can mask it. Without the operator, or without a key on the Free and Team plans, skip this step.
 
-### 5. Give the variables only to reviewed pipelines
+### 5. Run only trusted code with the credentials
 
-A merge request pipeline runs the code of the merge request with the kubeconfig and the CI API key. Thus give the variables only to pipelines that a Maintainer starts after a review. In GitLab 18.1 and later, a merge request pipeline can read protected variables only when:
+A merge request pipeline runs the code of the merge request with the kubeconfig and the CI API key, so that code can read both. Thus give the variables only to pipelines that a Maintainer starts after a review. In GitLab 18.1 and later, a merge request pipeline can read protected variables only when:
 
 - The source branch and the target branch are both protected.
 - The user who starts the pipeline can push or merge to the target branch.
@@ -164,7 +164,7 @@ Do these steps:
 3. In **Settings > CI/CD > Variables**, under **Access protected resources in merge request pipelines**, select **Allow merge request pipelines to access protected variables and runners**.
 4. Review the changes of each merge request, including `.gitlab-ci.yml` and the test scripts. Then, on the **Pipelines** tab of the merge request, select **Run pipeline**.
 
-A pipeline that a Developer starts with a push does not get the variables, so its mirrord jobs fail. See [Control access to protected variables and runners](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/#control-access-to-protected-variables-and-runners).
+A pipeline that a Developer starts with a push does not get the variables, so its mirrord jobs fail. A pipeline that a Maintainer starts gets the variables, both with **Run pipeline** and with a push to the source branch. Both pipelines run the latest commit of the source branch, also commits that a Developer pushed after your review. Thus review all commits of the branch before you select **Run pipeline** or push to the branch. To stop Developers from adding commits after a review, set **Allowed to push and merge** of the merge request branches to **Maintainers**. See [Control access to protected variables and runners](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/#control-access-to-protected-variables-and-runners).
 
 ## Install the mirrord CLI in a job
 
@@ -420,8 +420,15 @@ preview-start:
       EOF
       )
       API="$CI_API_V4_URL/projects/$CI_MERGE_REQUEST_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
-      NOTE_ID=$(curl -fsS -H "PRIVATE-TOKEN: $GITLAB_NOTES_TOKEN" "$API?sort=asc&per_page=100" \
-        | jq -r --arg m "$MARKER" '[.[] | select(.body | startswith($m))][0].id // empty')
+      # Read the notes page by page until the marker is found or a page is empty.
+      NOTE_ID=""
+      PAGE=1
+      while [ -z "$NOTE_ID" ]; do
+        NOTES=$(curl -fsS -H "PRIVATE-TOKEN: $GITLAB_NOTES_TOKEN" "$API?sort=asc&per_page=100&page=$PAGE")
+        [ "$(printf '%s' "$NOTES" | jq length)" -gt 0 ] || break
+        NOTE_ID=$(printf '%s' "$NOTES" | jq -r --arg m "$MARKER" '[.[] | select(.body | startswith($m))][0].id // empty')
+        PAGE=$((PAGE + 1))
+      done
       DATA=$(jq -n --arg body "$BODY" '{body: $body}')
       if [ -n "$NOTE_ID" ]; then
         curl -fsS -X PUT -H "PRIVATE-TOKEN: $GITLAB_NOTES_TOKEN" -H "Content-Type: application/json" \

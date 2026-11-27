@@ -8,7 +8,7 @@ tags:
 
 # How to Use mirrord in Jenkins
 
-This guide shows how to use mirrord in a Jenkins Multibranch Pipeline. You get two flows, each with a declarative `Jenkinsfile` that you can copy into your repository:
+This guide shows how to use mirrord in a Jenkins Multibranch Pipeline. You get two flows, each with a declarative `Jenkinsfile` that you can copy:
 
 1. Each pull request runs its tests against the real staging cluster, without a deploy.
 2. Each pull request gets a preview environment that reviewers open with one header.
@@ -25,14 +25,11 @@ The setup in this guide needs the mirrord operator. Flow 1 can also run with ope
   - [Pipeline](https://plugins.jenkins.io/workflow-aggregator/) and [Pipeline: Multibranch](https://plugins.jenkins.io/workflow-multibranch/).
   - [GitHub Branch Source](https://plugins.jenkins.io/github-branch-source/), for pull request discovery.
   - [Credentials Binding](https://plugins.jenkins.io/credentials-binding/), for `withCredentials`.
+  - [Pipeline: Multibranch with defaults](https://plugins.jenkins.io/pipeline-multibranch-defaults/) and [Config File Provider](https://plugins.jenkins.io/config-file-provider/), to load the `Jenkinsfile` from Jenkins, not from the pull request.
 - A Linux agent (x86_64 or aarch64) with `curl`, `jq`, `git`, and, for flow 2, `docker`.
 - mirrord CLI `3.181.0` or later for `mirrord ci`, and `3.189.0` or later for `mirrord preview`. The cleanup job in flow 2 uses `--glob`, which needs CLI `3.248.0` or later. This guide uses `3.288.0`.
 - For flow 2: mirrord operator `3.142.0` or later, with `operator.previewEnv` set to `true` in the Helm values. See [Preview Environments](../preview-environments.md).
 - A Multibranch Pipeline job that uses the GitHub Branch Source, with the **Discover pull requests from origin** behavior.
-
-{% hint style="warning" %}
-Do not give these credentials to pull requests from forks that you do not trust. A fork pull request can change the code that runs with the kubeconfig. Set the **Discover pull requests from forks** trust to **From users with Admin or Write permission**, or remove fork discovery.
-{% endhint %}
 
 Configure a GitHub webhook to Jenkins, or Jenkins finds new pull requests only when it scans the repository. See the [Multibranch Pipeline documentation](https://www.jenkins.io/doc/book/pipeline/multibranch/).
 
@@ -162,6 +159,18 @@ Store the key as the Secret text credential `mirrord-ci-api-key`. The `Jenkinsfi
 
 On the Free and Team plans, operator `3.224.0` or later and CLI `3.272.0` or later do not need the key. `mirrord ci` then uses the identity of the kubeconfig. If you do not use a key, do not create the `mirrord-ci-api-key` credential. Then remove the `string(credentialsId: 'mirrord-ci-api-key', ...)` line from both `withCredentials` blocks in flow 1, because Jenkins fails a binding to a credential that does not exist.
 
+### 4. Run only trusted code with the credentials
+
+A build that binds these credentials can read them. By default, a Multibranch Pipeline takes the `Jenkinsfile` from the pull request. The GitHub Branch Source trusts all pull requests from origin, and its fork **Trust** setting applies only to forks. Thus anyone who can push a branch can change the `Jenkinsfile` and print the credentials. Load the `Jenkinsfile` from Jenkins, and let a reviewer approve each build before it binds the credentials:
+
+1. In **Manage Jenkins > Managed files**, add a config file of type **Groovy file** with the ID `mirrord-jenkinsfile`.
+2. Paste the `Jenkinsfile` of [flow 1](#the-jenkinsfile) into its content.
+3. In the Multibranch Pipeline job, under **Build Configuration**, set **Mode** to **by default Jenkinsfile**.
+4. Set **Script ID** to `mirrord-jenkinsfile`, and select **Run default Jenkinsfile within Groovy sandbox**.
+5. In the `Approve` stage of the `Jenkinsfile`, set `submitter` to the users or groups that review pull requests.
+
+All branches and pull requests of the job, also pull requests from forks, then use this `Jenkinsfile`. The `Approve` stage waits until a reviewer selects **Proceed**. Review the changes of the pull request before you select it. Only the stages after `Approve` bind the credentials. A new push aborts the build that waits, so each approval applies to the code that its build checked out. See the [Pipeline: Multibranch with defaults documentation](https://plugins.jenkins.io/pipeline-multibranch-defaults/).
+
 ## Install the mirrord CLI in the job
 
 The `Jenkinsfile` below installs a pinned version with the install script of the same release tag:
@@ -240,6 +249,18 @@ pipeline {
       }
     }
 
+    // A reviewer approves the build before any stage binds the credentials.
+    stage('Approve') {
+      when { changeRequest() }
+      input {
+        message 'Run the code of this pull request with the staging credentials?'
+        submitter 'staging-reviewers'
+      }
+      steps {
+        echo 'Approved.'
+      }
+    }
+
     stage('Test against staging') {
       when { changeRequest() }
       steps {
@@ -287,6 +308,7 @@ pipeline {
 
 Read these points before you change the `Jenkinsfile`:
 
+- **The `Approve` stage** pauses the build until a user in `submitter` approves it. See [Run only trusted code with the credentials](#cluster-access).
 - **`when { changeRequest() }`** runs the stage only for pull request builds. The GitHub Branch Source sets `CHANGE_ID` to the pull request number for these builds.
 - **The service runs in the background.** `mirrord ci start` starts the service in the background and returns. The service stays after the `sh` step ends, so the tests can also run in a later step. Jenkins stops the service when the build ends. The `post` block runs before that, so `mirrord ci stop` still finds the session. See [Spawning processes from build](https://www.jenkins.io/doc/book/managing/spawning-processes/).
 - **The wait loop.** `mirrord ci start` returns before the service listens. Until the service listens, the deployed service answers the requests with the header. mirrord steals the port when the service starts to listen, so the loop waits until the service answers on the agent, at `localhost:8080`. The last `curl` fails the build if the service did not start. Use the port and the health path of your service.
@@ -330,7 +352,7 @@ mirrord replaces `{{ key }}` with the key that you give with `-k`. Do not write 
 
 ### The Jenkinsfile stage
 
-Add this stage to the `stages` block of the same `Jenkinsfile`, after `Install mirrord`:
+Add this stage to the `stages` block of the same `Jenkinsfile`, after `Approve`:
 
 ```groovy
     stage('Preview environment') {
@@ -368,11 +390,18 @@ Add this stage to the `stages` block of the same `Jenkinsfile`, after `Install m
               "$MARKER" "$PREVIEW_KEY" "$IMAGE" "$PREVIEW_KEY")
             PAYLOAD=$(jq -n --arg body "$BODY" '{body: $body}')
 
-            COMMENT_ID=$(curl -fsSL \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "${API}/issues/${CHANGE_ID}/comments?per_page=100" \
-              | jq -r --arg m "$MARKER" '[.[] | select(.body | startswith($m))][0].id // empty')
+            # Read the comments page by page until the marker is found or a page is empty.
+            COMMENT_ID=""
+            PAGE=1
+            while [ -z "$COMMENT_ID" ]; do
+              COMMENTS=$(curl -fsSL \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "${API}/issues/${CHANGE_ID}/comments?per_page=100&page=${PAGE}")
+              [ "$(printf '%s' "$COMMENTS" | jq length)" -gt 0 ] || break
+              COMMENT_ID=$(printf '%s' "$COMMENTS" | jq -r --arg m "$MARKER" '[.[] | select(.body | startswith($m))][0].id // empty')
+              PAGE=$((PAGE + 1))
+            done
 
             if [ -n "$COMMENT_ID" ]; then
               curl -fsSL -X PATCH \

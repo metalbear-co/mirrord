@@ -122,10 +122,21 @@ current-context: mirrord-ci
 EOF
 ```
 
-Store the kubeconfig as a secret in your CI system, not in Argo CD. In GitHub Actions, open **Settings > Secrets and variables > Actions > New repository secret**. Or use the GitHub CLI:
+### Run only trusted code with the credentials
+
+The CI job of flow 1 runs the code of the pull request with the kubeconfig and the CI API key, so that code can read both. In GitHub Actions, keep the secrets in an environment with required reviewers. A job gets the secrets of an environment only when it names the environment and a reviewer approves the run.
+
+1. In the repository, open **Settings > Environments > New environment**, and name it `staging-tests`.
+2. Select **Required reviewers**, and add the people or teams that review pull requests.
+3. Select **Prevent self-review**.
+4. Select **Save protection rules**.
+
+Store the secrets only in this environment, not as repository secrets. In a private repository, required reviewers need GitHub Enterprise.
+
+Store the kubeconfig as a secret in your CI system, not in Argo CD. In GitHub Actions, open the `staging-tests` environment and select **Add environment secret**. Or use the GitHub CLI:
 
 ```bash
-base64 < mirrord-ci.kubeconfig | tr -d '\n' | gh secret set KUBECONFIG_DATA
+base64 < mirrord-ci.kubeconfig | tr -d '\n' | gh secret set KUBECONFIG_DATA --env staging-tests
 ```
 
 ### The CI API key
@@ -142,10 +153,10 @@ Run the command in a terminal. If stderr is not a terminal, for example in a scr
 MIRRORD_PROGRESS_MODE=simple mirrord ci api-key
 ```
 
-Save the output as the secret `MIRRORD_CI_API_KEY` in your CI system:
+Save the output as the secret `MIRRORD_CI_API_KEY` in your CI system, in the same environment:
 
 ```bash
-gh secret set MIRRORD_CI_API_KEY
+gh secret set MIRRORD_CI_API_KEY --env staging-tests
 ```
 
 The hook Jobs of flow 2 do not need this key. `mirrord preview` does not read `MIRRORD_CI_API_KEY`, and authenticates as the `mirrord-ci` ServiceAccount.
@@ -205,7 +216,11 @@ concurrency:
 
 jobs:
   test:
+    # Workflows of pull requests from forks get no secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # The secrets are in this environment, so each run waits for a reviewer.
+    environment: staging-tests
     env:
       MIRRORD_CI_API_KEY: ${{ secrets.MIRRORD_CI_API_KEY }}
       CI_KEY: ci-${{ github.event.pull_request.number }}-${{ github.run_id }}
@@ -226,6 +241,13 @@ jobs:
         run: |
           npm ci
           mirrord ci start -f .mirrord/mirrord-ci.json -k "$CI_KEY" node server.js
+          # Wait until the local service listens on its port (8080 in this example).
+          for i in $(seq 1 60); do
+            curl -fs http://localhost:8080/healthz > /dev/null 2>&1 && break
+            sleep 2
+          done
+          # Fail here if the service did not start.
+          curl -fsS http://localhost:8080/healthz > /dev/null
 
       - name: Run the tests against staging
         env:
@@ -238,7 +260,9 @@ jobs:
         run: mirrord ci stop
 ```
 
-`mirrord ci start` can return before the steal is active, so the first requests can go to the deployed `orders`. Before the tests start, retry one request with the header until the response comes from the service on the runner, for example a version field.
+Each push to the pull request starts a run that waits for approval. Review the commits of the pull request, then select **Review deployments** in the run and approve it.
+
+`mirrord ci start` returns before the service listens. Until the service listens, the deployed `orders` answers the requests with the header. The loop waits until the service answers on the runner, and the last `curl` fails the job if the service did not start. Use the port and the health path of your service.
 
 The tests send their requests to the staging address of `orders`, for example the staging Ingress. Each request must carry the header. In `scripts/test.sh`, add the header to every call:
 
@@ -592,8 +616,10 @@ jobs:
           \`curl -H "baggage: mirrord-session=pr-${PR}" https://orders.staging.example.com/\`
           EOF
           )
-          ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" \
-            --jq '[.[] | select(.body | startswith("## mirrord Preview Environment"))][0].id // empty')
+          # --paginate reads all pages of comments. Keep the first ID that it finds.
+          IDS=$(gh api --paginate "repos/${{ github.repository }}/issues/${PR}/comments" \
+            --jq '.[] | select(.body | startswith("## mirrord Preview Environment")) | .id')
+          ID=${IDS%%$'\n'*}
           if [ -n "$ID" ]; then
             gh api -X PATCH "repos/${{ github.repository }}/issues/comments/${ID}" -f body="$BODY"
           else
