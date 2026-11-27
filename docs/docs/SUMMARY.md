@@ -31,6 +31,7 @@
   * [Configure AI Agents to Use mirrord](using-mirrord-with-ai/the-meta-prompt.md)
   * [Agent-Started Trials](using-mirrord-with-ai/agent-started-trials.md)
   * [Using mirrord with Cloud Agents](using-mirrord-with-ai/cloud-agents.md)
+  * [Test Devin Changes Against Staging](using-mirrord-with-ai/devin.md)
 
 ## Using mirrord
 
