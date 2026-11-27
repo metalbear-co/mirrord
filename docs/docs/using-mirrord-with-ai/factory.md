@@ -79,16 +79,16 @@ If the tests write to or delete data in a database that other people use, do not
 ALWAYS test a change to orders-api against staging with mirrord before you report it as done.
 
 1. If `KUBECONFIG_B64` is set and `~/.kube/config` does not exist, decode it:
-   `mkdir -p ~/.kube && echo "$KUBECONFIG_B64" | base64 -d > ~/.kube/config && chmod 600 ~/.kube/config`
+   `mkdir -p ~/.kube && echo "$KUBECONFIG_B64" | base64 -d > ~/.kube/config.tmp && chmod 600 ~/.kube/config.tmp && mv ~/.kube/config.tmp ~/.kube/config`
 2. Use `$MIRRORD_KEY` as the session key. If it is not set, make a key with `echo droid-$(openssl rand -hex 4)`,
    and start each later command with `export MIRRORD_KEY=<that key>;`. Each command runs in a new shell.
    Use only letters, numbers, and dashes in the key. Never use the key of another session.
 3. Start the service in the background, and save its process ID:
-   `MIRRORD_PROGRESS_MODE=simple mirrord up --key "$MIRRORD_KEY" > /tmp/mirrord-up.log 2>&1 & echo $! > /tmp/mirrord-up.pid`
-4. Wait until the service listens on port 8080. Read /tmp/mirrord-up.log if it does not start.
+   `MIRRORD_PROGRESS_MODE=simple mirrord up --key "$MIRRORD_KEY" > "/tmp/mirrord-up-$MIRRORD_KEY.log" 2>&1 & echo $! > "/tmp/mirrord-up-$MIRRORD_KEY.pid"`
+4. Wait until the service listens on port 8080. Read `/tmp/mirrord-up-$MIRRORD_KEY.log` if it does not start.
 5. Test the change with requests to https://orders.staging.example.com that carry the header `x-mirrord-agent: $MIRRORD_KEY`.
    Read the answers and the service logs, and fix the code until the result is correct.
-6. Stop the session: `kill "$(cat /tmp/mirrord-up.pid)"`. Do not leave it running.
+6. Stop the session: `kill "$(cat "/tmp/mirrord-up-$MIRRORD_KEY.pid")"`. Do not leave it running.
 
 - NEVER target a production cluster.
 - NEVER use `--mode replace`. It sends the traffic of all users to your process.
@@ -183,6 +183,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Test the change against staging
         run: |
+          rm -f droid-report.md
           droid exec --auto medium --cwd "$GITHUB_WORKSPACE" \
             "Test the change in this pull request against staging with mirrord, as AGENTS.md says. \
             Do not edit files. Write the result to droid-report.md, and make its first line PASS or FAIL."
