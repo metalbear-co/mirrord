@@ -145,8 +145,25 @@ pub(crate) enum ReplayError {
     #[error("the local application is not listening for port {0}")]
     NotListening(Port),
 
-    #[error(transparent)]
+    #[error("{}", with_causes(.0))]
     Send(#[from] LocalHttpError),
+}
+
+/// Returns the text of `error` and of each cause that the text doesn't already end with, because
+/// a [`hyper::Error`] leaves its cause, such as a reset connection, out of its text.
+fn with_causes(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !text.ends_with(&cause_text) {
+            text.push_str(": ");
+            text.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+
+    text
 }
 
 impl IntoResponse for ReplayError {
