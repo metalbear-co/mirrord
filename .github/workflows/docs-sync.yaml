@@ -1,0 +1,540 @@
+name: Sync skills with docs
+
+# The skills under `skills/skills/` restate what the docs under `docs/docs/` say, so a docs change can leave a skill
+# wrong. Every week this workflow gives Claude the changes to the docs' Markdown pages since the last sync, lets it
+# update the skills, and opens a pull request with the result for someone to review. Merging that pull request publishes
+# the skills, as publish-skills.yaml describes.
+#
+# `skills/.github/docs-sync-sha`, the marker, holds the commit of `main` up to which the skills are synced. A run diffs
+# the pages from that commit to the tip of `main`, and its pull request writes the tip into the file, so the next run
+# starts where the merged one ended. The marker moves only when a pull request merges, so the commits of a pull request
+# that is closed without merging go into the next run. When Claude changes no skill, the run still opens a pull
+# request, which only moves the marker, so that the next run doesn't give the same commits to Claude again. A run opens
+# no pull request when no page changed, or while a docs-sync pull request is open, because that pull request already
+# moves the marker. A run that opens a pull request pushes its commit to the one branch `auto/docs-sync` and replaces
+# what is there. The repository deletes the branch of a pull request only when it merges, so the branch of one that was
+# closed without merging stays until the next such run, but there is never more than this one branch.
+#
+# The diff holds only the Markdown pages. The docs also hold SVG diagrams, and a redraw of them adds megabytes to the
+# diff that tell Claude nothing about the skills.
+#
+# Claude reads content that a review let into `main`, but that content can still hold instructions that Claude
+# shouldn't follow, so the run limits what Claude can do rather than trust its input. Claude can read only the checkout
+# and the diff, edit only under `skills/skills/`, has no shell and no web access, and runs while the job holds no token
+# that can write: GITHUB_TOKEN only reads. The checkout keeps no credentials, but the action writes GITHUB_TOKEN into
+# the origin URL in `.git/config` for its own git use, so Claude can't read `.git/` either. After Claude exits, the job
+# puts back the checkout's git config, and a step fails the run if anything outside `skills/skills/` changed. Only then
+# does the job create the token of the Cubby GitHub App that pushes the branch and opens the pull request. Cubby, not
+# GITHUB_TOKEN, opens the pull request, because GitHub starts no workflow runs for a pull request that GITHUB_TOKEN
+# opens, so it would get no CI.
+#
+# ANTHROPIC_API_KEY is a secret of the `docs-sync` environment, which only `main` can use, so no other branch can read
+# it. A dispatch is a dry run by default. A dry run from `main` runs Claude, shows the changes and Claude's full output
+# in the run, and pushes nothing. A dry run from another branch can't use the environment, so it stops after the
+# `changes` job and only lists the docs commits that a run would give to Claude. That lets a branch that changes the
+# `changes` job try it before it merges. CONTRIBUTING.md ("Syncing the skills with the docs") has the setup that this
+# workflow needs, and what to do when a run fails.
+
+on:
+  schedule:
+    - cron: '0 9 * * 2' # Tuesdays at 09:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Show the changes that Claude makes in the run, without pushing a branch or opening a pull request. From a branch other than main, only list the docs commits that a run would cover.'
+        required: false
+        type: boolean
+        default: true
+
+# GITHUB_TOKEN only reads the repository. A token of Cubby pushes and opens the pull request.
+permissions:
+  contents: read
+
+# Only the runs that can open a pull request share the group, so that they run one at a time, and each one finds the
+# pull request that the run before it opened ("Look for an open docs-sync pull request"). GitHub keeps one pending run
+# per group and cancels the older pending one. That loses nothing, because each run syncs the tip of `main` when it
+# starts. A dry run, or a run from another branch, pushes nothing, so it gets a group of its own. A run in progress is
+# never cancelled, so it isn't stopped between its push and opening the pull request.
+concurrency:
+  group: ${{ (inputs.dry_run == true || github.ref != 'refs/heads/main') && format('docs-sync-no-push-{0}', github.run_id) || 'docs-sync' }}
+  cancel-in-progress: false
+
+env:
+  # In a git pathspec, `*` also matches `/`, so this takes the pages in every directory under docs/docs/.
+  DOCS_PAGES: docs/docs/*.md
+  # The branch of every docs-sync pull request. Every run uses the same branch, because the repository keeps the branch
+  # of a pull request that closed without merging, and a branch per run would pile up (see the header).
+  SYNC_BRANCH: auto/docs-sync
+
+# Each step that calls the network has its own timeout, so that a stalled API call, git transfer or Claude session fails
+# that step instead of holding the runner for the job's default 6 hours. A job timeout would cancel the job instead,
+# and the notify job runs only when a job failed, not when one was cancelled.
+jobs:
+  # Finds the docs commits to sync. It doesn't use the `docs-sync` environment, so it runs from any branch, and the
+  # `sync` job starts only when there is something to sync.
+  changes:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # The step that looks for an open docs-sync pull request needs to read the pull requests. The `sync` job, which
+    # gives its token to Claude, doesn't get this permission.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      marker: ${{ steps.changes.outputs.marker }}
+      head: ${{ steps.changes.outputs.head }}
+      sync: ${{ steps.changes.outputs.sync }}
+    steps:
+      # Only `main` holds reviewed content, so a dispatch from another branch may only dry-run.
+      - name: Check the ref to sync
+        if: ${{ github.ref != 'refs/heads/main' && inputs.dry_run != true }}
+        shell: bash
+        run: |
+          echo "::error::This run is for $GITHUB_REF, and only refs/heads/main opens a pull request. Run the workflow from main, or turn on dry_run."
+          exit 1
+
+      # A dry run opens no pull request, so it runs even while one is open. The workflow requests no reviewer for a
+      # docs-sync pull request, so the summary gives its age, which shows how long the sync has been waiting on it. Any
+      # pull request from this repository's `auto/docs-sync` counts, whoever opened it, because the run would replace
+      # its commits. A fork's pull request from a branch of the same name doesn't, so that it can't stop the sync.
+      # GitHub filters by owner and branch (`head=<owner>:<branch>`), so forks' pull requests can't crowd the docs-sync
+      # one out of the result either. GitHub allows one open pull request per head and base, so there is at most one
+      # into `main`.
+      - name: Look for an open docs-sync pull request
+        id: open-pr
+        if: ${{ inputs.dry_run != true }}
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          open=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=$GITHUB_REPOSITORY_OWNER:$SYNC_BRANCH" \
+            --jq '.[] | "- \(.html_url), opened \((now - (.created_at | fromdateiso8601)) / 86400 | floor
+                  | if . == 0 then "today" elif . == 1 then "1 day ago" else "\(.) days ago" end)"')
+          if [ -n "$open" ]; then
+            echo "open=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n\n%s\n' \
+              "A docs-sync pull request is open, so this run syncs nothing. Merge or close it, then run the workflow again." \
+              "$open" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # `ref` makes the checkout fetch the current tip of the run's ref. Without it, the checkout takes `github.sha`,
+      # which a re-run keeps from the event that started the first attempt.
+      #
+      # The job only reads the marker and compares trees, so the checkout fetches no blobs up front (`filter`) and
+      # writes only skills/.github and the root files (`sparse-checkout`, in cone mode). It needs the full history to
+      # find the commits since the marker.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: ${{ steps.open-pr.outputs.open != 'true' }}
+        timeout-minutes: 10
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: skills/.github
+          persist-credentials: false
+
+      - name: Find the docs changes since the last sync
+        id: changes
+        if: ${{ steps.open-pr.outputs.open != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker_file=skills/.github/docs-sync-sha
+          marker=$(tr -d '[:space:]' < "$marker_file")
+          head=$(git rev-parse HEAD)
+          if ! [[ "$marker" =~ ^[0-9a-f]{40}$ ]] || ! git merge-base --is-ancestor "$marker" "$head" 2>/dev/null; then
+            echo "::error file=$marker_file::$marker_file holds '$marker', which isn't the full SHA of a commit in the history of $GITHUB_REF. Set it to the commit that the last merged docs-sync pull request moved it to, which its description names after \"moves \`skills/.github/docs-sync-sha\` to\", or, if none has merged yet, to 3a843d8d473b3bda5be3408998a01b261bf3d7e0, the commit that imported the docs."
+            exit 1
+          fi
+          echo "marker=$marker" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+          # `git diff-tree` and `git log` compare only the object IDs in the trees, so neither fetches a blob.
+          # `git diff --quiet` reads the files that differ, so it would fetch each one. `git diff-tree --quiet` exits
+          # with 1 when the pages differ, and with another code when git fails.
+          changed=0
+          git diff-tree --quiet -r "$marker" "$head" -- "$DOCS_PAGES" || changed=$?
+          if [ "$changed" = 0 ]; then
+            printf '%s\n' "No docs page changed between $marker and $head, so there is nothing to sync." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          elif [ "$changed" != 1 ]; then
+            exit "$changed"
+          fi
+          {
+            echo "## Docs changes from $marker to $head"
+            echo
+            echo '```text'
+            git log --format='%h %s' "$marker..$head" -- "$DOCS_PAGES"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            printf '\n%s\n' "Dry run from $GITHUB_REF: only main can use the docs-sync environment, which holds ANTHROPIC_API_KEY, so Claude doesn't run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "sync=true" >> "$GITHUB_OUTPUT"
+
+  sync:
+    needs: changes
+    if: ${{ needs.changes.outputs.sync == 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    environment: docs-sync
+    env:
+      MARKER: ${{ needs.changes.outputs.marker }}
+      HEAD_SHA: ${{ needs.changes.outputs.head }}
+    steps:
+      # The checkout takes the commit that the `changes` job found, so that a re-run of this job alone syncs the same
+      # commits. Those can be days old by then, so the step that opens the pull request checks again that they are
+      # still the ones to sync. Claude reads the docs pages, the skills and the config schemas at the root, so the
+      # checkout writes only those (`sparse-checkout`, in non-cone mode, which can leave out the images under
+      # docs/docs/). It fetches no blobs up front (`filter`), so git fetches the earlier versions of the pages when the
+      # next step diffs them.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        timeout-minutes: 10
+        with:
+          ref: ${{ needs.changes.outputs.head }}
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /docs/docs/**/*.md
+            /skills/
+            /mirrord-schema.json
+            /mirrord-up-schema.json
+          persist-credentials: false
+
+      # Claude gets the diff as a file, so that it needs no git, and so no shell.
+      - name: Write the docs changes for Claude
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOCS_SYNC_DIR="$RUNNER_TEMP/docs-sync"
+          echo "DOCS_SYNC_DIR=$DOCS_SYNC_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$DOCS_SYNC_DIR"
+          git diff "$MARKER" "$HEAD_SHA" -- "$DOCS_PAGES" > "$DOCS_SYNC_DIR/docs-changes.diff"
+          git log --format='%h %s' "$MARKER..$HEAD_SHA" -- "$DOCS_PAGES" > "$DOCS_SYNC_DIR/docs-commits.log"
+
+      # The step after Claude puts this copy back, and fails the run if any other file under .git/ is newer than it, so
+      # this step must stay right before Claude's, and the copy must not keep the original's time (no `cp -p`). The
+      # non-cone sparse checkout above keeps all its settings in .git/config (it writes no .git/config.worktree), so the
+      # copy holds every repository setting that the later git commands should see.
+      - name: Keep a copy of the checkout's git config
+        shell: bash
+        run: cp .git/config "$RUNNER_TEMP/docs-sync-git-config"
+
+      - name: Update the skills with Claude
+        timeout-minutes: 30
+        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Without a token, the action exchanges an OIDC token for one of the Claude GitHub App. Claude only edits
+          # files in the checkout, so the job's token, which only reads, is enough.
+          github_token: ${{ github.token }}
+          # The action refuses to run when the run's actor is a bot. GitHub gives a scheduled run the actor of the
+          # commit that last changed the workflow's `schedule`, and the merge queue, github-merge-queue[bot], makes
+          # every commit to `main`.
+          allowed_bots: github-merge-queue
+          # The action hides Claude's output by default, so a failed run doesn't say why. The action warns that the
+          # full output can hold secrets from tool results, and the logs of this repository are public. Claude can read
+          # only public files here: the checkout without `.git/`, and the diff. Every run that isn't a dry run still
+          # keeps the output hidden, so that a later change to those limits can't make a weekly run print a secret.
+          # Someone starts a dry run to look into a failure, so it shows the output.
+          show_full_output: ${{ inputs.dry_run == true }}
+          prompt: Read skills/.github/docs-sync-prompt.md and follow it. DOCS_SYNC_DIR is ${{ env.DOCS_SYNC_DIR }}.
+          # Claude's process environment holds ANTHROPIC_API_KEY, so Claude must not read files outside the checkout
+          # and DOCS_SYNC_DIR (`--add-dir`), such as /proc/self/environ. Reads inside them need no rule, and these
+          # settings make the file tools refuse every path outside them, even one that a rule allows.
+          settings: |
+            {"permissions": {"blockReadsOutsideWorkingDirectories": true, "blockWritesOutsideWorkingDirectories": true}}
+          # Claude can't ask for permission in a workflow, so it can only use the tools that need no permission and the
+          # ones that `--allowedTools` allows. An `Edit` rule also covers the Write tool, and a relative path in a rule
+          # is relative to the checkout. `--disallowedTools` refuses the shell and the web. It refuses `.git/`, which
+          # holds GITHUB_TOKEN while Claude runs and which Claude never needs, and a `Read` deny also refuses edits
+          # there. It refuses /proc again in case the settings above don't apply. It doesn't refuse `~/`, because the
+          # checkout is under the runner's home directory.
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 250
+            --add-dir ${{ env.DOCS_SYNC_DIR }}
+            --allowedTools "Edit(./skills/skills/**)"
+            --disallowedTools "Bash,WebFetch,WebSearch,Read(./.git/**),Read(//proc/**)"
+
+      # Claude Code refuses writes under .git/, but the job doesn't rely on that: `git status` doesn't show .git/, so
+      # the check of Claude's changes below couldn't catch such a write, and the later steps run git while the Cubby
+      # token is in reach. This step replaces .git/config with the copy taken before Claude ran, which drops any setting
+      # that would make git run a program or connect to another server. The step then fails the run if any other file
+      # under .git/ changed after the copy was taken, such as a hook, .git/info/attributes, a .git/config.worktree or
+      # .git/commondir that makes git read its config from elsewhere, or a HEAD or branch that moved. It leaves out the
+      # index, which Claude Code's own `git status` can rewrite during the Claude step, and the objects, which only add
+      # data and can't make git run a program. It also turns off the hooks, the file system monitor and the credential
+      # helpers for every later git command (`GIT_CONFIG_*` in GITHUB_ENV). The copy leaves out the action's own changes
+      # to the config, and the later steps don't need them: they fetch `main` from the checkout's `origin`, push to an
+      # explicit URL, and take the commit's author from the environment.
+      - name: Put back the git config, check .git/ and turn off hooks for later steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          copy="$RUNNER_TEMP/docs-sync-git-config"
+          rm -f .git/config
+          cp "$copy" .git/config
+          changed=$(find .git -path .git/objects -prune -o -type f -newer "$copy" \
+            ! -path .git/config ! -path .git/index -print)
+          if [ -n "$changed" ]; then
+            printf '%s\n' "$changed"
+            echo "::error::The files under .git/ listed above changed while Claude ran. Nothing was pushed."
+            exit 1
+          fi
+          overrides=(core.hooksPath=/dev/null core.fsmonitor=false credential.helper=)
+          {
+            echo "GIT_CONFIG_COUNT=${#overrides[@]}"
+            for i in "${!overrides[@]}"; do
+              echo "GIT_CONFIG_KEY_$i=${overrides[$i]%%=*}"
+              echo "GIT_CONFIG_VALUE_$i=${overrides[$i]#*=}"
+            done
+          } >> "$GITHUB_ENV"
+
+      # The permission rule already keeps Claude inside skills/skills/, but this check doesn't depend on Claude Code
+      # applying it, and also refuses the four exempt files that the prompt tells Claude never to edit. It lists the
+      # skills that Claude changed, for the version bump and the pull request.
+      - name: Check the files that Claude changed
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$RUNNER_TEMP/docs-sync-status"
+          git status --porcelain=v1 -z --untracked-files=all --no-renames > "$status"
+          refused=()
+          changed_skills=()
+          while IFS= read -r -d '' entry; do
+            path=${entry:3}
+            case "$path" in
+              skills/skills/mirrord-config/references/configuration.md | \
+              skills/skills/mirrord-config/references/schema.json | \
+              skills/skills/mirrord-operator/references/values.yaml | \
+              skills/skills/mirrord-up/references/schema.json)
+                refused+=("$path") ;;
+              skills/skills/*)
+                rest=${path#skills/skills/}
+                changed_skills+=("${rest%%/*}") ;;
+              *) refused+=("$path") ;;
+            esac
+          done < "$status"
+          if [ "${#refused[@]}" -gt 0 ]; then
+            printf '%s\n' "${refused[@]}"
+            echo "::error::Claude changed the files listed above, which are outside skills/skills/, or are the four exempt files that the docs-sync prompt says never to edit. Nothing was pushed. Claude's full output is in the log of the Claude step of a dry run from main."
+            exit 1
+          fi
+          echo "changed_skills=$(printf '%s\n' "${changed_skills[@]}" | sort -u | sed '/^$/d' | paste -sd, -)" >> "$GITHUB_OUTPUT"
+
+      # Claude Code updates an installed plugin only when its version changes, so the `plan` job of ci.yaml fails a
+      # pull request that changes skills/skills/ without raising it. The prompt tells Claude to leave plugin.json alone,
+      # and this step raises the patch level, which is always above the version on `main` at the run's commit.
+      - name: Raise the plugin version, move the marker and stage the changes
+        env:
+          CHANGED_SKILLS: ${{ steps.check.outputs.changed_skills }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin=skills/.claude-plugin/plugin.json
+          if [ -n "$CHANGED_SKILLS" ]; then
+            old=$(jq -r '.version' "$plugin")
+            if ! [[ "$old" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "::error file=$plugin::The version in $plugin is '$old', which isn't of the form major.minor.patch."
+              exit 1
+            fi
+            new="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            # jq would write the whole file in its own layout, so sed changes only the version.
+            sed -i "s/\"version\": \"$old\"/\"version\": \"$new\"/" "$plugin"
+            if [ "$(jq -r '.version' "$plugin")" != "$new" ]; then
+              echo "::error file=$plugin::Couldn't raise the version in $plugin from $old to $new."
+              exit 1
+            fi
+          fi
+          echo "$HEAD_SHA" > skills/.github/docs-sync-sha
+          git add --all -- skills/skills "$plugin" skills/.github/docs-sync-sha
+
+      - name: Show the changes of the dry run
+        if: ${{ inputs.dry_run == true }}
+        env:
+          CHANGED_SKILLS: ${{ steps.check.outputs.changed_skills }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          diff="$RUNNER_TEMP/docs-sync-result.diff"
+          git diff --cached > "$diff"
+          # A step summary can be at most 1 MiB, so the diff gets 900,000 bytes and the text around it gets the rest.
+          limit=900000
+          {
+            echo "## Changes of the docs sync, dry run"
+            echo
+            if [ -z "$CHANGED_SKILLS" ]; then
+              echo "Claude changed no skill, so the pull request would only move the marker."
+              echo
+            fi
+            # The skills hold code blocks, so a fence of three backticks would end at the first one in the diff.
+            echo '````````diff'
+            head -c "$limit" "$diff"
+            echo
+            echo '````````'
+            echo
+            size=$(wc -c < "$diff")
+            if [ "$size" -gt "$limit" ]; then
+              echo "The diff above is cut at $limit of its $size bytes."
+              echo
+            fi
+            echo "Dry run: nothing was pushed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Cubby is installed on this repository with write access to its contents and pull requests. Its token has no
+      # Workflows permission, so it can't push a change to `.github/workflows`.
+      - name: Create GitHub App token
+        id: app-token
+        if: ${{ inputs.dry_run != true }}
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          owner: metalbear-co
+          repositories: mirrord
+          permission-contents: write
+          permission-pull-requests: write
+
+      # The title names the commit that the sync covers up to, not the skills that changed, because GitHub refuses a
+      # title over 256 characters, which a list of every skill would pass. The description lists the skills instead.
+      - name: Open the pull request
+        if: ${{ inputs.dry_run != true }}
+        timeout-minutes: 10
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          CHANGED_SKILLS: ${{ steps.check.outputs.changed_skills }}
+          GIT_AUTHOR_NAME: cubby-mb[bot]
+          GIT_AUTHOR_EMAIL: 273354325+cubby-mb[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: cubby-mb[bot]
+          GIT_COMMITTER_EMAIL: 273354325+cubby-mb[bot]@users.noreply.github.com
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$CHANGED_SKILLS" ]; then
+            title="Sync the skills with the docs up to ${HEAD_SHA::9}"
+            summary="Claude updated the skills below to match the docs changes merged to \`main\` since the last sync. Check each edit against the current pages under \`docs/docs/\`. Claude made these edits from the text of the docs, which can also hold instructions aimed at Claude, so look for instructions or content that don't belong in a skill. The workflow raised the version in \`skills/.claude-plugin/plugin.json\`."
+          else
+            title="Sync the skills with the docs up to ${HEAD_SHA::9}: Claude changed no skill"
+            summary="Claude changed no skill, because it found none that the docs changes since the last sync make outdated. Check the commits below for a change that a skill should reflect."
+          fi
+          git switch --create "$SYNC_BRANCH"
+          git commit --quiet -m "$title" -m "Covers the docs changes from $MARKER to $HEAD_SHA."
+
+          # The push below replaces the branch. That's safe only while no pull request uses the branch and this run
+          # still syncs from the marker on `main`. The `changes` job checked both, and the concurrency group runs one
+          # run that can push at a time. But "Re-run failed jobs" reuses the outputs of the `changes` job of the first
+          # attempt, which can be days old. Since then, a newer run may have opened a pull request from the branch, and
+          # the push would replace its commits. Or that pull request may have merged, and this run's pull request would
+          # then move the marker back. So this step checks both again, with the Cubby token, which can read the pull
+          # requests. Once both checks pass, the branch holds only what an earlier run left there, or what a reviewer
+          # pushed to a docs-sync pull request that has since closed, and CONTRIBUTING.md says to keep no work on it.
+          #
+          # The step reads the branch's tip before the checks, and the push takes it as its lease, so a push to the
+          # branch after that read makes this push fail rather than replace it. An empty tip means that the branch must
+          # not exist. A pull request opened from the branch between the check and `gh pr create`, without a push, still
+          # gets this run's commit, and then `gh pr create` fails. The repository is public, so `ls-remote` needs no
+          # token.
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          tip=$(git ls-remote "$url" "refs/heads/$SYNC_BRANCH" | cut -f1)
+          open=$(GH_TOKEN=$TOKEN gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&head=$GITHUB_REPOSITORY_OWNER:$SYNC_BRANCH" \
+            --jq '.[].html_url')
+          if [ -n "$open" ]; then
+            echo "::error::The pull request $open from $SYNC_BRANCH is open, and this run would replace its commits. This run started before that pull request opened, for example because only the failed jobs of this run were re-run. Nothing was pushed. To sync, merge or close that pull request, then start a new run, or use \"Re-run all jobs\"."
+            exit 1
+          fi
+          # `origin` is the checkout's own URL, which holds no token. The repository is public, so the fetch needs none.
+          git fetch --quiet --no-tags --filter=blob:none origin refs/heads/main
+          main_marker=$(git show FETCH_HEAD:skills/.github/docs-sync-sha | tr -d '[:space:]')
+          if [ "$main_marker" != "$MARKER" ]; then
+            echo "::error::skills/.github/docs-sync-sha on main is now $main_marker, but this run syncs from $MARKER, so a newer sync merged after this run started, for example because only the failed jobs of this run were re-run. Nothing was pushed. Start a new run, or use \"Re-run all jobs\"."
+            exit 1
+          fi
+          # The pull request's plugin version is one above the version at this run's commit. If another skills change
+          # raised the version on `main` since, the plugin version check of ci.yaml would fail the pull request, so the
+          # run stops here instead.
+          plugin=skills/.claude-plugin/plugin.json
+          if [ -n "$CHANGED_SKILLS" ]; then
+            main_version=$(git show "FETCH_HEAD:$plugin" | jq -r '.version')
+            base_version=$(git show "$HEAD_SHA:$plugin" | jq -r '.version')
+            if [ "$main_version" != "$base_version" ]; then
+              echo "::error::The version in $plugin on main is now $main_version, but this run raised it from $base_version, so another skills change raised it after this run started. Nothing was pushed. Start a new run, or use \"Re-run all jobs\"."
+              exit 1
+            fi
+          fi
+
+          # Git reads this header from the environment rather than from the command line or the checkout's config, so it
+          # shows in no log. The URL in the key limits it to the push. It takes the next free `GIT_CONFIG_*` index, so
+          # that it doesn't replace the overrides that the step after Claude set.
+          #
+          # With `push.negotiate`, git first asks GitHub which commits it already has. Without it, a push after `main`
+          # moved could send objects that GitHub already has, and the partial clone would first fetch their blobs to
+          # send them.
+          basic=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$basic"
+          (
+            n=${GIT_CONFIG_COUNT:-0}
+            export GIT_CONFIG_COUNT=$((n + 1)) "GIT_CONFIG_KEY_$n=http.$url.extraheader" \
+              "GIT_CONFIG_VALUE_$n=AUTHORIZATION: basic $basic"
+            git -c push.negotiate=true push --quiet --force-with-lease="refs/heads/$SYNC_BRANCH:$tip" "$url" \
+              "HEAD:refs/heads/$SYNC_BRANCH"
+          )
+
+          # The commit subjects go in a code block, where GitHub turns no `@name` into a mention and no `#123` into a
+          # reference to that pull request.
+          body="$RUNNER_TEMP/docs-sync-body.md"
+          {
+            echo "$summary"
+            echo
+            if [ -n "$CHANGED_SKILLS" ]; then
+              tr , '\n' <<< "$CHANGED_SKILLS" | sed "s/.*/- \`&\`/"
+              echo
+            fi
+            echo "Merging this pull request moves \`skills/.github/docs-sync-sha\` to $HEAD_SHA, so the next sync starts there. If it's closed without merging, the next sync covers these commits again."
+            echo
+            echo "The docs commits that this sync covers, from $MARKER to $HEAD_SHA:"
+            echo
+            echo '```text'
+            cat "$DOCS_SYNC_DIR/docs-commits.log"
+            echo '```'
+            echo
+            echo "Opened by [this run of the docs-sync workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+          } > "$body"
+          pr=$(GH_TOKEN=$TOKEN gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$SYNC_BRANCH" \
+            --title "$title" --body-file "$body")
+          printf '%s\n' "Opened $pr." >> "$GITHUB_STEP_SUMMARY"
+
+  # Only a failed run of `main` that could open a pull request alerts #ci-alerts. Whoever starts a dry run, or a run
+  # from another branch, sees its result.
+  notify:
+    needs: [changes, sync]
+    if: ${{ failure() && inputs.dry_run != true && github.ref == 'refs/heads/main' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: 'Notify #ci-alerts'
+        timeout-minutes: 2
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          text=$(printf '%s\n' \
+            ":rotating_light: *Syncing the skills of \`$GITHUB_REPOSITORY\` with the docs failed*" \
+            "• *Run:* <$run_url|Open GitHub Actions>")
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"

@@ -159,7 +159,9 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 - `skills/` came from `metalbear-co/skills`, which keeps its earlier history. Users install the skills from that
   repository, so `publish-skills.yaml` copies `skills/` there on every merge to `main` that changes it, and the next
   copy replaces a change made in that repository directly. `mirrord mcp` embeds `skills/skills` when it's built
-  (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release.
+  (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release. Every week, `docs-sync.yaml` has
+  Claude update `skills/skills/` to match the docs changes merged since the commit in `skills/.github/docs-sync-sha`,
+  with the prompt in `skills/.github/docs-sync-prompt.md`, and opens a pull request with the result.
 - `metalbear-co/mirrord-vscode` and `metalbear-co/mirrord-intellij` drive the CLI; `ci.yaml` runs their end-to-end
   tests on release branches.
 - `metalbear-co/test-images` builds the app images the end-to-end tests deploy.
