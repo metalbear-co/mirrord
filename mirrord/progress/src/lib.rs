@@ -62,6 +62,13 @@ pub fn is_session_ready_line(line: &str) -> bool {
             .is_ok_and(|message| message.is_success_with(messages::SESSION_READY_MESSAGE))
 }
 
+/// Whether `line` is one of the progress messages `json` mode prints, the ones the IDEs parse.
+///
+/// `mirrord up --output json` passes these on whole, as each service's `progress` events.
+pub fn is_progress_line(line: &str) -> bool {
+    serde_json::from_str::<ProgressMessage>(line.trim()).is_ok()
+}
+
 /// The line that finishing `task` successfully with `message` prints in `mode`, newline included.
 ///
 /// Byte for byte what `SimpleProgress` and `JsonProgress` print for `success(Some(message))`, for
