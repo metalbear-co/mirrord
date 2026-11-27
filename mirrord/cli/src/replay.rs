@@ -75,7 +75,7 @@ pub(crate) async fn replay_command(args: ReplayArgs) -> CliResult<()> {
                             .and_then(|requests| {
                                 requests.into_iter().find(|request| request.id == id)
                             })
-                            .and_then(|request| request.status.zip(request.duration_ms));
+                            .map(|request| request.status.zip(request.duration_ms));
 
                     print_run(id, original, &run);
                 }
@@ -257,11 +257,15 @@ fn print_request(request: &CapturedRequest) {
 
 /// Prints the response to the replay `run` of request `id`, next to the status and duration in
 /// milliseconds of the response to the `original` request.
-fn print_run(id: u64, original: Option<(u16, u64)>, run: &ReplayRun) {
-    let original = original.map_or_else(
-        || "no response".to_owned(),
-        |(status, duration_ms)| status_and_duration(status, duration_ms),
-    );
+///
+/// `original` is [`None`] when the session no longer lists the request or the lookup failed, and
+/// holds [`None`] when the local application never answered it.
+fn print_run(id: u64, original: Option<Option<(u16, u64)>>, run: &ReplayRun) {
+    let original = match original {
+        Some(Some((status, duration_ms))) => status_and_duration(status, duration_ms),
+        Some(None) => "no response".to_owned(),
+        None => "unknown".to_owned(),
+    };
 
     println!(
         "Replay {} of request {id}: {}   (original: {original})",
