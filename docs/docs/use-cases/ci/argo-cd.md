@@ -127,21 +127,18 @@ current-context: mirrord-ci
 EOF
 ```
 
-### Run only trusted code with the credentials
+### What the CI identity can do
 
-The CI job of flow 1 runs the code of the pull request with the kubeconfig and the CI API key, so that code can read both. In GitHub Actions, keep the secrets in an environment with required reviewers. A job gets the secrets of an environment only when it names the environment and a reviewer approves the run.
+The CI identity cannot change staging. It has `mirrord-operator-ci`, `get` on the target deployment, and `list` on pods in `staging`. It can start CI and preview sessions, which steal only the requests with their header. It cannot edit or delete workloads.
 
-1. In the repository, open **Settings > Environments > New environment**, and name it `staging-tests`.
-2. Select **Required reviewers**, and add the people or teams that review pull requests.
-3. Select **Prevent self-review**.
-4. Select **Save protection rules**.
+A session can read the environment and files of the target, and a preview runs the pull request image with the environment of the target. Thus a CI job from a branch of the repository has the same access as a developer with staging access. This is the intended use.
 
-Store the secrets only in this environment, not as repository secrets. In a private repository, required reviewers need GitHub Enterprise.
+Do not give the credentials to code from outside the repository. GitHub does not pass secrets to workflows of pull requests from forks. Keep this default: use the `pull_request` trigger, not `pull_request_target`. The CI job of flow 1 also skips pull requests from forks. See [Using secrets in GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#using-secrets-in-a-workflow).
 
-Store the kubeconfig as a secret in your CI system, not in Argo CD. In GitHub Actions, open the `staging-tests` environment and select **Add environment secret**. Or use the GitHub CLI:
+Store the kubeconfig as a secret in your CI system, not in Argo CD. In GitHub Actions, open **Settings > Secrets and variables > Actions > New repository secret**. Or use the GitHub CLI:
 
 ```bash
-base64 < mirrord-ci.kubeconfig | tr -d '\n' | gh secret set KUBECONFIG_DATA --env staging-tests
+base64 < mirrord-ci.kubeconfig | tr -d '\n' | gh secret set KUBECONFIG_DATA
 ```
 
 ### The CI API key
@@ -158,10 +155,10 @@ Run the command in a terminal. If stderr is not a terminal, for example in a scr
 MIRRORD_PROGRESS_MODE=simple mirrord ci api-key
 ```
 
-Save the output as the secret `MIRRORD_CI_API_KEY` in your CI system, in the same environment:
+Save the output as the secret `MIRRORD_CI_API_KEY` in your CI system:
 
 ```bash
-gh secret set MIRRORD_CI_API_KEY --env staging-tests
+gh secret set MIRRORD_CI_API_KEY
 ```
 
 The hook Jobs of flow 2 do not need this key. `mirrord preview` does not read `MIRRORD_CI_API_KEY`, and authenticates as the `mirrord-ci` ServiceAccount.
@@ -224,8 +221,6 @@ jobs:
     # Workflows of pull requests from forks get no secrets.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    # The secrets are in this environment, so each run waits for a reviewer.
-    environment: staging-tests
     env:
       MIRRORD_CI_API_KEY: ${{ secrets.MIRRORD_CI_API_KEY }}
       CI_KEY: ci-${{ github.event.pull_request.number }}-${{ github.run_id }}
@@ -264,8 +259,6 @@ jobs:
         if: always()
         run: mirrord ci stop
 ```
-
-Each push to the pull request starts a run that waits for approval. Review the commits of the pull request, then select **Review deployments** in the run and approve it.
 
 `mirrord ci start` returns before the service listens. Until the service listens, the deployed `orders` answers the requests with the header. The loop waits until the service answers on the runner, and the last `curl` fails the job if the service did not start. Use the port and the health path of your service.
 
@@ -556,7 +549,7 @@ spec:
 Some notes on the template:
 
 * **The trigger.** The generator returns open pull requests with the `preview` label. Remove `labels` to give every pull request a preview.
-* **Trust.** The preview pod runs the image of the pull request with the pod spec of `deployment/orders`, so it gets the ServiceAccount and secrets of that pod. Add the `preview` label only after a review, and only to pull requests from authors that you trust. Each later commit gets a preview with no new review.
+* **Trust.** The preview pod runs the image of the pull request with the pod spec of `deployment/orders`, so it gets the ServiceAccount and secrets of that pod. See [What the CI identity can do](#what-the-ci-identity-can-do).
 * **The chart revision.** `targetRevision: main` takes the chart and `mirrord.json` from the default branch. Only the image tag comes from the pull request. Without webhooks, the controller polls every `requeueAfterSeconds`. To react at once, configure the ApplicationSet webhook for the `opened`, `synchronize`, and `closed` events.
 * **The key.** `pr-{{.number}}` stays the same for all commits of a pull request.
 * **The image tag.** `{{.head_short_sha}}` has 8 characters. The CI system must push the same tag.

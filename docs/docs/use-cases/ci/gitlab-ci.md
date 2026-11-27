@@ -132,7 +132,7 @@ In GitLab, a variable of type **File** writes its value to a temporary file. The
 3. Set **Type** to **File**.
 4. Set **Key** to `KUBECONFIG`.
 5. Paste the content of `gitlab-ci.kubeconfig` into **Value**.
-6. Select **Protect variable**. Step 5 tells you how merge request pipelines get the variable.
+6. Clear **Protect variable**, so that merge request pipelines get the variable.
 7. Select **Add variable**.
 
 {% hint style="warning" %}
@@ -146,27 +146,17 @@ With an operator on the Enterprise plan, `mirrord ci` commands need a CI API key
 1. In a terminal on a machine with access to the cluster, run `mirrord ci api-key`. If you run it from a script or another program that is not a terminal, run `MIRRORD_PROGRESS_MODE=simple mirrord ci api-key`. Without a terminal, the default progress mode prints nothing, and the key is lost.
 2. In **Settings > CI/CD > Variables**, add a variable with the key `MIRRORD_CI_API_KEY`.
 3. Set **Type** to **Variable** and **Visibility** to **Masked**.
-4. Clear **Expand variable reference**, and select **Protect variable**.
+4. Clear **Expand variable reference** and **Protect variable**.
 
 The key is one line that starts with `mci-v1:`, so GitLab can mask it. Without the operator, or without a key on the Free and Team plans, skip this step.
 
-### 5. Run only trusted code with the credentials
+### 5. What the CI identity can do
 
-A merge request pipeline runs the code of the merge request with the kubeconfig and the CI API key, so that code can read both. Thus give the variables only to code that a Maintainer reviewed. In GitLab 18.1 and later, a merge request pipeline can read protected variables only when:
+The CI identity cannot change staging. It has `mirrord-operator-ci`, `get` on the target deployment, and `list` on pods in `staging`. It can start CI and preview sessions, which steal only the requests with their header. It cannot edit or delete workloads.
 
-- The source branch and the target branch are both protected.
-- The user who starts the pipeline can push or merge to the target branch.
-- Both branches are in the same project. Pipelines for merge requests from forks never get protected variables.
+A session can read the environment and files of the target, and a preview runs the merge request image with the environment of the target. Thus a pipeline from a branch of the project has the same access as a developer with staging access. This is the intended use.
 
-Do these steps:
-
-1. In **Settings > Repository > Protected branches**, protect the target branch, for example `main`. Set **Allowed to merge** and **Allowed to push and merge** to **Maintainers**.
-2. Protect the source branches for staging tests with a wildcard rule, for example `staging-test/*`. Set **Allowed to merge** and **Allowed to push and merge** to **Maintainers**.
-3. In **Settings > CI/CD > Variables**, under **Access protected resources in merge request pipelines**, select **Allow merge request pipelines to access protected variables and runners**.
-4. Review the changes of each merge request, including `.gitlab-ci.yml` and the test scripts.
-5. Push the reviewed commits to a protected branch, for example `staging-test/orders-fix`, and open a merge request from it. To run the tests again, select **Run pipeline** on the **Pipelines** tab of the merge request.
-
-Developers push to unprotected branches. Their merge request pipelines do not get the variables. Only Maintainers can push to the protected branches, so only reviewed code gets the variables. The mirrord jobs in this guide run only when `$CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED` is `"true"`, so GitLab skips them in all other merge request pipelines. See [Control access to protected variables and runners](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/#control-access-to-protected-variables-and-runners).
+Do not give the credentials to code from outside the project. A pipeline for a merge request from a fork runs in the fork project, with the variables of the fork. A project member can run that pipeline in the parent project, where it gets your variables. Do not do this for merge requests from forks. See [Run pipelines in the parent project](https://docs.gitlab.com/ci/pipelines/merge_request_pipelines/#run-pipelines-in-the-parent-project).
 
 ## Install the mirrord CLI in a job
 
@@ -255,7 +245,7 @@ mr-staging-tests:
   image: node:22-bookworm
   interruptible: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
     # One key for each pipeline, so two pipelines of the same MR do not share requests.
     MIRRORD_KEY: "mr-${CI_MERGE_REQUEST_IID}-${CI_PIPELINE_ID}"
@@ -351,7 +341,7 @@ The job uses a project access token to write the merge request comment.
 1. In the project, go to **Settings > Access tokens** and select **Add new token**.
 2. Select the **Developer** role and the `api` scope.
 3. Set an expiry date. By default, GitLab sets 365 days.
-4. Store the token as a masked and protected CI/CD variable with the key `GITLAB_NOTES_TOKEN`.
+4. Store the token as a masked CI/CD variable with the key `GITLAB_NOTES_TOKEN`.
 
 GitLab makes a bot user for the token. The comments show that bot user as the author.
 
@@ -375,7 +365,7 @@ build-preview-image:
     DOCKER_TLS_CERTDIR: "/certs"
   interruptible: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - docker build -t "$PREVIEW_IMAGE" .
@@ -387,7 +377,7 @@ preview-start:
   image: debian:bookworm-slim
   resource_group: preview-mr-$CI_MERGE_REQUEST_IID
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   environment:
     name: preview/mr-$CI_MERGE_REQUEST_IID
     on_stop: preview-stop
@@ -446,7 +436,7 @@ preview-stop:
   image: debian:bookworm-slim
   resource_group: preview-mr-$CI_MERGE_REQUEST_IID
   rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       when: manual
   allow_failure: true
   environment:
@@ -469,7 +459,7 @@ preview-stop:
 
 These are the GitLab rules that this pipeline uses:
 
-- **Triggers.** `$CI_PIPELINE_SOURCE == "merge_request_event"` is true when a merge request is created or updated. `$CI_MERGE_REQUEST_SOURCE_BRANCH_PROTECTED` is `"true"` when its source branch is protected. `$CI_MERGE_REQUEST_IID` is the merge request number from its URL.
+- **Triggers.** `$CI_PIPELINE_SOURCE == "merge_request_event"` is true when a merge request is created or updated. `$CI_MERGE_REQUEST_IID` is the merge request number from its URL.
 - **Cleanup.** The `preview-start` job starts the `preview/mr-<IID>` environment and names `preview-stop` as its `on_stop` job. GitLab runs the stop job when the merge request is merged or closed. The stop job must have the same rules as the start job. `when: manual` also lets a reviewer stop the preview from the environment page.
 - **Second guard.** `auto_stop_in: 1 day` makes GitLab run the stop job after one day. The GitLab worker for this runs one time each hour. The preview TTL of 1440 minutes does the same in the cluster.
 - **Concurrency.** `interruptible: true` with `auto_cancel: on_new_commit: interruptible` cancels the build and test jobs of an older pipeline after a new push. `resource_group` lets only one start or stop job run for each merge request at a time. To run the newest pipeline first, set the `process_mode` of the group to `newest_first` with the [resource groups API](https://docs.gitlab.com/api/resource_groups/).
@@ -504,7 +494,6 @@ sequenceDiagram
 - **Header filter.** Only requests with the header go to the CI session or the preview pod. A request without the header goes to the staging pods. Calls between services keep the header only if each service forwards it.
 - **Concurrent sessions.** Without the operator, one CI session at a time can steal from a target with a filter. With the operator, many pipelines can use the same target at the same time. The operator counts each session with the CI API key as a machine session.
 - **Readiness.** A preview pod never shows `Ready`. mirrord adds a readiness gate that never passes, so the Service does not send unfiltered traffic to the preview pod. This is not true for a Service with `publishNotReadyAddresses: true`. Use `mirrord preview status -n staging` to see the real state. Without `-n`, the command looks only in the namespace of the kubeconfig context.
-- **Forks.** A pipeline for a merge request from a fork runs in the fork project, with the variables of the fork. It does not get your kubeconfig or keys. A project member can run the pipeline in the parent project after a review of the changes.
 - **Timeouts and cancels.** GitLab does not run `after_script` when a job times out, and it runs `after_script` in a new container when you cancel a job. In both cases `mirrord ci stop` does not stop the session. The runner removes the job container, and the operator ends the session within about 30 seconds.
 - **Several services.** For more than one service in a merge request, use the same key for all of them. `mirrord preview up` and `mirrord preview down` start and stop all services of a `mirrord-up.yaml`. See [Previewing Several Services](../preview-environments.md#previewing-several-services).
 
@@ -512,8 +501,8 @@ sequenceDiagram
 
 | Symptom | Cause and fix |
 |---------|---------------|
-| `` `MIRRORD_CI_API_KEY` is required for operator-backed `mirrord ci start` `` (CLI error) | The operator needs a key, and the job did not get the variable. Make sure that a Maintainer started the pipeline, that the project allows protected variables in merge request pipelines, and that the pipeline does not run in a fork. See [Cluster access](#cluster-access). |
-| mirrord cannot connect to the cluster, or `KUBECONFIG` is empty | The `KUBECONFIG` File variable is not set, or has a different environment scope. Or the pipeline cannot read protected variables: a Developer started it, or a branch is not protected. See [Cluster access](#cluster-access). |
+| `` `MIRRORD_CI_API_KEY` is required for operator-backed `mirrord ci start` `` (CLI error) | The operator needs a key, and the job did not get the variable. Make sure that the variable is not protected, and that the pipeline does not run in a fork. See [Cluster access](#cluster-access). |
+| mirrord cannot connect to the cluster, or `KUBECONFIG` is empty | The `KUBECONFIG` File variable is not set, or has a different environment scope. Or the variable is protected, so merge request pipelines from unprotected branches do not get it. See [Cluster access](#cluster-access). |
 | `forbidden` errors for operator resources or the target | The ServiceAccount is not bound to `mirrord-operator-ci`, or it does not have the `gitlab-ci-target` Role. Check the ClusterRoleBinding and the RoleBinding in the target namespace. |
 | The tests get answers from staging, not from the service in the runner | The header value is not the session key. Make sure the tests send `mirrord-session=$MIRRORD_KEY` and the filter uses `{{ key }}`. If the request passes through other services first, make sure they forward `baggage`. |
 | The CI API key fails after a license change | Some operator versions check the key against the operator license. Run `mirrord ci api-key` again and update the variable. |
@@ -541,7 +530,7 @@ Give the start job an environment with `on_stop`, and give the stop job `environ
 
 ### Why does my GitLab merge request pipeline not see my CI/CD variables?
 
-The variables are protected, and the pipeline does not meet the GitLab conditions for protected variables. The source and target branches must be protected and in the same project. The user who starts the pipeline must be able to merge to the target branch. The project must allow protected variables in merge request pipelines. See [Cluster access](#cluster-access).
+The variables are protected, or the pipeline runs in a fork. GitLab gives protected variables only to pipelines of protected branches, so clear **Protect variable** on the mirrord variables. A pipeline for a merge request from a fork gets no variables of your project. See [Cluster access](#cluster-access).
 
 ### Do I need to deploy the merge request to staging to test it with mirrord?
 
