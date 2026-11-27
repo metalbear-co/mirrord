@@ -448,18 +448,16 @@ impl CiStopCommandHandler {
             Err(CiError::SessionLocked { .. }) => return Ok(SessionStop::Skipped),
             Err(error) => return Err(error),
         };
-        let mut store =
-            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(session_dir))
-                .await?;
+        let mut store = lock.read().await?;
         let had_targets = store.is_empty().not();
 
         if let Err(not_stopped) = store.terminate_with(remove_container).await {
             failures.extend(not_stopped);
         }
         if store.is_empty() {
-            MirrordCiStore::remove_session(session_dir, &lock).await?;
+            lock.remove_session().await?;
         } else {
-            store.write_locked(session_dir, &lock).await?;
+            lock.write(&store).await?;
         }
 
         Ok(SessionStop::Visited { had_targets })
@@ -830,12 +828,9 @@ mod tests {
             .handle_with(|_| {
                 removals += 1;
                 let other_stop_lock = other_stop_lock.take();
-                let removed_dir = removed_dir.clone();
                 async move {
                     if let Some(lock) = other_stop_lock {
-                        MirrordCiStore::remove_session(&removed_dir, &lock)
-                            .await
-                            .unwrap();
+                        lock.remove_session().await.unwrap();
                     }
                     Ok(())
                 }

@@ -195,11 +195,16 @@ struct MirrordCiStore {
     user_process_groups: HashSet<u32>,
 }
 
-/// Exclusive lock on the state of one CI session, held across every read-modify-write of it.
+/// Exclusive lock on the state of the CI session in `session_dir`, held across every
+/// read-modify-write of it.
 ///
 /// Keeping the same lock across a stop's read, signals, and ledger update prevents lock
 /// contention from leaving already-signalled numeric IDs available for a later retry.
-struct CiStoreLock {
+///
+/// The state is read, written, and removed only through the lock, which keeps the directory it was
+/// taken in, so that a caller can't change one session's state under another session's lock.
+struct SessionLock {
+    session_dir: PathBuf,
     _file: fs::File,
 }
 
@@ -220,14 +225,14 @@ impl MirrordCiStore {
     /// locking the state file itself would let another writer lock the replacement.
     const LOCK_FILE_NAME: &str = "session.lock";
 
-    /// Temporary file in a session's directory that [`Self::write_locked`] writes the state to
+    /// Temporary file in a session's directory that [`SessionLock::write`] writes the state to
     /// before it replaces the state file.
     ///
     /// Writers hold the session's lock, so they share this one name. A writer that is killed or
     /// fails before the replacement leaves this file behind. The next write removes it and creates
     /// the file exclusively, so that a leftover or a planted symlink is never followed or
-    /// truncated. [`Self::remove_session`] also removes it, so that it can't keep the session's
-    /// directory.
+    /// truncated. [`SessionLock::remove_session`] also removes it, so that it can't keep the
+    /// session's directory.
     const TEMPORARY_STATE_FILE_NAME: &str = "session.json.tmp";
 
     /// How often [`Self::lock_existing_session`] retries a held lock.
@@ -308,7 +313,7 @@ impl MirrordCiStore {
     async fn lock_or_create_session(
         session_dir: &Path,
         lock_timeout: Duration,
-    ) -> CiResult<CiStoreLock> {
+    ) -> CiResult<SessionLock> {
         let deadline = Instant::now() + lock_timeout;
         loop {
             fs::create_dir_all(session_dir).await?;
@@ -340,7 +345,7 @@ impl MirrordCiStore {
         session_dir: &Path,
         deadline: Instant,
         lock_timeout: Duration,
-    ) -> CiResult<Option<CiStoreLock>> {
+    ) -> CiResult<Option<SessionLock>> {
         loop {
             let lock_file = match fs::OpenOptions::new()
                 .create(true)
@@ -380,7 +385,10 @@ impl MirrordCiStore {
                 timeout: lock_timeout,
             })??;
             if Self::holds_current_lock_file(session_dir, &lock_file).await? {
-                return Ok(Some(CiStoreLock { _file: lock_file }));
+                return Ok(Some(SessionLock {
+                    session_dir: session_dir.to_owned(),
+                    _file: lock_file,
+                }));
             }
         }
     }
@@ -394,51 +402,10 @@ impl MirrordCiStore {
         lock_timeout: Duration,
         apply: impl FnOnce(&mut Self),
     ) -> CiResult<()> {
-        let lock = Self::lock_or_create_session(session_dir, lock_timeout).await?;
-        Self::update_locked(session_dir, &lock, apply).await
-    }
-
-    /// [`Self::update`] for a caller that already holds the lock.
-    ///
-    /// The read happens under the same lock as the write. A process that read the session's state
-    /// before it took the lock could write back a copy that misses the cleanup targets that
-    /// another process of the session recorded in between, and `mirrord ci stop` would then leave
-    /// those processes running.
-    async fn update_locked(
-        session_dir: &Path,
-        lock: &CiStoreLock,
-        apply: impl FnOnce(&mut Self),
-    ) -> CiResult<()> {
-        let mut store = Self::read_from_file_or_default(&Self::state_path(session_dir)).await?;
-        apply(&mut store);
-        store.write_locked(session_dir, lock).await
-    }
-
-    /// Replace the state only after its contents are complete. A partial write must not erase
-    /// the cleanup targets from the previous successful invocation.
-    async fn write_locked(&self, session_dir: &Path, _lock: &CiStoreLock) -> CiResult<()> {
-        let contents = serde_json::to_vec(self)?;
-        let temporary_path = session_dir.join(Self::TEMPORARY_STATE_FILE_NAME);
-        // `remove_file` removes a symlink itself rather than its target.
-        match fs::remove_file(&temporary_path).await {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.into()),
-            _ => {}
-        }
-        let mut options = fs::OpenOptions::new();
-        options.create_new(true).write(true);
-        // The state file takes this file's mode when it is replaced, and the temporary directory
-        // is readable by other users.
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut temporary_file = options.open(&temporary_path).await?;
-        temporary_file.write_all(&contents).await?;
-        temporary_file.flush().await?;
-        temporary_file.sync_all().await?;
-        drop(temporary_file);
-        fs::rename(&temporary_path, Self::state_path(session_dir)).await?;
-        #[cfg(target_os = "linux")]
-        fs::File::open(session_dir).await?.sync_all().await?;
-        Ok(())
+        Self::lock_or_create_session(session_dir, lock_timeout)
+            .await?
+            .update(apply)
+            .await
     }
 
     /// Tries to read the [`MirrordCiStore`] from `path` (normally the [`Self::state_path`] of a
@@ -452,39 +419,6 @@ impl MirrordCiStore {
         }
     }
 
-    /// Removes the temporary state file of the session in `session_dir`, then its state file,
-    /// then its lock file, then the directory itself, and treats each one that is already gone as
-    /// removed.
-    ///
-    /// While `lock` is held, no other process can be in [`Self::write_locked`], so a temporary
-    /// state file is what a writer that was killed or failed before the replacement left behind.
-    ///
-    /// The state file goes before the lock file because, once the lock file is gone, another
-    /// process can create a new lock file and lock it while `lock` is still held on the old one.
-    /// That process then finds no state, rather than the targets that `lock` was held to signal.
-    /// It may also have started writing in the directory, so a directory that isn't empty stays.
-    async fn remove_session(session_dir: &Path, _lock: &CiStoreLock) -> CiResult<()> {
-        let ignore_not_found = |result: io::Result<()>| match result {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            result => result,
-        };
-
-        ignore_not_found(fs::remove_file(session_dir.join(Self::TEMPORARY_STATE_FILE_NAME)).await)?;
-        ignore_not_found(fs::remove_file(Self::state_path(session_dir)).await)?;
-        ignore_not_found(fs::remove_file(Self::lock_path(session_dir)).await)?;
-        match fs::remove_dir(session_dir).await {
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
-                ) =>
-            {
-                Ok(())
-            }
-            result => Ok(result?),
-        }
-    }
-
     /// Check if the store is empty. Return `true` if no process is found.
     ///
     /// Used to avoid errors when calling `mirrord ci stop` multiple times, since that command
@@ -495,6 +429,99 @@ impl MirrordCiStore {
             && self.sidecar_pids.is_empty()
             && self.sidecar_containers.is_empty()
             && self.user_process_groups.is_empty()
+    }
+}
+
+/// Removes the file at `path`, and treats a file that is already gone as removed.
+async fn remove_file_if_exists(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path).await {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+impl SessionLock {
+    /// Reads the stored state of the locked session, see
+    /// [`MirrordCiStore::read_from_file_or_default`].
+    async fn read(&self) -> CiResult<MirrordCiStore> {
+        MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(&self.session_dir))
+            .await
+    }
+
+    /// [`MirrordCiStore::update`] for a caller that already holds the lock.
+    ///
+    /// The read happens under the same lock as the write. A process that read the session's state
+    /// before it took the lock could write back a copy that misses the cleanup targets that
+    /// another process of the session recorded in between, and `mirrord ci stop` would then leave
+    /// those processes running.
+    async fn update(&self, apply: impl FnOnce(&mut MirrordCiStore)) -> CiResult<()> {
+        let mut store = self.read().await?;
+        apply(&mut store);
+        self.write(&store).await
+    }
+
+    /// Replaces the state of the locked session with `store`, only after its contents are
+    /// complete. A partial write must not erase the cleanup targets from the previous successful
+    /// invocation.
+    async fn write(&self, store: &MirrordCiStore) -> CiResult<()> {
+        let contents = serde_json::to_vec(store)?;
+        let temporary_path = self
+            .session_dir
+            .join(MirrordCiStore::TEMPORARY_STATE_FILE_NAME);
+        // `remove_file` removes a symlink itself rather than its target.
+        remove_file_if_exists(&temporary_path).await?;
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        // The state file takes this file's mode when it is replaced, and the temporary directory
+        // is readable by other users.
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut temporary_file = options.open(&temporary_path).await?;
+        temporary_file.write_all(&contents).await?;
+        temporary_file.flush().await?;
+        temporary_file.sync_all().await?;
+        drop(temporary_file);
+        fs::rename(
+            &temporary_path,
+            MirrordCiStore::state_path(&self.session_dir),
+        )
+        .await?;
+        #[cfg(target_os = "linux")]
+        fs::File::open(&self.session_dir).await?.sync_all().await?;
+        Ok(())
+    }
+
+    /// Removes the temporary state file of the locked session, then its state file, then its lock
+    /// file, then the directory itself, and treats each one that is already gone as removed.
+    ///
+    /// While this lock is held, no other process can be in [`Self::write`], so a temporary state
+    /// file is what a writer that was killed or failed before the replacement left behind.
+    ///
+    /// The state file goes before the lock file because, once the lock file is gone, another
+    /// process can create a new lock file and lock it while this lock is still held on the old
+    /// one. That process then finds no state, rather than the targets that this lock was held to
+    /// signal. It may also have started writing in the directory, so a directory that isn't empty
+    /// stays.
+    async fn remove_session(&self) -> CiResult<()> {
+        remove_file_if_exists(
+            &self
+                .session_dir
+                .join(MirrordCiStore::TEMPORARY_STATE_FILE_NAME),
+        )
+        .await?;
+        remove_file_if_exists(&MirrordCiStore::state_path(&self.session_dir)).await?;
+        remove_file_if_exists(&MirrordCiStore::lock_path(&self.session_dir)).await?;
+        match fs::remove_dir(&self.session_dir).await {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
+                ) =>
+            {
+                Ok(())
+            }
+            result => Ok(result?),
+        }
     }
 }
 
@@ -596,7 +623,7 @@ impl MirrordCi {
         // with `O_CLOEXEC`, so the lock is released when this session drops it.
         let child = spawn_background_user_command(command).map_err(spawn_failed)?;
         if let Some(process_group) = child.id() {
-            MirrordCiStore::update_locked(&self.session_dir, &lock, |store| {
+            lock.update(|store| {
                 store.user_process_groups.insert(process_group);
             })
             .await?;
@@ -1003,12 +1030,11 @@ mod tests {
         let lock = MirrordCiStore::lock_or_create_session(&session_dir, Duration::ZERO)
             .await
             .unwrap();
-        let holder_dir = session_dir.clone();
         let holder = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(150)).await;
             let mut store = MirrordCiStore::default();
             store.intproxy_pids.insert(1234);
-            store.write_locked(&holder_dir, &lock).await.unwrap();
+            lock.write(&store).await.unwrap();
             drop(lock);
         });
 
@@ -1084,9 +1110,7 @@ mod tests {
         // The stop's descriptor and the one the waiter opened before the removal.
         wait_for_open_lock_files(&lock_path, 2).await;
 
-        MirrordCiStore::remove_session(&session_dir, &stop_lock)
-            .await
-            .unwrap();
+        stop_lock.remove_session().await.unwrap();
         let replacement = MirrordCiStore::lock_or_create_session(&session_dir, Duration::ZERO)
             .await
             .unwrap();
@@ -1095,11 +1119,12 @@ mod tests {
         wait_for_open_lock_files(&lock_path, 2).await;
         assert!(waiter.is_finished().not());
 
-        MirrordCiStore::update_locked(&session_dir, &replacement, |store| {
-            store.intproxy_pids.insert(5678);
-        })
-        .await
-        .unwrap();
+        replacement
+            .update(|store| {
+                store.intproxy_pids.insert(5678);
+            })
+            .await
+            .unwrap();
         drop(replacement);
         waiter.await.unwrap().unwrap();
 
