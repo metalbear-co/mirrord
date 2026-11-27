@@ -43,14 +43,16 @@ services:
       path: deployment/greeting
       namespace: staging
     http_filter:
-      header_filter: '^baggage: .*mirrord-session={{ key }}(?:[,; ]|$)'
+      header_filter: '^baggage: (?:.*, *)?mirrord-session={{ key }}(?:[,; ]|$)'
     run:
       command: ["node", "greeting.js"]
 ```
 
 The service uses the default `split` mode. mirrord steals only the requests that match `header_filter`, and the deployed `greeting` handles all other requests. `{{ key }}` is the session key that you give with `--key`.
 
-The filter ends at a delimiter: a comma, a semicolon, a space, or the end of the header. Thus the key `alice-e2e` does not match the header of the key `alice-e2e2`. The default filter of `mirrord up` has no delimiter, so set your own filter.
+The filter matches `mirrord-session` only at the start of the header value or after a comma. Thus a baggage member such as `other-mirrord-session=alice-e2e` does not match. The filter ends at a delimiter: a comma, a semicolon, a space, or the end of the header. Thus the key `alice-e2e` does not match the header of the key `alice-e2e2`. The default filter of `mirrord up` has no delimiters, so set your own filter.
+
+Use only lowercase letters, digits, `-`, and `_` in the key. mirrord puts the key into the filter as regular expression text, so other characters, such as `+` or `.`, can change the match.
 
 Start the service with a key that only your test run uses:
 
@@ -201,7 +203,7 @@ In CI, use `mirrord ci start`. It starts the service in the background and retur
       "incoming": {
         "mode": "steal",
         "http_filter": {
-          "header_filter": "^baggage: .*mirrord-session={{ key }}(?:[,; ]|$)"
+          "header_filter": "^baggage: (?:.*, *)?mirrord-session={{ key }}(?:[,; ]|$)"
         }
       }
     }
@@ -211,21 +213,30 @@ In CI, use `mirrord ci start`. It starts the service in the background and retur
 
 `mirrord ci start` returns when the local process starts, before the steal is active. A request that you send at once can still go to the deployed service. Wait until your change answers through staging, then run the tests.
 
-This script works in most CI systems. It uses the run ID and the attempt number of GitHub Actions to make a unique key. Use the run ID of your CI system:
+This script works in most CI systems. It makes a unique key from the run ID and the attempt number of GitHub Actions, and a random suffix. Parallel jobs and matrix entries of one run share the run ID, so the random suffix keeps their keys different. Use the run ID of your CI system:
 
 ```bash
-export MIRRORD_KEY="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+export MIRRORD_KEY="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(openssl rand -hex 4)"
 export MIRRORD_PROGRESS_MODE=simple
 export BASE_URL=https://staging.example.com
 
 mirrord ci start -f mirrord.json --key "$MIRRORD_KEY" -- node greeting.js
 
 # Wait until requests with the header reach the local service.
+ready=0
 for i in $(seq 1 60); do
-  curl -s -H "baggage: mirrord-session=$MIRRORD_KEY" "$BASE_URL/api/greeting" \
-    | grep -q "my change" && break
+  if curl -s --max-time 5 -H "baggage: mirrord-session=$MIRRORD_KEY" "$BASE_URL/api/greeting" \
+    | grep -q "my change"; then
+    ready=1
+    break
+  fi
   sleep 1
 done
+if [ "$ready" -ne 1 ]; then
+  echo "The local service did not get the requests with the header." >&2
+  mirrord ci stop
+  exit 1
+fi
 
 status=0
 npx playwright test || status=$?
@@ -233,11 +244,11 @@ mirrord ci stop
 exit $status
 ```
 
-Replace the `grep` check with a check that only your change passes, for example a version field in the response. Set the `MIRRORD_CI_API_KEY` secret when the operator is installed. `mirrord ci start` shows this output, and then the tests run:
+The script stops with an error if your change does not answer in 60 tries, so the tests never run against staging only. Replace the `grep` check with a check that only your change passes, for example a version field in the response. Set the `MIRRORD_CI_API_KEY` secret when the operator is installed. `mirrord ci start` shows this output, and then the tests run:
 
 ```
 session started
-Session key: ci-1795808949
+Session key: ci-<run ID>-<attempt>-<random>
 running process
 Ready!
 mirrord ci files will be stored in .../mirrord/node-1795808950-oXG65na
