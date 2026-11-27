@@ -2,15 +2,16 @@
 //! list and replay its captured requests.
 
 use axum::{
-    Extension, Json, Router,
+    Extension, Router,
     extract::Path,
+    http::header::CONTENT_TYPE,
     middleware,
+    response::IntoResponse,
     routing::{get, post},
 };
+use bytes::Bytes;
 use mirrord_session_monitor_client::SessionClient;
-use mirrord_session_monitor_protocol::{
-    CapturedRequest, CapturedRequestSummary, REPLAY_REQUESTS_ROUTE, ReplayRun,
-};
+use mirrord_session_monitor_protocol::REPLAY_REQUESTS_ROUTE;
 use serde::Deserialize;
 use tracing::Level;
 
@@ -45,46 +46,54 @@ struct RequestPath {
     request_id: u64,
 }
 
+/// Returns the JSON that the session answered, unchanged.
+///
+/// Parsing it would fail on a value that a newer session added, and would cost a copy of an answer
+/// that holds bodies.
+fn json(body: Bytes) -> impl IntoResponse {
+    ([(CONTENT_TYPE, "application/json")], body)
+}
+
 #[tracing::instrument(level = Level::DEBUG, err)]
 async fn list_requests(
     Extension(client): Extension<SessionClient>,
-) -> Result<Json<Vec<CapturedRequestSummary>>, ChaosApiError> {
+) -> Result<impl IntoResponse, ChaosApiError> {
     let requests = client
         .get(REPLAY_REQUESTS_ROUTE)
         .send()
         .await?
-        .json()
+        .bytes()
         .await?;
 
-    Ok(Json(requests))
+    Ok(json(requests))
 }
 
 #[tracing::instrument(level = Level::DEBUG, err)]
 async fn get_request(
     Extension(client): Extension<SessionClient>,
     Path(RequestPath { request_id }): Path<RequestPath>,
-) -> Result<Json<CapturedRequest>, ChaosApiError> {
+) -> Result<impl IntoResponse, ChaosApiError> {
     let request = client
         .get(format!("{REPLAY_REQUESTS_ROUTE}/{request_id}"))
         .send()
         .await?
-        .json()
+        .bytes()
         .await?;
 
-    Ok(Json(request))
+    Ok(json(request))
 }
 
 #[tracing::instrument(level = Level::DEBUG, err)]
 async fn replay_request(
     Extension(client): Extension<SessionClient>,
     Path(RequestPath { request_id }): Path<RequestPath>,
-) -> Result<Json<ReplayRun>, ChaosApiError> {
+) -> Result<impl IntoResponse, ChaosApiError> {
     let run = client
         .post(format!("{REPLAY_REQUESTS_ROUTE}/{request_id}/replay"))
         .send()
         .await?
-        .json()
+        .bytes()
         .await?;
 
-    Ok(Json(run))
+    Ok(json(run))
 }

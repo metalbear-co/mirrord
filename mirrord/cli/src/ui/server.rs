@@ -1391,6 +1391,41 @@ mod tests {
         }
     }
 
+    /// A forwarded call can wait long for its session, for example while a replay waits on a
+    /// breakpoint, so it must not hold the lock of the sessions meanwhile. A writer that waits for
+    /// that lock would block every other reader.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn forwarded_call_does_not_hold_the_sessions_lock() {
+        let sessions_dir = tempfile::tempdir().unwrap();
+        let session_id = "held-session";
+        let session = tracked_session(session_id, sessions_dir.path());
+        let listener = tokio::net::UnixListener::bind(&session.endpoint.sentinel_path).unwrap();
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            accepted_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        let state = test_state();
+        state
+            .sessions
+            .write()
+            .await
+            .insert(session_id.to_owned(), session);
+        let request = Request::get(format!("/api/replay/{session_id}"))
+            .header(TOKEN_HEADER_NAME, TEST_TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        tokio::spawn(build_router(state.clone()).oneshot(request));
+        accepted_rx.await.unwrap();
+
+        let _sessions = tokio::time::timeout(Duration::from_secs(5), state.sessions.write())
+            .await
+            .expect("the forwarded call holds the lock of the sessions");
+    }
+
     #[tokio::test]
     async fn event_buffer_keeps_only_the_latest_port_subscription_per_port() {
         let state = test_state();

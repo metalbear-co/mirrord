@@ -250,11 +250,12 @@ export const strings = {
     replayHint:
       'Sent straight to your local application. Calls it makes still reach the cluster.',
     cantReplay: (reason: string) => `Can't be replayed: ${reason}.`,
-    notReplayable: {
-      upgraded: 'it upgraded the connection',
-      body_too_large: 'its body is larger than the session keeps',
-      body_incomplete: "the session doesn't have its whole body",
-    },
+    notReplayable: (reason: string) =>
+      ({
+        upgraded: 'it upgraded the connection',
+        body_too_large: 'its body is larger than the session keeps',
+        body_incomplete: "the session doesn't have its whole body",
+      })[reason] ?? "of a reason that this version of mirrord doesn't know",
     replayFailed: (detail: string) => `Replay failed: ${detail}`,
     loadingRequest: 'Loading the request\u2026',
     requestFailed: (detail: string) => `Couldn't load the request: ${detail}`,

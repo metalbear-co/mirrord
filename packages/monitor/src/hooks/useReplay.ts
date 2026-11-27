@@ -8,7 +8,8 @@ import type {
 
 // The session has no event for a captured request, so the list is refetched.
 const POLL_INTERVAL_MS = 2500
-// The session keeps this many replays of each request.
+// The replays that the session keeps of each request, `MAX_KEPT_REPLAYS` in the intproxy's
+// `replay.rs`. Only the merge of a replay's answer uses it, not the check for a stale request.
 const KEPT_REPLAYS = 5
 
 export interface UseReplay {
@@ -33,18 +34,17 @@ function message(err: unknown): string {
 }
 
 /**
- * Whether `detail` holds exactly the replays that the session keeps of a request that was
- * replayed `replayCount` times: the latest ones, without a gap.
+ * Whether `detail` holds the latest replays of a request that was replayed `replayCount` times,
+ * without a gap.
  */
-function holdsKeptReplays(
+function holdsLatestReplays(
   detail: CapturedRequest,
   replayCount: number,
 ): boolean {
-  const kept = Math.min(replayCount, KEPT_REPLAYS)
-  const first = replayCount - kept + 1
+  const first = replayCount - detail.replays.length + 1
 
   return (
-    detail.replays.length === kept &&
+    (replayCount === 0 || detail.replays.length > 0) &&
     detail.replays.every((run, index) => run.number === first + index)
   )
 }
@@ -58,7 +58,7 @@ function isStale(
     detail.status !== summary.status ||
     detail.duration_ms !== summary.duration_ms ||
     // A replay that was made elsewhere, or whose answer was dropped, is missing from the detail.
-    !holdsKeptReplays(detail, summary.replay_count) ||
+    !holdsLatestReplays(detail, summary.replay_count) ||
     detail.not_replayable !== summary.not_replayable ||
     detail.body_size !== summary.body_size
   )
@@ -81,6 +81,40 @@ function withRun(request: CapturedRequest, run: ReplayRun): CapturedRequest {
     replay_count: Math.max(request.replay_count, run.number),
     replays,
   }
+}
+
+function sameSummary(
+  a: CapturedRequestSummary,
+  b: CapturedRequestSummary,
+): boolean {
+  const keys = Object.keys(b) as (keyof CapturedRequestSummary)[]
+  return (
+    keys.length === Object.keys(a).length &&
+    keys.every((key) => a[key] === b[key])
+  )
+}
+
+/**
+ * Returns `next` with each summary that didn't change replaced by the one in `current`, and
+ * `current` itself when nothing changed, so that the rows that didn't change skip rendering.
+ */
+function reuseUnchanged(
+  current: CapturedRequestSummary[],
+  next: CapturedRequestSummary[],
+): CapturedRequestSummary[] {
+  const byId = new Map(current.map((summary) => [summary.id, summary]))
+  let changed = current.length !== next.length
+  const merged = next.map((summary, index) => {
+    const previous = byId.get(summary.id)
+    if (previous === undefined || !sameSummary(previous, summary)) {
+      changed = true
+      return summary
+    }
+    if (current[index] !== previous) changed = true
+    return previous
+  })
+
+  return changed ? merged : current
 }
 
 /** A replay of one request that waits for the application, or why the last one failed. */
@@ -171,7 +205,7 @@ export function useReplay(sessionId: string, active: boolean): UseReplay {
         if (cancelled) return
 
         const next = listed ?? []
-        setRequests(next)
+        setRequests((current) => reuseUnchanged(current, next))
         setUnsupported(listed === null)
         setLoadError(false)
 

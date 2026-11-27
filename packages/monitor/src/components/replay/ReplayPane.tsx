@@ -37,6 +37,22 @@ function withoutJsonWhitespace(json: string): string {
   )
 }
 
+// The embeddings, overrides and isolates of the Unicode bidirectional algorithm.
+const DIRECTION_CHANGES = /[\u202a-\u202e\u2066-\u2069]/g
+const HEX = 16
+
+/**
+ * Returns `text` with the characters that change the direction of text escaped, as
+ * `mirrord replay` prints them, because they would show the text in another order than the bytes
+ * that a replay sends.
+ */
+function visible(text: string): string {
+  return text.replace(
+    DIRECTION_CHANGES,
+    (c) => `\\u{${c.codePointAt(0)?.toString(HEX)}}`,
+  )
+}
+
 function Body({ body }: { body: CapturedBody }) {
   const s = strings.replay
   if (body.size === 0) {
@@ -49,10 +65,15 @@ function Body({ body }: { body: CapturedBody }) {
 
   // Formatted only when that can't change what is shown: parsing rounds large numbers and merges
   // repeated keys.
+  // A body with direction changes is shown as text, where they are escaped.
+  const text = visible(body.text)
   let parsed: unknown
   try {
     const value: unknown = JSON.parse(body.text)
-    if (JSON.stringify(value) === withoutJsonWhitespace(body.text)) {
+    if (
+      text === body.text &&
+      JSON.stringify(value) === withoutJsonWhitespace(body.text)
+    ) {
       parsed = value
     }
   } catch {
@@ -63,7 +84,7 @@ function Body({ body }: { body: CapturedBody }) {
     <div className="border-border bg-muted/40 rounded border p-2">
       {parsed === undefined ? (
         <pre className="text-meta whitespace-pre-wrap break-all font-mono leading-relaxed">
-          {body.text}
+          {text}
         </pre>
       ) : (
         <JsonHighlight value={parsed} />
@@ -86,7 +107,8 @@ function Headers({ headers }: { headers: [string, string][] }) {
         // A header name can repeat, so the position is part of the key.
         // eslint-disable-next-line react/no-array-index-key
         <div key={`${name}-${index}`} className="break-all">
-          <span className="text-muted-foreground">{name}:</span> {value}
+          <span className="text-muted-foreground">{visible(name)}:</span>{' '}
+          {visible(value)}
         </div>
       ))}
     </div>
@@ -98,20 +120,20 @@ function RequestRow({
   onSelect,
 }: {
   request: CapturedRequestSummary
-  onSelect: () => void
+  onSelect: (id: number) => void
 }) {
   const s = strings.replay
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => onSelect(request.id)}
       className="border-border hover:bg-muted/50 flex w-full items-center gap-2 border-b px-3 py-2 text-left"
     >
       <span className="text-meta text-muted-foreground w-12 shrink-0 font-mono font-semibold">
         {request.method}
       </span>
       <span className="text-body text-foreground min-w-0 flex-1 truncate font-mono">
-        {request.path}
+        {visible(request.path)}
       </span>
       {request.replay_count > 0 && (
         <span className="text-meta text-primary flex shrink-0 items-center gap-1 font-semibold">
@@ -126,6 +148,8 @@ function RequestRow({
     </button>
   )
 }
+
+const MemoRequestRow = memo(RequestRow)
 
 function RequestDetail({
   request,
@@ -154,7 +178,7 @@ function RequestDetail({
     <div className="flex flex-col gap-3 p-3">
       <div>
         <div className="text-body text-foreground break-all font-mono font-semibold">
-          {request.method} {request.path}
+          {request.method} {visible(request.path)}
         </div>
         <div className="text-meta text-muted-foreground mt-0.5">
           {s.receivedLine(
@@ -188,7 +212,7 @@ function RequestDetail({
         </div>
       ) : (
         <p className="text-meta text-muted-foreground leading-relaxed">
-          {s.cantReplay(s.notReplayable[request.not_replayable])}
+          {s.cantReplay(s.notReplayable(request.not_replayable))}
         </p>
       )}
 
@@ -320,10 +344,10 @@ function ReplayPane({ replay }: { replay: UseReplay }) {
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {newestFirst.map((request) => (
-          <RequestRow
+          <MemoRequestRow
             key={request.id}
             request={request}
-            onSelect={() => replay.select(request.id)}
+            onSelect={replay.select}
           />
         ))}
         {replay.requests.length === 0 && !replay.loadError && (

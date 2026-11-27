@@ -61,7 +61,7 @@ content-type: application/json
 {"id":"ch_8Kq2","status":"succeeded"}
 ```
 
-To change the request before sending it, set or remove headers. Both flags can be repeated. The `content-length` and `transfer-encoding` headers can't be changed:
+To change the request before sending it, set or remove headers. Both flags can be repeated, once for each header, because a replay sets each header to one value. The `content-length` and `transfer-encoding` headers can't be changed:
 
 ```bash
 mirrord replay send 1 --header 'x-tenant: blue' --remove-header authorization
@@ -77,7 +77,7 @@ A replay is sent once. mirrord only sends it again when your application can't h
 mirrord replay show 1
 ```
 
-This prints the headers and body of the request, the status of the response to the original request, and the status of its latest replays. Values of headers and query parameters that usually carry secrets, such as `authorization`, `cookie`, and `token`, are printed as `[REDACTED]`. A replay still sends the original values. Bodies are printed as text: bytes that are not valid UTF-8 are printed as `�`, and control characters, such as terminal escape sequences, and characters that change the direction of text are printed escaped. With `--format json`, the body is text too, and only control characters are escaped, the JSON way. A replay still sends the original bytes.
+This prints the headers and body of the request, the status of the response to the original request, and the status of its latest replays. Values of headers and query parameters that usually carry secrets, such as `authorization`, `cookie`, and `token`, are printed as `[REDACTED]`. A replay still sends the original values. Bodies are printed as text: bytes that are not valid UTF-8 are printed as `�`, and control characters, such as terminal escape sequences, and characters that change the direction of text are printed escaped. With `--format json`, the body is text too, and the same characters are written as `\u` escapes, which JSON reads as the original characters. A replay still sends the original bytes.
 
 ## Replaying from the Local UI
 
