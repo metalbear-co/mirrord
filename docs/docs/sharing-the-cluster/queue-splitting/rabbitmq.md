@@ -226,7 +226,7 @@ Both fields are optional and in seconds, on the `MirrordSplitConfig`:
 
 | Field | Behavior |
 | ----- | -------- |
-| `spec.ttl` | `N`: keep the split live for up to `N` seconds after the last session ends. `0` or unset: go straight to the drain window. |
+| `spec.ttl` | `N`: keep the split in place for up to `N` seconds after the last session ends. `0` or unset: go straight to the drain window. |
 | `spec.drainTimeout` | `N`: wait up to `N` seconds for the patched workload to read its temporary queue. `0`: remove the split at once; unread messages can be lost. Unset: no limit; wait until the queue is empty. |
 
 When the split ends, the operator does not delete the queue that the patched workload reads while it still holds messages. It keeps that queue and reports it in a `Drained` condition on the `MirrordSplitConfig`. If a pod still reads the queue, the operator deletes it after that pod is gone.
