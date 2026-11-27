@@ -1333,6 +1333,7 @@ mod output_tests {
     /// error report: it then goes on `exited`, not printed. Every other line is printed as
     /// output, a report that isn't last too. Text output keeps nothing back.
     #[rstest]
+    // The session's last line is an error report, so it's the session's error.
     #[case::report_last(
         include_str!("testdata/output/stderr-error-last.txt"),
         OutputFormat::Json,
