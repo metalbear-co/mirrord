@@ -57,6 +57,7 @@ windows-sys = { version = "0.59", features = [
     "Wdk_Storage_FileSystem",
     "Wdk_System_Threading",
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_IO",

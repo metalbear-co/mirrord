@@ -34,7 +34,7 @@ use winapi::{
             PS_SOLID, RoundRect, SelectObject, SetBkColor, SetBkMode, SetTextColor, TRANSPARENT,
         },
         winuser::{
-            AdjustWindowRect, CREATESTRUCTW, CW_USEDEFAULT, CreateWindowExW, DRAWITEMSTRUCT,
+            self, AdjustWindowRect, CREATESTRUCTW, CW_USEDEFAULT, CreateWindowExW, DRAWITEMSTRUCT,
             DT_CENTER, DT_SINGLELINE, DT_VCENTER, DefWindowProcW, DestroyWindow, DispatchMessageW,
             DrawTextW, FillRect, GWLP_USERDATA, GetClientRect, GetMessageW, GetParent,
             GetSystemMetrics, GetWindowLongPtrW, GetWindowTextW, IDC_ARROW, IsDialogMessageW,
@@ -560,24 +560,37 @@ fn shell_open(target: &[u16]) {
     }
 }
 
-// The rich-edit messages, flags, notification code, and payload structs below are declared locally
-// because winapi 0.3.9 ships no richedit module to import them from.
+// The edit-control messages the report sends, which winapi types as `WORD`; `SendMessageW` takes a
+// `UINT`.
 
-/// `EN_LINK` notification code, sent by the rich-edit control for a `CFE_LINK` range.
-const EN_LINK: u32 = 0x070B;
-/// `EM_EXGETSEL` — reads the selection as a character range.
-const EM_EXGETSEL: u32 = 0x0434;
-/// `EM_EXSETSEL` — sets the selection by character range.
-const EM_EXSETSEL: u32 = 0x0437;
 /// `EM_REPLACESEL` — replaces the selection with text, inserting at an empty selection.
-const EM_REPLACESEL: u32 = 0x00C2;
+const EM_REPLACESEL: u32 = winuser::EM_REPLACESEL as u32;
 /// `EM_SETREADONLY` — toggles the read-only protection that otherwise blocks programmatic edits.
-const EM_SETREADONLY: u32 = 0x00CF;
-/// `EM_SETCHARFORMAT` — applies character formatting.
+const EM_SETREADONLY: u32 = winuser::EM_SETREADONLY as u32;
+
+// The rich-edit messages, flags, notification code, and payload structs below are declared locally
+// because winapi 0.3.9 ships no richedit module to import them from, and windows-sys has none
+// either. Each links the page that documents it.
+
+/// [`EN_LINK`](https://learn.microsoft.com/en-us/windows/win32/controls/en-link) notification
+/// code, sent by the rich-edit control for a `CFE_LINK` range.
+const EN_LINK: u32 = 0x070B;
+/// [`EM_EXGETSEL`](https://learn.microsoft.com/en-us/windows/win32/controls/em-exgetsel) — reads
+/// the selection as a character range.
+const EM_EXGETSEL: u32 = 0x0434;
+/// [`EM_EXSETSEL`](https://learn.microsoft.com/en-us/windows/win32/controls/em-exsetsel) — sets
+/// the selection by character range.
+const EM_EXSETSEL: u32 = 0x0437;
+/// [`EM_SETCHARFORMAT`](https://learn.microsoft.com/en-us/windows/win32/controls/em-setcharformat)
+/// — applies character formatting.
 const EM_SETCHARFORMAT: u32 = 0x0444;
-/// Apply the format to the current selection only.
+/// Apply the format to the current selection only, an
+/// [`EM_SETCHARFORMAT`](https://learn.microsoft.com/en-us/windows/win32/controls/em-setcharformat)
+/// flag.
 const SCF_SELECTION: usize = 0x0001;
-/// Link mask and effect bits for [`CharFormat2W`].
+/// Link mask and effect bits for [`CharFormat2W`], as
+/// [`CHARFORMAT2W`](https://learn.microsoft.com/en-us/windows/win32/api/richedit/ns-richedit-charformat2w)
+/// documents them.
 const CFM_LINK: u32 = 0x0000_0020;
 const CFE_LINK: u32 = 0x0000_0020;
 

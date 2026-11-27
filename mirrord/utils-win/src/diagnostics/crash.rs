@@ -676,6 +676,10 @@ mod tests {
 
     use super::*;
 
+    /// `EXCEPTION_MSVC`, the code a C++ `throw` raises. No crate defines it; the .NET runtime's
+    /// [`corexcep.h`](https://github.com/dotnet/runtime/blob/main/src/coreclr/inc/corexcep.h) does.
+    const EXCEPTION_MSVC: DWORD = 0xE06D_7363;
+
     /// The OS slot and the chain target are process-wide, so the tests that touch them take turns.
     static FILTER_SLOT: Mutex<()> = Mutex::new(());
 
@@ -697,7 +701,7 @@ mod tests {
     /// Runs the installed filter the way the OS would, with a C++ exception, which the filter
     /// never records, so only the chaining is exercised.
     fn run_filter() -> LONG {
-        run_filter_with(0xE06D_7363)
+        run_filter_with(EXCEPTION_MSVC)
     }
 
     /// Runs the installed filter the way the OS would, with an exception of `code`.

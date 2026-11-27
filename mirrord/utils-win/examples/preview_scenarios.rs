@@ -10,6 +10,8 @@
 use utils_win::diagnostics::report::{
     CrashReport, Incident, Outcome, ProcessNode, show_dialog, write_artifacts,
 };
+#[cfg(windows)]
+use winapi::shared::ntstatus::STATUS_STACK_BUFFER_OVERRUN;
 
 // A developer tool run from a terminal, never loaded into a target process, so printing is safe.
 #[allow(clippy::disallowed_macros)]
@@ -30,7 +32,7 @@ fn main() {
             role: "parent".to_owned(),
             log: None,
             // Already dead — shows up in the tree marked, e.g. the init-failure dead-parent case.
-            exit_code: Some(0xC000_0409),
+            exit_code: Some(STATUS_STACK_BUFFER_OVERRUN as u32),
         },
         ProcessNode {
             pid: 32908,
@@ -49,7 +51,7 @@ fn main() {
         "kill" => Outcome::Terminated { exit_code: 0 },
         // A fail-fast (0xC0000409) the handler missed. Title -> "mirrord caught a crash".
         "fastfail" => Outcome::Terminated {
-            exit_code: 0xC000_0409,
+            exit_code: STATUS_STACK_BUFFER_OVERRUN as u32,
         },
         // An early layer-init failure. Title -> "mirrord layer failed to start".
         "initfail" => Outcome::InitFailed {

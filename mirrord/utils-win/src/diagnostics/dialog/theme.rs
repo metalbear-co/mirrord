@@ -14,6 +14,7 @@ use winapi::{
         },
     },
 };
+use windows_sys::Win32::Graphics::Dwm;
 
 /// Resource id of the embedded logo bitmap. See `logo.rc` / `build.rs`.
 pub(super) const LOGO_RESOURCE_ID: u16 = 100;
@@ -46,14 +47,19 @@ pub(super) const BUTTON_RADIUS: i32 = 6;
 /// Left edge of the header text, clearing the logo.
 pub(super) const TEXT_LEFT: i32 = MARGIN + 112;
 
+// windows-sys types the DWM attributes and values as `i32` enums, and winapi's
+// `DwmSetWindowAttribute` takes them as `DWORD`; all of them are small and positive.
+
 /// `DwmSetWindowAttribute`: use the dark title bar (Windows 10 2004+ / Windows 11).
-pub(super) const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+pub(super) const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = Dwm::DWMWA_USE_IMMERSIVE_DARK_MODE as u32;
 /// The dark-title-bar attribute id on Windows 10 1809–1909, before it moved to 20.
+///
+/// Undocumented, so no SDK header or crate defines it.
 pub(super) const DWMWA_USE_IMMERSIVE_DARK_MODE_OLD: u32 = 19;
 /// `DwmSetWindowAttribute`: window corner preference.
-pub(super) const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+pub(super) const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = Dwm::DWMWA_WINDOW_CORNER_PREFERENCE as u32;
 /// Round the window corners.
-pub(super) const DWMWCP_ROUND: u32 = 2;
+pub(super) const DWMWCP_ROUND: u32 = Dwm::DWMWCP_ROUND as u32;
 
 /// Header band color (dark navy-charcoal).
 ///

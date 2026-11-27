@@ -1361,7 +1361,10 @@ mod tests {
     use std::{net::TcpListener, time::Instant};
 
     use winapi::{
-        shared::winerror::ERROR_IO_PENDING,
+        shared::{
+            ntstatus::{STATUS_CONTROL_C_EXIT, STATUS_STACK_BUFFER_OVERRUN},
+            winerror::ERROR_IO_PENDING,
+        },
         um::{
             errhandlingapi::GetLastError,
             ioapiset::{CancelIoEx, DeviceIoControl, GetOverlappedResult},
@@ -1376,8 +1379,9 @@ mod tests {
         *,
     };
 
-    const FAIL_FAST: u32 = 0xC000_0409;
-    const CTRL_C: u32 = 0xC000_013A;
+    // As the `u32` exit codes the verdict takes; winapi types `NTSTATUS` as `i32`.
+    const FAIL_FAST: u32 = STATUS_STACK_BUFFER_OVERRUN as u32;
+    const CTRL_C: u32 = STATUS_CONTROL_C_EXIT as u32;
 
     #[test]
     fn clean_shutdown_wins_over_everything() {

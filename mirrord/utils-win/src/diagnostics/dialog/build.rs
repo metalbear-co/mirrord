@@ -32,11 +32,16 @@ use super::{
     },
 };
 
-/// Rich-edit control messages and flags (from `richedit.h`). Defined locally because winapi 0.3.9
-/// ships no richedit module, so there is nothing to import these from.
+// Rich-edit control messages and flags (from `richedit.h`). Defined locally because winapi 0.3.9
+// ships no richedit module, and windows-sys has none either, so there is nothing to import these
+// from.
+
+/// [`EM_SETEVENTMASK`](https://learn.microsoft.com/en-us/windows/win32/controls/em-seteventmask).
 const EM_SETEVENTMASK: u32 = 0x0445;
+/// [`EM_SETBKGNDCOLOR`](https://learn.microsoft.com/en-us/windows/win32/controls/em-setbkgndcolor).
 const EM_SETBKGNDCOLOR: u32 = 0x0443;
-/// `EN_LINK` notifications, requested via [`EM_SETEVENTMASK`].
+/// `EN_LINK` notifications, requested via [`EM_SETEVENTMASK`]: one of the
+/// [event mask flags](https://learn.microsoft.com/en-us/windows/win32/controls/rich-edit-control-event-mask-flags).
 const ENM_LINK: u32 = 0x0400_0000;
 
 /// Builds the controls and the owned GDI resources for the window.
