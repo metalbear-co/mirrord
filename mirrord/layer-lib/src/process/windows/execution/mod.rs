@@ -446,7 +446,8 @@ impl LayerManagedProcess {
     /// nothing retries it.
     ///
     /// `progress` succeeds before the program's primary thread first runs, so a caller that shares
-    /// its console with the program can end its own output there.
+    /// its console with the program can end its own output there. A layer that loads on resume
+    /// comes up after that, and succeeds it a second time, with `Ready!`.
     ///
     /// `hold_for_debugger` makes this launcher hold the program: it keeps the program suspended
     /// once its layer is ready, until an IDE releases it (see [`hold::hold`]), and announces the
@@ -846,7 +847,7 @@ impl LayerManagedProcess {
             }
             // The program runs from here on, while its layer comes up, and it shares the
             // launcher's console: progress is done before the program can write to it. The wait
-            // below decides how the launch ends, and its readiness is only printed.
+            // below decides how the launch ends, and finishes the task again once it's ready.
             LoadTiming::OnResume => {
                 if let Some(progress) = progress.as_mut() {
                     progress.success(Some("layer loading on resume"));
@@ -863,13 +864,11 @@ impl LayerManagedProcess {
         match parent_events.wait(self.process_handle(), timeout_ms) {
             Ok(InitWaitOutcome::Signaled) => {
                 tracing::debug!(child_pid, "wait: signaled");
-                // `mirrord up` marks a service ready on this line, whichever way its layer loaded.
+                // `mirrord up` marks a service ready on this finish, whichever way its layer loaded.
+                // It's a finish, not a `print`, even when the task already finished at the
+                // handoff: `json` progress drops `print`, so `up` would never see the line.
                 if let Some(progress) = progress.as_mut() {
-                    if injected.timing == LoadTiming::OnResume {
-                        progress.print(SESSION_READY_MESSAGE);
-                    } else {
-                        progress.success(Some(SESSION_READY_MESSAGE));
-                    }
+                    progress.success(Some(SESSION_READY_MESSAGE));
                 }
             }
             Ok(InitWaitOutcome::Failed) => {
@@ -1205,6 +1204,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use rstest::rstest;
     use utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
     use winapi::{
         shared::minwindef::FALSE,
@@ -1284,6 +1284,9 @@ mod tests {
         creations: u32,
         /// What the launcher reported as done, which tells readiness apart from a fallback.
         progress: Vec<String>,
+        /// What the launcher only printed. `json` progress drops these lines, so `mirrord up`
+        /// never reads them.
+        printed: Vec<String>,
         /// The environment block the launcher created the child with, empty when nothing was
         /// created.
         child_environment: WindowsEnv,
@@ -1319,7 +1322,12 @@ mod tests {
 
     /// Keeps what the launcher reports, so a test can tell which path it took.
     #[derive(Clone, Default)]
-    struct Recorder(Arc<Mutex<Vec<String>>>);
+    struct Recorder {
+        /// Each success's message.
+        finished: Arc<Mutex<Vec<String>>>,
+        /// Each `print`'s text.
+        printed: Arc<Mutex<Vec<String>>>,
+    }
 
     impl mirrord_progress::Progress for Recorder {
         fn subtask(&self, _: &str) -> Self {
@@ -1327,14 +1335,17 @@ mod tests {
         }
 
         fn success(&mut self, message: Option<&str>) {
-            self.0
+            self.finished
                 .lock()
                 .expect("progress")
                 .push(message.unwrap_or_default().to_owned());
         }
 
         fn print(&self, message: &str) {
-            self.0.lock().expect("progress").push(message.to_owned());
+            self.printed
+                .lock()
+                .expect("progress")
+                .push(message.to_owned());
         }
     }
 
@@ -1477,13 +1488,15 @@ mod tests {
                 drop(announce_to);
                 fake_ide.join().expect("fake IDE")
             });
-            let progress = recorder.0.lock().expect("progress").clone();
+            let progress = recorder.finished.lock().expect("progress").clone();
+            let printed = recorder.printed.lock().expect("progress").clone();
 
             Launched {
                 result,
                 process: duplicate,
                 creations,
                 progress,
+                printed,
                 child_environment: child_environment.unwrap_or_default(),
                 announcement,
             }
@@ -1742,8 +1755,8 @@ mod tests {
 
     #[test]
     fn a_ready_layer_resumes_the_program_once() {
-        // A layer that loads on resume finishes progress before the program runs, and its
-        // readiness is still printed, which is what `mirrord up` waits for.
+        // A layer that loads on resume finishes progress before the program runs, and finishes
+        // it again with its readiness, which is what `mirrord up` waits for.
         for (method, reported) in [
             (InjectionMethod::LoadLibrary, &["Ready!"][..]),
             (InjectionMethod::Apc, &["layer loading on resume", "Ready!"]),
@@ -1758,6 +1771,29 @@ mod tests {
             assert!(launched.result.is_ok(), "{method}: launch");
             assert_eq!(launched.exit_code(), RAN, "{method}");
         }
+    }
+
+    /// A layer that loads on resume reports `Ready!` as a finish, after the one at the handoff,
+    /// never as a `print`: `json` progress drops `print`, so `mirrord up` would never count the
+    /// session ready.
+    #[rstest]
+    // The layer loads when the APC queued on the primary thread runs.
+    #[case::apc(InjectionMethod::Apc)]
+    // The layer loads as an import of the patched image.
+    #[case::iat(InjectionMethod::Iat)]
+    fn a_layer_loaded_on_resume_reports_ready_as_a_finish(#[case] method: InjectionMethod) {
+        let launched = Launch::new(method, Layer::Ready).run();
+        assert_eq!(
+            launched.progress.last().map(String::as_str),
+            Some(SESSION_READY_MESSAGE),
+            "{method}: readiness finishes the task, which every line mode prints"
+        );
+        assert!(
+            launched.printed.is_empty(),
+            "{method}: nothing is left to `print`, which `json` drops: {:?}",
+            launched.printed
+        );
+        assert_eq!(launched.exit_code(), RAN, "{method}");
     }
 
     #[test]
