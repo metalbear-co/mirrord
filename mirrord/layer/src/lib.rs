@@ -96,7 +96,8 @@ use load::ExecuteArgs;
 #[cfg(doc)]
 use mirrord_config::feature::fs::FsConfig;
 use mirrord_config::{
-    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, feature::env::mapper::EnvVarsRemapper,
+    LayerConfig, MIRRORD_LAYER_INTPROXY_ADDR, debug_hold::dotnet_ports,
+    feature::env::mapper::EnvVarsRemapper,
 };
 use mirrord_intproxy_protocol::NewSessionRequest;
 #[cfg(target_os = "linux")]
@@ -566,6 +567,11 @@ fn fetch_env_vars() -> HashMap<String, String> {
     };
 
     setup().layer_config().sanitize_remote_env(&mut env_vars);
+    // As in `exec`'s own fetch: a pod's own ports name sockets inside the pod, which no local
+    // runtime can reach, and one with `suspend` keeps it paused for good. They're dropped before
+    // the env file and the overrides apply, and only fetched variables are set, so the user's own
+    // values stay.
+    dotnet_ports::drop_remote(&mut env_vars);
 
     if let Some(file) = &setup().env_config().env_file {
         let envs_from_file = dotenvy::from_path_iter(file)

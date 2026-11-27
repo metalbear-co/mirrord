@@ -36,6 +36,13 @@ impl Argv {
         self.0.push(item);
     }
 
+    /// The value of the env variable `key`, from its first entry, as `getenv` reads it.
+    pub(crate) fn get_env(&self, key: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find_map(|var| var.to_str().ok()?.strip_prefix(key)?.strip_prefix('='))
+    }
+
     /// Insert or replace env variable.
     pub(crate) fn insert_env(&mut self, key: &str, value: &str) -> Result<(), std::ffi::NulError> {
         let Argv(argv) = self;

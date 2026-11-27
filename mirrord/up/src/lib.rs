@@ -39,17 +39,18 @@ use miette::Diagnostic;
 use mirrord_analytics::{MIRRORD_UP_CORRELATION_ID_ENV, UpSessionDbBranch};
 use mirrord_command::resolve_tokio_command;
 use mirrord_config::{
-    MIRRORD_DEBUG_HOLD,
+    MIRRORD_DEBUG_DOTNET_PORT, MIRRORD_DEBUG_HOLD,
     config::{ConfigContext, ConfigError, EnvKey},
-    debug_hold,
+    debug_hold::{self, dotnet_ports},
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
+use mirrord_debug_hold::runtime::DiagnosticPort;
 use mirrord_kube::{
     api::kubernetes::{create_kube_config, seeker::KubeResourceSeeker},
     error::KubeApiError,
 };
-use mirrord_progress::MIRRORD_PROGRESS_ENV;
+use mirrord_progress::{LineMode, MIRRORD_PROGRESS_ENV};
 use serde_saphyr::{DefaultMessageFormatter, MessageFormatter};
 use tera::Tera;
 use thiserror::Error;
@@ -59,11 +60,13 @@ use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
 
 use crate::kube_context::UpKubeContext;
+pub use crate::output::{OutputFormat, Printer, SESSION_OUTPUT_ENV, SESSION_OUTPUT_JSON};
 
 mod config;
 mod init;
 mod kube_context;
 mod list;
+mod output;
 mod process;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
@@ -201,6 +204,16 @@ pub enum UpError {
         name: Arc<str>,
         /// Exit status of the pre-command.
         status: ExitStatus,
+    },
+
+    /// The .NET diagnostic port of a debugged service could not be created.
+    #[error("failed to create the .NET diagnostic port of service {name}")]
+    DiagnosticPort {
+        /// Name of the debugged service.
+        name: Arc<str>,
+        /// Why creating the port failed.
+        #[source]
+        source: mirrord_debug_hold::runtime::PortError,
     },
 
     /// The `run.pre_command` of the only service left to start could not be spawned.
@@ -519,6 +532,7 @@ async fn resolve_unresolved_workloads(
     config_path: &Path,
     up_context: UpKubeContext,
     resolution: Resolution,
+    printer: &Printer,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -561,7 +575,7 @@ async fn resolve_unresolved_workloads(
         let resolved = match find_by_name(&workloads, name) {
             Some(path) => {
                 if resolution != Resolution::Quiet {
-                    println!("{name}: using {path}");
+                    printer.note(Some(name), &format!("using {path}"));
                 }
                 ResolvedTarget {
                     resolved: SpecifiedTarget {
@@ -879,6 +893,7 @@ pub async fn resolve_services(
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
     interactive: bool,
+    printer: &Printer,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
     let config_directory = config_directory(config_path)?;
@@ -886,11 +901,14 @@ pub async fn resolve_services(
         let config_name = config_path.file_name().unwrap_or(config_path.as_os_str());
         for (service, config) in &up_config.services {
             if config.run.directory.is_none() {
-                println!(
-                    "{service}: no `run.directory` set, running from {} ({} is in {})",
-                    invocation_directory.display(),
-                    Path::new(config_name).display(),
-                    config_directory.display(),
+                printer.note(
+                    Some(service),
+                    &format!(
+                        "no `run.directory` set, running from {} ({} is in {})",
+                        invocation_directory.display(),
+                        Path::new(config_name).display(),
+                        config_directory.display(),
+                    ),
                 );
             }
         }
@@ -906,9 +924,14 @@ pub async fn resolve_services(
     } else {
         Resolution::Fail
     };
-    let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), resolution)
-            .await?;
+    let mut resolved_targets = resolve_unresolved_workloads(
+        &up_config,
+        config_path,
+        up_context.clone(),
+        resolution,
+        printer,
+    )
+    .await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -944,6 +967,7 @@ pub async fn resolve_preview_services(
         config_path,
         up_context.clone(),
         Resolution::Quiet,
+        &Printer::new(OutputFormat::Text),
     )
     .await?;
 
@@ -966,25 +990,48 @@ pub async fn resolve_preview_services(
 /// `debug` names the services whose programs are held for a debugger (see [`MIRRORD_DEBUG_HOLD`]).
 /// [`UpConfig::select_services`] has checked that each is one of the services launched.
 ///
+/// Each session reports its progress in `simple` mode, or in `json` when `mirrord up`'s own
+/// [`MIRRORD_PROGRESS_ENV`] asks for it, or `printer` writes JSON. An IDE then reads each
+/// session's steps as it reads a `mirrord exec` of its own, behind the service's prefix, or as
+/// the service's `progress` events.
+///
 /// Returns when the user stops the session or one of the child sessions exits.
 pub async fn launch(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
     debug: &[String],
     ready: ReadyTracker,
+    printer: Printer,
 ) -> Result<(), UpError> {
-    let commands = service_commands(service_configs, correlation_id, debug)?;
-    process::run(commands, ready).await
+    let line_mode = match printer.format() {
+        OutputFormat::Json => LineMode::Json,
+        OutputFormat::Text => LineMode::from_env().unwrap_or(LineMode::Simple),
+    };
+    let commands = service_commands(
+        service_configs,
+        correlation_id,
+        debug,
+        line_mode,
+        printer.format(),
+    )?;
+    process::run(commands, ready, printer).await
 }
 
 /// The `mirrord exec`/`mirrord container` command, and `run.pre_command`, of every service.
 ///
-/// Only the services named in `debug` get [`MIRRORD_DEBUG_HOLD`]. The others never inherit it from
-/// `mirrord up`'s own environment, so they run as usual whatever it holds.
+/// Only the services named in `debug` get [`MIRRORD_DEBUG_HOLD`], and the address of a .NET
+/// diagnostic port made for each of them, [`MIRRORD_DEBUG_DOTNET_PORT`]. Nothing else `up` starts
+/// gets either, nor inherits them from `mirrord up`'s own environment, so it runs as usual whatever
+/// that holds: a pre-command builds without anything pausing. Every session reports its progress
+/// in `line_mode`, and its final error as `up`'s `output` asks ([`SESSION_OUTPUT_ENV`]).
+///
+/// Must be called within a tokio runtime, which the ports register with.
 fn service_commands(
     service_configs: Vec<SubprocessCfg>,
     correlation_id: Uuid,
     debug: &[String],
+    line_mode: LineMode,
+    output: OutputFormat,
 ) -> Result<Vec<process::ServiceCommands>, UpError> {
     service_configs
         .into_iter()
@@ -1011,13 +1058,25 @@ fn service_commands(
 
             let mut cmd = resolve_tokio_command(std::env::current_exe()?);
             let debugged = debug.iter().any(|name| **name == *service_name);
-            if debugged {
-                cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED);
+            let dotnet_port = if debugged {
+                let port = DiagnosticPort::create().map_err(|source| UpError::DiagnosticPort {
+                    name: service_name.clone(),
+                    source,
+                })?;
+                cmd.env(MIRRORD_DEBUG_HOLD, debug_hold::REQUESTED)
+                    .env(MIRRORD_DEBUG_DOTNET_PORT, port.address());
+                Some(port)
             } else {
-                cmd.env_remove(MIRRORD_DEBUG_HOLD);
-            }
+                cmd.env_remove(MIRRORD_DEBUG_HOLD)
+                    .env_remove(MIRRORD_DEBUG_DOTNET_PORT);
+                None
+            };
+            match output {
+                OutputFormat::Json => cmd.env(SESSION_OUTPUT_ENV, SESSION_OUTPUT_JSON),
+                OutputFormat::Text => cmd.env_remove(SESSION_OUTPUT_ENV),
+            };
             cmd.env(RESOLVED_CONFIG_ENV, encoded_cfg)
-                .env(MIRRORD_PROGRESS_ENV, "simple")
+                .env(MIRRORD_PROGRESS_ENV, line_mode.as_str())
                 .env(MIRRORD_UP_CORRELATION_ID_ENV, correlation_id.to_string())
                 .env(SERVICE_NAME_ENV, &*service_name)
                 .arg(Into::<&'static str>::into(r#type))
@@ -1030,6 +1089,8 @@ fn service_commands(
             let pre = pre_command.split_first().map(|(program, args)| {
                 let mut pre = resolve_tokio_command(program);
                 pre.args(args)
+                    .env_remove(MIRRORD_DEBUG_HOLD)
+                    .env_remove(MIRRORD_DEBUG_DOTNET_PORT)
                     .stdin(Stdio::null())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -1037,6 +1098,7 @@ fn service_commands(
                 if let Some(directory) = &directory {
                     pre.current_dir(directory);
                 }
+                without_stale_dotnet_ports(&mut pre);
                 pre
             });
             if let Some(directory) = directory {
@@ -1047,10 +1109,32 @@ fn service_commands(
                 name: service_name,
                 debugged,
                 pre,
+                dotnet_port,
                 session: cmd,
             })
         })
         .collect()
+}
+
+/// Drops the entries of an outer `mirrord up` from the diagnostic ports `command` inherits.
+///
+/// A program `up` starts without `mirrord exec`, a pre-command, inherits `up`'s own environment.
+/// When `up` runs in another `mirrord up`'s debugged tree, that holds the outer port, which may be
+/// gone by the time a .NET program of the pre-command starts, and would then pause it forever.
+/// `exec` does the same for the programs it starts.
+fn without_stale_dotnet_ports(command: &mut tokio::process::Command) {
+    for name in [
+        dotnet_ports::DOTNET_DIAGNOSTIC_PORTS,
+        dotnet_ports::COMPLUS_DIAGNOSTIC_PORTS,
+    ] {
+        let Ok(value) = std::env::var(name) else {
+            continue;
+        };
+        match dotnet_ports::without_mirrord_entries(&value) {
+            Some(kept) => command.env(name, kept),
+            None => command.env_remove(name),
+        };
+    }
 }
 
 #[cfg(test)]
@@ -1245,35 +1329,17 @@ services:
     /// `--debug` holds exactly the programs it names: each named service's `mirrord exec` gets
     /// the hold, and the one in between, not named, has it removed, so it runs as usual even if
     /// `mirrord up`'s own environment holds.
-    #[test]
-    fn only_the_debugged_services_are_held() {
-        let key = EnvKey::Provided("key".to_owned());
-        let config = template(include_str!("testdata/debugged-services.yaml"), &key)
-            .expect("parse the config");
-        let service_configs = config
-            .service_configs(
-                &key,
-                &mut HashMap::new(),
-                UpKubeContext::default(),
-                &mut ConfigContext::default().strict_env(true),
-            )
-            .expect("assemble the services");
-
-        let debug = ["worker".to_owned(), "api".to_owned()];
-        let commands =
-            service_commands(service_configs, Uuid::nil(), &debug).expect("build the commands");
+    #[tokio::test]
+    async fn only_the_debugged_services_are_held() {
+        let commands = debugged_services_commands();
 
         let holds: HashMap<_, _> = commands
             .iter()
             .map(|commands| {
-                let hold = commands
-                    .session
-                    .as_std()
-                    .get_envs()
-                    .find(|(name, _)| *name == MIRRORD_DEBUG_HOLD)
-                    // `None` inside: the variable is removed.
-                    .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()));
-                (commands.name.to_string(), hold)
+                (
+                    commands.name.to_string(),
+                    env_of(&commands.session, MIRRORD_DEBUG_HOLD),
+                )
             })
             .collect();
         assert_eq!(
@@ -1291,6 +1357,113 @@ services:
             ]),
             "only the services `--debug` names may wait for an IDE to release them"
         );
+    }
+
+    /// Each debugged service's `mirrord exec` gets the address of a port of its own, which its
+    /// .NET runtimes pause on; the one in between, not named, has it removed.
+    #[tokio::test]
+    async fn only_the_debugged_services_get_a_diagnostic_port() {
+        let commands = debugged_services_commands();
+
+        for commands in &commands {
+            let address = env_of(&commands.session, MIRRORD_DEBUG_DOTNET_PORT);
+            match &commands.dotnet_port {
+                Some(port) => assert_eq!(
+                    address,
+                    Some(Some(port.address().to_owned())),
+                    "{} is debugged, so its runtimes pause on its own port",
+                    commands.name
+                ),
+                None => assert_eq!(
+                    address,
+                    Some(None),
+                    "{} isn't debugged, so it gets no port, whatever `up` inherited",
+                    commands.name
+                ),
+            }
+        }
+        let debugged = commands
+            .iter()
+            .filter(|commands| commands.dotnet_port.is_some())
+            .map(|commands| commands.name.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(debugged, ["api", "worker"]);
+    }
+
+    /// A pre-command runs without `mirrord exec`, so nothing may hold it or pause its .NET
+    /// programs, a build's compiler server included, even when its service is debugged.
+    #[tokio::test]
+    async fn no_pre_command_is_held_or_paused() {
+        let commands = debugged_services_commands();
+
+        for commands in &commands {
+            let Some(pre) = &commands.pre else {
+                continue;
+            };
+            for name in [MIRRORD_DEBUG_HOLD, MIRRORD_DEBUG_DOTNET_PORT] {
+                assert_eq!(
+                    env_of(pre, name),
+                    Some(None),
+                    "{}'s pre-command must have {name} removed",
+                    commands.name
+                );
+            }
+        }
+    }
+
+    /// `exec` drops a port it inherits from an outer `mirrord up` as stale, by its address, so
+    /// the address `up` makes must be one it recognizes.
+    #[tokio::test]
+    async fn a_services_port_is_one_exec_recognizes_as_mirrords() {
+        let commands = debugged_services_commands();
+
+        for port in commands
+            .iter()
+            .filter_map(|commands| commands.dotnet_port.as_ref())
+        {
+            assert!(
+                dotnet_ports::is_mirrord_entry(&dotnet_ports::entry(port.address())),
+                "{} must read as mirrord's own",
+                port.address()
+            );
+        }
+    }
+
+    /// The commands of `testdata/debugged-services.yaml`, with `worker` and `api` debugged.
+    fn debugged_services_commands() -> Vec<process::ServiceCommands> {
+        let key = EnvKey::Provided("key".to_owned());
+        let config = template(include_str!("testdata/debugged-services.yaml"), &key)
+            .expect("parse the config");
+        let service_configs = config
+            .service_configs(
+                &key,
+                &mut HashMap::new(),
+                UpKubeContext::default(),
+                &mut ConfigContext::default().strict_env(true),
+            )
+            .expect("assemble the services");
+
+        let debug = ["worker".to_owned(), "api".to_owned()];
+        let mut commands = service_commands(
+            service_configs,
+            Uuid::nil(),
+            &debug,
+            LineMode::Simple,
+            OutputFormat::Text,
+        )
+        .expect("build the commands");
+        commands.sort_by(|a, b| a.name.cmp(&b.name));
+        commands
+    }
+
+    /// What `command` does with `name`: `None` when it leaves it as inherited, `Some(None)` when
+    /// it removes it, and `Some(Some(value))` when it sets it.
+    fn env_of(command: &tokio::process::Command, name: &str) -> Option<Option<String>> {
+        command
+            .as_std()
+            .get_envs()
+            .find(|(set, _)| *set == name)
+            .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
     }
 
     /// `mirrord preview down` loads the same config as `mirrord preview up`, and must still

@@ -2215,7 +2215,10 @@ pub(super) struct UpArgs {
     pub context: Option<Arc<str>>,
 
     /// Experimental: hold this service's program at its entry point until an IDE releases it, so
-    /// a debugger attaches before its first line runs.
+    /// a debugger attaches before its first line runs. A .NET program, and every .NET program the
+    /// service starts, is held at its runtime's startup instead, on a diagnostic port `up` serves.
+    /// That pause needs .NET 5 or later: an older runtime doesn't read the port, and runs on
+    /// without being held.
     ///
     /// Repeat it to hold several services, e.g. `--debug api --debug web`. Each one must be
     /// among the services launched, and run with `type: exec`.
@@ -2224,11 +2227,42 @@ pub(super) struct UpArgs {
     #[arg(long, hide = true, value_name = "SERVICE")]
     pub debug: Vec<String>,
 
+    /// Experimental: how to report the run. `json` writes one JSON event per line on stdout, for
+    /// IDE extensions: the services' output, progress and ends, and as the last line, the run's
+    /// error. `mirrord/up/src/output.rs` lists the events.
+    ///
+    /// `json` never prompts, so a service whose target can't be found fails the run. It needs
+    /// `--no-ui`, since `mirrord ui` prints to stdout.
+    ///
+    /// Experimental, so it's hidden from help and may still change.
+    #[arg(long, hide = true, default_value_t, requires_if("json", "no_ui"))]
+    pub output: UpOutputFormat,
+
     /// Subcommand. When absent, `mirrord up` runs the sessions defined in
     /// the config file. `init` ignores the flags above, and `list` reads only `-f`, `-k`, `-m`
     /// and `--context`.
     #[command(subcommand)]
     pub command: Option<UpSubcommand>,
+}
+
+/// Output formats of a `mirrord up` run, its `--output`.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, ValueEnum, Display)]
+#[strum(serialize_all = "lowercase")]
+pub(super) enum UpOutputFormat {
+    /// Lines for people.
+    #[default]
+    Text,
+    /// One JSON event per line, for IDE extensions.
+    Json,
+}
+
+impl From<UpOutputFormat> for mirrord_up::OutputFormat {
+    fn from(format: UpOutputFormat) -> Self {
+        match format {
+            UpOutputFormat::Text => Self::Text,
+            UpOutputFormat::Json => Self::Json,
+        }
+    }
 }
 
 /// Output formats of `mirrord up list`.

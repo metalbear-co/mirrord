@@ -1,0 +1,3 @@
+stdout Ready!
+stdout serving
+exit 3

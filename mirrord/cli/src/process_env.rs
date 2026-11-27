@@ -46,7 +46,6 @@ pub(crate) fn set(env: &mut ProcessEnv, name: &str, value: String) {
 }
 
 /// The value of `name`, under any spelling the platform treats as the same name.
-#[cfg(test)]
 pub(crate) fn get<'env>(env: &'env ProcessEnv, name: &str) -> Option<&'env str> {
     #[cfg(windows)]
     {

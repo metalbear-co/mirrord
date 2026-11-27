@@ -1798,12 +1798,14 @@ where
                 });
             }
             if up_service.is_some() {
-                // `mirrord up` reads this line off the session's stdout, so it is printed as is.
-                progress.print(&format!(
+                // `mirrord up` reads this line off the session's stdout, so it is printed as is,
+                // past the progress tracker: `json` mode drops `print`, and `mirrord up` may ask
+                // its sessions for `json`.
+                println!(
                     "{UP_DB_BRANCHES_REPORT_PREFIX}{}",
                     serde_json::to_string(&up_report)
                         .expect("a branch report always serializes to JSON")
-                ));
+                );
             }
 
             // Two shared branches under this key copied from one database are usually one

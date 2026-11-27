@@ -1,0 +1,50 @@
+[package]
+name = "mirrord-debug-hold"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# The .NET runtime's startup pause, which `mirrord up` serves. Off for the layer, which only
+# holds processes.
+runtime-pause = ["dep:tokio", "dep:winapi"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "io-util", "rt", "sync", "time"], optional = true }
+tracing.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+nix = { workspace = true, features = ["fs", "signal"] }
+
+[target.'cfg(windows)'.dependencies]
+utils-win = { path = "../utils-win" }
+winapi = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+winapi.workspace = true
+
+[dev-dependencies]
+mirrord-command = { path = "../command", features = ["tokio"] }
+rstest.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "time"] }
+
+[lib]
+doctest = false

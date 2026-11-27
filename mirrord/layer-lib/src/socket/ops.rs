@@ -8,6 +8,8 @@ use std::{
 use std::{io, os::fd::BorrowedFd};
 
 use libc::c_int;
+#[cfg(unix)]
+use mirrord_config::debug_hold::dotnet_ports;
 use mirrord_intproxy_protocol::{
     NetProtocol, OutgoingConnectRequest, OutgoingConnectRequestMetadata, OutgoingConnectResponse,
 };
@@ -369,9 +371,12 @@ where
                     .map(String::from_utf8_lossy))
                 .map(String::from);
 
+            // The .NET diagnostic port `mirrord up` serves for a debugged service is a local
+            // socket, which a runtime pauses on at its startup. It must stay local even when
+            // `unix_streams` matches every path, or the runtime waits on the pod forever.
             let handle_remotely = address
                 .as_ref()
-                .map(|addr| unix_streams.is_match(addr))
+                .map(|addr| !dotnet_ports::is_mirrord_entry(addr) && unix_streams.is_match(addr))
                 .unwrap_or(false);
             if !handle_remotely {
                 return Err(DetourError::Bypass(Bypass::UnixSocket(address)));

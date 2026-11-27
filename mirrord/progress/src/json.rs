@@ -4,10 +4,10 @@
 //! the same format without them: the layer finishes `mirrord exec`'s running task from inside the
 //! program, which has no use for the terminal renderers.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Serialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub(crate) struct NewTaskMessage {
     /// Task name (identifier)
     pub(crate) name: String,
@@ -16,7 +16,7 @@ pub(crate) struct NewTaskMessage {
 }
 
 /// Message sent when a task is finished.
-#[derive(Serialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub(crate) struct FinishedTaskMessage {
     /// Finished task name
     name: String,
@@ -27,7 +27,7 @@ pub(crate) struct FinishedTaskMessage {
 }
 
 /// Message sent when a task is finished.
-#[derive(Serialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub(crate) struct WarningMessage {
     /// Warning message
     pub(crate) message: String,
@@ -36,7 +36,7 @@ pub(crate) struct WarningMessage {
 /// The message types that we report on [`Progress`](crate::Progress).
 ///
 /// These are used by the extensions (vscode and intellij) to show nice notifications.
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub(crate) enum ProgressMessage {
     NewTask(NewTaskMessage),
@@ -62,6 +62,15 @@ impl ProgressMessage {
             success,
             message: message.map(str::to_owned),
         })
+    }
+
+    /// Whether this is a successful finish with `message`, whatever its task.
+    pub(crate) fn is_success_with(&self, message: &str) -> bool {
+        matches!(
+            self,
+            Self::FinishedTask(FinishedTaskMessage { success: true, message: Some(finished), .. })
+                if finished == message
+        )
     }
 
     /// The message as the JSON line the IDEs parse, without its newline.

@@ -49,7 +49,7 @@ use super::{
 use crate::{
     error::{LayerError, LayerResult, windows::WindowsError},
     logging::MIRRORD_LAYER_LOG_PATH,
-    process::hold::{self, Gate, HoldOutcome},
+    process::hold::{self, Gate, HeldProcess, HoldOutcome},
     proxy_connection::PROXY_CONNECTION,
     setup::setup,
     socket::{SOCKETS, sockets::SHARED_SOCKETS_ENV_VAR},
@@ -167,7 +167,16 @@ struct LaunchPlan<'a> {
     debugger_wait: bool,
     /// Where the hold is announced, when the program is held at its entry point once its layer
     /// is ready, until an IDE releases it. See [`hold::hold`].
-    debug_hold: Option<&'a mut dyn Write>,
+    debug_hold: Option<DebugHold<'a>>,
+}
+
+/// A program held for a debugger at its entry point: where its hold is announced, and what the
+/// announcement says about it that only its creator knows.
+pub struct DebugHold<'a> {
+    /// Where the IDE reads the hold's lines: `mirrord exec`'s stdout.
+    pub announce_to: &'a mut dyn Write,
+    /// The command line the program is created with.
+    pub command_line: String,
 }
 
 /// Variables Windows itself needs in every process: without `SystemRoot`, Winsock cannot start,
@@ -446,7 +455,8 @@ impl LayerManagedProcess {
     /// nothing retries it.
     ///
     /// `progress` succeeds before the program's primary thread first runs, so a caller that shares
-    /// its console with the program can end its own output there.
+    /// its console with the program can end its own output there. A layer that loads on resume
+    /// comes up after that, and succeeds it a second time, with `Ready!`.
     ///
     /// `hold_for_debugger` makes this launcher hold the program: it keeps the program suspended
     /// once its layer is ready, until an IDE releases it (see [`hold::hold`]), and announces the
@@ -531,6 +541,10 @@ impl LayerManagedProcess {
         // the CLI's.
         #[allow(clippy::disallowed_methods)]
         let mut stdout = std::io::stdout();
+        let debug_hold = hold_for_debugger.then(|| DebugHold {
+            announce_to: &mut stdout,
+            command_line: command_line.clone(),
+        });
 
         Self::execute_with_closure(
             &WindowsEnv::inherited(),
@@ -541,7 +555,7 @@ impl LayerManagedProcess {
             create_process_fn,
             kill_children_on_exit,
             LayerFailurePolicy::Terminate,
-            hold_for_debugger.then_some(&mut stdout as &mut dyn Write),
+            debug_hold,
             progress,
         )
         .map_err(|launch| launch.error)
@@ -588,7 +602,7 @@ impl LayerManagedProcess {
         create_process_fn: F,
         kill_children_on_exit: bool,
         on_layer_failure: LayerFailurePolicy,
-        debug_hold: Option<&mut dyn Write>,
+        debug_hold: Option<DebugHold<'_>>,
         progress: Option<P>,
     ) -> Result<Self, LaunchError>
     where
@@ -727,7 +741,10 @@ impl LayerManagedProcess {
             reporting,
             debugger_wait,
             // Shortens the writer's object lifetime to the plan's, which `Option` alone won't.
-            debug_hold: debug_hold.map(|out| out as &mut dyn Write),
+            debug_hold: debug_hold.map(|hold| DebugHold {
+                announce_to: hold.announce_to as &mut dyn Write,
+                command_line: hold.command_line,
+            }),
         };
         managed_process
             .inject_and_resume(&mut plan, progress)
@@ -846,7 +863,7 @@ impl LayerManagedProcess {
             }
             // The program runs from here on, while its layer comes up, and it shares the
             // launcher's console: progress is done before the program can write to it. The wait
-            // below decides how the launch ends, and its readiness is only printed.
+            // below decides how the launch ends, and finishes the task again once it's ready.
             LoadTiming::OnResume => {
                 if let Some(progress) = progress.as_mut() {
                     progress.success(Some("layer loading on resume"));
@@ -863,13 +880,11 @@ impl LayerManagedProcess {
         match parent_events.wait(self.process_handle(), timeout_ms) {
             Ok(InitWaitOutcome::Signaled) => {
                 tracing::debug!(child_pid, "wait: signaled");
-                // `mirrord up` marks a service ready on this line, whichever way its layer loaded.
+                // `mirrord up` marks a service ready on this finish, whichever way its layer loaded.
+                // It's a finish, not a `print`, even when the task already finished at the
+                // handoff: `json` progress drops `print`, so `up` would never see the line.
                 if let Some(progress) = progress.as_mut() {
-                    if injected.timing == LoadTiming::OnResume {
-                        progress.print(SESSION_READY_MESSAGE);
-                    } else {
-                        progress.success(Some(SESSION_READY_MESSAGE));
-                    }
+                    progress.success(Some(SESSION_READY_MESSAGE));
                 }
             }
             Ok(InitWaitOutcome::Failed) => {
@@ -985,9 +1000,18 @@ impl LayerManagedProcess {
         // NOTE: this runs in the launcher (`mirrord exec`), not in the program's layer: on Windows
         // the launcher holds the program from outside. A held program is still at its entry
         // point here, since load-library ran the layer's startup on a thread of its own.
-        if let Some(announce_to) = plan.debug_hold.as_mut()
-            && hold::hold::<Gate>(child_pid, self.process_handle(), announce_to)?
-                == HoldOutcome::ProcessExited
+        if let Some(debug_hold) = plan.debug_hold.as_mut()
+            && hold::hold::<Gate>(
+                child_pid,
+                HeldProcess {
+                    image: utils_win::process::process_image_path(self.process_handle()),
+                    // This launcher created it.
+                    parent_pid: Some(std::process::id()),
+                    command_line: Some(debug_hold.command_line.clone()),
+                },
+                self.process_handle(),
+                &mut debug_hold.announce_to,
+            )? == HoldOutcome::ProcessExited
         {
             tracing::debug!(child_pid, "the process ended while held for a debugger");
             return Ok(self);
@@ -1205,6 +1229,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use rstest::rstest;
     use utils_win::diagnostics::monitor::{ACK_READY, Registration, read_registration};
     use winapi::{
         shared::minwindef::FALSE,
@@ -1224,6 +1249,9 @@ mod tests {
 
     /// The exit code the test program ends with, so an exit with it proves the program ran.
     const RAN: u32 = 7;
+
+    /// The command line a held launch says it was created with, which its announcement names.
+    const HELD_COMMAND_LINE: &str = r#""C:\Program Files\app.exe" --port 1"#;
 
     /// What the fake layer does once the child exists.
     #[derive(Clone, Copy)]
@@ -1284,6 +1312,9 @@ mod tests {
         creations: u32,
         /// What the launcher reported as done, which tells readiness apart from a fallback.
         progress: Vec<String>,
+        /// What the launcher only printed. `json` progress drops these lines, so `mirrord up`
+        /// never reads them.
+        printed: Vec<String>,
         /// The environment block the launcher created the child with, empty when nothing was
         /// created.
         child_environment: WindowsEnv,
@@ -1319,7 +1350,12 @@ mod tests {
 
     /// Keeps what the launcher reports, so a test can tell which path it took.
     #[derive(Clone, Default)]
-    struct Recorder(Arc<Mutex<Vec<String>>>);
+    struct Recorder {
+        /// Each success's message.
+        finished: Arc<Mutex<Vec<String>>>,
+        /// Each `print`'s text.
+        printed: Arc<Mutex<Vec<String>>>,
+    }
 
     impl mirrord_progress::Progress for Recorder {
         fn subtask(&self, _: &str) -> Self {
@@ -1327,14 +1363,17 @@ mod tests {
         }
 
         fn success(&mut self, message: Option<&str>) {
-            self.0
+            self.finished
                 .lock()
                 .expect("progress")
                 .push(message.unwrap_or_default().to_owned());
         }
 
         fn print(&self, message: &str) {
-            self.0.lock().expect("progress").push(message.to_owned());
+            self.printed
+                .lock()
+                .expect("progress")
+                .push(message.to_owned());
         }
     }
 
@@ -1467,8 +1506,10 @@ mod tests {
                 create,
                 false,
                 self.policy,
-                ide.as_mut()
-                    .map(|(_, announce_to)| announce_to as &mut dyn Write),
+                ide.as_mut().map(|(_, announce_to)| DebugHold {
+                    announce_to: announce_to as &mut dyn Write,
+                    command_line: HELD_COMMAND_LINE.to_owned(),
+                }),
                 Some(recorder.clone()),
             );
             fake_layer.join().expect("fake layer");
@@ -1477,13 +1518,15 @@ mod tests {
                 drop(announce_to);
                 fake_ide.join().expect("fake IDE")
             });
-            let progress = recorder.0.lock().expect("progress").clone();
+            let progress = recorder.finished.lock().expect("progress").clone();
+            let printed = recorder.printed.lock().expect("progress").clone();
 
             Launched {
                 result,
                 process: duplicate,
                 creations,
                 progress,
+                printed,
                 child_environment: child_environment.unwrap_or_default(),
                 announcement,
             }
@@ -1580,6 +1623,7 @@ mod tests {
     /// # Returns
     ///
     /// The hold line, or `None` when the launcher closed its end without announcing one.
+    #[allow(clippy::indexing_slicing)]
     fn fake_ide(
         ide: Ide,
         announcements: PipeReader,
@@ -1595,12 +1639,18 @@ mod tests {
                 return None;
             }
 
-            // Parsed the way the IDE matches it: `debug-hold pid=<pid> release=<name>`.
-            let (pid, release) = announcement
-                .strip_prefix("debug-hold pid=")
-                .and_then(|rest| rest.split_once(" release="))
+            // Parsed the way the IDE reads it: `debug-hold {json}`.
+            let hold: serde_json::Value = announcement
+                .strip_prefix(hold::ANNOUNCEMENT_PREFIX)
+                .and_then(|json| serde_json::from_str(json).ok())
                 .unwrap_or_else(|| panic!("not a hold line: {announcement}"));
-            let pid: u32 = pid.parse().expect("the announced pid is a number");
+            let pid = hold["pid"]
+                .as_u64()
+                .and_then(|pid| u32::try_from(pid).ok())
+                .expect("the announced pid is a number");
+            let release = hold["release"]
+                .as_str()
+                .expect("the announced release is a string");
             assert_eq!(
                 Some(pid),
                 *child_pid.lock().expect("pid"),
@@ -1742,8 +1792,8 @@ mod tests {
 
     #[test]
     fn a_ready_layer_resumes_the_program_once() {
-        // A layer that loads on resume finishes progress before the program runs, and its
-        // readiness is still printed, which is what `mirrord up` waits for.
+        // A layer that loads on resume finishes progress before the program runs, and finishes
+        // it again with its readiness, which is what `mirrord up` waits for.
         for (method, reported) in [
             (InjectionMethod::LoadLibrary, &["Ready!"][..]),
             (InjectionMethod::Apc, &["layer loading on resume", "Ready!"]),
@@ -1758,6 +1808,29 @@ mod tests {
             assert!(launched.result.is_ok(), "{method}: launch");
             assert_eq!(launched.exit_code(), RAN, "{method}");
         }
+    }
+
+    /// A layer that loads on resume reports `Ready!` as a finish, after the one at the handoff,
+    /// never as a `print`: `json` progress drops `print`, so `mirrord up` would never count the
+    /// session ready.
+    #[rstest]
+    // The layer loads when the APC queued on the primary thread runs.
+    #[case::apc(InjectionMethod::Apc)]
+    // The layer loads as an import of the patched image.
+    #[case::iat(InjectionMethod::Iat)]
+    fn a_layer_loaded_on_resume_reports_ready_as_a_finish(#[case] method: InjectionMethod) {
+        let launched = Launch::new(method, Layer::Ready).run();
+        assert_eq!(
+            launched.progress.last().map(String::as_str),
+            Some(SESSION_READY_MESSAGE),
+            "{method}: readiness finishes the task, which every line mode prints"
+        );
+        assert!(
+            launched.printed.is_empty(),
+            "{method}: nothing is left to `print`, which `json` drops: {:?}",
+            launched.printed
+        );
+        assert_eq!(launched.exit_code(), RAN, "{method}");
     }
 
     #[test]
@@ -1968,6 +2041,7 @@ mod tests {
     /// A program held for a debugger stays at its entry point, past any launcher timeout, until
     /// the IDE sets its release event, and then runs once.
     #[test]
+    #[allow(clippy::indexing_slicing)]
     fn a_held_program_runs_once_after_its_release() {
         let launched = Launch {
             hold: Some(Ide::Releases),
@@ -1979,11 +2053,26 @@ mod tests {
         assert_eq!(launched.creations, 1);
         let pid = process.dwProcessId;
         let announcement = launched.announcement.as_deref().expect("announced");
+        let hold: serde_json::Value = announcement
+            .strip_prefix(hold::ANNOUNCEMENT_PREFIX)
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or_else(|| panic!("not a hold line: {announcement}"));
+        assert_eq!(hold["trigger"], "process", "{announcement}");
+        assert_eq!(hold["pid"], pid, "the held program: {announcement}");
         assert!(
-            announcement.starts_with(&format!(
-                r"debug-hold pid={pid} release=Local\mirrord-debug-release-{pid}-"
-            )),
-            "the IDE finds the program and its release event in one line: {announcement}"
+            hold["release"].as_str().is_some_and(
+                |release| release.starts_with(&format!(r"Local\mirrord-debug-release-{pid}-"))
+            ),
+            "the IDE finds the program's release event in the same line: {announcement}"
+        );
+        assert_eq!(
+            hold["command_line"], HELD_COMMAND_LINE,
+            "the IDE shows what was held: {announcement}"
+        );
+        assert_eq!(
+            hold["parent_pid"],
+            std::process::id(),
+            "the launcher created it: {announcement}"
         );
         assert_eq!(launched.exit_code(), RAN);
     }

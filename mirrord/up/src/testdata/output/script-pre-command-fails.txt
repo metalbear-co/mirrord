@@ -1,0 +1,3 @@
+stdout building
+stderr build failed
+exit 2

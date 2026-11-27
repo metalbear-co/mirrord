@@ -132,6 +132,7 @@ derive_more = "2.0.1"
 dirs = "6"
 dns-lookup = "3"
 dotenvy = "0.15"
+dotnot = { git = "https://github.com/metalbear-co/dotnot.git", rev = "2960471c7deaf7676bc744eebe9077b58f0603b5" }
 drain = "0.1"
 dunce = "1"
 enum_dispatch = "0.3"

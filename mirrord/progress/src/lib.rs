@@ -2,13 +2,6 @@
 
 #[cfg(feature = "implementations")]
 pub mod implementations;
-#[cfg_attr(
-    not(feature = "implementations"),
-    allow(
-        dead_code,
-        reason = "without the renderers, only a finished task is ever printed"
-    )
-)]
 mod json;
 pub mod messages;
 
@@ -22,7 +15,8 @@ use crate::json::ProgressMessage;
 pub const MIRRORD_PROGRESS_ENV: &str = "MIRRORD_PROGRESS_MODE";
 
 /// A progress mode that prints one line per event, the modes machines read: `simple` for
-/// `mirrord up`, `json` for the IDEs.
+/// `mirrord up`'s sessions by default, `json` for the IDEs, and for `up`'s sessions when an IDE
+/// asks for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineMode {
     /// `SimpleProgress`'s plain lines.
@@ -48,6 +42,31 @@ impl LineMode {
             _ => None,
         }
     }
+
+    /// The mode [`MIRRORD_PROGRESS_ENV`] names in this process's environment, or `None` when it's
+    /// unset or names a mode that isn't a [`LineMode`] (a tracker for people, or `off`).
+    pub fn from_env() -> Option<Self> {
+        Self::from_name(&std::env::var(MIRRORD_PROGRESS_ENV).ok()?)
+    }
+}
+
+/// Whether `line` reports a session [`messages::SESSION_READY_MESSAGE`] in either line mode:
+/// `Ready!` alone, or a successful `FinishedTask` whose message is `Ready!`.
+///
+/// The task's name isn't checked, since `mirrord exec` and `mirrord container` finish different
+/// tasks with it.
+pub fn is_session_ready_line(line: &str) -> bool {
+    let line = line.trim();
+    line == messages::SESSION_READY_MESSAGE
+        || serde_json::from_str::<ProgressMessage>(line)
+            .is_ok_and(|message| message.is_success_with(messages::SESSION_READY_MESSAGE))
+}
+
+/// Whether `line` is one of the progress messages `json` mode prints, the ones the IDEs parse.
+///
+/// `mirrord up --output json` passes these on whole, as each service's `progress` events.
+pub fn is_progress_line(line: &str) -> bool {
+    serde_json::from_str::<ProgressMessage>(line.trim()).is_ok()
 }
 
 /// The line that finishing `task` successfully with `message` prints in `mode`, newline included.
