@@ -16,7 +16,10 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicU32, Ordering},
+    },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -337,7 +340,11 @@ struct StoredRequest {
     /// How the local application answered the original request.
     response: Option<CapturedResponse>,
 
-    replay_count: u32,
+    /// How many replays of the request finished.
+    ///
+    /// Shared with the replays that wait for the local application, so that a replay that
+    /// finishes after newer requests pushed the request out still gets a number of its own.
+    replay_count: Arc<AtomicU32>,
 
     /// The latest replays, oldest first.
     replays: VecDeque<KeptReplay>,
@@ -401,7 +408,7 @@ impl StoredRequest {
             duration_ms: self.response.as_ref().map(|response| response.duration_ms),
             body_size: u64::try_from(self.body.size).unwrap_or(u64::MAX),
             not_replayable: self.not_replayable(),
-            replay_count: self.replay_count,
+            replay_count: self.replay_count.load(Ordering::Relaxed),
         }
     }
 
@@ -535,7 +542,7 @@ impl ReplayStore {
             headers: headers.clone(),
             body: kept_body,
             response: None,
-            replay_count: 0,
+            replay_count: Default::default(),
             replays: VecDeque::new(),
             delivery: Delivery {
                 client_store: client_store.clone(),
@@ -600,7 +607,7 @@ impl ReplayStore {
             (
                 stored.replay_request(header_changes),
                 stored.delivery.clone(),
-                stored.replay_count,
+                stored.replay_count.clone(),
             )
         };
 
@@ -617,7 +624,7 @@ impl ReplayStore {
         };
 
         let mut replay = KeptReplay {
-            number: replay_count + 1,
+            number: 0,
             at_ms: unix_millis(sent_at),
             response,
             body,
@@ -626,18 +633,18 @@ impl ReplayStore {
         // Converted before taking the lock, which the incoming requests wait for.
         let mut run = replay.to_run();
 
+        // Other replays of the request can finish first, so the number is taken when the replay
+        // finishes, under the lock, so that the store keeps the replays in the order of their
+        // numbers.
+        let mut state = self.state();
+        replay.number = replay_count.fetch_add(1, Ordering::Relaxed) + 1;
+        run.number = replay.number;
+
         // Newer requests can push the request out of the store while its replay waits for the
         // local application. The caller still gets the response.
-        let mut state = self.state();
         let Some(stored) = state.request_mut(id) else {
             return Ok(run);
         };
-
-        // Other replays of the request can finish first, so the number is taken when the replay
-        // is stored.
-        stored.replay_count += 1;
-        replay.number = stored.replay_count;
-        run.number = replay.number;
 
         if stored.replays.len() >= MAX_KEPT_REPLAYS {
             stored.replays.pop_front();
@@ -1166,6 +1173,46 @@ mod tests {
             .expect("the root cause is the reset of the connection");
         assert_eq!(reset.kind(), std::io::ErrorKind::ConnectionReset);
         assert!(error.to_string().ends_with(&reset.to_string()), "{error}");
+    }
+
+    /// A replay that finishes after newer requests pushed its request out gets a number of its
+    /// own, not the number of a replay that finished meanwhile.
+    #[tokio::test]
+    async fn replay_finishing_after_eviction_gets_its_own_number() {
+        let (address, accepted) = server(|mut stream| async move {
+            read_head(&mut stream).await;
+            tokio::spawn(async move {
+                // The first connection answers late, the others at once.
+                if FIRST.swap(false, Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+                    .await
+                    .unwrap();
+            });
+        })
+        .await;
+        static FIRST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        let store = ReplayStore::default();
+        capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
+        listen_on(&store, address);
+
+        let slow = tokio::spawn({
+            let store = store.clone();
+            async move { store.replay(1, ReplayOptions::default()).await }
+        });
+        while accepted.load(Ordering::SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let fast = store.replay(1, ReplayOptions::default()).await.unwrap();
+        for _ in 0..MAX_KEPT_REQUESTS {
+            capture(&store, &request(Version::HTTP_11, &[], vec![]), true);
+        }
+        let slow = slow.await.unwrap().unwrap();
+
+        assert_eq!(fast.number, 1);
+        assert_eq!(slow.number, 2);
     }
 
     /// A response that never ends, such as an event stream, is cut after
