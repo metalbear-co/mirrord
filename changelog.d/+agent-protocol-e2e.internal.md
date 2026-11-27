@@ -1,1 +1,1 @@
-Added end-to-end tests that talk `mirrord-protocol` to the agent directly, covering file and Unix socket paths that try to leave the target's root, and files behind symlinks restricted by `fs.protected_symlinks`.
+Added end-to-end tests that talk `mirrord-protocol` to the agent directly, covering file and socket paths that try to leave the target's root, and files behind symlinks restricted by `fs.protected_symlinks`.
