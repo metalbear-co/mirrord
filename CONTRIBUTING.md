@@ -976,8 +976,8 @@ When a submission warns or fails:
   environment, because a workflow run for a pull request could then match the rule and read the token.
 - If the `submit` job only warns that it couldn't sync the fork, the pull request was still submitted, so don't re-run
   the job. Check the token, which the next release also needs.
-- If the `submit` job fails, check the token and the access of `metalbear-ci` to the fork, then re-run the job. If
-  GitHub refused to create the branch, use "Sync fork" on the fork's GitHub page.
+- If `komac update` fails, the `submit` job retries it, up to 4 attempts in total, unless an attempt may have opened a
+  pull request. If the job still fails, its error lists the likely causes and what to check for each.
 - If a pull request for the version already exists, open, merged or closed, Komac opens none and the `submit` job shows
   a warning. After a re-run, that is expected. If that pull request was closed without merging, running the Release
   WinGet workflow again also opens nothing, so submit the version by hand from the org fork, with a token that can write
