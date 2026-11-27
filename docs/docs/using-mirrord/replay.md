@@ -61,7 +61,7 @@ content-type: application/json
 {"id":"ch_8Kq2","status":"succeeded"}
 ```
 
-To change the request before sending it, set or remove headers. Both flags can be repeated. The `content-length` and `transfer-encoding` headers can't be changed:
+To change the request before sending it, set or remove headers. Both flags can be repeated, once for each header, because a replay sets each header to one value. The `content-length` and `transfer-encoding` headers can't be changed:
 
 ```bash
 mirrord replay send 1 --header 'x-tenant: blue' --remove-header authorization

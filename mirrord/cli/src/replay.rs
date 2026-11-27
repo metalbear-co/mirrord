@@ -53,18 +53,7 @@ pub(crate) async fn replay_command(args: ReplayArgs) -> CliResult<()> {
             headers,
             remove_headers,
         } => {
-            let mut options = ReplayOptions::default();
-            for header in headers {
-                let (name, value) = header.split_once(':').ok_or_else(|| {
-                    CliError::Replay(format!("header `{header}` is not in `NAME: VALUE` format"))
-                })?;
-                options
-                    .headers
-                    .insert(header_key(name), Some(value.trim().to_owned()));
-            }
-            for name in remove_headers {
-                options.headers.insert(header_key(&name), None);
-            }
+            let options = replay_options(&headers, &remove_headers)?;
 
             let response = client
                 .post(format!("{REPLAY_REQUESTS_ROUTE}/{id}/replay"))
@@ -131,11 +120,36 @@ async fn session_client(session_id: Option<&str>) -> CliResult<SessionClient> {
     }
 }
 
-/// Returns `name` in the form that identifies a header in [`ReplayOptions`]: trimmed and in
-/// lowercase. Header names are not case-sensitive, so the same header in another case replaces
-/// the earlier one.
-fn header_key(name: &str) -> String {
-    name.trim().to_ascii_lowercase()
+/// Returns the options that set the `headers`, each in `NAME: VALUE` format, and remove the
+/// headers named in `remove_headers`.
+///
+/// The options hold one value for each header, so a header named twice is an error, whether in
+/// another case or once in each list.
+fn replay_options(headers: &[String], remove_headers: &[String]) -> CliResult<ReplayOptions> {
+    let set = headers.iter().map(|header| {
+        let (name, value) = header.split_once(':').ok_or_else(|| {
+            CliError::Replay(format!("header `{header}` is not in `NAME: VALUE` format"))
+        })?;
+
+        Ok::<_, CliError>((name, Some(value.trim().to_owned())))
+    });
+    let removed = remove_headers.iter().map(|name| Ok((name.as_str(), None)));
+
+    let mut options = ReplayOptions::default();
+    for change in set.chain(removed) {
+        let (name, value) = change?;
+        // Header names are not case-sensitive.
+        let key = name.trim().to_ascii_lowercase();
+        if options.headers.insert(key, value).is_some() {
+            return Err(CliError::Replay(format!(
+                "header `{}` is given more than once, and a replay can only set it to one value \
+                or remove it",
+                name.trim()
+            )));
+        }
+    }
+
+    Ok(options)
 }
 
 async fn get<T: DeserializeOwned>(client: &SessionClient, path: impl Into<String>) -> CliResult<T> {

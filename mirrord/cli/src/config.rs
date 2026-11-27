@@ -2476,11 +2476,12 @@ pub enum ReplaySubcommand {
         /// Id of the request, as `mirrord replay list` prints it.
         id: u64,
 
-        /// Header to set on the replayed request, replacing its original value. Can be repeated.
+        /// Header to set on the replayed request, replacing its original value. Can be repeated
+        /// for different headers.
         #[arg(short = 'H', long = "header", value_name = "NAME: VALUE")]
         headers: Vec<String>,
 
-        /// Header to leave out of the replayed request. Can be repeated.
+        /// Header to leave out of the replayed request. Can be repeated for different headers.
         #[arg(long = "remove-header", value_name = "NAME")]
         remove_headers: Vec<String>,
     },
