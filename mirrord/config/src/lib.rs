@@ -788,7 +788,24 @@ impl LayerConfig {
         };
         config.apply_magic();
         config.reflect_outgoing_filter_in_dns(context);
+        config.prefer_env_preview_ttl(context);
         Ok(config)
+    }
+
+    /// A TTL from `MIRRORD_PREVIEW_TTL_MINS` (`mirrord preview start --ttl`) or
+    /// `MIRRORD_PREVIEW_TTL_SECS` replaces the config file's TTL in the other unit, as
+    /// `mirrord preview up --ttl` does, rather than adding a second TTL that
+    /// [`PreviewConfig::verify`](feature::preview::PreviewConfig::verify) refuses.
+    fn prefer_env_preview_ttl(&mut self, context: &ConfigContext) {
+        let preview = &mut self.feature.preview;
+        match (
+            context.get_env("MIRRORD_PREVIEW_TTL_MINS").is_ok(),
+            context.get_env("MIRRORD_PREVIEW_TTL_SECS").is_ok(),
+        ) {
+            (true, false) => preview.ttl_secs = None,
+            (false, true) => preview.ttl_mins = None,
+            _ => {}
+        }
     }
 
     /// Mirrors host names from [`feature.network.outgoing.filter`](OutgoingFilterConfig)
@@ -2999,6 +3016,47 @@ mod tests {
             double.is_generated(),
             "double-quoted filter argument should leave the file unparsable, got {double:?}",
         );
+    }
+
+    /// `mirrord preview start --ttl` passes its TTL as `MIRRORD_PREVIEW_TTL_MINS`, and it has to
+    /// win over a file TTL in seconds (and the other way round) instead of making the resolved
+    /// config hold both, which [`feature::preview::PreviewConfig::verify`] refuses.
+    #[test]
+    fn preview_ttl_from_env_replaces_file_ttl_in_other_unit() {
+        let cases = [
+            (
+                r#"{"ttl_secs": 600}"#,
+                "MIRRORD_PREVIEW_TTL_MINS",
+                "30",
+                30 * 60,
+            ),
+            (r#"{"ttl_mins": 10}"#, "MIRRORD_PREVIEW_TTL_SECS", "45", 45),
+        ];
+        for (preview, env, value, expected_secs) in cases {
+            let mut file = NamedTempFile::with_suffix(".json").unwrap();
+            write!(file, r#"{{"feature": {{"preview": {preview}}}}}"#).unwrap();
+
+            let mut context = ConfigContext::default()
+                .override_env(LayerConfig::FILE_PATH_ENV, file.path())
+                .override_env(env, value)
+                .strict_env(true);
+            let config = LayerConfig::resolve(&mut context).unwrap();
+
+            config.feature.preview.verify().unwrap();
+            assert_eq!(
+                config.feature.preview.resolved_ttl_secs(),
+                expected_secs,
+                "{preview} with {env}={value}"
+            );
+        }
+
+        // Both units set through the environment are still a conflict.
+        let mut context = ConfigContext::default()
+            .override_env("MIRRORD_PREVIEW_TTL_MINS", "30")
+            .override_env("MIRRORD_PREVIEW_TTL_SECS", "45")
+            .strict_env(true);
+        let config = LayerConfig::resolve(&mut context).unwrap();
+        assert!(config.feature.preview.verify().is_err());
     }
 
     /// Builds and resolves a [`LayerConfig`] from a JSON string, then runs the outgoing-to-DNS
