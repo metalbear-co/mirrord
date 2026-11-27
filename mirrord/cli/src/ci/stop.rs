@@ -411,7 +411,9 @@ impl CiStopCommandHandler {
     /// target that the stop never saw. The session's directory is removed under the same lock once
     /// every target is gone; otherwise only the failed targets are written back, for a later stop
     /// to retry. A session whose directory is gone by the time the stop takes its lock was
-    /// removed by another stop, so it has nothing left to stop.
+    /// removed by another stop, so it has nothing left to stop. A session whose directory exists
+    /// but whose lock file can't be opened fails instead, so that [`Self::handle_with`] reports it
+    /// rather than leaving its targets running unseen.
     #[cfg(not(target_os = "windows"))]
     async fn stop_session<Remove, Removal>(
         session_dir: &Path,

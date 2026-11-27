@@ -298,6 +298,10 @@ impl MirrordCiStore {
     /// `mirrord ci stop` holds it while it stops the session, so a held lock is a reason to wait
     /// rather than to fail. A stop uses [`Self::lock_existing_session`] instead, so that it never
     /// creates a session's directory.
+    ///
+    /// The directory is created again only when it is gone. A lock file that can't be opened in a
+    /// directory that exists is returned as an error, because creating the directory again
+    /// wouldn't change the outcome of the next open.
     async fn lock_or_create_session(
         session_dir: &Path,
         lock_timeout: Duration,
@@ -317,7 +321,9 @@ impl MirrordCiStore {
     /// holder to release it, or returns `None` when the session's directory doesn't exist.
     ///
     /// The directory is never created here, so a `mirrord ci stop` that reaches a session that
-    /// another stop has just removed finds it gone, instead of bringing back an empty one.
+    /// another stop has just removed finds it gone, instead of bringing back an empty one. A lock
+    /// file that can't be opened in a directory that exists is an error rather than `None`, so that
+    /// a session the caller can't lock is never taken for one that another stop removed.
     ///
     /// Only the wait for a held lock counts against `lock_timeout`, not the file operations, so a
     /// zero `lock_timeout` tries the lock once and fails only if another process holds it.
@@ -335,7 +341,21 @@ impl MirrordCiStore {
                 .await
             {
                 Ok(lock_file) => lock_file,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                // On APFS, the open can fail with `EINVAL` rather than `ENOENT` while another
+                // process removes the directory. Either error means that the session is gone only
+                // if its directory is, because the lock file also fails to be created in a
+                // directory that exists, for example when `session.lock` is a dangling symlink.
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::InvalidInput
+                    ) =>
+                {
+                    return match fs::symlink_metadata(session_dir).await {
+                        Err(missing) if missing.kind() == io::ErrorKind::NotFound => Ok(None),
+                        _ => Err(error.into()),
+                    };
+                }
                 Err(error) => return Err(error.into()),
             };
             while lock_file.try_lock_exclusive()?.not() {
