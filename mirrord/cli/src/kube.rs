@@ -7,11 +7,14 @@ use std::{
 use kube::{Resource, api::ListParams, client::ClientBuilder};
 use mirrord_config::LayerConfig;
 use mirrord_kube::{
-    api::kubernetes::{KubeEnvironment, create_kube_config, resolve_kube_environment},
+    api::kubernetes::{KubeEnvironment, resolve_kube_environment},
     error::KubeApiError,
     retry::retry_policy_from_config,
 };
-use mirrord_operator::client::add_baggage_header;
+use mirrord_operator::{
+    client::{NoClientCert, OperatorAccess, OperatorApi},
+    sso::OperatorLogin,
+};
 use mirrord_progress::Progress;
 use serde::de::DeserializeOwned;
 use tower::{buffer::BufferLayer, retry::RetryLayer};
@@ -20,22 +23,26 @@ use crate::error::CliError;
 
 /// Create a kube client according to the layer config, carrying its `baggage`, with a request
 /// buffer of 1024 requests and a retry policy according to the layer config.
+///
+/// Built from the same base as the operator client, so it reaches the operator the way the run
+/// does: through the kubeconfig, or through the selected operator login without reading one.
 pub(crate) async fn kube_client_from_layer_config(
     layer_config: &LayerConfig,
 ) -> Result<kube::Client, CliError> {
-    let mut config = create_kube_config(
-        layer_config.accept_invalid_certificates,
-        layer_config.kubeconfig.clone(),
-        layer_config.kube_context.clone(),
-    )
-    .await
-    .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))?;
-    add_baggage_header(&mut config, layer_config.baggage.as_deref())?;
-    // `startup_retry` below is the only retry: kube's own, nested under it, turns a 503 into
-    // minutes of silent waiting.
-    config.default_retry = false;
+    kube_client_and_access_from_layer_config(layer_config)
+        .await
+        .map(|(client, _)| client)
+}
 
-    ClientBuilder::try_from(config)
+/// [`kube_client_from_layer_config`] together with how the client reaches the operator, for
+/// commands that read ordinary cluster resources: under a login only the operator's own API
+/// answers, so they ask the operator instead.
+pub(crate) async fn kube_client_and_access_from_layer_config(
+    layer_config: &LayerConfig,
+) -> Result<(kube::Client, OperatorAccess), CliError> {
+    let (config, access) = OperatorApi::<NoClientCert>::base_client_config(layer_config).await?;
+
+    let client = ClientBuilder::try_from(config)
         .map_err(KubeApiError::from)
         .and_then(|builder| {
             Ok(builder
@@ -45,7 +52,10 @@ pub(crate) async fn kube_client_from_layer_config(
                 )?))
                 .build())
         })
-        .map_err(|error| CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed))
+        .map_err(|error| {
+            CliError::friendlier_error_or_else(error, CliError::CreateKubeApiFailed)
+        })?;
+    Ok((client, access))
 }
 
 /// Namespace to query when not spanning all namespaces, first match wins:
@@ -162,6 +172,9 @@ pub(crate) struct RunKubeInputs {
     pub(crate) kubeconfig: Option<String>,
     pub(crate) kube_context: Option<String>,
     pub(crate) namespace: RunNamespace,
+    /// Host of the operator the run is logged in to. When set, the run reaches the operator
+    /// through that login and never reads a kubeconfig, not even to describe a failure.
+    pub(crate) operator_login: Option<String>,
 }
 
 /// The Kubernetes environment of a run, displayed by [`crate::error::print_run_kube_environment`].
@@ -174,11 +187,16 @@ pub(crate) struct RunKubeEnvironment {
 }
 
 /// Records the Kubernetes settings of the resolved `config`, so that a failing command can show
-/// them. The kubeconfig is only read when the error is shown, see [`take_run_kube_environment`].
+/// them. The kubeconfig is only read when the error is shown, see [`take_run_kube_environment`],
+/// and not at all when the run is logged in to an operator.
 ///
 /// Only the first resolved config of the run is recorded, so a command that resolves its config
 /// again does not replace it.
-pub(crate) fn record_run_kube_environment(config_source: ConfigSource, config: &LayerConfig) {
+pub(crate) fn record_run_kube_environment(
+    config_source: ConfigSource,
+    config: &LayerConfig,
+    login: Option<&OperatorLogin>,
+) {
     let mut recorded = lock_run_kube_inputs();
     if recorded.is_some() {
         return;
@@ -195,6 +213,7 @@ pub(crate) fn record_run_kube_environment(config_source: ConfigSource, config: &
         kubeconfig,
         kube_context: config.kube_context.clone(),
         namespace: RunNamespace::of(config),
+        operator_login: login.map(|login| login.host().to_owned()),
     });
 }
 
@@ -214,6 +233,12 @@ pub(crate) fn take_run_kube_environment(all_namespaces: bool) -> Option<RunKubeE
     let mut inputs = lock_run_kube_inputs().take()?;
     if all_namespaces {
         inputs.namespace = RunNamespace::All;
+    }
+    if inputs.operator_login.is_some() {
+        return Some(RunKubeEnvironment {
+            inputs,
+            resolved: None,
+        });
     }
     let resolved = resolve_kube_environment(
         inputs.kubeconfig.as_deref(),

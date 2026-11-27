@@ -153,7 +153,6 @@ pub async fn wait_until_pods_ready(service: &Service, min: usize, client: Client
 /// 1. It's in the `Running` phase
 /// 2. All of its containers are ready
 #[cfg(test)]
-#[cfg(all(not(feature = "operator"), feature = "job"))]
 pub async fn wait_until_pod_ready(pod_name: &str, namespace: &str, client: Client) {
     let api = Api::<Pod>::namespaced(client, namespace);
 

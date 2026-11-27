@@ -111,11 +111,11 @@ Example `start` output:
 
 ```
   ✓ mirrord preview start
-    ✓ preview pod is ready
+    ✓ preview session is ready
   info:
     * key: alice-checkout-fix
     * namespace: staging
-    * session: preview-session-<target>-<id>
+    * session: <target>-<key>-<id>
     * preview URL: https://<slug>.<shareDomain>
 ```
 

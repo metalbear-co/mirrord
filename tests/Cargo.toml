@@ -33,7 +33,11 @@ hyper-util.workspace = true
 http-body-util.workspace = true
 rustls.workspace = true
 rstest.workspace = true
-mirrord-kube = { path = "../mirrord/kube" }
+mirrord-config = { path = "../mirrord/config" }
+mirrord-kube = { path = "../mirrord/kube", features = ["portforward"] }
+mirrord-progress = { path = "../mirrord/progress" }
+mirrord-protocol = { path = "../mirrord/protocol" }
+mirrord-protocol-io = { path = "../mirrord/protocol-io" }
 
 futures-util.workspace = true
 chrono.workspace = true

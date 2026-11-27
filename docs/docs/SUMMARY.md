@@ -108,6 +108,17 @@
     * [Schema Migrations](sharing-the-cluster/db-branching/migrations.md)
     * [Branch Management](sharing-the-cluster/db-branching/management.md)
 
+## Tutorials
+
+* [Queue and Workflow Tutorials](tutorials/queues/README.md "Queues and Workflows")
+  * [How to Test Temporal Workers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-temporal-workers.md "Temporal")
+  * [How to Test RabbitMQ Consumers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-rabbitmq-consumers.md "RabbitMQ")
+  * [How to Test GCP Pub/Sub Consumers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-gcp-pubsub-consumers.md "Google Cloud Pub/Sub")
+  * [How to Test Redis Pub/Sub Consumers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-redis-pubsub-consumers.md "Redis Pub/Sub")
+  * [How to Test NATS Consumers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-nats-consumers.md "NATS")
+  * [How to Test Azure Service Bus Consumers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-azure-service-bus-consumers.md "Azure Service Bus")
+  * [How to Test BullMQ Workers in Kubernetes with Queue Splitting](tutorials/queues/how-to-test-bullmq-workers.md "BullMQ")
+
 ## Managing mirrord
 
 * [Single Sign-On](managing-mirrord/sso.md)

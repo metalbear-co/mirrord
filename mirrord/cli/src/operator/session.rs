@@ -47,6 +47,9 @@ impl SessionCommandHandler {
             .inspect_err(|error| {
                 progress.failure(Some(&format!("failed to read config from env: {error}")));
             })?;
+        for warning in cfg_context.into_warnings() {
+            progress.warning(&warning);
+        }
 
         let mut subtask = progress.subtask("checking operator");
         let operator_api =

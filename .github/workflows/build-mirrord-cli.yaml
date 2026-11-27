@@ -6,6 +6,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Line tables keep the file and line numbers in panics and backtraces, but they build and link faster than full
+  # debug info. rust-cache hashes this variable into its key, so the jobs that share a cache must all set it.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
 jobs:
   build-mirrord-cli:
     runs-on: blacksmith-8vcpu-ubuntu-2404

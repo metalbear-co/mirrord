@@ -26,7 +26,7 @@ For example, if you want your local process to access a remote database, the con
 
 ## How does it work?
 
-![mirrord - fileops](../.gitbook/assets/mirrord-env-vars.png)
+![mirrord - fileops](../.gitbook/assets/mirrord-env-vars.svg)
 
 mirrord-layer sends a message to mirrord-agent requesting remote environment variables, which are then set before the local process starts.
 

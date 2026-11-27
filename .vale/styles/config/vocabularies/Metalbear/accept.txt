@@ -225,6 +225,7 @@ README
 READMEs
 RSTs
 rollout
+ruleset
 backoff
 subtask
 stderr

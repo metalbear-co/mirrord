@@ -66,12 +66,14 @@ pub trait ExtraParamSet: Sized {
 pub enum ConnectionSourceKind {
     /// Environment variable with value defined directly in the pod template.
     Env {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         container: Option<String>,
         variable: String,
     },
 
     /// Environment from resource reference in the the pod template.
     EnvFrom {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         container: Option<String>,
         variable: String,
     },
@@ -89,6 +91,7 @@ pub enum ConnectionSourceKind {
 
     /// Environment variable whose value is extracted via a regex pattern.
     EnvPattern {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         container: Option<String>,
         variable: String,
         value_pattern: String,
@@ -833,5 +836,54 @@ mod tests {
             spec.extra.get("database_id").and_then(|s| s.iter().next()),
             Some(ConnectionSourceKind::Env { variable, .. }) if variable == "SPANNER_DATABASE_ID"
         ));
+    }
+}
+
+#[cfg(test)]
+mod null_free_spec_tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::crd::db_branching::{branch_database::ItemCopyConfig, mysql::TableCopyConfig};
+
+    /// Regression test: unset branch options used to be stored as explicit `null`
+    /// (`"tables": {"t": {}}` became `copy.items.t.filter: null`). The CRD rule that freezes
+    /// the spec compares whole option objects with `oldSelf`, and Kubernetes 1.31 to 1.33 treat
+    /// an object with a present-but-null field as unequal to an identical one
+    /// (kubernetes/kubernetes#131559), so every update of such a branch was rejected with
+    /// "only `migrations` can change after a branch is created". Unset options now leave the
+    /// key out, while branches already stored with `null` still deserialize.
+    #[test]
+    fn unset_branch_options_are_not_serialized_as_null() {
+        let source = ConnectionSourceKind::EnvFrom {
+            container: None,
+            variable: "DATABASE_URL".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_value(&source).unwrap(),
+            json!({"envFrom": {"variable": "DATABASE_URL"}})
+        );
+
+        let table = TableCopyConfig { filter: None };
+        assert_eq!(serde_json::to_value(&table).unwrap(), json!({}));
+        let item = ItemCopyConfig { filter: None };
+        assert_eq!(serde_json::to_value(&item).unwrap(), json!({}));
+
+        let stored: ConnectionSourceKind =
+            serde_json::from_value(json!({"envFrom": {"container": null, "variable": "X"}}))
+                .expect("a branch stored with explicit null still deserializes");
+        assert_eq!(
+            stored,
+            ConnectionSourceKind::EnvFrom {
+                container: None,
+                variable: "X".to_owned()
+            }
+        );
+        let stored: TableCopyConfig = serde_json::from_value(json!({"filter": null}))
+            .expect("a branch stored with explicit null still deserializes");
+        assert!(stored.filter.is_none());
+        let stored: ItemCopyConfig = serde_json::from_value(json!({"filter": null}))
+            .expect("a branch stored with explicit null still deserializes");
+        assert!(stored.filter.is_none());
     }
 }

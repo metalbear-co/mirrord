@@ -21,7 +21,7 @@ use crate::{
         BgTaskRuntime,
         status::{BgTaskStatus, IntoStatus},
     },
-    util::path_resolver::InTargetPathResolver,
+    util::target_root::TargetRoot,
 };
 
 /// Starts and monitors the workload-companion's remote-layer incoming traffic infrastructure.
@@ -39,6 +39,7 @@ pub(crate) struct WorkloadCompanionIngress {
 impl WorkloadCompanionIngress {
     pub(crate) fn start(
         runtime: &BgTaskRuntime,
+        target_root: TargetRoot,
         cancellation_token: CancellationToken,
     ) -> AgentResult<Self> {
         // IMPORTANT: this makes tokio tasks spawn on `runtime`, and registers the handoff
@@ -47,8 +48,7 @@ impl WorkloadCompanionIngress {
         let _rt = runtime.handle().enter();
 
         let tls_steal_config = envs::STEAL_TLS_CONFIG.from_env_or_default();
-        let tls_handler_store =
-            StealTlsHandlerStore::new(tls_steal_config, InTargetPathResolver::from_root());
+        let tls_handler_store = StealTlsHandlerStore::new(tls_steal_config, target_root);
         let RemoteLayerIncoming { redirector, sender } = RemoteLayerIncoming::new();
         let (redirector_task, steal_handle, mirror_handle) = RedirectorTask::new(
             redirector,

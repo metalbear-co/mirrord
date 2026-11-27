@@ -8,6 +8,8 @@ tags:
 
 This page covers queue splitting for [NATS](https://nats.io). Most of it describes [JetStream](https://docs.nats.io/nats-concepts/jetstream) (persisted streams consumed through a durable pull consumer); [core NATS pub/sub](#core-nats-pubsub-no-jetstream) (plain subject subscriptions) is covered in its own section. For the general concepts and the message filter reference shared by all queue services, see the [Queue Splitting overview](../queue-splitting.md).
 
+For a walkthrough with a sample app, see the [tutorial](../../tutorials/queues/how-to-test-nats-consumers.md).
+
 Unless the [core pub/sub](#core-nats-pubsub-no-jetstream) section says otherwise, "queue" on this page refers to a JetStream stream consumed through a durable pull consumer.
 
 {% hint style="info" %}
@@ -29,7 +31,7 @@ In the default `steal` mode a matched message goes only to the session's tempora
 
 Delivery is at-least-once: a message is acknowledged on the original consumer only after the JetStream server has acknowledged the republish, so a message can be redelivered but never silently dropped.
 
-When sessions end, their temporary streams are deleted, and when the whole split ends the main-output stream is deleted too. Cleanup is crash-safe: every temporary resource is tracked in a `MirrordClusterExternalResource`, so it is removed even if the operator restarts mid-session.
+When sessions end, their temporary streams are deleted. When the whole split ends, the deployed workload first drains the main-output stream (capped by [`drainTimeout`](kafka.md#configuring-workload-restart)), then the operator unpatches the pods and deletes the main-output stream. Cleanup is crash-safe: every temporary resource is tracked in a `MirrordClusterExternalResource`, so it is removed even if the operator restarts mid-session.
 
 ## Enabling NATS Splitting in Your Cluster
 
