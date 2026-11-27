@@ -411,6 +411,8 @@ Copy schema plus filtered rows per table. Combine with `"empty"` to copy **only*
 MongoDB and DynamoDB use `collections` instead of `tables` and support only `empty` / `all`.
 - MongoDB filter is a MongoDB query as an escaped JSON string: `"{\"name\": {\"$in\": [\"alice\", \"bob\"]}}"`.
 - DynamoDB filter is a `Scan` `FilterExpression` string, e.g. `"active = true"`. It **cannot** use `ExpressionAttributeValues`/`Names` placeholders. An empty `{}` copies the table in full.
+- DynamoDB `connection` names the env var holding the DynamoDB endpoint, usually `{ "url": "AWS_ENDPOINT_URL_DYNAMODB" }`. mirrord sets it to the branch's endpoint in the local process, and copies the source tables from the endpoint that variable holds on the target (or the standard regional AWS endpoint if the target doesn't set it).
+- MongoDB with a custom `image`: from operator `3.238.0`, the branch container's command replaces the image's `CMD`, so the server starts as plain `mongod`. Flags the image's `CMD` carried go in the operator Helm value `operator.mongodbBranchConfig.dbPod.dbServerArgs`, or in the selected profile's `dbPod.dbServerArgs` (a profile inherits nothing from the default `dbPod`).
 
 ```json mirrord=feature.db_branches[]
 { "copy": { "mode": "all", "collections": { "users": { "filter": "active = true" }, "orders": {} } } }
