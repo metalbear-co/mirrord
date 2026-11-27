@@ -33,6 +33,7 @@ use mirrord_session_monitor_protocol::{
 };
 use prettytable::{Table, format, row};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::Value;
 
 use crate::{
     CliResult,
@@ -257,10 +258,12 @@ fn url_encoded(text: &str) -> String {
 /// credential.
 const CLIENT_BUILD_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Kube clients by kubeconfig and context.
+type OperatorClients = HashMap<(Option<String>, Option<String>), Client>;
+
 /// Kube clients for the operators that serve `queuereplays`, by kubeconfig and context, so that
 /// the Replay tab of `mirrord ui` doesn't run the auth plugin of the kubeconfig on every poll.
-static OPERATOR_CLIENTS: LazyLock<Mutex<HashMap<(Option<String>, Option<String>), Client>>> =
-    LazyLock::new(Default::default);
+static OPERATOR_CLIENTS: LazyLock<Mutex<OperatorClients>> = LazyLock::new(Default::default);
 
 /// Sends `request` to the operator of the session `info`, with the kubeconfig, context and
 /// baggage that the session uses, and returns the JSON response.
@@ -340,15 +343,23 @@ async fn build_client(info: &SessionInfo) -> CliResult<Client> {
             .map_err(|e| error(&e))?,
     };
 
-    if let Some(accept) = info.config["accept_invalid_certificates"].as_bool() {
+    if let Some(accept) = info
+        .config
+        .get("accept_invalid_certificates")
+        .and_then(Value::as_bool)
+    {
         config.accept_invalid_certs = accept;
     }
-    add_baggage_header(&mut config, info.config["baggage"].as_str()).map_err(|e| error(&e))?;
+    add_baggage_header(
+        &mut config,
+        info.config.get("baggage").and_then(Value::as_str),
+    )
+    .map_err(|e| error(&e))?;
 
     Client::try_from(config).map_err(|e| error(&e))
 }
 
-fn lock_clients() -> MutexGuard<'static, HashMap<(Option<String>, Option<String>), Client>> {
+fn lock_clients() -> MutexGuard<'static, OperatorClients> {
     OPERATOR_CLIENTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -367,18 +378,16 @@ fn print_messages(messages: &[KeptMessage]) {
     table.set_format(*format::consts::FORMAT_CLEAN);
     table.add_row(row!["ID", "QUEUE", "MESSAGE", "SIZE", "BODY", "REPLAYS"]);
     for message in messages {
-        let sqs = &message.event["queue_message"];
-        let kafka = &message.event["kafka_message"];
-        let queue = sqs["queue_name"]
-            .as_str()
-            .or_else(|| kafka["topic"].as_str())
-            .unwrap_or("-");
-        let message_id = sqs["message_id"]
-            .as_str()
-            .map(str::to_owned)
+        let field = |kind: &str, name: &str| message.event.get(kind)?.get(name).cloned();
+        let queue = field("queue_message", "queue_name")
+            .or_else(|| field("kafka_message", "topic"))
+            .and_then(|name| name.as_str().map(str::to_owned));
+        let queue = queue.as_deref().unwrap_or("-");
+        let message_id = field("queue_message", "message_id")
+            .and_then(|id| id.as_str().map(str::to_owned))
             .or_else(|| {
-                let partition = kafka["partition"].as_i64()?;
-                let offset = kafka["offset"].as_i64()?;
+                let partition = field("kafka_message", "partition")?.as_i64()?;
+                let offset = field("kafka_message", "offset")?.as_i64()?;
                 Some(format!("{partition}@{offset}"))
             })
             .unwrap_or_else(|| "-".to_owned());
