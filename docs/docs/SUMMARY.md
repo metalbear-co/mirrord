@@ -49,6 +49,8 @@
 * [Connecting Tools to the Cluster](using-mirrord/connecting-tools/README.md)
   * [Web Browsing](using-mirrord/connecting-tools/web-browsing.md)
   * [Postman](using-mirrord/connecting-tools/postman.md)
+  * [Playwright](using-mirrord/connecting-tools/playwright.md)
+  * [Cypress](using-mirrord/connecting-tools/cypress.md)
 * [Running Without a Target](using-mirrord/targetless.md)
 * [Copying a Target](using-mirrord/copy-target.md)
 * [Local Containers](using-mirrord/local-container.md)
