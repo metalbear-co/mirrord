@@ -306,7 +306,7 @@ Open a terminal and follow the worker logs:
 kubectl -n bullmq-demo logs -f deploy/bullmq-worker
 ```
 
-In a second terminal, send jobs for two tenants. The producer runs in the worker pod, where `bullmq` is already installed:
+The pod installs `bullmq` before it starts the worker. Wait until the worker prints `worker reads queue "orders"`. Then, in a second terminal, send jobs for two tenants. The producer runs in the worker pod:
 
 ```bash
 kubectl -n bullmq-demo exec deploy/bullmq-worker -c worker -- node /app/producer.js alice 2
@@ -481,14 +481,18 @@ kubectl -n bullmq-demo wait mirrordsplitconfig/worker-split \
   --for=jsonpath='{.status.phase}'=inactive --timeout=600s
 ```
 
+The restored pod installs `bullmq` again before it starts the worker. The producer runs in this pod, so wait until the worker prints its queue name:
+
+```bash
+until kubectl -n bullmq-demo logs deploy/bullmq-worker 2>/dev/null | grep -q 'queue "orders"'; do sleep 2; done
+```
+
 Send one more job. The restored deployed worker gets it from `orders`:
 
 ```bash
 kubectl -n bullmq-demo exec deploy/bullmq-worker -c worker -- node /app/producer.js alice 1
 kubectl -n bullmq-demo logs deploy/bullmq-worker
 ```
-
-The restored pod reads `orders` again. When the pod is still in the `npm install` step, the job waits in `orders` until the worker starts.
 
 ## How it works
 
@@ -571,9 +575,10 @@ kubectl delete namespace bullmq-demo
 mirrord ui stop
 ```
 
-Delete the local directories:
+Go back to the parent directory of `bullmq-local`, and delete it:
 
 ```bash
+cd ..
 rm -rf bullmq-local
 ```
 

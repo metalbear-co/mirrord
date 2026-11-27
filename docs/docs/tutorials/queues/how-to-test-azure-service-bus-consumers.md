@@ -545,6 +545,7 @@ To use queue splitting with your own consumer, change these items:
 4. **Authentication.** Use Workload Identity, a connection string, or a service principal in the `MirrordPropertyList`. To share one property list between namespaces, put it in the operator namespace.
 5. **Session key in the messages.** Make your producers set an application property with `mirrord-session=<key>`, for example `baggage`. Each developer uses a different key.
 6. **Queue ID.** For a custom filter, use the same ID in the `MirrordSplitConfig` and in `feature.split_queues`. To use one filter for all queues in the split config, use the ID `*`.
+7. **Consumer credentials.** The demo gives the consumer the `RootManageSharedAccessKey` connection string. Give your consumer a shared access policy with only the **Listen** and **Send** rights. With a managed identity, use the Azure Service Bus Data Receiver and Azure Service Bus Data Sender roles. Scope the policy or the roles to the namespace, because the temporary queues get new names. Keep the **Manage** right for the operator only.
 
 You do not change the consumer code. The consumer reads its queue name in the same way in the cluster and on your machine. The operator changes only the value.
 

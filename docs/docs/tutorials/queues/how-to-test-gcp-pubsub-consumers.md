@@ -79,7 +79,7 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --role roles/pubsub.editor
 ```
 
-Let the operator's Kubernetes service account (`mirrord-operator` in namespace `mirrord`, the chart defaults) act as the Google service account:
+Let the operator's Kubernetes ServiceAccount act as the Google service account. The binding uses the chart defaults: the namespace `mirrord` and the ServiceAccount `mirrord-operator`. If your operator uses a different namespace or ServiceAccount name, change `[mirrord/mirrord-operator]` to match:
 
 ```bash
 gcloud iam service-accounts add-iam-policy-binding \
@@ -91,7 +91,7 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 ### Step 3: Enable Pub/Sub splitting in the operator
 
-Set two Helm values on your operator release. The commands use the default install: the release `mirrord-operator` is in the namespace of your kube context, usually `default`. If your release is in a different namespace, add `--namespace` with that namespace. The operator pods and their service account are always in the `mirrord` namespace, because the chart makes that namespace.
+Set two Helm values on your operator release. The commands use the default install: the release `mirrord-operator` is in the namespace of your kube context, usually `default`. If your release is in a different namespace, add `--namespace` with that namespace. The operator runs in the namespace `mirrord`, the chart default. If your operator runs in a different namespace, change `-n mirrord` in the `kubectl rollout restart` command to match.
 
 - `operator.gcpPubsubSplitting=true` enables Pub/Sub splitting and installs the `MirrordSplitConfig` CRD.
 - `sa.gcpSa` adds the `iam.gke.io/gcp-service-account` annotation to the operator's service account.
