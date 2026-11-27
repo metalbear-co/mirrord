@@ -46,7 +46,7 @@ The scripts on this page use `mirrord ci start`, not `mirrord up`. `mirrord ci s
 - A staging service with an HTTP endpoint that the sandbox can reach, for example through an ingress. The ingress must forward the `x-mirrord-agent` header to the service.
 - An account and an API key for E2B, Daytona, or Modal, and the Python SDK of that platform on the machine that runs the script.
 
-Bind the agent identity to the `mirrord-operator-ci` ClusterRole. Also give it `get` on the target deployment and `list` on pods in the target namespace. See [Security](../managing-mirrord/security.md) for the built-in roles. For example:
+Bind the agent identity to the `mirrord-operator-ci` ClusterRole. Also give it `get` on the target deployment and `list` on pods in the target namespace. See [Security](../managing-mirrord/security.md) for the built-in roles. For example, this Role and RoleBinding give these permissions to the service account `mirrord-agent`:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -62,6 +62,20 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mirrord-sandbox-target
+  namespace: staging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mirrord-sandbox-target
+subjects:
+  - kind: ServiceAccount
+    name: mirrord-agent
+    namespace: staging
 ```
 
 ## Prepare the files for the sandbox
@@ -130,7 +144,8 @@ done
 
 # The steal starts some seconds after mirrord ci start returns.
 for i in $(seq 1 30); do
-  answer=$(curl -s -H "x-mirrord-agent: $AGENT_KEY" "$STAGING_URL" || true)
+  answer=$(curl -s --connect-timeout 5 --max-time 10 \
+    -H "x-mirrord-agent: $AGENT_KEY" "$STAGING_URL" || true)
   if [[ "$answer" == *"$EXPECTED"* ]]; then break; fi
   if [ "$i" -eq 30 ]; then
     echo "The answer with the header is not from the sandbox: $answer" >&2; exit 1
@@ -139,8 +154,10 @@ for i in $(seq 1 30); do
 done
 echo "With the header: $answer"
 
-# A request without the header must get the answer of staging.
-answer=$(curl -s "$STAGING_URL")
+# A request without the header must get a successful answer of staging.
+if ! answer=$(curl -sf --connect-timeout 5 --max-time 10 "$STAGING_URL"); then
+  echo "Staging did not send a successful answer to the request without the header." >&2; exit 1
+fi
 echo "Without the header: $answer"
 if [[ "$answer" == *"$EXPECTED"* ]]; then
   echo "A request without the header got the answer of the sandbox." >&2; exit 1
@@ -186,7 +203,7 @@ APP_REPO = "https://github.com/your-org/orders-api.git"
 APP_CMD = "python3 app.py"
 APP_PORT = "8080"
 EXPECTED = '"version": "sandbox"'
-KEY = f"agent-{uuid.uuid4().hex[:8]}"
+KEY = f"agent-{uuid.uuid4().hex}"
 
 INSTALL = (
     "curl -fsSL https://raw.githubusercontent.com/metalbear-co/mirrord/main/scripts/install.sh"
@@ -246,6 +263,7 @@ Give the kubeconfig and the CI API key with `env_vars` ([Python SDK](https://www
 ```python
 import base64
 import os
+import shlex
 import uuid
 
 from daytona import Daytona
@@ -256,7 +274,7 @@ APP_REPO = "https://github.com/your-org/orders-api.git"
 APP_CMD = "python3 app.py"
 APP_PORT = "8080"
 EXPECTED = '"version": "sandbox"'
-KEY = f"agent-{uuid.uuid4().hex[:8]}"
+KEY = f"agent-{uuid.uuid4().hex}"
 
 image = Image.debian_slim("3.12").run_commands(
     "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git"
@@ -293,7 +311,7 @@ try:
         f"git clone --depth 1 {APP_REPO} /tmp/app"
         f" && cd /tmp/app && bash /tmp/check.sh {APP_CMD}"
     )
-    result = sandbox.process.exec(f"bash -c '{steps}'", timeout=600)
+    result = sandbox.process.exec(f"bash -c {shlex.quote(steps)}", timeout=600)
     print(result.result)
     if result.exit_code != 0:
         raise SystemExit(f"check.sh failed with exit code {result.exit_code}")
@@ -333,7 +351,7 @@ APP_REPO = "https://github.com/your-org/orders-api.git"
 APP_CMD = "python3 app.py"
 APP_PORT = "8080"
 EXPECTED = '"version": "sandbox"'
-KEY = f"agent-{uuid.uuid4().hex[:8]}"
+KEY = f"agent-{uuid.uuid4().hex}"
 
 image = (
     modal.Image.debian_slim()
@@ -441,7 +459,7 @@ A Firecracker microVM has its own Linux kernel, so mirrord works there as on oth
 
 ### Do I need to expose the cluster to the internet?
 
-The sandbox needs to reach the Kubernetes API server. You do not need to expose the staging services or the mirrord Operator. Limit access to the API server to the egress addresses of the sandbox platform where the platform publishes them.
+The sandbox needs to reach the Kubernetes API server. The check script on this page also sends requests from the sandbox to `STAGING_URL`. The sandbox needs a route to that endpoint, for example through an ingress. You do not need to expose the other staging services or the mirrord Operator. Limit access to the API server to the egress addresses of the sandbox platform where the platform publishes them.
 
 ## See also
 
