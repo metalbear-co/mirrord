@@ -2789,25 +2789,26 @@ mod tests {
             files
         }
 
-        fn parse(block: &str) -> Result<serde_json::Value, String> {
-            let mut template_engine = Tera::default();
-            template::register(&mut template_engine);
-            template_engine.register_function("get_env", |args: &HashMap<String, tera::Value>| {
-                args.get("default")
-                    .or_else(|| args.get("name"))
-                    .cloned()
-                    .ok_or_else(|| "get_env needs a name".into())
-            });
+        // One engine and context for every block.
+        let mut template_engine = Tera::default();
+        template::register(&mut template_engine);
+        template_engine.register_function("get_env", |args: &HashMap<String, tera::Value>| {
+            args.get("default")
+                .or_else(|| args.get("name"))
+                .cloned()
+                .ok_or_else(|| "get_env needs a name".into())
+        });
 
-            let mut context = tera::Context::new();
-            context.insert("key", "key");
-            context.insert("git_branch", "main");
+        let mut context = tera::Context::new();
+        context.insert("key", "key");
+        context.insert("git_branch", "main");
 
+        let mut parse = |block: &str| -> Result<serde_json::Value, String> {
             let rendered = template_engine
                 .render_str(block, &context)
                 .map_err(|error| format!("{error:?}"))?;
             serde_json::from_str(&rendered).map_err(|error| error.to_string())
-        }
+        };
 
         let mut invalid = Vec::new();
         for file in rust_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src")) {
