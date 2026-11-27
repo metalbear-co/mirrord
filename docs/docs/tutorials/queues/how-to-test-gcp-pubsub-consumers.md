@@ -366,8 +366,6 @@ mirrord up --key alice
 
 The local consumer reads from a temporary subscription, not from `orders-sub`. `mirrord up` puts the service name in front of each line of the consumer:
 
-<!-- TODO: confirm on a cluster -->
-
 ```text
 order-consumer: [alice] reading from projects/my-gcp-project/subscriptions/mirrord-tmp-<random>-orders-sub-sub
 ```

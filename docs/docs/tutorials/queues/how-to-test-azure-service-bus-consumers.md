@@ -392,8 +392,6 @@ mirrord up --key alice
 
 mirrord gives the local process the environment of the deployed pod, so the script gets the connection string from the cluster. The operator changes `SERVICE_BUS_QUEUE_NAME` for your process to the name of a temporary queue that only your session reads. The local consumer prints a name like this. `mirrord up` puts the service name in front of each line of the consumer:
 
-<!-- TODO: confirm on a cluster -->
-
 ```
 orders-consumer: [alice] reading queue mirrord-tmp-<random>-orders
 ```
