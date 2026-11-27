@@ -939,7 +939,10 @@ impl MirrordCi {
 #[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use std::{
-        collections::HashSet, ops::Not, os::unix::process::ExitStatusExt, process::Stdio,
+        collections::HashSet,
+        ops::Not,
+        os::unix::{fs::symlink, process::ExitStatusExt},
+        process::Stdio,
         time::Duration,
     };
 
@@ -1021,6 +1024,59 @@ mod tests {
                 .await
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    /// A writer that was killed before it replaced the state file leaves the temporary state file
+    /// behind. The next write of the session must still succeed, or the session's later records,
+    /// such as a background command that is already running, would never reach the state.
+    #[tokio::test]
+    async fn update_succeeds_after_killed_writer_left_temporary_state_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        std::fs::write(
+            session_dir.join(MirrordCiStore::TEMPORARY_STATE_FILE_NAME),
+            "{",
+        )
+        .unwrap();
+
+        MirrordCiStore::update(&session_dir, LOCK_TIMEOUT, |store| {
+            store.intproxy_pids.insert(42);
+        })
+        .await
+        .unwrap();
+
+        let store =
+            MirrordCiStore::read_from_file_or_default(&MirrordCiStore::state_path(&session_dir))
+                .await
+                .unwrap();
+        assert_eq!(store.intproxy_pids, HashSet::from([42]));
+    }
+
+    /// A session whose directory exists but whose lock file can't be created, here because
+    /// `session.lock` is a dangling symlink, must fail with the open's error rather than be taken
+    /// for a removed session, which `MirrordCiStore::update` would create again forever.
+    #[tokio::test]
+    async fn update_with_dangling_lock_symlink_fails() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("session");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let lock_path = MirrordCiStore::lock_path(&session_dir);
+        symlink(temp_dir.path().join("missing").join("lock"), &lock_path).unwrap();
+
+        let result = timeout(
+            Duration::from_secs(3),
+            MirrordCiStore::update(&session_dir, LOCK_TIMEOUT, |_| {}),
+        )
+        .await
+        .expect("update did not return within 3 s (LOCK_TIMEOUT is 1 s)");
+        assert!(
+            matches!(
+                &result,
+                Err(CiError::SessionFile { operation: "open", path, .. }) if *path == lock_path
+            ),
+            "{result:?}"
         );
     }
 

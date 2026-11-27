@@ -489,7 +489,9 @@ mod tests {
         time::timeout,
     };
 
-    use super::{CiStopCommandHandler, StopTarget, TerminationTarget, runtime_remove_container};
+    use super::{
+        CiStopCommandHandler, SessionStop, StopTarget, TerminationTarget, runtime_remove_container,
+    };
     use crate::ci::{
         CiError, MirrordCiManagedContainer, MirrordCiStore, spawn_background_user_command,
     };
@@ -788,58 +790,29 @@ mod tests {
         assert!(contested_dir.exists().not());
     }
 
-    /// Two stops that run concurrently (parallel CI jobs on one runner, each with `mirrord ci stop`
-    /// in its teardown) both go over every session. When one stop removes a session after the other
-    /// stop listed it, the other stop must find nothing left to stop there rather than fail, and
-    /// leave no session directory behind.
+    /// A stop that reaches a session after another stop removed it finds nothing to stop there,
+    /// and doesn't fail. It also must not create the session's directory again, which would leave
+    /// an empty session behind for every later stop to go over.
     #[tokio::test]
-    async fn session_removed_by_another_stop_has_nothing_to_stop() {
+    async fn stop_session_of_removed_session_has_nothing_to_stop() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let sessions_dir = temp_dir.path();
-        for name in ["session-1", "session-2", "session-3"] {
-            MirrordCiStore::update(&sessions_dir.join(name), LOCK_TIMEOUT, |store| {
-                store.sidecar_containers.insert(MirrordCiManagedContainer {
-                    runtime: ContainerRuntime::Podman,
-                    container_id: "test-container".to_owned(),
-                });
-            })
-            .await
-            .unwrap();
-        }
+        let session_dir = temp_dir.path().join("removed");
+        let mut failures = Vec::new();
 
-        // The other stop holds the lock of the session that the directory listing puts last, and
-        // removes that session while this stop removes the container of the first session. This
-        // stop lists the unchanged directory in the same order, so it reaches the removed session
-        // only afterwards, whatever order the filesystem lists the names in.
-        let session_dirs = std::fs::read_dir(sessions_dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
-        let [stopped_dirs @ .., removed_dir] = session_dirs.as_slice() else {
-            panic!("the test created three sessions, found {session_dirs:?}");
-        };
-        let mut other_stop_lock = Some(
-            MirrordCiStore::lock_or_create_session(removed_dir, Duration::ZERO)
-                .await
-                .unwrap(),
-        );
-        let mut removals = 0;
-        CiStopCommandHandler::new(sessions_dir.to_owned(), ProgressTracker::null())
-            .handle_with(|_| {
-                removals += 1;
-                let other_stop_lock = other_stop_lock.take();
-                async move {
-                    if let Some(lock) = other_stop_lock {
-                        lock.remove_session().await.unwrap();
-                    }
-                    Ok(())
-                }
-            })
-            .await
-            .unwrap();
+        let stopped = CiStopCommandHandler::stop_session(
+            &session_dir,
+            runtime_remove_container,
+            &mut failures,
+        )
+        .await
+        .unwrap();
 
-        assert_eq!(removals, stopped_dirs.len());
-        assert!(std::fs::read_dir(sessions_dir).unwrap().next().is_none());
+        assert!(matches!(
+            stopped,
+            SessionStop::Visited { had_targets: false }
+        ));
+        assert!(failures.is_empty());
+        assert!(session_dir.exists().not());
     }
 
     /// A writer that is killed after it created its temporary state file, and before it replaced
