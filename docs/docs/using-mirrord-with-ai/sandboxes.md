@@ -18,22 +18,7 @@ This page shows one setup for each of the three sandbox platforms. Each setup us
 
 The agent, or a script that the agent calls, creates a sandbox from an image that contains mirrord. The sandbox gets a kubeconfig and a CI API key as secrets. mirrord starts the service in the sandbox and connects to the mirrord Operator through the Kubernetes API. The Operator starts a session on the staging target. The target continues to serve all requests, except the requests whose header carries the session key of the agent. mirrord sends those requests to the service in the sandbox.
 
-```mermaid
-flowchart LR
-    agent[AI agent] -->|creates and runs| sandbox
-    subgraph sandbox[Sandbox]
-        service[Service under test]
-        mirrord[mirrord CLI and layer]
-        service --- mirrord
-    end
-    mirrord -->|Kubernetes API and CI API key| operator[mirrord Operator]
-    subgraph cluster[Staging cluster]
-        operator --> target[Staging target]
-    end
-    request[Request with header<br>x-mirrord-agent: key] --> target
-    others[Other developers and agents] --> target
-    target -.->|only requests with the key| mirrord
-```
+![How mirrord connects a sandbox to the staging cluster](../.gitbook/assets/ai-sandbox-flow.svg)
 
 The scripts on this page use `mirrord ci start`, not `mirrord up`. `mirrord ci start` starts the service in the background and returns, so one shell script can start the service, send the request, and stop the session with `mirrord ci stop`.
 
