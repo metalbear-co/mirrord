@@ -111,7 +111,12 @@ impl AgentClient {
                 "path": format!("pod/{pod}/container/{CONTAINER_NAME}"),
                 "namespace": "default",
             },
-            "agent": { "ephemeral": cfg!(feature = "ephemeral") },
+            "agent": {
+                "ephemeral": cfg!(feature = "ephemeral"),
+                // The agent that CI builds and loads into the cluster, as in `run_exec`.
+                // `MIRRORD_AGENT_IMAGE` overrides it.
+                "image": "test",
+            },
         }))
         .unwrap()
         .generate_config(&mut Default::default())
