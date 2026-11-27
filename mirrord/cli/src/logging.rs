@@ -2,6 +2,7 @@ use std::{fs::OpenOptions, future::Future, ops::Not, path::Path};
 
 use futures::StreamExt;
 use mirrord_config::LayerConfig;
+use mirrord_up::OutputFormat;
 use tokio::io::AsyncWriteExt;
 use tokio_stream::Stream;
 use tracing_subscriber::{EnvFilter, prelude::*};
@@ -43,6 +44,15 @@ pub async fn init_tracing_registry(
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(false)
+        }
+
+        // A session of `mirrord up --output json`, whose final error `up` reads off its stderr
+        // and puts on the service's `exited` event. It logs as any session does.
+        Commands::Exec(_) | Commands::Container(_)
+            if OutputFormat::of_session() == OutputFormat::Json =>
+        {
+            let _ = miette::set_hook(Box::new(|_| Box::new(miette::JSONReportHandler::new())));
+            true
         }
 
         // Proxies initialize tracing independently, after log file setup.
