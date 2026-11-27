@@ -1106,16 +1106,7 @@ fn queue_filter_count(config: &PreviewQueueSplittingConfig) -> usize {
 }
 
 fn db_branch_count(config: &PreviewDbBranchingConfig) -> usize {
-    config.mysql_branch_names.len()
-        + config.mariadb_branch_names.len()
-        + config.pg_branch_names.len()
-        + config.dynamodb_branch_names.len()
-        + config.mongodb_branch_names.len()
-        + config.mssql_branch_names.len()
-        + config.redis_branch_names.len()
-        + config.spanner_branch_names.len()
-        + config.clickhouse_branch_names.len()
-        + config.cockroachdb_branch_names.len()
+    config.all_branch_names().count()
 }
 
 /// Mirrors the exact phrasing `mirrord preview status` uses (`mirrord/mirrord/cli/src/preview.rs`),
