@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 590" width="1200" height="590" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">mirrord with Devin</title>
-  <desc id="d">Devin runs on its machine. Devin starts the changed service with mirrord up and a session key KEY, and the service connects to the mirrord operator in the staging cluster through the Kubernetes API. All traffic of the session goes through this connection and the operator. Devin then sends a request with the header x-mirrord-agent and KEY to the ingress or gateway of the staging cluster. The gateway sends the request to the mirrord agent at the target pod. The agent sends the requests with KEY through the operator to the changed service on Devin's machine, and all other requests to the deployed service. The changed service sends its outgoing calls through the operator to the mirrord agent, and the agent sends them from the target pod to the APIs, queues, and databases in the cluster.</desc>
+  <desc id="d">Devin runs on its machine. Devin starts the changed service with mirrord up and a session key KEY, and the service connects to the mirrord operator in the staging cluster through the Kubernetes API. Requests with KEY and outgoing calls go through this connection and the operator. Devin then sends a request with the header x-mirrord-agent and KEY to the ingress or gateway of the staging cluster. The gateway sends the request to the mirrord agent at the target pod. The agent sends the requests with KEY through the operator to the changed service on Devin's machine, and all other requests to the deployed service. The changed service sends its outgoing calls through the operator to the mirrord agent, and the agent sends them from the target pod to the APIs, queues, and databases in the cluster.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -88,8 +88,9 @@
   <line x1="1075" y1="250" x2="1075" y2="406" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="1067" y="396" font-size="12.5" fill="#333344" text-anchor="end">outgoing calls</text>
   <line x1="324" y1="485" x2="556" y2="485" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
-  <text x="440" y="475" font-size="12.5" fill="#4a44b8" text-anchor="middle">Kubernetes API</text>
-  <text x="440" y="503" font-size="12.5" fill="#4a44b8" text-anchor="middle">all session traffic</text>
+  <text x="440" y="457" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with KEY</text>
+  <text x="440" y="475" font-size="12.5" fill="#4a44b8" text-anchor="middle">outgoing calls</text>
+  <text x="440" y="503" font-size="12.5" fill="#333344" text-anchor="middle">through the Kubernetes API</text>
 
   <!-- Kubernetes logos: what runs in the cluster -->
   <use href="#k8s" x="1132" y="115" width="36" height="36"/>
