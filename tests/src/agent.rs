@@ -203,7 +203,7 @@ impl AgentClient {
 /// following, as the target itself can (#5357).
 ///
 /// Reproduces only on a node with `fs.protected_symlinks` set, which is the default on most
-/// distributions.
+/// distributions, so the test fails without it rather than pass without covering anything.
 #[cfg_attr(not(any(feature = "ephemeral", feature = "job")), ignore)]
 #[rstest]
 #[tokio::test]
@@ -211,6 +211,16 @@ async fn opens_through_protected_symlink(#[future] kube_client: KubeClient) {
     let kube_client = kube_client.await;
     let (pod, _guard) = target_pod(&kube_client).await;
     let mut agent = AgentClient::spawn(&pod).await;
+
+    let sysctl = agent
+        .open(None, "/proc/sys/fs/protected_symlinks")
+        .await
+        .unwrap();
+    assert_eq!(
+        agent.read(sysctl).await,
+        b"1\n",
+        "the node needs `fs.protected_symlinks=1`"
+    );
 
     let fd = agent.open(None, "/tmp/link").await.unwrap();
 
