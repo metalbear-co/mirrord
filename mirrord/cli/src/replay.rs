@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use http::StatusCode;
 use mirrord_session_monitor_client::{
-    SessionClient, SessionError, session_endpoints, sessions_dir,
+    SessionClient, SessionError, find_session_endpoint, sessions_dir,
 };
 use mirrord_session_monitor_protocol::{
     CapturedBody, CapturedRequest, CapturedRequestSummary, REPLAY_REQUESTS_ROUTE, ReplayOptions,
@@ -53,18 +53,7 @@ pub(crate) async fn replay_command(args: ReplayArgs) -> CliResult<()> {
             headers,
             remove_headers,
         } => {
-            let mut options = ReplayOptions::default();
-            for header in headers {
-                let (name, value) = header.split_once(':').ok_or_else(|| {
-                    CliError::Replay(format!("header `{header}` is not in `NAME: VALUE` format"))
-                })?;
-                options
-                    .headers
-                    .insert(header_key(name), Some(value.trim().to_owned()));
-            }
-            for name in remove_headers {
-                options.headers.insert(header_key(&name), None);
-            }
+            let options = replay_options(&headers, &remove_headers)?;
 
             let response = client
                 .post(format!("{REPLAY_REQUESTS_ROUTE}/{id}/replay"))
@@ -86,7 +75,7 @@ pub(crate) async fn replay_command(args: ReplayArgs) -> CliResult<()> {
                             .and_then(|requests| {
                                 requests.into_iter().find(|request| request.id == id)
                             })
-                            .and_then(|request| request.status.zip(request.duration_ms));
+                            .map(|request| request.status.zip(request.duration_ms));
 
                     print_run(id, original, &run);
                 }
@@ -104,10 +93,8 @@ async fn session_client(session_id: Option<&str>) -> CliResult<SessionClient> {
         let sessions_dir = sessions_dir()
             .ok_or_else(|| CliError::Replay("could not determine home directory".to_owned()))?;
 
-        return session_endpoints(&sessions_dir)
-            .into_iter()
-            .find(|(id, _)| id == session_id)
-            .map(|(_, endpoint)| SessionClient::new(endpoint))
+        return find_session_endpoint(&sessions_dir, session_id)
+            .map(SessionClient::new)
             .ok_or_else(|| CliError::Replay(format!("no local session has id `{session_id}`")));
     }
 
@@ -131,11 +118,36 @@ async fn session_client(session_id: Option<&str>) -> CliResult<SessionClient> {
     }
 }
 
-/// Returns `name` in the form that identifies a header in [`ReplayOptions`]: trimmed and in
-/// lowercase. Header names are not case-sensitive, so the same header in another case replaces
-/// the earlier one.
-fn header_key(name: &str) -> String {
-    name.trim().to_ascii_lowercase()
+/// Returns the options that set the `headers`, each in `NAME: VALUE` format, and remove the
+/// headers named in `remove_headers`.
+///
+/// The options hold one value for each header, so a header named twice is an error, whether in
+/// another case or once in each list.
+fn replay_options(headers: &[String], remove_headers: &[String]) -> CliResult<ReplayOptions> {
+    let set = headers.iter().map(|header| {
+        let (name, value) = header.split_once(':').ok_or_else(|| {
+            CliError::Replay(format!("header `{header}` is not in `NAME: VALUE` format"))
+        })?;
+
+        Ok::<_, CliError>((name, Some(value.trim().to_owned())))
+    });
+    let removed = remove_headers.iter().map(|name| Ok((name.as_str(), None)));
+
+    let mut options = ReplayOptions::default();
+    for change in set.chain(removed) {
+        let (name, value) = change?;
+        // Header names are not case-sensitive.
+        let key = name.trim().to_ascii_lowercase();
+        if options.headers.insert(key, value).is_some() {
+            return Err(CliError::Replay(format!(
+                "header `{}` is given more than once, and a replay can only set it to one value \
+                or remove it",
+                name.trim()
+            )));
+        }
+    }
+
+    Ok(options)
 }
 
 async fn get<T: DeserializeOwned>(client: &SessionClient, path: impl Into<String>) -> CliResult<T> {
@@ -165,8 +177,32 @@ fn replay_error(error: SessionError) -> CliError {
 }
 
 fn print_json<T: Serialize>(value: &T) -> CliResult<()> {
-    println!("{}", serde_json::to_string(value)?);
+    println!("{}", escaped_json(&serde_json::to_string(value)?));
     Ok(())
+}
+
+/// Returns `json` with every control character and every character that changes the direction of
+/// text written as a `\u` escape, which JSON reads as the same character.
+///
+/// serde_json only escapes the control characters up to U+001F, so DEL, the C1 controls and the
+/// direction changes would reach the terminal.
+fn escaped_json(json: &str) -> String {
+    let mut escaped = String::with_capacity(json.len());
+    for c in json.chars() {
+        if c.is_control() || is_direction_change(c) {
+            escaped.push_str(&format!("\\u{:04x}", u32::from(c)));
+        } else {
+            escaped.push(c);
+        }
+    }
+
+    escaped
+}
+
+/// Returns whether `c` is one of the embeddings, overrides and isolates of the Unicode
+/// bidirectional algorithm.
+fn is_direction_change(c: char) -> bool {
+    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 fn print_list(requests: &[CapturedRequestSummary]) {
@@ -243,11 +279,15 @@ fn print_request(request: &CapturedRequest) {
 
 /// Prints the response to the replay `run` of request `id`, next to the status and duration in
 /// milliseconds of the response to the `original` request.
-fn print_run(id: u64, original: Option<(u16, u64)>, run: &ReplayRun) {
-    let original = original.map_or_else(
-        || "no response".to_owned(),
-        |(status, duration_ms)| status_and_duration(status, duration_ms),
-    );
+///
+/// `original` is [`None`] when the session no longer lists the request or the lookup failed, and
+/// holds [`None`] when the local application never answered it.
+fn print_run(id: u64, original: Option<Option<(u16, u64)>>, run: &ReplayRun) {
+    let original = match original {
+        Some(Some((status, duration_ms))) => status_and_duration(status, duration_ms),
+        Some(None) => "no response".to_owned(),
+        None => "unknown".to_owned(),
+    };
 
     println!(
         "Replay {} of request {id}: {}   (original: {original})",
@@ -285,9 +325,7 @@ fn printable(text: &str) -> String {
             '\n' | '\t' => true,
             // On its own, a carriage return moves the cursor back over what is already printed.
             '\r' => chars.peek() == Some(&'\n'),
-            // The embeddings, overrides and isolates of the Unicode bidirectional algorithm.
-            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => false,
-            c => !c.is_control(),
+            c => !c.is_control() && !is_direction_change(c),
         };
 
         if keep {
@@ -311,4 +349,34 @@ fn age(unix_millis: u64) -> String {
         .unwrap_or_default();
 
     humantime::format_duration(Duration::from_secs(elapsed.as_secs())).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::escape_sequence("a\u{1b}[31mb", "a\\u{1b}[31mb")]
+    #[case::bell("a\u{7}b", "a\\u{7}b")]
+    #[case::osc_52("\u{1b}]52;c;aGk=\u{7}", "\\u{1b}]52;c;aGk=\\u{7}")]
+    #[case::lone_carriage_return("a\rb", "a\\rb")]
+    #[case::delete_and_c1("a\u{7f}b\u{9b}c", "a\\u{7f}b\\u{9b}c")]
+    #[case::right_to_left_override("a\u{202e}b", "a\\u{202e}b")]
+    #[case::isolate("a\u{2066}b", "a\\u{2066}b")]
+    #[case::line_breaks_and_tabs("a\r\nb\tc\nd", "a\r\nb\tc\nd")]
+    #[case::zero_width_space("a\u{200b}b", "a\u{200b}b")]
+    fn printable_escapes_what_a_terminal_would_run(#[case] text: &str, #[case] expected: &str) {
+        assert_eq!(printable(text), expected);
+    }
+
+    #[test]
+    fn json_escapes_what_a_terminal_would_run() {
+        let text = "a\u{7f}b\u{9b}c\u{202e}d\u{1b}e";
+        let json = escaped_json(&serde_json::to_string(text).unwrap());
+
+        assert_eq!(json, r#""a\u007fb\u009bc\u202ed\u001be""#);
+        assert_eq!(serde_json::from_str::<String>(&json).unwrap(), text);
+    }
 }

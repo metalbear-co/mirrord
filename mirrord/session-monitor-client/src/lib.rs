@@ -119,6 +119,14 @@ pub fn session_endpoints(sessions_dir: &Path) -> Vec<(String, SessionEndpoint)> 
         .collect()
 }
 
+/// Returns the endpoint of the session `session_id` in `sessions_dir`, if the directory has its
+/// sentinel file.
+pub fn find_session_endpoint(sessions_dir: &Path, session_id: &str) -> Option<SessionEndpoint> {
+    session_endpoints(sessions_dir)
+        .into_iter()
+        .find_map(|(id, endpoint)| (id == session_id).then_some(endpoint))
+}
+
 /// On windows, named pipes can be momentarily busy (`ERROR_PIPE_BUSY`) between the moment the
 /// server pre-allocates a new instance and the next `connect()` returning. Retry briefly so
 /// callers don't observe spurious failures.
