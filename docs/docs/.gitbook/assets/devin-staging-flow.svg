@@ -82,15 +82,17 @@
   <line x1="760" y1="200" x2="836" y2="200" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <line x1="940" y1="250" x2="940" y2="296" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="950" y="279" font-size="12.5" fill="#333344" text-anchor="start">all other requests</text>
-  <polyline points="836,236 780,236 780,446" fill="none" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
-  <text x="770" y="330" font-size="12.5" fill="#4a44b8" text-anchor="end">requests with KEY</text>
-  <text x="770" y="348" font-size="12.5" fill="#4a44b8" text-anchor="end">outgoing calls</text>
+  <polyline points="836,230 772,230 772,446" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="764" y="330" font-size="12.5" fill="#4a44b8" text-anchor="end">requests with KEY</text>
+  <polyline points="788,446 788,242 832,242" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="796" y="420" font-size="12.5" fill="#4a44b8" text-anchor="start">outgoing calls</text>
   <line x1="1075" y1="250" x2="1075" y2="406" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="1067" y="396" font-size="12.5" fill="#333344" text-anchor="end">outgoing calls</text>
-  <line x1="324" y1="485" x2="556" y2="485" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
-  <text x="440" y="457" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with KEY</text>
-  <text x="440" y="475" font-size="12.5" fill="#4a44b8" text-anchor="middle">outgoing calls</text>
-  <text x="440" y="503" font-size="12.5" fill="#333344" text-anchor="middle">through the Kubernetes API</text>
+  <line x1="556" y1="477" x2="324" y2="477" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="440" y="467" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with KEY</text>
+  <line x1="324" y1="493" x2="556" y2="493" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <text x="440" y="511" font-size="12.5" fill="#4a44b8" text-anchor="middle">outgoing calls</text>
+  <text x="440" y="529" font-size="12.5" fill="#333344" text-anchor="middle">through the Kubernetes API</text>
 
   <!-- Kubernetes logos: what runs in the cluster -->
   <use href="#k8s" x="1132" y="115" width="36" height="36"/>
