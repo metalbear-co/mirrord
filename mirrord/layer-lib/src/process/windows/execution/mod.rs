@@ -1268,11 +1268,17 @@ mod tests {
     use winapi::{
         shared::minwindef::FALSE,
         um::{
+            debugapi::{ContinueDebugEvent, DebugActiveProcess, WaitForDebugEvent},
             handleapi::DuplicateHandle,
+            minwinbase::{
+                CREATE_PROCESS_DEBUG_EVENT, DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT,
+                LOAD_DLL_DEBUG_EVENT,
+            },
             processthreadsapi::{GetCurrentProcess, OpenProcess, OpenThread, SuspendThread},
             synchapi::{OpenEventA, SetEvent},
+            winbase::DebugSetProcessKillOnExit,
             winnt::{
-                DUPLICATE_SAME_ACCESS, EVENT_MODIFY_STATE, PROCESS_ALL_ACCESS,
+                DBG_CONTINUE, DUPLICATE_SAME_ACCESS, EVENT_MODIFY_STATE, PROCESS_ALL_ACCESS,
                 PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE, PROCESS_VM_READ,
                 SYNCHRONIZE, THREAD_SUSPEND_RESUME,
             },
@@ -1308,6 +1314,11 @@ mod tests {
         Releases,
         /// Ends it, as a debugger session stopped before it started.
         Kills,
+        /// Attaches a debugger and releases it before handling the attach's first event, as
+        /// Visual Studio's Native engine does, so the debugger's suspension is still there when
+        /// the launcher resumes. Handles the events once the launcher is done, until the program
+        /// exits.
+        AttachesThenReleases,
         /// Suspends it once more without attaching a debugger, then releases it.
         SuspendsThenReleases,
     }
@@ -1698,6 +1709,30 @@ mod tests {
                 Ide::Kills => unsafe {
                     TerminateProcess(process, 42);
                 },
+                Ide::AttachesThenReleases => {
+                    let thread = open_primary_thread(&child_tid);
+                    unsafe {
+                        assert_ne!(DebugActiveProcess(pid), 0, "attach a debugger");
+                        // This thread is the debugger, and its end must not end the program.
+                        assert_ne!(
+                            DebugSetProcessKillOnExit(FALSE),
+                            0,
+                            "keep the program alive past the debugger thread"
+                        );
+                        SetEvent(event);
+                    }
+                    // The attach's first event stays pending until the launcher has resumed, or
+                    // ended, the program, so the debugger's suspension is there when it resumes.
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    while suspend_count(thread.as_raw_handle().cast()) > 1 {
+                        assert!(
+                            Instant::now() < deadline,
+                            "the launcher neither resumed nor ended the program"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    handle_debug_events_until_exit();
+                }
                 Ide::SuspendsThenReleases => {
                     let thread = open_primary_thread(&child_tid);
                     unsafe {
@@ -1728,6 +1763,45 @@ mod tests {
         assert!(!thread.is_null(), "open the held program's primary thread");
         // SAFETY: a fresh handle this function owns.
         unsafe { OwnedHandle::from_raw_handle(thread.cast()) }
+    }
+
+    /// The thread's suspend count, read with a suspension that is lifted at once. A thread that
+    /// is gone, or ending, reads as zero.
+    fn suspend_count(thread: HANDLE) -> u32 {
+        match unsafe { SuspendThread(thread) } {
+            u32::MAX => 0,
+            count => {
+                unsafe { ResumeThread(thread) };
+                count
+            }
+        }
+    }
+
+    /// Plays the debugger's part from here on: continues every event, until the program exits.
+    fn handle_debug_events_until_exit() {
+        loop {
+            let mut event: DEBUG_EVENT = unsafe { std::mem::zeroed() };
+            assert_ne!(
+                unsafe { WaitForDebugEvent(&mut event, 10_000) },
+                0,
+                "the debugged program sends events until it exits"
+            );
+            // The image files these two events hand over are the debugger's to close.
+            // SAFETY: the event code says which member of the union is filled, and each `hFile` is
+            // a handle this thread owns from here on, or null.
+            let file = match event.dwDebugEventCode {
+                CREATE_PROCESS_DEBUG_EVENT => unsafe { event.u.CreateProcessInfo().hFile },
+                LOAD_DLL_DEBUG_EVENT => unsafe { event.u.LoadDll().hFile },
+                _ => std::ptr::null_mut(),
+            };
+            if !file.is_null() {
+                drop(unsafe { OwnedHandle::from_raw_handle(file.cast()) });
+            }
+            unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, DBG_CONTINUE) };
+            if event.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT {
+                return;
+            }
+        }
     }
 
     /// An explicit environment, even one without `SystemRoot`, gets what Windows needs to start
@@ -2200,6 +2274,26 @@ mod tests {
             Some(InjectionMethod::Apc.to_string().as_str())
         );
         assert_eq!(launched.exit_code(), RAN);
+    }
+
+    /// A debugger attached at the hold still holds its own suspension when the IDE releases the
+    /// program. The launcher lifts only its own, and the program runs once the debugger lets it.
+    /// The program outlives the grace a failed resume waits for an exit, as a service does.
+    #[test]
+    fn a_held_program_runs_once_its_debugger_lets_it() {
+        let launched = Launch {
+            hold: Some(Ide::AttachesThenReleases),
+            command: OUTLIVES_THE_WAIT,
+            policy: LayerFailurePolicy::Terminate,
+            ..Launch::new(InjectionMethod::LoadLibrary, Layer::Ready)
+        }
+        .run();
+        assert!(
+            launched.result.is_ok(),
+            "launch: {:?}",
+            launched.result.as_ref().err()
+        );
+        assert_eq!(launched.exit_code(), RAN, "the program ran to its end");
     }
 
     /// An extra suspension with no debugger to lift it would leave the program suspended forever,
