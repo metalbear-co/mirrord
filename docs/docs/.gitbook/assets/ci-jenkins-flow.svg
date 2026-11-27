@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" width="1200" height="680" font-family="Inter, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">mirrord in Jenkins</title>
-  <desc id="d">A GitHub pull request sends a webhook to the Jenkins Multibranch Pipeline, which runs on a Jenkins agent. In flow 1, the pipeline runs mirrord ci start: the service under test runs on the Jenkins agent, and the mirrord operator starts a session on the orders pod in staging. The tests send requests with the x-mirrord-ci header. The mirrord agent at the orders pod sends those requests through the operator to the service on the Jenkins agent. All traffic of the session goes through the operator, and all other requests to the deployed orders. In flow 2, the pipeline runs mirrord preview start with the key pr-N, the operator creates a preview pod with the new image, and the pipeline comments on the pull request. Reviewer requests with the baggage header mirrord-session=pr-N go to the preview pod. A cleanup job runs every 30 minutes and runs mirrord preview stop for closed pull requests, and the operator deletes their preview pods.</desc>
+  <desc id="d">A GitHub pull request sends a webhook to the Jenkins Multibranch Pipeline, which runs on a Jenkins agent. In flow 1, the pipeline runs mirrord ci start: the service under test runs on the Jenkins agent, and the mirrord operator starts a session on the orders pod in staging. The tests send requests with the x-mirrord-ci header. The mirrord agent at the orders pod sends those requests through the operator to the service on the Jenkins agent. Requests with the key and outgoing calls go through the operator, and all other requests to the deployed orders. In flow 2, the pipeline runs mirrord preview start with the key pr-N, the operator creates a preview pod with the new image, and the pipeline comments on the pull request. Reviewer requests with the baggage header mirrord-session=pr-N go to the preview pod. A cleanup job runs every 30 minutes and runs mirrord preview stop for closed pull requests, and the operator deletes their preview pods.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#232141"/>
@@ -94,7 +94,8 @@
   <line x1="300" y1="344" x2="576" y2="344" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="412" y="334" font-size="12.5" fill="#333344" text-anchor="middle">test requests</text>
   <polyline points="304,465 540,465 540,522 860,522 860,258" fill="none" stroke="#756DF3" stroke-width="2.5" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)"/>
-  <text x="422" y="455" font-size="12.5" fill="#4a44b8" text-anchor="middle">session traffic</text>
+  <text x="422" y="437" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with the key</text>
+  <text x="422" y="455" font-size="12.5" fill="#4a44b8" text-anchor="middle">outgoing calls</text>
   <line x1="700" y1="390" x2="700" y2="426" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
   <text x="710" y="413" font-size="12.5" fill="#333344" text-anchor="start">other requests</text>
   <polyline points="940,254 940,580 884,580" fill="none" stroke="#232141" stroke-width="2.5" marker-end="url(#arrow)"/>
