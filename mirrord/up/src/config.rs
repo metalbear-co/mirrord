@@ -554,6 +554,16 @@ impl TargetConfig {
                 kube_context,
             }),
 
+            // `path: targetless` runs as `target: none` does, without a path. `Target::Targetless`
+            // serializes as `null`, which a service's `config_patch` merge can't read back.
+            Self::Specified(SpecifiedTarget {
+                path: Some(Target::Targetless),
+                namespace,
+            }) => Ok(mirrord_config::target::TargetConfig {
+                path: None,
+                namespace: namespace.as_deref().map(Into::into),
+            }),
+
             Self::Specified(SpecifiedTarget {
                 path: path @ Some(_),
                 namespace,
@@ -3230,6 +3240,24 @@ mod tests {
         assert_eq!(&*name, "bogus");
         assert!(known.iter().any(|mode| &**mode == "custom"));
         assert_eq!(&*config.services["a"].default_mode, "replace");
+    }
+
+    /// `path: targetless` with a `config_patch` runs targetless, as `target: none` does. The patch
+    /// merge reads the generated config back, which a path of `Target::Targetless`, `null` in
+    /// JSON, failed.
+    #[test]
+    fn a_targetless_path_with_a_config_patch_runs_targetless() {
+        let yaml = include_str!("testdata/targetless-config-patch.yaml");
+        assert_eq!(
+            layer_value(yaml, "agent.ttl"),
+            serde_json::json!(30),
+            "the patch applies"
+        );
+        assert_eq!(
+            layer_value(yaml, "target.path"),
+            serde_json::Value::Null,
+            "a targetless service runs without a path"
+        );
     }
 
     /// `incoming: replace` on a targetless service fails the target check like built-in
