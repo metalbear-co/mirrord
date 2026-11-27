@@ -215,3 +215,126 @@ async fn http_request_terminates_on_remote_close(#[case] steal_type: StealType) 
         panic!("{error}");
     }
 }
+
+/// Verifies that a request that [`IncomingProxy`] steals is kept in the session's replay store,
+/// that a health probe isn't, and that a replay reaches the local application where the port
+/// subscription says that it listens.
+#[tokio::test]
+async fn stolen_request_is_kept_for_replay() {
+    let local_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = local_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (conn, _) = local_listener.accept().await.unwrap();
+            tokio::spawn(hyper::server::conn::http1::Builder::new().serve_connection(
+                TokioIo::new(conn),
+                hyper::service::service_fn(|_| async {
+                    Ok::<_, std::convert::Infallible>(Response::new(http_body_util::Full::new(
+                        Bytes::from_static(b"hi"),
+                    )))
+                }),
+            ));
+        }
+    });
+
+    let (conn, _, out) = Connection::dummy();
+    let (monitor_tx, _monitor_rx) = tokio::sync::broadcast::channel(64);
+    let monitor_tx = MonitorTx::from_sender(monitor_tx);
+    let proxy = IncomingProxy::new(
+        Duration::from_secs(3),
+        LocalTlsSetup::from_config(Default::default()),
+        monitor_tx.clone(),
+    );
+    let mut background_tasks: BackgroundTasks<(), ProxyMessage, IncomingProxyError> =
+        BackgroundTasks::new(conn.tx_handle());
+    let proxy = background_tasks.register(proxy, (), 8);
+
+    proxy
+        .send(IncomingProxyMessage::AgentProtocolVersion(
+            mirrord_protocol::VERSION.clone(),
+        ))
+        .await;
+    proxy
+        .send(IncomingProxyMessage::LayerRequest(
+            0,
+            LayerId(0),
+            IncomingRequest::PortSubscribe(PortSubscribe {
+                listening_on: local_addr.into(),
+                subscription: PortSubscription::Steal(StealType::All(80)),
+            }),
+        ))
+        .await;
+    out.next().await.unwrap();
+    proxy
+        .send(IncomingProxyMessage::AgentSteal(
+            DaemonTcp::SubscribeResult(Ok(80)),
+        ))
+        .await;
+    background_tasks.next().await.unwrap();
+
+    for (request_id, user_agent) in [(0, "curl/8.7.1"), (1, "kube-probe/1.30")] {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            hyper::header::USER_AGENT,
+            hyper::header::HeaderValue::from_static(user_agent),
+        );
+        proxy
+            .send(IncomingProxyMessage::AgentSteal(
+                DaemonTcp::HttpRequestChunked(ChunkedRequest::StartV2(ChunkedRequestStartV2 {
+                    connection_id: request_id,
+                    request_id: 0,
+                    metadata: HttpRequestMetadata::V1 {
+                        source: "127.0.0.1:55555".parse().unwrap(),
+                        destination: "127.0.0.1:80".parse().unwrap(),
+                    },
+                    transport: IncomingTrafficTransportType::Tcp,
+                    request: InternalHttpRequest {
+                        method: Method::GET,
+                        uri: "http://127.0.0.1:80/hello".parse().unwrap(),
+                        version: Version::HTTP_11,
+                        headers,
+                        body: InternalHttpBodyNew {
+                            frames: Default::default(),
+                            is_last: true,
+                        },
+                    },
+                })),
+            ))
+            .await;
+    }
+    // Both requests were handled once the local application answered both.
+    let mut responses = 0;
+    let both_answered = async {
+        while responses < 2 {
+            if matches!(
+                out.next().await.unwrap(),
+                ClientMessage::TcpSteal(
+                    LayerTcpSteal::HttpResponse(..)
+                        | LayerTcpSteal::HttpResponseFramed(..)
+                        | LayerTcpSteal::HttpResponseChunked(ChunkedResponse::Start(..))
+                )
+            ) {
+                responses += 1;
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), both_answered)
+        .await
+        .expect("the local application answers both requests");
+    tokio::spawn(async move {
+        loop {
+            out.next().await;
+        }
+    });
+
+    let store = monitor_tx.replay_store().unwrap();
+    let [summary] = store
+        .list()
+        .try_into()
+        .expect("only the request that isn't a probe is kept");
+    assert_eq!(summary.path, "/hello");
+
+    let run = store.replay(summary.id, Default::default()).await.unwrap();
+    assert_eq!(run.response.status, 200);
+    assert_eq!(run.body.text, "hi");
+}
