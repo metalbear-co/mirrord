@@ -965,14 +965,11 @@ impl FileManager {
 mod tests {
     use std::{fs, os::unix::fs::symlink};
 
+    use libc::{S_IFLNK, S_IFMT, S_IFREG};
     use rstest::rstest;
 
     use super::*;
     use crate::util::target_root::Resolver;
-
-    const S_IFMT: u32 = 0o170000;
-    const S_IFREG: u32 = 0o100000;
-    const S_IFLNK: u32 = 0o120000;
 
     /// Whether the target root is a container's or the agent's own `/`, as for targetless and
     /// workload companion agents. Absolute paths and symlinks resolve against it, so requests
