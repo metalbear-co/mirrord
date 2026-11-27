@@ -199,10 +199,13 @@ fn escaped_json(json: &str) -> String {
     escaped
 }
 
-/// Returns whether `c` is one of the embeddings, overrides and isolates of the Unicode
+/// Returns whether `c` is one of the marks, embeddings, overrides and isolates of the Unicode
 /// bidirectional algorithm.
 fn is_direction_change(c: char) -> bool {
-    matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    matches!(
+        c,
+        '\u{61c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 fn print_list(requests: &[CapturedRequestSummary]) {
@@ -365,6 +368,7 @@ mod tests {
     #[case::delete_and_c1("a\u{7f}b\u{9b}c", "a\\u{7f}b\\u{9b}c")]
     #[case::right_to_left_override("a\u{202e}b", "a\\u{202e}b")]
     #[case::isolate("a\u{2066}b", "a\\u{2066}b")]
+    #[case::right_to_left_mark("a\u{200f}b", "a\\u{200f}b")]
     #[case::line_breaks_and_tabs("a\r\nb\tc\nd", "a\r\nb\tc\nd")]
     #[case::zero_width_space("a\u{200b}b", "a\u{200b}b")]
     fn printable_escapes_what_a_terminal_would_run(#[case] text: &str, #[case] expected: &str) {
