@@ -1,1 +1,0 @@
-`mirrord preview start`, `mirrord preview up` and `mirrord preview sync` no longer crash when given a very large `--timeout` or `feature.preview.creation_timeout_secs`; such a timeout now just waits for a very long time.

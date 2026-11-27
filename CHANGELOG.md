@@ -8,6 +8,44 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [3.292.0](https://github.com/metalbear-co/mirrord/tree/3.292.0) - 2026-11-26
+
+
+### Added
+
+- Added `mirrord login --url`, `mirrord logout` and `mirrord whoami` for
+  operator SSO logins.
+- Added `mirrord preview wake`, which wakes every preview environment under a
+  key and waits until each one's pods are ready. It finds the key and kube
+  contexts the way `mirrord preview down` does, keeps the previews from idling
+  while it runs, and also wakes a multi-cluster preview's replicas. `--timeout`
+  sets how long to wait, by default the longest wake timeout of the previews,
+  and `--no-wait` returns once the operator has started waking every preview,
+  failing at `--timeout` if it never starts. A preview paused by a `mirrord
+  exec` session is skipped with a warning. Requires an operator that supports
+  waking previews.
+- Preview environments scale like their target with `feature.preview.autoscale`
+  and `preview.autoscale` in `mirrord-up.yaml`.
+- Run mirrord sessions and operator commands through an SSO login.
+- mirrord ls lists namespaces and targets through an SSO login.
+
+
+### Fixed
+
+- Fixed the agent failing with `EACCES` to open files behind symlinks
+  restricted by `fs.protected_symlinks`, such as a projected service account
+  token. [#5357](https://github.com/metalbear-co/mirrord/issues/5357)
+- Fixed database branch updates being rejected with "only `migrations` can
+  change after a branch is created" on Kubernetes 1.31 to 1.33 when a branch
+  option was unset.
+- `mirrord preview start`, `mirrord preview up` and `mirrord preview sync` no
+  longer crash when given a very large `--timeout` or
+  `feature.preview.creation_timeout_secs`; such a timeout now just waits for a
+  very long time.
+- `mirrord up` without a terminal, as IDEs run it, no longer hangs when a
+  service's target can't be inferred. It fails at once and names the service,
+  instead of waiting on a prompt nobody can answer.
+
 ## [3.291.2](https://github.com/metalbear-co/mirrord/tree/3.291.2) - 2026-11-25
 
 
