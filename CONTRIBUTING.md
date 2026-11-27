@@ -976,23 +976,8 @@ When a submission warns or fails:
   environment, because a workflow run for a pull request could then match the rule and read the token.
 - If the `submit` job only warns that it couldn't sync the fork, the pull request was still submitted, so don't re-run
   the job. Check the token, which the next release also needs.
-- If `komac update` fails, the `submit` job runs it again, up to 4 attempts in total. Before each new attempt, it shows
-  a warning, waits and syncs the fork, which may help if GitHub needs the fork to contain the upstream commit that Komac
-  branches from. If the job then succeeds, those retry warnings need no action. This covers errors such as
-  `Ref cannot be created`, which GitHub returned for 3.292.0 although a re-run with the same token succeeded.
-- After each failed attempt, the job lists the fork's branches for the version. Komac's check for an existing pull
-  request uses GitHub search, which can lag behind a new pull request, and a new attempt could then open a duplicate.
-  The job makes no more attempts when an attempt reported a created pull request, when the fork has a branch for the
-  version, or when the listing fails, and a warning says which. A branch left over from an earlier failed run also stops
-  new attempts.
-- When the `submit` job fails, its error lists the likely causes, each with what to check:
-  - If a pull request may exist, because Komac reported one or the fork has a branch for the version, look for it in
-    `microsoft/winget-pkgs`. If one exists, the submission went through. If none exists, re-run the job. Deleting the
-    version's branches from the fork first lets the re-run retry.
-  - If the listing failed with HTTP 401 or 403, check the token as the bullet about an expired or revoked token
-    describes.
-  - If every attempt failed, the last attempt's error names the cause, such as a refused branch, missing write access
-    of `metalbear-ci` to the fork, or a GitHub outage. Fix it, or wait for GitHub, then re-run the job.
+- If `komac update` fails, the `submit` job retries it, up to 4 attempts in total, unless an attempt may have opened a
+  pull request. If the job still fails, its error lists the likely causes and what to check for each.
 - If a pull request for the version already exists, open, merged or closed, Komac opens none and the `submit` job shows
   a warning. After a re-run, that is expected. If that pull request was closed without merging, running the Release
   WinGet workflow again also opens nothing, so submit the version by hand from the org fork, with a token that can write
