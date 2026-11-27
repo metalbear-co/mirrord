@@ -57,7 +57,7 @@ use crate::{
     data::{GlobalConfig, UserData},
     ui::{
         MAX_EVENTS_PER_SESSION, TOKEN_HEADER_NAME, chaos::chaos_router, daemon, db_portforwards,
-        error::ApiError, wizard::wizard_router,
+        error::ApiError, replay::replay_router, wizard::wizard_router,
     },
 };
 
@@ -1280,7 +1280,8 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/operator-previews", get(list_operator_previews))
         .route("/me", get(current_user))
         .route("/token", get(auth_token))
-        .nest("/chaos/rules", chaos_router(state.clone()));
+        .nest("/chaos/rules", chaos_router(state.clone()))
+        .nest("/replay", replay_router(state.clone()));
 
     let authenticated_routes = Router::new()
         .nest("/api/v1", wizard_router())
@@ -1388,6 +1389,41 @@ mod tests {
             events: Vec::new(),
             client: SessionClient::new(endpoint),
         }
+    }
+
+    /// A forwarded call can wait long for its session, for example while a replay waits on a
+    /// breakpoint, so it must not hold the lock of the sessions meanwhile. A writer that waits for
+    /// that lock would block every other reader.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn forwarded_call_does_not_hold_the_sessions_lock() {
+        let sessions_dir = tempfile::tempdir().unwrap();
+        let session_id = "held-session";
+        let session = tracked_session(session_id, sessions_dir.path());
+        let listener = tokio::net::UnixListener::bind(&session.endpoint.sentinel_path).unwrap();
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            accepted_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        let state = test_state();
+        state
+            .sessions
+            .write()
+            .await
+            .insert(session_id.to_owned(), session);
+        let request = Request::get(format!("/api/replay/{session_id}"))
+            .header(TOKEN_HEADER_NAME, TEST_TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        tokio::spawn(build_router(state.clone()).oneshot(request));
+        accepted_rx.await.unwrap();
+
+        let _sessions = tokio::time::timeout(Duration::from_secs(5), state.sessions.write())
+            .await
+            .expect("the forwarded call holds the lock of the sessions");
     }
 
     #[tokio::test]

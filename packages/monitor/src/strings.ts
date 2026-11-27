@@ -105,6 +105,7 @@ export const strings = {
     eventsTab: 'Events',
     configTab: 'Config',
     chaosTab: 'Chaos',
+    replayTab: 'Replay',
     copyConfig: 'Copy config',
     sectionSession: 'Session',
     sectionPorts: 'Port Subscriptions',
@@ -230,6 +231,52 @@ export const strings = {
     joinPromptSuffix: '— the extension will inject the matching header.',
     currentlyJoinedPrefix: 'Currently joined to',
     currentlyJoinedSuffix: '; joining here will switch you over.',
+  },
+  replay: {
+    loadFailed: "Couldn't load the requests of this session.",
+    emptyTitle: 'No requests yet',
+    emptyHint:
+      'The session keeps the HTTP requests it steals or mirrors. Send one to your target, then replay it here after each code change.',
+    unsupportedTitle: 'Not available in this session',
+    unsupportedHint:
+      "This session was started by a mirrord version that doesn't keep requests. Start a new session to replay its requests.",
+    footerNote:
+      'The session keeps its latest 100 requests in memory on your machine, until it ends.',
+    backToList: 'All requests',
+    receivedLine: (time: string, mode: string, port: number) =>
+      `Received ${time} \u00b7 ${mode} \u00b7 port ${port}`,
+    replay: 'Replay',
+    replayAgain: 'Replay again',
+    replayHint:
+      'Sent straight to your local application. Calls it makes still reach the cluster.',
+    cantReplay: (reason: string) => `Can't be replayed: ${reason}.`,
+    notReplayable: (reason: string) => {
+      switch (reason) {
+        case 'upgraded':
+          return 'it upgraded the connection'
+        case 'body_too_large':
+          return 'its body is larger than the session keeps'
+        case 'body_incomplete':
+          return "the session doesn't have its whole body"
+        default:
+          return "of a reason that this version of mirrord doesn't know"
+      }
+    },
+    replayFailed: (detail: string) => `Replay failed: ${detail}`,
+    loadingRequest: 'Loading the request\u2026',
+    requestFailed: (detail: string) => `Couldn't load the request: ${detail}`,
+    request: 'Request',
+    headersLabel: (count: number) => `Headers (${count})`,
+    bodyLabel: 'Body',
+    emptyBody: 'No body.',
+    truncated: 'Only the start of the body is shown.',
+    noBodyInTime: 'No body arrived in time.',
+    responses: 'Responses',
+    original: 'Original',
+    noStatus: '-',
+    replayRun: (number: number) => `Replay ${number}`,
+    responseOf: (number: number) => `Response to replay ${number}`,
+    duration: (ms: number) => `${ms} ms`,
   },
   chaos: {
     tab: 'Chaos',

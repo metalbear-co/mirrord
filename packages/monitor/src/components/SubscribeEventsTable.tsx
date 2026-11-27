@@ -26,7 +26,7 @@ import LiveDot from './LiveDot'
 const ALL_TYPES = '__all__'
 
 // Each categorical column carries its own hue, so one broker or every 5xx stands out unread.
-const TONES = {
+export const TONES = {
   sky: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
   violet:
     'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
@@ -69,7 +69,7 @@ const HTTP_CLIENT_ERROR = 400
 const HTTP_REDIRECT = 300
 
 /** Tone of a status: a routing outcome, or an HTTP status code by its class. */
-function statusTone(status: string): keyof typeof TONES {
+export function statusTone(status: string): keyof typeof TONES {
   const routing = ROUTING_TONES[status]
   if (routing) return routing
 

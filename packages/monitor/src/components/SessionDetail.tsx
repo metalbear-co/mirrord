@@ -11,6 +11,7 @@ import { emitUserBlocked } from '../analytics'
 import { EventType } from '../eventTypes'
 import { expectArray, formatHostPort } from '../utils'
 import { useChaosRules, type ChaosRuleFields } from '../hooks/useChaosRules'
+import { useReplay } from '../hooks/useReplay'
 import EventStream from './EventStream'
 import SessionHeader from './SessionHeader'
 import MetadataStrip from './MetadataStrip'
@@ -45,6 +46,7 @@ export default function SessionDetail({
   const [paneTab, setPaneTab] = useState<SidePaneTab>('config')
   const [formRequest, setFormRequest] = useState<ChaosFormRequest | null>(null)
   const chaos = useChaosRules(session.session_id)
+  const replay = useReplay(session.session_id, paneTab === 'replay')
 
   useEffect(() => {
     setPortSubs([])
@@ -211,6 +213,7 @@ export default function SessionDetail({
       tab={paneTab}
       onTabChange={setPaneTab}
       chaos={chaos}
+      replay={replay}
       seenHosts={seenHosts}
       formRequest={formRequest}
       onNewRule={newRule}
