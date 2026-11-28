@@ -277,11 +277,11 @@ Before you install or upgrade with these values:
 
 - Set `operator.port` to a port of 1024 or higher that no other process on the nodes uses, such as 8443 on EKS. With a lower port, `helm install` and `helm upgrade` fail. On EKS, avoid 10250 (the `kubelet`) and 9443 (the AWS Load Balancer Controller webhook).
 - Keep both values in the values file that you pass to every `helm upgrade`. An upgrade that passes values with `-f` or `--set` resets every value that it doesn't set to the chart default, unless it also passes `--reuse-values` or `--reset-then-reuse-values`. If the upgrade resets `operator.hostNetwork`, the Operator moves back to the pod network without an error.
-- Allow the control plane to reach the nodes on `operator.port`: add an inbound TCP rule for the port to the node security group, from the cluster security group.
+- The node security group must allow the control plane to reach the nodes on `operator.port`. If it doesn't, add an inbound TCP rule for the port from the cluster security group.
 - Make sure that the Operator's namespace allows host-network pods. The Pod Security `baseline` and `restricted` levels reject them.
 
 The API server reaches the Operator once `kubectl get apiservice v1.operator.metalbear.co` shows `True` in the `AVAILABLE` column.
 
 On the host network, every port that the Operator listens on is a port of its node, so it must be free on each node that runs an Operator pod. Anything that the node security group lets in can also reach most of them on the node's IP address. The Temporal proxy of `operator.temporalSplitting` (port 7233 by default) and the metrics endpoint of `operator.metrics` (port 9000) don't authenticate their clients, so allow their ports in the node security group only from the places that need them.
 
-The chart README's [Running the operator on the host network](https://github.com/metalbear-co/charts/blob/main/mirrord-operator/README.md#running-the-operator-on-the-host-network) lists these ports. It also explains why an upgrade keeps the Operator API down for longer on the host network, why with one replica a new pod that can't start leaves no Operator running, and how to move from a hand-patched Deployment, including how to recover when that upgrade fails.
+The chart README's [Running the operator on the host network](https://github.com/metalbear-co/charts/blob/main/mirrord-operator/README.md#running-the-operator-on-the-host-network) lists these ports and what an upgrade needs.
