@@ -133,7 +133,10 @@ async fn up_without_a_kubeconfig(home: &Path) -> Output {
     let mut command = resolve_tokio_command(env!("CARGO_BIN_EXE_mirrord"));
     command
         .current_dir(home)
+        // The home directory the CLI reads `~/.mirrord/auth.json` from: `HOME` on Unix,
+        // `USERPROFILE` on Windows.
         .env("HOME", home)
+        .env("USERPROFILE", home)
         .env("KUBECONFIG", home.join("no-such-kubeconfig"))
         .env("MIRRORD_PROGRESS_MODE", "off")
         .env_remove("MIRRORD_KUBECONFIG")
