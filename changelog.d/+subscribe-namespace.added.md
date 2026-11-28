@@ -1,0 +1,1 @@
+`mirrord subscribe` takes `-n/--namespace` to stream the events of one namespace, and `-A/--all-namespaces` to stream the events of every namespace. The Events tab of `mirrord ui` gains a namespace picker, which starts at every namespace, and two columns that show each event's namespace and target.

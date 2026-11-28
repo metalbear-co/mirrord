@@ -22,10 +22,13 @@ use tracing::{Level, field};
 use crate::{
     outgoing::OutgoingError,
     task::BgTaskRuntime,
-    util::io::{
-        buffered::{UnboundedBufferedSink, UnboundedBufferedStream},
-        throttle::{Throttle, Throttled, ThrottledSink, ThrottledStream},
-        timeout::TimeoutSink,
+    util::{
+        io::{
+            buffered::{UnboundedBufferedSink, UnboundedBufferedStream},
+            throttle::{Throttle, Throttled, ThrottledSink, ThrottledStream},
+            timeout::TimeoutSink,
+        },
+        target_root::TargetRoot,
     },
 };
 
@@ -67,6 +70,8 @@ pub struct OutgoingRouter<C: ConnectionKind> {
     total_connections: usize,
     /// Runtime where we should run connect attempts.
     network_runtime: Arc<BgTaskRuntime>,
+    /// Where the paths of Unix socket addresses are.
+    target_root: TargetRoot,
 }
 
 impl<C: ConnectionKind> OutgoingRouter<C> {
@@ -80,6 +85,7 @@ impl<C: ConnectionKind> OutgoingRouter<C> {
 
     pub fn new(
         network_runtime: Arc<BgTaskRuntime>,
+        target_root: TargetRoot,
         inbound_throttle: Throttle,
         outbound_throttle: Throttle,
     ) -> Self {
@@ -94,6 +100,7 @@ impl<C: ConnectionKind> OutgoingRouter<C> {
             queued_updates: Default::default(),
             total_connections: 0,
             network_runtime,
+            target_root,
         }
     }
 
@@ -103,12 +110,12 @@ impl<C: ConnectionKind> OutgoingRouter<C> {
         fields(kind = C::DISPLAY_NAME),
     )]
     pub fn start_connect(&mut self, uid: Uid, address: SocketAddress) {
-        let target_pid = self.network_runtime.target_pid();
+        let target_root = self.target_root.clone();
 
         let fut = async move {
             let start_at = Instant::now();
             let result =
-                tokio::time::timeout(Self::CONNECT_TIMEOUT, C::connect(&address, target_pid))
+                tokio::time::timeout(Self::CONNECT_TIMEOUT, C::connect(&address, &target_root))
                     .await
                     .unwrap_or_else(|_elapsed| Err(io::ErrorKind::TimedOut.into()))
                     .inspect_err(|error| {
@@ -360,9 +367,11 @@ pub trait ConnectionKind: 'static {
     const DISPLAY_NAME: &'static str;
 
     /// Attempts to make a connection to the given peer.
+    ///
+    /// A Unix socket address is a path in `target_root`.
     fn connect(
         addr: &SocketAddress,
-        target_pid: Option<u64>,
+        target_root: &TargetRoot,
     ) -> impl Future<Output = io::Result<NewConnection<Self>>> + Send;
 
     /// Returns the kind-specific prometheus metrics counter of active outgoing connections.
@@ -467,12 +476,13 @@ mod test {
             tcp_unix::TcpOrUnixConnection,
         },
         task::BgTaskRuntime,
-        util::io::throttle::Throttle,
+        util::{io::throttle::Throttle, target_root::TargetRoot},
     };
 
     async fn test_router() -> OutgoingRouter<TcpOrUnixConnection> {
         OutgoingRouter::<TcpOrUnixConnection>::new(
             Arc::new(BgTaskRuntime::spawn(None).await.unwrap()),
+            TargetRoot::for_target(None),
             Throttle::new(128 * 1024, IntGauge::new("daemon", "daemon").unwrap()),
             Throttle::new(128 * 1024, IntGauge::new("client", "client").unwrap()),
         )

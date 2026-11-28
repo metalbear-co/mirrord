@@ -3,6 +3,14 @@
 // type this build does not know still gets a row, labelled by its tag, so nothing the operator
 // reports goes uncounted.
 
+/** The workload an event was intercepted on, as a mirrord target path names it: `kind/name`. */
+export interface WorkloadTarget {
+  /** mirrord's lowercase target type, such as `deployment`, `rollout` or `targetless`. */
+  kind: string
+  /** The workload's name, the label selector of a `label` target, or empty for `targetless`. */
+  name: string
+}
+
 export interface SubscribeEventRow {
   /** Arrival order: the React key, and the order rows are shown in. */
   seq: number
@@ -10,7 +18,11 @@ export interface SubscribeEventRow {
   sessionKey: string
   /** The cluster that intercepted it on a multi-cluster primary; empty elsewhere. */
   cluster: string
-  /** The intercepted workload. */
+  /** Namespace of the intercepted workload; empty from an operator that doesn't name it. */
+  namespace: string
+  /** The intercepted workload; `null` from an operator that doesn't name it. */
+  target: WorkloadTarget | null
+  /** The intercepted workload's name, which every operator sends. */
   serviceName: string
   /** The payload tag, or the broker for a queue message. */
   type: string
@@ -51,6 +63,16 @@ export function labelForType(type: string): string | null {
   return TYPE_LABELS[type] ?? null
 }
 
+/**
+ * The workload as the table names it: `kind/name` when the event has a `target` (only `kind` for
+ * `targetless`), else the `service_name` that older operators send.
+ */
+export function targetLabel(row: SubscribeEventRow): string {
+  if (!row.target) return row.serviceName
+  const { kind, name } = row.target
+  return name === '' ? kind : `${kind}/${name}`
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -59,6 +81,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+function asTarget(value: unknown): WorkloadTarget | null {
+  const target = asRecord(value)
+  const kind = asString(target?.['kind'])
+  return kind === '' ? null : { kind, name: asString(target?.['name']) }
 }
 
 interface Described {
@@ -149,6 +177,8 @@ export function toEventRow(
     timestamp: asString(event['timestamp']),
     sessionKey: asString(event['session_key']),
     cluster: asString(event['cluster']),
+    namespace: asString(event['namespace']),
+    target: asTarget(event['target']),
     serviceName: asString(event['service_name']),
     type: described.type,
     source: described.source,

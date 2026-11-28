@@ -295,7 +295,11 @@ impl AgentConnection {
 
             AgentConnectInfo::OperatorSessionsManager(connect_info) => {
                 let transport = OperatorTransport::new(
-                    OperatorApi::serverless_sessions_manager_client(config).await?,
+                    OperatorApi::serverless_sessions_manager_client(
+                        config,
+                        connect_info.login_url.as_deref(),
+                    )
+                    .await?,
                 );
                 let proxy_client = IntproxyClient::with_transport(connect_info.clone(), transport)?;
                 let conn = Box::pin(proxy_client.connect(Duration::from_secs(60)))

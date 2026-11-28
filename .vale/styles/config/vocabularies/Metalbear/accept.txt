@@ -170,6 +170,7 @@ protoc
 nixpkgs
 WinGet
 wingetcreate
+Komac
 Chocolatey
 choco
 asdf
@@ -224,6 +225,7 @@ README
 READMEs
 RSTs
 rollout
+ruleset
 backoff
 subtask
 stderr

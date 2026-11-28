@@ -1,7 +1,9 @@
 use std::{
     collections::HashMap,
-    future, io,
-    path::PathBuf,
+    fs::File,
+    future,
+    io::{self, Read},
+    path::Path,
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
@@ -23,9 +25,9 @@ use mirrord_protocol::{
         LookupRecord,
     },
 };
+use nix::fcntl::OFlag;
 use thiserror::Error;
 use tokio::{
-    fs,
     sync::{
         mpsc::{Receiver, Sender},
         oneshot,
@@ -35,7 +37,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, warn};
 
-use crate::{error::AgentResult, metrics::DNS_REQUEST_COUNT, task::status::BgTaskStatus};
+use crate::{
+    error::AgentResult, metrics::DNS_REQUEST_COUNT, task::status::BgTaskStatus,
+    util::target_root::TargetRoot,
+};
 
 #[derive(Debug)]
 pub(crate) enum ClientGetAddrInfoRequest {
@@ -62,11 +67,9 @@ pub(crate) struct DnsCommand {
 /// Background task for resolving hostnames to IP addresses.
 /// Should be run in the same network namespace as the agent's target.
 pub(crate) struct DnsWorker {
-    /// Path to the `/etc` directory in the target container filesystem.
-    ///
-    /// This directory contains some configuration files we need
-    /// to prepare the [`Resolver`].
-    etc_path: PathBuf,
+    /// The filesystem whose `/etc` holds the configuration files we need to prepare the
+    /// [`Resolver`].
+    target_root: TargetRoot,
     /// For receiving [`DnsCommand`]s from [`DnsApi`]s.
     request_rx: Receiver<DnsCommand>,
     /// Max request attempts per DNS query.
@@ -87,20 +90,8 @@ pub(crate) struct DnsWorker {
 impl DnsWorker {
     /// Creates a new instance of this worker.
     /// To run this worker, call [`Self::run`].
-    ///
-    /// # Note
-    ///
-    /// `pid` is used to find the correct path of `etc` directory.
     #[tracing::instrument(level = Level::TRACE)]
-    pub(crate) fn new(pid: Option<u64>, request_rx: Receiver<DnsCommand>) -> Self {
-        let etc_path = pid
-            .map(|pid| {
-                PathBuf::from("/proc")
-                    .join(pid.to_string())
-                    .join("root/etc")
-            })
-            .unwrap_or_else(|| PathBuf::from("/etc"));
-
+    pub(crate) fn new(target_root: TargetRoot, request_rx: Receiver<DnsCommand>) -> Self {
         let timeout = envs::DNS_TIMEOUT
             .try_from_env()
             .ok()
@@ -114,7 +105,7 @@ impl DnsWorker {
             .map(|attempts| usize::try_from(attempts).unwrap_or(usize::MAX));
 
         Self {
-            etc_path,
+            target_root,
             request_rx,
             timeout,
             attempts,
@@ -133,7 +124,7 @@ impl DnsWorker {
     /// change.
     #[tracing::instrument(level = Level::TRACE, ret, err(level = Level::TRACE))]
     async fn do_lookup(
-        etc_path: PathBuf,
+        target_root: TargetRoot,
         request: GetAddrInfoRequestV2,
         attempts: Option<usize>,
         timeout: Option<Duration>,
@@ -142,15 +133,19 @@ impl DnsWorker {
         //
         // We care about logging these errors, at an `error!` level.
         let resolver: Result<_, InternalLookupError> = async {
-            let resolv_conf_path = etc_path.join("resolv.conf");
-            let hosts_path = etc_path.join("hosts");
-
-            let resolv_conf = fs::read(resolv_conf_path)
-                .await
-                .map_err(InternalLookupError::from)?;
-            let hosts_conf = fs::read(hosts_path)
-                .await
-                .map_err(InternalLookupError::from)?;
+            // Through `TargetRoot`, so that a file that is an absolute symlink, such as
+            // `resolv.conf` on a systemd-resolved image, resolves in the target.
+            let (resolv_conf, hosts_conf) = tokio::task::spawn_blocking(move || {
+                let read = |path: &str| -> io::Result<Vec<u8>> {
+                    let mut bytes = Vec::new();
+                    File::from(target_root.open_from_root(Path::new(path), OFlag::O_RDONLY)?)
+                        .read_to_end(&mut bytes)?;
+                    Ok(bytes)
+                };
+                io::Result::Ok((read("/etc/resolv.conf")?, read("/etc/hosts")?))
+            })
+            .await
+            .map_err(io::Error::other)??;
 
             let (config, mut options) =
                 parse_resolv_conf(resolv_conf).map_err(InternalLookupError::from)?;
@@ -217,12 +212,12 @@ impl DnsWorker {
     /// Handles the given [`DnsCommand`] in a separate [`tokio::task`].
     #[tracing::instrument(level = Level::TRACE, skip(self))]
     fn handle_message(&mut self, message: DnsCommand) {
-        let etc_path = self.etc_path.clone();
+        let target_root = self.target_root.clone();
         let timeout = self.timeout;
         let attempts = self.attempts;
 
         let handle = self.tasks.spawn(Self::do_lookup(
-            etc_path,
+            target_root,
             message.request.into_v2(),
             attempts,
             timeout,

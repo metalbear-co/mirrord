@@ -1134,20 +1134,6 @@ jobs:
       CUBBY_CLIENT_ID: ${{ secrets.CUBBY_CLIENT_ID }}
       CUBBY_PRIVATE_KEY: ${{ secrets.CUBBY_PRIVATE_KEY }}
 
-  publish_docs:
-    needs: [validate_release_request, release_gh]
-    if: needs.validate_release_request.outputs.should_release == 'true'
-    permissions:
-      contents: write
-      statuses: read
-    uses: ./.github/workflows/publish-docs.yaml
-    with:
-      # The tag that release_gh created at the released commit, so the publish commits name the version.
-      ref: ${{ needs.validate_release_request.outputs.version }}
-      dry_run: false
-    secrets:
-      SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
-
   release_homebrew:
     needs: [validate_release_request, release_gh]
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -1326,77 +1312,28 @@ jobs:
           }
           Write-Host "Successfully published to Chocolatey"
 
+  # The `winget` environment only deploys from `main`, and this workflow's jobs run for
+  # `refs/pull/<number>/merge`, so the submission runs in release-winget.yaml, started on
+  # `main`. The default token is enough, because `workflow_dispatch` is one of the few
+  # events that a GITHUB_TOKEN can use to start another workflow.
   release_winget:
     needs: [validate_release_request, release_gh]
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     if: needs.validate_release_request.outputs.should_release == 'true'
+    # `gh` sets no HTTP timeout, so a stalled request would otherwise hold this job for
+    # GitHub's default of 6 hours.
+    timeout-minutes: 9
+    permissions:
+      actions: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.validate_release_request.outputs.sha }}
-
-      - name: Install .NET runtime for wingetcreate
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Get release version
-        id: version
-        run: |
-          $version = (Select-String -Path "Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Update WinGet manifest
+      - name: Start the WinGet submission
+        # Shorter than the job's timeout, because a job timeout concludes as cancelled,
+        # and a dispatch that never happened must show as a failure.
+        timeout-minutes: 8
         env:
-          # Classic PAT from a bot account. A GitHub App installation token
-          # can't be used here: wingetcreate opens the PR against
-          # microsoft/winget-pkgs, where our app isn't (and can't be) installed.
-          # A classic PAT can open a cross-fork PR to a public repo without
-          # write access, which is exactly what WinGet needs.
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          # Get version from step output
-          $version = "${{ steps.version.outputs.version }}"
-
-          # Construct MSI download URL from GitHub release
-          $installerUrl = "https://github.com/metalbear-co/mirrord/releases/download/$version/mirrord.msi"
-          $packageId = "MetalBear.mirrord"
-
-          Write-Host "Updating WinGet manifest for package '$packageId' version '$version'"
-          Write-Host "Installer URL: $installerUrl"
-
-          # Validate the WinGet PAT is set
-          if (-not $env:WINGET_TOKEN) {
-            throw "WINGET_GITHUB_PAT is not set. Cannot publish to WinGet."
-          }
-
-          # Download wingetcreate
-          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
-
-          # Update manifest and submit a PR to microsoft/winget-pkgs
-          $output = & .\wingetcreate.exe update $packageId `
-            --version $version `
-            --urls "$installerUrl|x64|machine" `
-            --submit `
-            --token $env:WINGET_TOKEN 2>&1
-
-          $exitCode = $LASTEXITCODE
-
-          # Display output
-          $output | ForEach-Object { Write-Host $_ }
-
-          # Check for errors
-          if ($exitCode -ne 0) {
-            if ($output -match "was not found") {
-              throw "WinGet package '$packageId' was not found in microsoft/winget-pkgs. Create the initial package manually first."
-            } else {
-              throw "wingetcreate update failed with exit code $exitCode"
-            }
-          }
-
-          Write-Host "Successfully updated WinGet manifest"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate_release_request.outputs.version }}
+        run: gh workflow run release-winget.yaml --repo "$GITHUB_REPOSITORY" --ref main --field version="$VERSION"
 
   update_latest:
     needs: [validate_release_request, release_homebrew, check_for_new_docs]

@@ -66,9 +66,17 @@ run:
 
 ### Exempt files
 
-These files are verbatim copies of files generated elsewhere (the operator chart's `values.yaml`, the mirrord config schemas and the configuration reference), so they are not tagged and the check skips them. Nothing in the mirrord repository updates them. Keep this list in sync with `EXEMPT` in `.github/scripts/check_fence_tags.py`.
+These files are verbatim copies of files generated elsewhere (the operator chart's `values.yaml`, the mirrord config schemas and the configuration reference), so they are not tagged and the check skips them. Nothing in the mirrord repository updates them. Keep this list in sync with `EXEMPT` in `.github/scripts/check_fence_tags.py`. The docs sync keeps away from these files through the list in `.github/docs-sync-prompt.md` and the step "Check the files that Claude changed" of the root `.github/workflows/docs-sync.yaml`, so keep those in sync too.
 
 - `skills/mirrord-config/references/configuration.md`
 - `skills/mirrord-config/references/schema.json`
 - `skills/mirrord-operator/references/values.yaml`
 - `skills/mirrord-up/references/schema.json`
+
+## Plugin version
+
+A pull request that changes `skills/` or `.claude-plugin/`, the files that Claude Code installs, must raise `version` in `.claude-plugin/plugin.json`, because Claude Code caches an installed plugin by its version and updates it only when the version changes. `npx skills add` and `install.sh` clone the repository, so they get every change either way. The version check in the `plan` job of the mirrord repository's CI fails a pull request that changes either directory without raising the version above the one at its base. A pull request that only raises the version passes it.
+
+Keep the version in `plugin.json` only. Don't set `version` in the plugin's entry in `.claude-plugin/marketplace.json`: [Claude Code's plugin marketplace docs](https://code.claude.com/docs/en/plugins/host-marketplace#release-a-new-version) say not to set it in both files, because `plugin.json` wins and the entry's copy is ignored. Leave `.codex-plugin/plugin.json` and `.cursor-plugin/plugin.json` at their own versions: nothing shows that Codex or Cursor cache a plugin by version.
+
+When the version check fails in the merge queue after the pull request passed, another pull request that changes the plugin took the same or a higher version first: it either merged or is ahead in the queue. Raise the version above the one that the error names, which is the base's. Once the other pull request has merged, merge `main` into the branch first, so that the branch has its version.

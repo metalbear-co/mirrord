@@ -151,13 +151,17 @@ schedule. What's only on `main` hasn't shipped and needs no compatibility; what'
 - `docs/` and `guides/` came from `metalbear-co/docs`, which keeps their earlier history. They document user-visible
   behavior, so a change users notice usually updates them in the same pull request. The configuration reference is the
   exception: it isn't in `docs/`, but is generated from `mirrord-config`'s doc comments (`mirrord/config/AGENTS.md`), so
-  a config change updates those instead. GitBook builds the site from the `docs-published` and `guides-published`
-  branches, which every mirrord release updates from the released commit (`publish-docs.yaml`), so an edit reaches the
-  site with the next release. `mirrord mcp` embeds `docs/docs` when it's built, so an edit there also reaches it with
-  the next release. `docs/AGENTS.md` says how to publish a fix between releases.
-- `skills/` came from `metalbear-co/skills`, which keeps its earlier history. `mirrord mcp` embeds `skills/skills` when
-  it's built (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release. Nothing copies `skills/` to
-  `metalbear-co/skills` yet, so an edit doesn't reach that repository.
+  a config change updates those instead. GitBook's Documentation and Guides spaces sync `docs/` and `guides/` on
+  `main`, so an edit reaches the site once GitBook imports its merge commit, even when the change it documents isn't
+  released yet. A pull request into `main` from a branch of this repository gets a GitBook preview. `mirrord mcp`
+  embeds `docs/docs` when it's built, so an edit there reaches it only with the next release. `docs/AGENTS.md` says how
+  to check that GitBook imported a merge, and what to do when an import fails.
+- `skills/` came from `metalbear-co/skills`, which keeps its earlier history. Users install the skills from that
+  repository, so `publish-skills.yaml` copies `skills/` there on every merge to `main` that changes it, and the next
+  copy replaces a change made in that repository directly. `mirrord mcp` embeds `skills/skills` when it's built
+  (`mirrord/mcp/AGENTS.md`), so an edit reaches it with the next mirrord release. Every week, `docs-sync.yaml` has
+  Claude update `skills/skills/` to match the docs changes merged since the commit in `skills/.github/docs-sync-sha`,
+  with the prompt in `skills/.github/docs-sync-prompt.md`, and opens a pull request with the result.
 - `metalbear-co/mirrord-vscode` and `metalbear-co/mirrord-intellij` drive the CLI; `ci.yaml` runs their end-to-end
   tests on release branches.
 - `metalbear-co/test-images` builds the app images the end-to-end tests deploy.

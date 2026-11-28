@@ -16,7 +16,10 @@ use mirrord_operator::crd::{MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STA
 use tracing::Level;
 
 use crate::{
-    CliResult, config::SubscribeArgs, error::CliError, kube::kube_client_from_layer_config,
+    CliResult,
+    config::SubscribeArgs,
+    error::CliError,
+    kube::{kube_client_from_layer_config, resolve_namespace},
     util::remove_proxy_env,
 };
 
@@ -43,26 +46,42 @@ pub(crate) struct EventStreamOptions {
 /// Opens the operator's interception event stream for one session, or for every session when
 /// `key` is `None`, yielding each event's payload.
 ///
+/// `namespace` keeps only the events of targets in that namespace, and `None` keeps every
+/// namespace the caller may see. An operator that predates the parameter ignores it and streams
+/// every namespace, which is more than asked for but no more than a stream without it, so the
+/// parameter is sent without checking the operator's features.
+///
 /// `watch=true` is mandatory: without it the kube-apiserver cuts the connection at its 60s
 /// `--request-timeout` instead of treating this as a long-running watch.
 pub(crate) async fn operator_event_stream(
     client: &Client,
     key: Option<&str>,
+    namespace: Option<&str>,
     options: EventStreamOptions,
 ) -> CliResult<impl Stream<Item = std::io::Result<String>>> {
-    let session_key = key
-        .map(|key| {
-            let encoded: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
-            format!("&session_key={encoded}")
-        })
-        .unwrap_or_default();
-    let request = Request::get(format!(
-        "/apis/operator.metalbear.co/v1/events?watch=true{session_key}\
-         &include_session_key={}&include_unmatched={}",
-        options.session_key_field, options.unmatched
-    ))
-    .body(Vec::new())
-    .map_err(|error| CliError::SubscribeError(error.to_string()))?;
+    // The serializer isn't `Send`, so it must be dropped before the `.await` below: `mirrord ui`
+    // spawns this future, which must be `Send`.
+    let query = {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        query.append_pair("watch", "true");
+        if let Some(key) = key {
+            query.append_pair("session_key", key);
+        }
+        if let Some(namespace) = namespace {
+            query.append_pair("namespace", namespace);
+        }
+        query
+            .append_pair(
+                "include_session_key",
+                &options.session_key_field.to_string(),
+            )
+            .append_pair("include_unmatched", &options.unmatched.to_string())
+            .finish()
+    };
+
+    let request = Request::get(format!("/apis/operator.metalbear.co/v1/events?{query}"))
+        .body(Vec::new())
+        .map_err(|error| CliError::SubscribeError(error.to_string()))?;
 
     let stream = client
         .request_stream(request)
@@ -133,8 +152,9 @@ fn stream_scope(
     }
 }
 
-/// Streams interception events for a session key, or for every session, from the operator to
-/// stdout as JSON.
+/// Streams the interception events of one session key, or of every session, in one namespace or in
+/// every namespace, from the operator to stdout as JSON. Without `-n` or `-A`, the namespace is the
+/// one that [`resolve_namespace`] picks, as for `mirrord queues status`.
 #[mirrord_macros::boxed_future]
 #[tracing::instrument(level = Level::TRACE, skip_all, err)]
 pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
@@ -147,21 +167,37 @@ pub(crate) async fn subscribe_command(args: SubscribeArgs) -> CliResult<()> {
 
     let key = layer_config.key.provided();
     let client = kube_client_from_layer_config(&layer_config).await?;
+    let namespace = args
+        .all_namespaces
+        .not()
+        .then(|| resolve_namespace(&layer_config, &client));
 
     // The feature read only decides what to say about the stream, so it runs beside opening the
     // stream rather than delaying it; events buffer on the open connection meanwhile.
     let operator: Api<MirrordOperatorCrd> = Api::all(client.clone());
     let (features, events) = tokio::join!(
         operator.get(OPERATOR_STATUS_NAME),
-        operator_event_stream(&client, key, args.event_stream_options)
+        operator_event_stream(
+            &client,
+            key,
+            namespace.as_deref(),
+            args.event_stream_options
+        )
     );
     let features = features.map(|operator| operator.spec.supported_features());
     let scope = stream_scope(key, features.as_deref().ok())?;
     let mut events = std::pin::pin!(events?);
 
-    match key {
-        Some(key) => eprintln!("Subscribed to events for session key `{key}`."),
-        None => eprintln!("Subscribed to events for every session."),
+    let sessions = match key {
+        Some(key) => format!("session key `{key}`"),
+        None => "every session".to_owned(),
+    };
+    match &namespace {
+        Some(namespace) => eprintln!(
+            "Subscribed to events for {sessions} in namespace `{namespace}` (use -A for every \
+             namespace)."
+        ),
+        None => eprintln!("Subscribed to events for {sessions} in every namespace."),
     }
     match scope {
         // The cause is what the user needs to fix (a permission, a connection); the stream is

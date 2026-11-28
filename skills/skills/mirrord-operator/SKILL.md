@@ -49,7 +49,7 @@ Trigger on questions like:
 
 - `references/troubleshooting.md` — common operator issues and solutions
 - `references/helm-values.md` — curated digest of the important chart values (auth, feature flags, agent, TLS, registry, platform)
-- `references/values.yaml` — verbatim upstream chart `values.yaml`, kept in sync automatically. **Read this for exact current defaults or any value the digest doesn't list.**
+- `references/values.yaml` — verbatim copy of the chart's `values.yaml`, which nothing updates automatically, so it can be older than the chart. **Read this for the defaults or any value the digest doesn't list, and check the [live source](https://raw.githubusercontent.com/metalbear-co/charts/main/mirrord-operator/values.yaml) when the exact current default matters.**
 
 Authoritative upstream sources:
 - [Operator install docs](https://metalbear.com/mirrord/docs/getting-started/quick-start/install-the-operator)

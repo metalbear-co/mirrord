@@ -1305,10 +1305,11 @@ fn main() -> miette::Result<()> {
                 ..
             } => {
                 let config = mirrord_config::util::read_resolved_config()?;
-                let shutdown_handler = internal_proxy::install_ci_shutdown_handler(mirrord_for_ci)?;
+                let shutdown_handler =
+                    internal_proxy::install_ci_shutdown_handler(mirrord_for_ci.is_some())?;
 
-                if mirrord_for_ci {
-                    MirrordCi::prepare_intproxy(&shutdown_handler).await?;
+                if let Some(session_dir) = mirrord_for_ci {
+                    MirrordCi::prepare_intproxy(&session_dir, &shutdown_handler).await?;
                 }
 
                 logging::init_intproxy_tracing_registry(&config).await?;
@@ -1382,6 +1383,8 @@ fn main() -> miette::Result<()> {
             Commands::Queues(args) => queues::queues_command(*args).await?,
             Commands::Fix(args) => fix::fix_command(args).await?,
             Commands::Login(args) => login::login_command(*args).await?,
+            Commands::Logout(args) => login::logout_command(*args).await?,
+            Commands::Whoami => login::whoami_command().await?,
             #[cfg(windows)]
             Commands::Attach(args) => {
                 let progress = ProgressTracker::from_env("mirrord attach");

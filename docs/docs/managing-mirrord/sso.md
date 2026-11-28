@@ -2,7 +2,6 @@
 title: Single Sign-On
 description: Connect the mirrord Operator to your OIDC identity provider so developers log in without a kubeconfig.
 tags:
-  - team
   - enterprise
 ---
 
@@ -139,6 +138,17 @@ RBAC for SSO users is the same as for any Kubernetes user. See [How do I configu
    ```
 
 To grant a group every namespace instead, bind it to the `mirrord-operator-user` ClusterRole, as in the [RBAC examples](security.md#how-do-i-configure-role-based-access-control-for-mirrord-for-teams). Users still need `get` on the workloads they target, the same as without SSO.
+
+## Sessions and seats
+
+From Operator `3.236.0`, an SSO login is the same person as a kubeconfig login with the same Kubernetes username, everywhere mirrord names or counts users:
+
+- `mirrord operator status` and the session list show the SSO username as the session's Kubernetes user.
+- The cloud dashboard shows it too, under the same conditions as any username: identity sharing on for the operator's API key and `cloud.anonymizeData` not set to `true` (see [Cloud Setup](dashboard/cloud.md#new-customers-set-up-the-cloud-dashboard)). With identity sharing off, SSO sessions show anonymized like every other session. The [license server dashboard](dashboard/license-server.md) shows it as it shows every username.
+- With seat tracking by **Kubernetes user** (see [Licensing](licensing.md#what-counts-as-a-seat)), a developer who uses a kubeconfig on one day and SSO on the next takes one seat, as long as both give the same username. For that, set `usernameClaim` and `usernamePrefix` to produce the name the kubeconfig produces, as in [Usernames and groups](#usernames-and-groups).
+- With seat tracking by **client machine**, the default, the seat follows the mirrord credentials on the developer's machine as before, whichever login they use.
+
+Each session records how its developer authenticated, in the `authMethod` field of the `MirrordClusterSession` resource: `kube` for a kubeconfig, `sso` for an SSO login. `kubectl get mirrordclustersessions -o wide` shows it in the `AUTH` column.
 
 ## Checking the setup
 

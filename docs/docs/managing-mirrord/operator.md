@@ -57,7 +57,7 @@ The Operator runs as one pod by default. Agents run only while sessions use them
 
 Rotate and revoke the key at [app.metalbear.com](https://app.metalbear.com). When you revoke, you can choose a grace window so the current key keeps working while you roll the Operator over to the new one.
 
-## Single sign-on
+## Single sign-on (Enterprise)
 
 Developers can log in to the Operator with your OIDC identity provider at a public HTTPS URL instead of through a kubeconfig. See [Single Sign-On](sso.md) for registering mirrord at the provider, the `sso` Helm values and granting groups access.
 
@@ -153,8 +153,8 @@ These images are only pulled when the corresponding feature is enabled:
 | ----------------------- | ------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Kafka splitting sidecar | `ghcr.io/metalbear-co/operator-kafka-proxy` | Same as operator | JVM sidecar for Kafka splitting (only when `operator.kafkaSplittingSidecar.enabled` is true). | `operator.kafkaSplittingSidecar.image`                                    |
 | MSSQL tools             | `ghcr.io/metalbear-co/mssql-tools`          | Same as operator | Init container and sidecar for MSSQL DB branching (provides `sqlpackage` and `sqlcmd`). Table data is exported with the `bcp` in the branch's SQL Server image. | Env `MSSQL_TOOLS_IMAGE` via `operator.extraEnv`                           |
-| Flyway                  | `flyway/flyway`                             | `13` from operator `3.232.0`; `12` on `3.182.0` through `3.231.0` | Flyway migration runner for DB branching.                                                     | Per-branch `migrations.image`, or `dbPod.migrationImages.flyway.registry` |
-| Liquibase               | `liquibase/liquibase`                       | `4.33`           | Liquibase migration runner for DB branching.                                                  | Per-branch `migrations.image`, or `dbPod.migrationImages.liquibase.registry` |
+| Flyway                  | `flyway/flyway`                             | `13` from operator `3.232.0`; `12` on `3.182.0` through `3.231.0` | Flyway migration runner for DB branching. See [serving your own migration images](../sharing-the-cluster/db-branching/migrations.md#serving-your-own-migration-images). | Per-branch `migrations.image`, or `dbPod.migrationImages.flyway.registry` |
+| Liquibase               | `liquibase/liquibase`                       | `4.33`           | Liquibase migration runner for DB branching. See [serving your own migration images](../sharing-the-cluster/db-branching/migrations.md#serving-your-own-migration-images). | Per-branch `migrations.image`, or `dbPod.migrationImages.liquibase.registry` |
 
 ### Code sync
 
