@@ -125,6 +125,24 @@ Logged out of mirrord.corp.example.com. mirrord uses your kubeconfig context sta
 
 Logging out removes that login from your machine. If it was the one in use, mirrord switches to the login you made most recently that has not expired, and to your kubeconfig when there is none. The same command with the Cloud URL logs you out of mirrord Cloud.
 
+## Logging in from the IDE
+
+The VS Code extension and the IntelliJ plugin run these commands for you, so you can log in, check your logins and log out without a terminal.
+
+| To | VS Code (Command Palette) | IntelliJ (mirrord menu in the toolbar) |
+| --- | --- | --- |
+| Log in | **mirrord: Log in to an operator** | **Log In to an Operator...** |
+| See your logins | **mirrord: Show operator logins** | the first item under **Operator Login** |
+| Log out | **mirrord: Log out of an operator** | **Log Out of an Operator...** |
+
+Logging in asks for the Operator's URL and opens your browser, the same as `mirrord login --url`. In the list of logins, picking one logs in to it: mirrord switches to it while it is valid, and opens the browser when it expired.
+
+Once the IDE has read your logins, after a session or one of these actions, it also names the login in use, for example `Logged in to mirrord.corp.example.com as dev@corp.example.com, until Fri 14:00`. VS Code shows that line in the tooltip of mirrord in the status bar, and IntelliJ as the first item under **Operator Login**.
+
+When a session needs a login that expired, the IDE shows the message from [When a login expires](#when-a-login-expires) with a **Log in** action that logs you in to that Operator again. Start the session again once you are logged in.
+
+This needs mirrord `3.293.0` or later, with the VS Code extension `3.76.0` or the IntelliJ plugin `3.84.0` or later.
+
 ## Where logins are kept
 
 Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entry holds the Operator URL, your account, a token the Operator issued and the time it expires. The token is useless to another Operator. The Operator's admin can end every login at once by rotating the client secret of the mirrord application at the identity provider, updating the Kubernetes Secret that holds it and restarting every Operator replica: the Operator derives the key it signs tokens with from the secret at startup, so a replica still running on the old secret keeps accepting the old tokens. After that, a command fails with the message in the table below, and `mirrord logout --url` then `mirrord login --url` gets you a new login.
