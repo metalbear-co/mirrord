@@ -36,12 +36,14 @@ pub struct MongodbBranchDatabaseSpec {
     /// Database connection info from the workload.
     pub connection_source: ConnectionSource,
     /// MongoDB database name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database_name: Option<String>,
     /// Target k8s resource to extract connection source info from.
     pub target: Target,
     /// The duration in seconds this branch database will live idling.
     pub ttl_secs: u64,
     /// MongoDB server image version, e.g. "7.0".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mongodb_version: Option<String>,
     /// Options for copying data from source database to the branch.
     #[serde(default)]
@@ -107,6 +109,7 @@ impl From<MongodbBranchCopyConfig> for BranchCopyConfig {
 pub struct CollectionCopyConfig {
     /// Data that matches the filter will be copied.
     /// For MongoDB, this filter is a JSON query document like `{"username": "alice"}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
 }
 

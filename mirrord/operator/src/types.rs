@@ -110,6 +110,7 @@ impl PaidFeatureGate {
                 | "target.path"
                 | "multi_cluster"
                 | "ci"
+                | "sso"
         ) {
             Some(gate)
         } else {

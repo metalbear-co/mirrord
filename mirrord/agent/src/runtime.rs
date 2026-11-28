@@ -10,7 +10,7 @@ use containerd_client::{
     with_namespace,
 };
 use enum_dispatch::enum_dispatch;
-use oci_spec::runtime::Spec;
+use serde::Deserialize;
 use tokio::net::UnixStream;
 use tonic::transport::{Endpoint, Uri};
 use tower::service_fn;
@@ -185,9 +185,20 @@ async fn connect_and_find_container(
     Ok(channel)
 }
 
+/// The part of a container's OCI runtime spec, as containerd returns it, that the agent reads.
+#[derive(Deserialize)]
+struct Spec {
+    process: Option<SpecProcess>,
+}
+
+#[derive(Deserialize)]
+struct SpecProcess {
+    env: Option<Vec<String>>,
+}
+
 /// Extract from [`Spec`] struct the environment variables as HashMap<K,V>
 fn extract_env_from_containerd_spec(spec: &Spec) -> Option<HashMap<String, String>> {
-    Some(parse_raw_env(spec.process().as_ref()?.env().as_ref()?))
+    Some(parse_raw_env(spec.process.as_ref()?.env.as_ref()?))
 }
 impl ContainerdContainer {
     /// Get the containerd channel for a given container id.

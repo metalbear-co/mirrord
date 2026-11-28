@@ -261,6 +261,12 @@ interface ContextNamespacePickerProps {
   onSelectNamespace: (namespace: string | null) => void
   namespacesLoading: boolean
   namespacesError: boolean
+  /**
+   * Keeps the pickers on screen in windows narrower than the `md` breakpoint, where they are
+   * hidden by default. A view whose pickers are its only way to choose what it shows needs them
+   * at every width.
+   */
+  alwaysVisible?: boolean
 }
 
 interface ContextPickerProps {
@@ -270,8 +276,8 @@ interface ContextPickerProps {
   onSelectContext: (context: string | null) => void
 }
 
-/** The kube context picker on its own, for views that have no namespace of their own to scope. */
-export function ContextPicker({
+/** The kube context picker, shown beside the namespace picker. */
+function ContextPicker({
   contexts,
   currentContext,
   selectedContext,
@@ -298,7 +304,8 @@ export function ContextPicker({
 
 /**
  * Context and namespace pickers, rendered inline in the header next to the user menu. They scope the
- * cluster (operator) session view; local sessions are always shown regardless of the selection.
+ * cluster (operator) session view and the Events tab, each of which keeps its own namespace; local
+ * sessions are always shown regardless of the selection.
  */
 export default function ContextNamespacePicker({
   contexts,
@@ -310,9 +317,15 @@ export default function ContextNamespacePicker({
   onSelectNamespace,
   namespacesLoading,
   namespacesError,
+  alwaysVisible = false,
 }: ContextNamespacePickerProps) {
   return (
-    <div className="hidden min-w-0 items-center gap-2 md:flex">
+    <div
+      className={cn(
+        'min-w-0 items-center gap-2',
+        alwaysVisible ? 'flex' : 'hidden md:flex',
+      )}
+    >
       <ContextPicker
         contexts={contexts}
         currentContext={currentContext}

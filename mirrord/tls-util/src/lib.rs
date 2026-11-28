@@ -29,7 +29,7 @@ pub use identity::{CertIdentity, CertNames};
 pub use maybe_tls::MaybeTls;
 pub use no_verifier::{DangerousNoVerifierClient, DangerousNoVerifierServer};
 pub use read_pem::{parse_cert_chain, parse_key_der, read_cert_chain, read_key_der};
-pub use root_store::best_effort_root_store;
+pub use root_store::{add_pem_certs, best_effort_root_store};
 pub use san::HasSubjectAlternateNames;
 pub use secure_channel::SecureChannelSetup;
 pub use uri_ext::UriExt;

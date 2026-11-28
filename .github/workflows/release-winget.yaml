@@ -1,0 +1,350 @@
+# Submits a published mirrord release to WinGet. This is a separate workflow because the
+# `winget` environment, which holds the submission token, only deploys from `main`, and
+# the jobs of the Release workflow run for `refs/pull/<number>/merge`. The Release
+# workflow starts this one on `main` for each release. A person can also start it from
+# `main` for a release that missed its submission. CONTRIBUTING.md ("WinGet") has the
+# setup and the recovery steps.
+name: Release WinGet
+run-name: Release WinGet ${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published mirrord release to submit, such as 3.291.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs outside the `winget` environment, so an invalid input fails before any job can
+  # read the submission token.
+  validate_version:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 11
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - name: Check that the version is a published release with an MSI
+        id: validate
+        # Shorter than the job's timeout, because a job timeout concludes as cancelled,
+        # which would skip the failure alert.
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          # The rejected value isn't printed, because a line of it could be read as a
+          # workflow command.
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version must be a bare major.minor.patch value, such as 3.291.0."
+            exit 1
+          fi
+
+          if ! release_state=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" \
+            --jq '[.prerelease, any(.assets[]; .name == "mirrord.msi")] | @tsv'); then
+            echo "::error::Couldn't read a published release with the tag ${VERSION}; the error from gh is above."
+            exit 1
+          fi
+          read -r is_prerelease has_msi <<<"${release_state}"
+
+          if [[ "${is_prerelease}" != "false" ]]; then
+            echo "::error::Release ${VERSION} is a prerelease, so it can't be submitted to WinGet."
+            exit 1
+          fi
+          if [[ "${has_msi}" != "true" ]]; then
+            echo "::error::Release ${VERSION} has no mirrord.msi asset, which is the installer that WinGet needs."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+  submit:
+    needs: validate_version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 21
+    environment: winget
+    # Two runs for one version could both pass Komac's check for an existing pull request
+    # and open duplicates, so they run one at a time. The group is per version, because
+    # GitHub cancels a pending job when another job joins its group, and a shared group
+    # could cancel the submission of a different release.
+    concurrency:
+      group: release-winget-${{ needs.validate_version.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Update WinGet manifest
+        # Shorter than the job's timeout, because a job timeout concludes as cancelled,
+        # which would skip the failure alert.
+        timeout-minutes: 20
+        env:
+          # Classic PAT of metalbear-ci, because Komac opens the PR on
+          # microsoft/winget-pkgs, where a GitHub App can't be installed and a
+          # fine-grained PAT can't open PRs. It exists only in the `winget`
+          # environment, limited to `main`, so runs on other branches can't
+          # read it. CONTRIBUTING.md ("WinGet") has the scopes and setup.
+          GITHUB_TOKEN: ${{ secrets.WINGET_BOT_TOKEN }}
+          # Komac uses the token's login as the fork owner unless this is set.
+          KOMAC_FORK_OWNER: metalbear-co
+          # Komac is pinned by version and SHA-256, so a replaced release asset
+          # fails the job. To upgrade, change the version and take the hash from
+          # the komac-<version>-x86_64-unknown-linux-gnu.tar.gz line of the
+          # release's SHA256SUMS. When upgrading, also check the Komac behavior
+          # that the comment above the retry loop lists.
+          KOMAC_VERSION: "2.17.2"
+          KOMAC_SHA256: b03b020eec98acfb0b53e284a6e21815b884be33de6785b97e7a120f0e748966
+          MIRRORD_VERSION: ${{ needs.validate_version.outputs.version }}
+          # Komac drops colors from most of its output with this set. The
+          # script removes the rest before it matches the output.
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+
+          package_id="MetalBear.mirrord"
+          fork="${KOMAC_FORK_OWNER}/winget-pkgs"
+          installer_url="https://github.com/metalbear-co/mirrord/releases/download/${MIRRORD_VERSION}/mirrord.msi"
+
+          echo "Updating WinGet manifest for package '${package_id}' version '${MIRRORD_VERSION}'"
+          echo "Installer URL: ${installer_url}"
+
+          if [[ -z "${GITHUB_TOKEN}" ]]; then
+            echo "::error::WINGET_BOT_TOKEN is not set. Cannot publish to WinGet."
+            exit 1
+          fi
+
+          # The archive holds the `komac` executable at its root, with its
+          # executable mode, which tar keeps.
+          archive="komac-${KOMAC_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl --fail --silent --show-error --location --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/russellbanks/Komac/releases/download/v${KOMAC_VERSION}/${archive}"
+          echo "${KOMAC_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "${RUNNER_TEMP}/${archive}" --directory "${RUNNER_TEMP}" komac
+          komac="${RUNNER_TEMP}/komac"
+
+          # A failed `komac update` is retried whatever its error, up to 4
+          # attempts in total, unless the attempt may have opened a PR (see the
+          # last two paragraphs). The waits of 15, 30 and 60 seconds before the
+          # retries add at most 105 seconds, well inside the step's timeout.
+          #
+          # GitHub refused to create Komac's branch for 3.292.0 with "Ref
+          # cannot be created", and a re-run with the same token succeeded.
+          # russellbanks/Komac#1009 reports the same error. Its cause is
+          # unconfirmed, and two explanations fit:
+          #
+          # - GitHub refuses a branch at an upstream commit that the fork
+          #   doesn't contain yet. microsoft/winget-pkgs gets a commit about
+          #   every 15 seconds at busy times, and Komac reads upstream's latest
+          #   commit right before it creates the branch, so each attempt is a
+          #   fresh try at whatever commit is latest then. The sync at the
+          #   start of each attempt makes it more likely, but not certain, that
+          #   the fork contains that commit, because upstream can get a new
+          #   commit between the sync and Komac's read. For 3.292.0, one landed
+          #   about a second after the sync.
+          # - GitHub refuses new refs for a while for a reason of its own. The
+          #   waits give that time to clear.
+          #
+          # A retry must not open a duplicate PR. In Komac v2.17.2, `komac
+          # update` checks for an existing PR before its first write, and that
+          # first write creates the branch. The check uses GitHub search, which
+          # can miss a PR created seconds earlier, so a retry after an attempt
+          # that created a PR could open a second one. An attempt that reported
+          # a created PR therefore ends the attempts.
+          #
+          # GitHub can also create the PR and fail to send Komac its response,
+          # and Komac then fails without reporting the PR. Every PR has a
+          # branch, because the branch is Komac's first write, so after each
+          # failed attempt the fork's branches for this version are listed,
+          # which GitHub answers without search's lag. Komac names its branches
+          # `<package>-<version>-<id>`, and the listing matches that prefix. A
+          # branch or a failed listing ends the attempts. After the last
+          # attempt, the listing picks which error the job reports. A branch
+          # left over from an earlier failed run ends the attempts on purpose,
+          # because it can't be told apart from one that this run created.
+          # Check the order of Komac's writes and its branch names again when
+          # upgrading Komac.
+          #
+          # Each attempt's output stays in the job log, and the checks after
+          # the loop read the last attempt's output.
+          update_log="${RUNNER_TEMP}/komac-update.log"
+          listing_error_log="${RUNNER_TEMP}/branch-listing-error.log"
+          created_pr_pattern='Successfully created microsoft/winget-pkgs#[0-9]+'
+          pr_search_url="https://github.com/microsoft/winget-pkgs/pulls?q=is%3Apr+${package_id}+${MIRRORD_VERSION}"
+          retry_wait_seconds=(15 30 60)
+          max_attempts=$(( ${#retry_wait_seconds[@]} + 1 ))
+          # Why a PR from this run can't be ruled out, which picks the final
+          # error: created_pr, listing_failed or branch_exists. Empty after a
+          # success, and after a last attempt whose listing found no branch.
+          stop_reason=""
+          listing_status=""
+          for (( attempt_number = 1; attempt_number <= max_attempts; attempt_number++ )); do
+            # `komac update` creates its branch at the latest commit of
+            # microsoft/winget-pkgs, not at the fork's, so an attempt can
+            # succeed without a synced fork, and a failed sync only warns. The
+            # sync keeps the org fork current for anyone who works in it by
+            # hand, shows a broken token as a warning before `komac update`
+            # fails on it, and may prevent the refused branch that the comment
+            # above describes.
+            if ! "${komac}" sync-fork; then
+              echo "::warning::Komac couldn't sync ${fork} with microsoft/winget-pkgs before attempt ${attempt_number}; its error is above. The attempt goes on, because the sync is best effort. The token may lack the workflow scope, may have expired or been revoked, or GitHub returned an error."
+            fi
+
+            update_exit=0
+            # `|x64` overrides the architecture Komac reads from the MSI, which
+            # reports x86. Komac has no scope suffix; it takes the scope (machine)
+            # from the MSI's ALLUSERS property.
+            "${komac}" update "${package_id}" \
+              --version "${MIRRORD_VERSION}" \
+              --urls "${installer_url}|x64" \
+              --submit 2>&1 | tee "${update_log}" || update_exit=$?
+            # Komac's error reports are colored even with NO_COLOR, and the PR
+            # number can be wrapped in an OSC 8 hyperlink, so color and hyperlink
+            # escape sequences are removed before matching.
+            update_output=$(sed --regexp-extended \
+              's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\x1b\]8;[^\x1b\x07]*(\x1b\\|\x07)//g' "${update_log}")
+
+            if (( update_exit == 0 )); then
+              break
+            fi
+            if grep --quiet --extended-regexp "${created_pr_pattern}" <<<"${update_output}"; then
+              echo "::warning::komac update failed on attempt ${attempt_number} of ${max_attempts} after it reported a created PR; its error is above. A new attempt could open a duplicate PR, so the job makes no more attempts."
+              stop_reason=created_pr
+              break
+            fi
+            # gh reads the WinGet token from GITHUB_TOKEN. The listing reads a
+            # public repository, so it needs no scope. GitHub still rejects an
+            # expired or revoked token, and the listing then fails and ends the
+            # attempts.
+            if ! version_branch_count=$(gh api "repos/${fork}/git/matching-refs/heads/${package_id}-${MIRRORD_VERSION}-" --jq length 2>"${listing_error_log}"); then
+              cat "${listing_error_log}" >&2
+              listing_status=$(grep --only-matching --extended-regexp 'HTTP [0-9]{3}' "${listing_error_log}" | tail -n 1 || true)
+              echo "::warning::komac update failed on attempt ${attempt_number} of ${max_attempts}; its error is above. The branches of ${fork} couldn't be listed (${listing_status:-no HTTP status}), so an attempt of this run may have opened a PR without the job knowing. A new attempt could open a duplicate PR, so the job makes no more attempts."
+              stop_reason=listing_failed
+              break
+            fi
+            if (( version_branch_count > 0 )); then
+              echo "::warning::komac update failed on attempt ${attempt_number} of ${max_attempts}; its error is above. ${fork} has a branch for ${package_id} ${MIRRORD_VERSION}, which this run or an earlier run created, and whichever created it may also have opened a PR. A new attempt could open a duplicate PR, so the job makes no more attempts."
+              stop_reason=branch_exists
+              break
+            fi
+            if (( attempt_number == max_attempts )); then
+              break
+            fi
+
+            wait_seconds=${retry_wait_seconds[attempt_number - 1]}
+            echo "::warning::komac update failed on attempt ${attempt_number} of ${max_attempts}; its error is above. In ${wait_seconds} seconds, Komac syncs the fork again and starts attempt $(( attempt_number + 1 ))."
+            sleep "${wait_seconds}"
+          done
+
+          # Prints the step's final error as one annotation: what happened,
+          # then the likely causes, each with what to check. A workflow command
+          # reads %0A as a line break, so a literal % is written as %25.
+          report_error() {
+            local message="${1//"%"/%25}" cause
+            shift
+            for cause in "$@"; do
+              message+="%0A- ${cause//"%"/%25}"
+            done
+            echo "::error::${message}%0ACONTRIBUTING.md (WinGet) has the recovery steps."
+          }
+
+          if (( update_exit != 0 )); then
+            failure="komac update failed on attempt ${attempt_number} of ${max_attempts} with exit code ${update_exit}; its error is above."
+            pr_check="Check ${pr_search_url} for a PR for this version. If one exists, the submission went through."
+            token_cause="WINGET_BOT_TOKEN is invalid, expired or revoked, or isn't authorized for the org's SSO. Check the token: its account must be able to read and write ${fork}."
+            outage_cause="GitHub had an outage, or a network error cut the call short. Check https://www.githubstatus.com, then re-run the job."
+            case "${stop_reason}" in
+              created_pr)
+                report_error "${failure} Komac reported a created PR before it failed. Possible causes:" \
+                  "Komac opened the PR, and a later step failed. ${pr_check}" \
+                  "If there is no PR, the attempt's error above names what failed. Fix it, then re-run the job."
+                ;;
+              branch_exists)
+                report_error "${failure} ${fork} has a branch for ${package_id} ${MIRRORD_VERSION}, so a PR may already exist. Possible causes:" \
+                  "An attempt of this run created the branch and the PR, but Komac didn't get GitHub's response. ${pr_check}" \
+                  "An earlier failed run, or an attempt of this run that failed before it opened a PR, left the branch. If there is no PR, re-run the job. Deleting the version's branches from ${fork} first lets the re-run retry."
+                ;;
+              listing_failed)
+                if [[ "${listing_status}" == "HTTP 401" || "${listing_status}" == "HTTP 403" ]]; then
+                  listing_causes=("GitHub answered ${listing_status}, which points at the token. ${token_cause}" "${outage_cause}")
+                else
+                  listing_causes=("${outage_cause}" "${token_cause}")
+                fi
+                report_error "${failure} The branches of ${fork} couldn't be listed (${listing_status:-no HTTP status}); gh's error is above. Possible causes:" \
+                  "${listing_causes[@]}" \
+                  "An attempt of this run may have opened a PR. ${pr_check} If none exists, fix the cause, then re-run the job."
+                ;;
+              *)
+                # Komac reports a package as missing whenever it can't read the
+                # package's manifests, which includes GitHub API errors.
+                if grep --quiet "does not exist in microsoft/winget-pkgs" <<<"${update_output}"; then
+                  report_error "Komac couldn't read ${package_id} from microsoft/winget-pkgs on attempt ${attempt_number} of ${max_attempts}; its error is above. Possible causes:" \
+                    "GitHub returned an error or rate-limited the token. Re-run the job, and check https://www.githubstatus.com if it fails again." \
+                    "The package no longer exists there. Check https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/MetalBear/mirrord."
+                else
+                  exhausted_causes=()
+                  if grep --quiet --fixed-strings "Ref cannot be created" <<<"${update_output}"; then
+                    exhausted_causes+=("GitHub refused to create Komac's branch (Ref cannot be created), whose cause is unconfirmed. Re-run the job later.")
+                  fi
+                  exhausted_causes+=(
+                    "The account that holds WINGET_BOT_TOKEN can't write to ${fork}, or the token lacks the public_repo scope or isn't authorized for the org's SSO. The branch listing succeeded, so GitHub accepts the token for reads. Check the account's access to the fork, and the token's scopes and SSO authorization."
+                    "GitHub had an outage or rate-limited the token. Check https://www.githubstatus.com, then re-run the job."
+                    "GitHub changed something that Komac v${KOMAC_VERSION} relies on. Search Komac's issues for the error."
+                  )
+                  report_error "${failure} Every attempt failed, and the fork has no branch for this version, so no attempt opened a PR. Possible causes:" \
+                    "${exhausted_causes[@]}"
+                fi
+                ;;
+            esac
+            exit 1
+          fi
+
+          # In CI Komac exits 0 without a PR when a PR titled with this package
+          # and version already exists in any state, as on a re-run.
+          if grep --quiet --extended-regexp "${created_pr_pattern}" <<<"${update_output}"; then
+            echo "Successfully updated WinGet manifest"
+          else
+            echo "::warning::Komac created no pull request, most likely because one for ${package_id} ${MIRRORD_VERSION} already exists (open, merged or closed). Check ${pr_search_url}; if it was closed without merging, submit the version by hand as CONTRIBUTING.md (WinGet) describes."
+          fi
+
+          # Removes the fork's branches whose PRs were merged, so the fork
+          # doesn't keep one branch per release. Best effort, since the
+          # submission is already done.
+          "${komac}" cleanup --only-merged --all || echo "::warning::komac cleanup failed; the fork keeps its merged branches until a later release removes them."
+
+  # The Release run stays green whatever happens in this workflow, so this alert is what
+  # shows a failed submission. It runs outside the `winget` environment, so it can't read
+  # the submission token.
+  notify_failure:
+    name: "Notify #ci-alerts"
+    needs: [validate_version, submit]
+    if: failure()
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 8
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_CI_ALERTS_WEBHOOK_URL: ${{ secrets.SLACK_CI_ALERTS_WEBHOOK_URL }}
+          # Empty when validation failed. The raw input stays out of the alert, because
+          # it can hold any text.
+          VERSION: ${{ needs.validate_version.outputs.version }}
+        shell: bash
+        run: |
+          if [ -z "$SLACK_CI_ALERTS_WEBHOOK_URL" ]; then
+            echo "SLACK_CI_ALERTS_WEBHOOK_URL is not set; cannot notify #ci-alerts."
+            exit 1
+          fi
+
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          text=$(printf '%s\n' \
+            ":rotating_light: *WinGet submission failed for \`$GITHUB_REPOSITORY\`*" \
+            "• *Version:* \`${VERSION:-not validated}\`" \
+            "• *Run:* <$run_url|Open GitHub Actions>")
+          payload=$(jq -Rn --arg text "$text" '{text: $text}')
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-type: application/json' \
+            --data "$payload" \
+            "$SLACK_CI_ALERTS_WEBHOOK_URL"

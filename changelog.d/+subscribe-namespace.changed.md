@@ -1,0 +1,1 @@
+`mirrord subscribe` now streams the events of one namespace by default, with or without `--key`: the one given with `-n/--namespace`, else `target.namespace` from the mirrord config, else the kubeconfig's default namespace. Pass `-A/--all-namespaces` to stream the events of every namespace, as before.

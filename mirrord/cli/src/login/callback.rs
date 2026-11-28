@@ -30,9 +30,10 @@ use crate::login::LoginError;
 
 /// Loopback callback server for `mirrord login`, used to deliver the grant back to the CLI.
 ///
-/// Exposes one GET endpoint at [`Self::CALLBACK_PATH`],
-/// expecting `grant` and `state` query params.
-/// Every request is redirected to the login page, see the module docs.
+/// Exposes one GET endpoint at [`Self::CALLBACK_PATH`], expecting `grant` and `state` query
+/// params, or `error` and `state` when the login was refused upstream, so the CLI stops waiting
+/// instead of running into its timeout. Every request is redirected to the login page, see the
+/// module docs.
 pub struct LoginCallbackServer {
     state: CallbackState,
     addr: SocketAddr,
@@ -51,10 +52,10 @@ impl LoginCallbackServer {
             .await
             .map_err(LoginError::LoopbackListen)?;
         let addr = listener.local_addr().map_err(LoginError::LoopbackListen)?;
-        let grant = Arc::new(SetOnce::default());
+        let outcome = Arc::new(SetOnce::default());
         let state = CallbackState {
             state_param: URL_SAFE_NO_PAD.encode(rand::random::<[u8; 16]>()),
-            grant: grant.clone(),
+            outcome: outcome.clone(),
             received_redirect: status_url(login_page, STATUS_RECEIVED),
             invalid_redirect: status_url(login_page, STATUS_INVALID),
         };
@@ -63,8 +64,8 @@ impl LoginCallbackServer {
             .with_state(state.clone());
         let server = axum::serve(listener, router)
             .with_graceful_shutdown(async move {
-                // Once the grant is delivered, we can gracefully shutdown the server.
-                let _ = grant.wait().await;
+                // Once the outcome is delivered, we can gracefully shutdown the server.
+                let _ = outcome.wait().await;
             })
             .into_future()
             .boxed();
@@ -86,13 +87,14 @@ impl LoginCallbackServer {
         &self.state.state_param
     }
 
-    /// Waits until the callback is called, and returns the grant.
+    /// Waits until the callback is called, and returns the grant, or the refusal the browser
+    /// delivered instead.
     ///
     /// This method drives IO of the server.
     pub async fn wait(mut self) -> Result<String, LoginError> {
-        let grant = tokio::select! {
+        let outcome = tokio::select! {
             biased;
-            grant = self.state.grant.wait() => grant,
+            outcome = self.state.outcome.wait() => outcome,
             result = &mut self.server => {
                 let error = result
                     .err()
@@ -100,17 +102,20 @@ impl LoginCallbackServer {
                 return Err(LoginError::LoopbackListen(error));
             },
         };
-        // Grant delivery triggered graceful shutdown of the HTTP server.
+        // Delivery triggered graceful shutdown of the HTTP server.
         // We wait for it to finish, ensuring that the browser can receive the response.
         let _ = self.server.await;
-        Ok(grant.clone())
+        outcome
+            .clone()
+            .map_err(|reason| LoginError::Refused(reason.clone()))
     }
 }
 
 #[derive(Clone)]
 struct CallbackState {
     state_param: String,
-    grant: Arc<SetOnce<String>>,
+    /// The grant, or the reason the login was refused before a grant was issued.
+    outcome: Arc<SetOnce<Result<String, String>>>,
     /// Where the browser is sent after delivering the grant.
     received_redirect: String,
     /// Where the browser is sent after a request without a valid grant or `state`.
@@ -121,6 +126,8 @@ struct CallbackState {
 struct CallbackParams {
     grant: Option<String>,
     state: Option<String>,
+    /// Why the login was refused upstream, when it was: the identity provider's words, relayed.
+    error: Option<String>,
 }
 
 /// `status` query param value telling the login page that the CLI received the grant.
@@ -145,9 +152,18 @@ async fn callback(
         CallbackParams {
             grant: Some(grant),
             state: Some(received_state),
+            ..
         } if received_state == state.state_param => {
-            let _ = state.grant.set(grant);
+            let _ = state.outcome.set(Ok(grant));
             &state.received_redirect
+        }
+        CallbackParams {
+            grant: None,
+            error: Some(reason),
+            state: Some(received_state),
+        } if received_state == state.state_param => {
+            let _ = state.outcome.set(Err(reason));
+            &state.invalid_redirect
         }
         _ => &state.invalid_redirect,
     };
@@ -210,5 +226,38 @@ mod tests {
             .unwrap();
         assert_redirected(&response, STATUS_RECEIVED);
         assert_eq!(callback.await.unwrap(), "valid");
+    }
+
+    /// The identity provider's refusal reaches the CLI through the callback, so `mirrord login`
+    /// fails at once with the provider's words instead of waiting out its timeout.
+    #[tokio::test]
+    async fn relays_a_refusal_with_valid_state() {
+        let callback = LoginCallbackServer::prepare(&LOGIN_PAGE.parse().unwrap())
+            .await
+            .unwrap();
+        let url = callback.url();
+        let state_param = callback.state_param().to_owned();
+        let waiting = tokio::spawn(async move { callback.wait().await });
+        let client = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()
+            .unwrap();
+
+        let response = client
+            .get(&url)
+            .query(&[
+                ("error", "access_denied: not in the mirrord group"),
+                ("state", &state_param),
+            ])
+            .send()
+            .await
+            .unwrap();
+        assert_redirected(&response, STATUS_INVALID);
+
+        let outcome = waiting.await.unwrap();
+        assert!(
+            matches!(&outcome, Err(LoginError::Refused(reason)) if reason.contains("access_denied")),
+            "{outcome:?}"
+        );
     }
 }
