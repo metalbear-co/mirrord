@@ -135,6 +135,7 @@ spec:
 | `exclusive`   | If true, the queue can only be accessed by the current connection and will be deleted when that connection closes |          |          boolean         |  false  |
 | `auto_delete` |                  If true, the queue is deleted automatically when the last consumer unsubscribes                  |          |          boolean         |  false  |
 | `arguments.*` |                                    Custom properties sent in queue declaration                                    |          | object / key-value pairs |         |
+
 {% endstep %}
 
 {% step %}
@@ -216,23 +217,29 @@ The mirrord operator can only read consumer's environment variables if they are 
 {% endstep %}
 {% endstepper %}
 
-## Drain timeout
+## Ending the split
 
-After the last session against a target ends, the operator keeps the split's temporary resources alive for the drain timeout so a new session can reuse them, then tears them down. It does not wait for unread messages to be consumed first.
+When the **last** session on a workload ends, the operator does not remove the split at once. It passes through two windows before it deletes the temporary queues and restarts the workload back onto the original queue:
 
-| Setting                                         | Unit    | Scope     | Effect                              |
-| ----------------------------------------------- | ------- | --------- | ----------------------------------- |
-| `spec.drainTimeout` on the `MirrordSplitConfig` | seconds | One split | Wins over the cluster-wide default. |
+1. **Idle window - `spec.ttl`.** The split stays in place, but the operator stops reading the original queue. New messages wait on the original queue until a session starts again or the split is removed. A session that starts in this window reuses the split with no restart.
+2. **Drain window - limited by `spec.drainTimeout`.** The operator stops forwarding new messages and lets the patched workload read what is already in its temporary queue. The window ends early when that queue is empty.
 
-| `drainTimeout` | Behavior                                                  |
-| -------------- | --------------------------------------------------------- |
-| unset (both)   | Tear down as soon as the last session ends (same as `0`). |
-| `0`            | Tear down immediately. Unread messages may be lost.       |
-| `N`            | Keep resources for up to `N` seconds, then tear down.     |
+Both fields are optional and in seconds, on the `MirrordSplitConfig`:
+
+| Field | Behavior |
+| ----- | -------- |
+| `spec.ttl` | `N`: keep the split in place for up to `N` seconds after the last session ends. `0` or unset: go straight to the drain window. |
+| `spec.drainTimeout` | `N`: wait up to `N` seconds for the patched workload to read its temporary queue. `0`: remove the split at once; unread messages can be lost. Unset: no limit; wait until the queue is empty. |
+
+When the split ends, the operator does not delete the queue that the patched workload reads while it still holds messages. It keeps that queue and reports it in a `Drained` condition on the `MirrordSplitConfig`. If a pod still reads the queue, the operator deletes it after that pod is gone.
+
+{% hint style="warning" %}
+When a session ends, the operator deletes the temporary queue of that session, even when it is the last session. Messages that the local consumer did not read are lost. They do not go back to the deployed consumer.
+{% endhint %}
 
 ## Temporary queue names
 
-By default, temporary queues are named `mirrord-<random>-<hash>` for user queues and `mirrord-main-<random>-<hash>` for the queue the patched workload reads, where `<hash>` is a hash of the original queue name. To use a different format, set `spec.tmpNameTemplate` in the `MirrordSplitConfig`:
+By default, temporary queues are named `mirrord-<random>-<original>` for user queues and `mirrord-main-<random>-<original>` for the queue the patched workload reads, where `<original>` is the name of the original queue. To use a different format, set `spec.tmpNameTemplate` in the `MirrordSplitConfig`:
 
 ```yaml
 spec:
