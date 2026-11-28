@@ -1244,10 +1244,17 @@ where
             }
         }
 
-        // Under a login the branches are created and watched through the operator's
+        // Under a login the branches the operator provisions are created and watched through its
         // `branchdatabases` route (see `login_routes`), which older operators do not serve: their
-        // URL answers a bare 404 for the stored kind, so name the missing feature instead.
-        if self.through_login() {
+        // URL answers a bare 404 for the stored kind, so name the missing feature instead. A
+        // session whose branches are all local (local Redis) or that resolved to none needs no
+        // route.
+        if self.through_login()
+            && layer_config
+                .feature
+                .db_branches
+                .any_provisioned_by_operator()
+        {
             self.operator
                 .spec
                 .require_feature(NewOperatorFeature::DbBranchRoutes)?;
