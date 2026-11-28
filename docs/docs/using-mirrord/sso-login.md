@@ -127,7 +127,7 @@ Logging out removes that login from your machine. If it was the one in use, mirr
 
 ## Logging in from the IDE
 
-The VS Code extension and the IntelliJ plugin run these commands for you, so you can log in, check your logins and log out without a terminal.
+The VS Code extension and the IntelliJ plugin run these commands for you, so you can log in, check your logins, and log out without a terminal.
 
 | To | VS Code (Command Palette) | IntelliJ (mirrord menu in the toolbar) |
 | --- | --- | --- |
