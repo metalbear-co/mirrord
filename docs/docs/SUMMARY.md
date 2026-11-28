@@ -66,6 +66,7 @@
 * [Targeting Pods by Label](using-mirrord/targeting-pods-by-label.md)
 * [Local UI](using-mirrord/local-ui.md)
 * [Subscribing to Events](using-mirrord/subscribe.md)
+* [Logging in with SSO](using-mirrord/sso-login.md)
 
 ## Sharing the Cluster
 
