@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, HashMap, hash_map::Entry},
     convert::Infallible,
+    hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -802,7 +803,17 @@ const CLIENT_BUILD_TIMEOUT: Duration = Duration::from_secs(15);
 /// Builds a kube client for the given context, or for the global default, else the kubeconfig's
 /// current context, when `context` is `None`.
 pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client> {
-    tokio::time::timeout(CLIENT_BUILD_TIMEOUT, build_client(context))
+    client_for(daemon_login().await?, context).await
+}
+
+/// [`client_for_context`] for a login the caller already read, so a caller that keys a cache on
+/// the login builds its client from that same login, even when `mirrord login` or `logout` runs
+/// in between.
+pub(super) async fn client_for(
+    login: Option<OperatorLogin>,
+    context: Option<&str>,
+) -> UiResult<Client> {
+    tokio::time::timeout(CLIENT_BUILD_TIMEOUT, build_client(login, context))
         .await
         .map_err(|_| ApiError::Timeout {
             what: "kube client initialization",
@@ -813,7 +824,9 @@ pub(super) async fn client_for_context(context: Option<&str>) -> UiResult<Client
 /// The default namespace of `context` (see [`kube_config`]), read without building a client, which
 /// would run the auth-exec plugin.
 pub(super) async fn default_namespace(context: Option<&str>) -> UiResult<String> {
-    Ok(kube_config(context).await?.default_namespace)
+    Ok(kube_config(daemon_login().await?, context)
+        .await?
+        .default_namespace)
 }
 
 /// What the daemon calls the context of an operator login in its context list, so the picker shows
@@ -826,10 +839,13 @@ pub(super) fn login_context(login: &OperatorLogin) -> String {
 }
 
 /// What tells two logins apart for the daemon's client cache and its operator watcher: the
-/// operator and the token's expiry, so a `mirrord login` again to the same operator, which mints a
-/// new token, gets a new client instead of the one holding the old token.
+/// operator's full URL and a fingerprint of the token, so a `mirrord login` again to the same
+/// operator, which mints a new token, gets a new client instead of the one holding the old token.
+/// The fingerprint never leaves the process.
 pub(super) fn login_client_key(login: &OperatorLogin) -> String {
-    format!("{}#{}", login_context(login), login.expires_at.timestamp())
+    let mut token = DefaultHasher::new();
+    login.token.expose_secret().hash(&mut token);
+    format!("{LOGIN_CONTEXT_PREFIX}{}#{:x}", login.url, token.finish())
 }
 
 /// `context` as a kubeconfig context: a login context name (see [`login_context`]) is dropped,
@@ -859,8 +875,8 @@ fn accept_invalid_certificates_from_env() -> bool {
 
 /// The kube config of the active operator login, else of `context`, else of the global
 /// `kube_context`, else inferred.
-async fn kube_config(context: Option<&str>) -> UiResult<Config> {
-    if let Some(login) = daemon_login().await? {
+async fn kube_config(login: Option<OperatorLogin>, context: Option<&str>) -> UiResult<Config> {
+    if let Some(login) = login {
         let mut config = login
             .kube_config()
             .map_err(|error| ApiError::InvalidLoginUrl {
@@ -889,8 +905,8 @@ async fn kube_config(context: Option<&str>) -> UiResult<Config> {
     Ok(config)
 }
 
-async fn build_client(context: Option<&str>) -> UiResult<Client> {
-    let mut config = kube_config(context).await?;
+async fn build_client(login: Option<OperatorLogin>, context: Option<&str>) -> UiResult<Client> {
+    let mut config = kube_config(login, context).await?;
     add_baggage_header(&mut config, baggage_from_env().as_deref())
         .map_err(|error| ApiError::InvalidBaggage(error.to_string()))?;
     // Without a client version, the operator returns legacy ports without hit counts.
@@ -1172,6 +1188,7 @@ pub(crate) fn start_operator_watcher(state: AppState) {
             if login_now != client_login {
                 client = None;
                 client_login = login_now;
+                forget_operator(&state).await;
             }
 
             if client.is_none() {
@@ -1244,6 +1261,29 @@ pub(crate) fn start_operator_watcher(state: AppState) {
             }
         }
     });
+}
+
+/// Drops what the watcher learned from the operator it watched before a `mirrord login` or
+/// `logout`, telling the page each session and preview is gone, so the page never shows one
+/// operator's sessions while the daemon reaches another, or cannot reach any.
+async fn forget_operator(state: &AppState) {
+    *state.operator_license.write().await = None;
+    let sessions = reconcile_observed(&mut *state.operator_sessions.write().await, HashMap::new());
+    for change in sessions {
+        if let Change::Removed(id) = change {
+            let _ = state
+                .notify_tx
+                .send(SessionNotification::OperatorSessionRemoved { id });
+        }
+    }
+    let previews = reconcile_observed(&mut *state.operator_previews.write().await, HashMap::new());
+    for change in previews {
+        if let Change::Removed(id) = change {
+            let _ = state
+                .notify_tx
+                .send(SessionNotification::OperatorPreviewRemoved { id });
+        }
+    }
 }
 
 async fn reconcile_operator_sessions(state: &AppState, operator: &MirrordOperatorCrd) {

@@ -53,11 +53,11 @@ use tracing::warn;
 
 use super::{
     AppState, OperatorLicense, OperatorLockedPort, OperatorPreviewSession, OperatorQueueSplits,
-    OperatorSessionOwner, OperatorSessionSummary, OperatorSessionTarget, UiResult,
-    client_for_context, daemon_login, get_session, kill_session, kubeconfig_context, list_sessions,
-    login_client_key, login_context, session_events_sse,
+    OperatorSessionOwner, OperatorSessionSummary, OperatorSessionTarget, UiResult, client_for,
+    daemon_login, get_session, kill_session, kubeconfig_context, list_sessions, login_client_key,
+    login_context, session_events_sse,
 };
-use crate::{data::GlobalConfig, ui::error::ApiError};
+use crate::{data::GlobalConfig, list::namespaces_of_targets_across_cluster, ui::error::ApiError};
 
 mod cloud;
 mod events;
@@ -93,11 +93,14 @@ pub(super) fn v2_router() -> Router<AppState> {
 /// rebuild TLS each time. Callers should [`evict_client`] when a request made with the returned
 /// client fails, so a broken client is rebuilt rather than reused.
 async fn cached_client(state: &AppState, context: Option<&str>) -> UiResult<Client> {
-    let key = client_key(context).await;
+    // Read once, for both the key and the client: an expired or unreadable login is the
+    // request's error, never a reason to hand out a kubeconfig client cached before the login.
+    let login = daemon_login().await?;
+    let key = client_key(login.as_ref(), context).await;
     if let Some(client) = state.clients.read().await.get(&key).cloned() {
         return Ok(client);
     }
-    let client = client_for_context(key.as_deref()).await?;
+    let client = client_for(login, context).await?;
     Ok(state
         .clients
         .write()
@@ -112,20 +115,18 @@ async fn cached_client(state: &AppState, context: Option<&str>) -> UiResult<Clie
 /// go stale for other reasons (a rotated CA, a moved API server, a failing auth-exec plugin), and
 /// rebuilding is the cheap way to recover — the alternative is serving a dead client until restart.
 async fn evict_client(state: &AppState, context: Option<&str>) {
-    state
-        .clients
-        .write()
-        .await
-        .remove(&client_key(context).await);
+    let login = daemon_login().await.ok().flatten();
+    let key = client_key(login.as_ref(), context).await;
+    state.clients.write().await.remove(&key);
 }
 
 /// Keys the client cache by the context a request really uses, so changing the global default
 /// gives later requests a client for the new cluster, and a `mirrord login` or `logout` gives them
 /// a client for what the daemon reaches now. An active login is used whatever the context, as in
 /// the CLI.
-async fn client_key(context: Option<&str>) -> Option<String> {
-    if let Ok(Some(login)) = daemon_login().await {
-        return Some(login_client_key(&login));
+async fn client_key(login: Option<&OperatorLogin>, context: Option<&str>) -> Option<String> {
+    if let Some(login) = login {
+        return Some(login_client_key(login));
     }
     match kubeconfig_context(context) {
         Some(context) => Some(context.to_owned()),
@@ -630,8 +631,13 @@ async fn kube_namespaces(
                 url: login.url.clone(),
                 error: error.to_string(),
             })?;
-        let listed: OperatorNamespaceList = match client.request(request).await {
-            Ok(listed) => listed,
+        let namespaces = match client.request::<OperatorNamespaceList>(request).await {
+            Ok(listed) => listed.names(),
+            // An operator older than the namespace route: the namespaces of the targets the
+            // user may list, the fallback `mirrord ls` uses there too.
+            Err(kube::Error::Api(status)) if status.code == 404 => {
+                namespaces_of_targets_across_cluster(&client, "default").await
+            }
             Err(err) => {
                 evict_client(&state, query.context.as_deref()).await;
                 return Err(ApiError::KubeApi(err));
@@ -639,7 +645,7 @@ async fn kube_namespaces(
         };
         return Ok(axum::Json(NamespacesResponse {
             context: Some(login_context(&login)),
-            namespaces: listed.names(),
+            namespaces,
         }));
     }
     let api: Api<Namespace> = Api::all(client);
@@ -758,15 +764,20 @@ mod tests {
         assert_eq!(kubeconfig_context(None), None);
     }
 
-    /// Logging in again to the same operator mints a new token with a later expiry, which gets a
-    /// new client and a new watcher instead of the cached one holding the old token.
+    /// Logging in again to the same operator mints a new token, which gets a new client and a
+    /// new watcher instead of the cached one holding the old token, even within the same second.
     #[test]
     fn a_new_login_to_the_same_operator_gets_a_new_client() {
-        let first = login();
+        let mut first = login();
+        first.token = "first-secret-token".to_owned().into();
         let mut again = first.clone();
-        again.expires_at = first.expires_at + chrono::Duration::hours(24);
+        again.token = "second-secret-token".to_owned().into();
         assert_ne!(login_client_key(&first), login_client_key(&again));
-        assert!(login_client_key(&first).starts_with(&login_context(&first)));
+        assert_eq!(login_client_key(&first), login_client_key(&first.clone()));
+        assert!(
+            !login_client_key(&first).contains("secret-token"),
+            "the token itself stays out of the key"
+        );
     }
 
     /// The wizard's workload pages tell the user why they are empty under a login and what to
