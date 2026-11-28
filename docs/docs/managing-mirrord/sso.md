@@ -139,6 +139,22 @@ RBAC for SSO users is the same as for any Kubernetes user. See [How do I configu
 
 To grant a group every namespace instead, bind it to the `mirrord-operator-user` ClusterRole, as in the [RBAC examples](security.md#how-do-i-configure-role-based-access-control-for-mirrord-for-teams). Users still need `get` on the workloads they target, the same as without SSO.
 
+A logged-in CLI reaches database branches through the Operator's own API, as `branchdatabases` in the `operator.metalbear.co` group. The chart's user roles grant it from Operator `3.240.0`, next to the same resource in `dbs.mirrord.metalbear.co`. If you bind your own roles instead, give SSO users this rule wherever they create branches:
+
+```yaml
+- apiGroups:
+    - operator.metalbear.co
+  resources:
+    - branchdatabases
+  verbs:
+    - get
+    - list
+    - create
+    - watch
+    - delete
+    - patch
+```
+
 ## Sessions and seats
 
 From Operator `3.236.0`, an SSO login is the same person as a kubeconfig login with the same Kubernetes username, everywhere mirrord names or counts users:
