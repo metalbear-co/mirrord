@@ -31,6 +31,9 @@
   * [Configure AI Agents to Use mirrord](using-mirrord-with-ai/the-meta-prompt.md)
   * [Agent-Started Trials](using-mirrord-with-ai/agent-started-trials.md)
   * [Using mirrord with Cloud Agents](using-mirrord-with-ai/cloud-agents.md)
+  * [Run AI Sandbox Code Against Staging](using-mirrord-with-ai/sandboxes.md)
+    * [Test E2B Sandbox Code Against Staging](using-mirrord-with-ai/e2b.md)
+    * [Test Modal Sandbox Code Against Staging](using-mirrord-with-ai/modal.md)
 
 ## Using mirrord
 
