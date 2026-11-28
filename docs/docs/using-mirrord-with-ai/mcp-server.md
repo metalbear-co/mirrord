@@ -22,7 +22,7 @@ The server works offline, from the docs and schema built into your mirrord binar
 ## What you need
 
 - mirrord CLI `3.273.0` or later, and `3.291.0` or later on Windows for the skills. Check with `mirrord --version`, and see [Install mirrord](../getting-started/install-mirrord.md).
-- An agent that supports MCP servers over stdio, such as Claude Code, Codex, Cursor, VS Code, Windsurf, Claude Desktop, or OpenCode.
+- An agent that supports MCP servers over stdio, such as Claude Code, Codex, Cursor, VS Code, GitHub Copilot, Windsurf, Claude Desktop, or OpenCode.
 
 ## Register the server
 
@@ -73,6 +73,27 @@ To register the server by hand, add the entry under `"servers"` in `.vscode/mcp.
 ```json
 "mirrord": { "type": "stdio", "command": "/absolute/path/to/mirrord", "args": ["mcp"] }
 ```
+
+{% endtab %}
+{% tab title="GitHub Copilot" %}
+
+For Copilot in VS Code, see the VS Code tab.
+
+In Copilot CLI, run:
+
+```sh
+copilot mcp add mirrord -- /absolute/path/to/mirrord mcp
+```
+
+In JetBrains IDEs, Xcode, and Eclipse, open Copilot's MCP configuration ([where to find it in each IDE](https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/extend-copilot-chat-with-mcp)) and add the entry under `"servers"`:
+
+```json
+"mirrord": { "command": "/absolute/path/to/mirrord", "args": ["mcp"] }
+```
+
+The `mirrord` tools show in Copilot Chat's Agent mode.
+
+On Copilot Business and Enterprise plans, Copilot in an IDE or in VS Code uses MCP servers only after an administrator enables the **MCP servers in Copilot** policy.
 
 {% endtab %}
 {% tab title="OpenCode" %}
