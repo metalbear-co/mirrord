@@ -319,3 +319,48 @@ Failures you may hit: a migration with a SQL error (fix the file; a fresh sessio
 Cluster admins can restrict which images are accepted with the per-database `dbPod.allowedImages` list in the operator's Helm values. The list applies to every migration image a user supplies — the `container` flavor's `image`, and any `migrations.image` override on the `flyway` or `liquibase` flavors, whether the migration files are uploaded or baked into the image — the same way it applies to branch database images. A disallowed image fails the migration with a clear error before anything runs.
 
 The flavor defaults are not matched against the list; `dbPod.migrationImages.<tool>.registry` controls where those come from.
+
+## Serving your own migration images
+
+Point the chart at a registry that holds your own build of a default runner, for example one rebuilt on a newer JRE or without drivers you do not use. `migrationImages.<tool>.registry` replaces the repository and keeps the operator's tag, so the operator pulls `<registry>:<tag>`: `4.33` for Liquibase, `13` for Flyway from operator `3.232.0` and `12` on `3.182.0` through `3.231.0`. The [image table](../../managing-mirrord/operator.md#feature-specific-images) lists the current tags. A private registry also needs `imagePullSecrets`:
+
+```yaml
+operator:
+  pgBranchConfig:
+    dbPod:
+      migrationImages:
+        flyway:
+          registry: registry.example.com/flyway
+        liquibase:
+          registry: registry.example.com/liquibase
+      imagePullSecrets:
+        - name: migration-registry-secret
+```
+
+* Set the block under every engine that runs migrations (`pgBranchConfig`, `mysqlBranchConfig`, `mariadbBranchConfig`, `mssqlBranchConfig`, `cockroachdbBranchConfig`). A [profile](../db-branching.md#branch-config-profiles) is a complete `dbPod` of its own, so set it again in each profile that runs migrations.
+* Publish the new tag before upgrading to an operator release that bumps a runner tag, as `3.232.0` did for Flyway. A tag the registry lacks fails every migration on that tool with `ImagePullBackOff`.
+* Pushing a rebuilt image under the same tag does not reach nodes that already hold it under the default `imagePullPolicy: IfNotPresent`. Set `dbPod.imagePullPolicy: Always`, the only cluster-wide option, which also makes every branch database pod pull its image again on each start. Otherwise publish the rebuild under a new tag and select it per branch with `migrations.image`.
+* Keep the upstream layout when you rebuild: Flyway drivers in `/flyway/drivers`, Liquibase jars in `/liquibase/internal/lib`, and the JDBC drivers your dialects need in place. Run `flyway -v` or `liquibase --version` and one migration against the image before publishing it.
+
+A single branch can instead name the full image, any tag, with `migrations.image`. Like every user-supplied image it must pass `dbPod.allowedImages` when the admin set that list:
+
+```json
+{
+  "feature": {
+    "db_branches": [
+      {
+        "type": "pg",
+        "version": "17",
+        "name": "users-database-name",
+        "connection": { "url": "DATABASE_URL" },
+        "migrations": {
+          "flavor": "liquibase",
+          "image": "registry.example.com/liquibase:4.33-patched",
+          "path": "./changelog",
+          "changelog_file": "db.changelog-master.xml"
+        }
+      }
+    ]
+  }
+}
+```
