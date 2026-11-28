@@ -204,6 +204,8 @@ services:
 
 To override the context for every service in a run, use `mirrord up --context minikube`.
 
+While you are logged in to an Operator with `mirrord login --url`, contexts have no effect: see [Running mirrord up](sso-login.md#running-mirrord-up).
+
 #### Context precedence
 
 | common context | service context | `--context` | context used              |
