@@ -10,48 +10,17 @@ tags:
 
 The mirrord Operator is a Kubernetes operator that runs persistently in your cluster and manages mirrord sessions. It's the central component that enables all **\[Teams]** features.
 
-## Why the Operator?
+## How it works
 
 In the open-source version of mirrord, each session is standalone - mirrord injects itself into the local process and creates an agent pod directly. This works well for individual use, but doesn't support coordination between users.
 
-The Operator solves this by acting as a centralized control plane:
-
-- **Better security** - Users no longer need permissions to create privileged pods. Only the Operator does. Permissions are managed through Kubernetes RBAC.
-- **Concurrent use** - The Operator coordinates multiple mirrord sessions on the same cluster, preventing conflicts.
-- **Advanced features** - Support for [policies](../sharing-the-cluster/policies.md), [profiles](../sharing-the-cluster/profiles.md), [queue splitting](../sharing-the-cluster/queue-splitting.md), [DB branching](../sharing-the-cluster/db-branching.md), and more.
+The Operator solves this by acting as a centralized control plane. For what that enables, see [mirrord for Teams](../getting-started/what-is-mirrord.md#mirrord-for-teams).
 
 ![mirrord for Teams - Architecture](../.gitbook/assets/operator-architecture.svg)
 
 ## Installation
 
-To install the Operator, see [Install the Operator](../getting-started/install-the-operator.md).
-
-## Requirements
-
-Before you install the Operator, make sure that your cluster and network meet these requirements.
-
-**Kubernetes version**
-
-The Operator needs Kubernetes `1.22` or later. Some features need a newer version, listed in [Which Kubernetes versions does mirrord support?](../faq/limitations.md#which-kubernetes-versions-does-mirrord-support)
-
-**Permissions**
-
-Installing the Operator creates cluster-scoped objects: CRDs, ClusterRoles, an APIService, and a PriorityClass for agent pods. The user who installs it needs permission to create these objects. In most clusters, this is the `cluster-admin` role.
-
-**Nodes**
-
-- The Operator and agent images are available for `linux/amd64` and `linux/arm64`.
-- The nodes where agents run need Linux kernel 5.4 or later and a containerd, CRI-O, or Docker container runtime. Most features work with older kernels, but traffic stealing can be unreliable before 5.4. An agent for a target runs on the same node as the target pod. A targetless agent can run on any node.
-
-**Network**
-
-- **API server to Operator:** The Kubernetes API server sends mirrord requests to the Operator through the APIService. The API server must be able to reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke).
-- **Operator to MetalBear:** A cloud-connected Operator sends HTTPS requests to `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Team and Free licenses require telemetry. If the Operator cannot reach the telemetry endpoint for more than one hour, new sessions are blocked. For Enterprise licenses, telemetry is optional. For more details, see [Licensing](licensing.md). If your cluster cannot send outbound traffic, you need an Enterprise license certificate (`license.pem`). Give it to the Operator directly (see [Air-gapped / offline clusters](#air-gapped-offline-clusters-enterprise)), or install it in an [Enterprise License Server](license-server.md) that your Operators connect to.
-- **Image pulls:** Your nodes pull the mirrord images from `ghcr.io/metalbear-co`. Some features use other public images, for example the database images for DB branching. If your nodes cannot reach these registries, see [Using an Internal Registry](#using-an-internal-registry-optional).
-
-**Resources**
-
-The Operator runs as one pod by default. Agents run only while sessions use them. For the default CPU and memory values, see [Scalability](scalability.md).
+To install the Operator and check its requirements, see [Install the Operator](../getting-started/install-the-operator.md).
 
 ## Rotating the cloud API key
 
@@ -63,74 +32,17 @@ Developers can log in to the Operator with your OIDC identity provider at a publ
 
 ## Air-gapped / offline clusters (Enterprise)
 
-Air-gapped or offline clusters can't reach the cloud to exchange an API key for a license, so Enterprise deployments in that situation use an offline **license certificate** instead. First add the Helm repository and download `values.yaml`, as in [Get the chart](../getting-started/install-the-operator.md#get-the-chart). Then, instead of a cloud API key, give the chart your certificate. If you have a `license.pem` file, set `license.file.secret.data.license.pem` in `values.yaml` using a YAML literal block:
-
-```yaml
-license:
-  file:
-    secret:
-      data:
-        license.pem: |
-          -----BEGIN CERTIFICATE-----
-          <contents of your license.pem file>
-          -----END CERTIFICATE-----
-```
-
-Alternatively, reference a Kubernetes secret via `license.pemRef` in `values.yaml`:
-
-```yaml
-license:
-  pemRef: mirrord-operator-license-pem
-```
-
-This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-
-kubectl create secret generic mirrord-operator-license-pem \
-  --namespace mirrord \
-  --from-file=license.pem=/path/to/license.pem
-```
-
-The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
-
-For a fully self-hosted setup, see the [license server](license-server.md).
+See [Air-gapped Clusters](air-gapped.md).
 
 ## License key
+
+If you run your own [License Server](license-server.md), the license key is the shared secret your Operators use to authenticate to it. See [Connecting Operators to the License Server](license-server.md#connecting-operators-to-the-license-server).
 
 {% hint style="warning" %}
 **⚠️ Deprecated for cloud authentication**
 
 For clusters that reach the mirrord cloud, the license key is being replaced by the [cloud API key](../getting-started/install-the-operator.md#cloud-api-key), which is now the default way the Operator authenticates and obtains its license. Existing cloud license-key installations keep working, but new ones should use a cloud API key.
-
-This does not apply to the [license server](license-server.md): if you run your own license server, the license key is still the shared secret the Operator uses to authenticate to it (a value you choose, not a mirrord-issued credential) and remains required.
 {% endhint %}
-
-Set `license.key` to your key, then install:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-```
-
-Alternatively, reference a Kubernetes secret via `license.keyRef` in `values.yaml`:
-
-```yaml
-license:
-  keyRef: mirrord-operator-license
-```
-
-This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it:
-
-```bash
-helm install -f values.yaml mirrord-operator metalbear/mirrord-operator
-
-kubectl create secret generic mirrord-operator-license \
-  --namespace mirrord \
-  --from-literal=OPERATOR_LICENSE_KEY=<your license key>
-```
-
-The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
 
 ## Using an Internal Registry (Optional)
 
@@ -177,11 +89,7 @@ DB branch pods pull a database image matching the engine. These are the defaults
 | CockroachDB | `docker.io/cockroachdb/cockroach:{version}`        | `operator.cockroachdbBranchConfig` - `dbPod.image` |
 | Spanner     | `gcr.io/cloud-spanner-emulator/emulator:{version}` | `operator.spannerBranchConfig` - `dbPod.image`     |
 
-[Generic branches](../sharing-the-cluster/db-branching/generic.md) have no default image - the user supplies the full image reference per branch. Admins can restrict which images are allowed with the `allowedImages` glob list under `operator.genericBranchConfig` - `dbPod.allowedImages` (when absent, all images are allowed), and `imagePullSecrets` in the same config covers private registries.
-
-### DB branching migration Job environment
-
-Container-flavor migration Jobs inherit the target container's `env` and `envFrom` by default, with the declared connection variables redirected to the branch. `dbPod.migrationEnv` on every `<db>BranchConfig` controls this: `inherit: false` opts out, and `env`/`envFrom` add admin-supplied values in plain Kubernetes shapes (so `valueFrom`/`secretRef` keep secret values in-cluster). See [Schema Migrations](../sharing-the-cluster/db-branching/migrations.md#admin-control-over-the-jobs-environment) for the full behavior and precedence.
+[Generic branches](../sharing-the-cluster/db-branching/generic.md) have no default image - the user supplies the full image reference per branch. To limit which images users can run, or to pull from a private registry, see [Restricting Branch Images](../sharing-the-cluster/db-branching.md#restricting-branch-images) and [Custom Branch Image](../sharing-the-cluster/db-branching.md#custom-branch-image).
 
 ### Copying images
 

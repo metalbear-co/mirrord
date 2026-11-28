@@ -26,7 +26,7 @@ dashboard:
 2. Upgrade the license server:
 ```bash 
 helm repo update metalbear
-helm upgrade mirrord-operator-license-server metalbear/mirrord-license-server -f ./values.yaml --wait
+helm upgrade mirrord-operator-license-server metalbear/mirrord-operator-license-server -f ./values.yaml --wait
 ```
 3. Via `kubectl port-forward`: Forward the dashboard port to your local machine:
 ```bash

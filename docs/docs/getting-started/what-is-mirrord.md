@@ -41,6 +41,7 @@ mirrord's core functionality is free and open source. Individual developers can 
 [mirrord for Teams](https://metalbear.com/mirrord/pricing/) is the paid offering, available as the **Team** and **Enterprise** plans. Both add the **mirrord Operator** - a Kubernetes operator that runs in your cluster and acts as a centralized control plane. It enables:
 
 * **Concurrent usage** - Multiple developers can work on the same cluster without conflicts
+* **Better security** - Developers don't need permissions to create privileged pods, only the Operator does. Access is managed through Kubernetes RBAC
 * **Traffic filtering** - Route only specific HTTP requests to your local process using header, path, or method filters
 * **Queue splitting** - Split message queue traffic so each developer gets their own messages
 * **DB branching** - Ephemeral database branches per developer session
@@ -56,7 +57,7 @@ On top of everything in the Team plan, the Enterprise plan adds:
 * **Preview Environments** - Deploy isolated, ephemeral pods in the cluster for async review and QA
 * **mirrord for CI** - Run integration and end-to-end tests against a shared staging cluster without spinning up a dedicated test environment
 * **Multi-cluster** - Intercept traffic across multiple clusters in a single mirrord session
-* **Air-gapped operation** - Run the [License Server](../managing-mirrord/license-server.md) on-prem to manage seats without sending telemetry to MetalBear
+* **Air-gapped operation** - Run mirrord in clusters with no internet access, using a license certificate or an on-prem [License Server](../managing-mirrord/license-server.md). See [Air-gapped Clusters](../managing-mirrord/air-gapped.md).
 * **High availability** - Run the Operator in HA mode
 * **Operator-hosted sessions-manager** - Run the sessions-manager for [workloads outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md) inside the Operator on your cluster, with access managed by Kubernetes RBAC (alpha)
 * **Premium support**

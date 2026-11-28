@@ -12,14 +12,14 @@ weight: 540
 toc: true
 tags:
   - enterprise
-description: "Run your own mirrord license server to manage seats with no data sent to MetalBear, including in air-gapped clusters."
+description: "Run your own mirrord license server to manage seats without the mirrord cloud, including in air-gapped clusters."
 ---
 
 # License Server
 
-The license server enables you to manage your organization’s seats without sending any data to mirrord’s servers. It can aggregate license metrics from multiple operators (useful if you’re running mirrord across multiple clusters) and provides visibility into seat usage across your organization.
+The license server enables you to manage your organization’s seats without the mirrord cloud. It can aggregate license metrics from multiple operators (useful if you’re running mirrord across multiple clusters) and provides visibility into seat usage across your organization.
 
-The license server also lets you run mirrord in air-gapped clusters, because the operator gets its license without contacting MetalBear. See [Can mirrord run air-gapped?](security.md#can-mirrord-run-air-gapped).
+The license server also lets you run mirrord in [air-gapped clusters](air-gapped.md), because the operator gets its license from it.
 
 {% hint style="info" %}
 This feature is available to users on the Enterprise pricing plan.
@@ -70,7 +70,7 @@ _NOTE: The license server needs to be accessible to any mirrord operators you wa
 Next, install the license server on your cluster:
 
 ```bash
-helm install metalbear/mirrord-operator-license-server -f ./values.yaml --wait
+helm install mirrord-operator-license-server metalbear/mirrord-operator-license-server -f ./values.yaml --wait
 ```
 
 To make sure it's been installed successfully and is running:
@@ -146,11 +146,34 @@ license:
 
 _NOTE: The server value must contain the protocol and the prefix for any ingress that the the license server can be behind._
 
+If the Operator goes in the same namespace as the license server (`mirrord` by default), also set `createNamespace: false`. The license server release already created that namespace, and Helm can't adopt it into a second release.
+
 Then run:
 
 ```bash
-helm install metalbear/mirrord-operator -f ./values.yaml --wait
+helm install mirrord-operator metalbear/mirrord-operator -f ./values.yaml --wait
 ```
+
+Alternatively, reference a Kubernetes secret via `license.keyRef` instead of `license.key`:
+
+```yaml
+# ./values.yaml
+license:
+  keyRef: mirrord-operator-license
+  licenseServer: http://<license-server-addr>
+```
+
+This only points the chart at a secret name, it doesn't require the secret to exist yet. Install the chart first (this also creates the `mirrord` namespace), then create the secret in it, with the same key you set on the License Server:
+
+```bash
+helm install mirrord-operator metalbear/mirrord-operator -f ./values.yaml
+
+kubectl create secret generic mirrord-operator-license \
+  --namespace mirrord \
+  --from-literal=OPERATOR_LICENSE_KEY=<your license key>
+```
+
+The Operator pod will wait until the secret exists and start automatically once it's created, no restart needed. If you create the secret before installing instead, make sure the `mirrord` namespace already exists and is Helm-managed, otherwise `helm install` will fail to adopt it.
 
 ## Getting a Utilisation Report from the License Server
 

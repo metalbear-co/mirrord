@@ -17,18 +17,19 @@ There are two ways to install it:
 - **[Default install](#default-install):** one command, `mirrord operator install`, with the chart's default settings. Use it unless one of the Helm cases below applies.
 - **[Custom install with Helm](#custom-install-with-helm):** if your platform team manages cluster software with Helm or GitOps, or you need to change a default. For example, your nodes can't pull images from `ghcr.io` (see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional)), you want a namespace other than `mirrord`, or you run OpenShift or GKE Autopilot.
 
-If your cluster is isolated from the internet and external networks, for example for security or compliance, see [Air-gapped / offline clusters](../managing-mirrord/operator.md#air-gapped-offline-clusters-enterprise) (Enterprise only).
+If your cluster is isolated from the internet and external networks, for example for security or compliance, see [Air-gapped Clusters](../managing-mirrord/air-gapped.md) (Enterprise only).
 
 ## Requirements
 
 - A mirrord for Teams license (Team or Enterprise) or a 7-day trial. To start the trial, sign up at [app.metalbear.com](https://app.metalbear.com), or run the [default install](#default-install) and sign up on the login page it opens.
 - Kubernetes `1.22` or later. Some features need a newer version, listed in [Which Kubernetes versions does mirrord support?](../faq/limitations.md#which-kubernetes-versions-does-mirrord-support)
-- Permission to create cluster-scoped objects, such as CRDs, ClusterRoles, and an APIService. In most clusters, that's the `cluster-admin` role. You need it only to install: the Operator itself runs with its own, narrower role (see [What can the Operator access in my cluster?](../managing-mirrord/security.md#what-can-the-operator-access-in-my-cluster)).
-- Nodes running `linux/amd64` or `linux/arm64`, with Linux kernel 5.4 or later and a containerd, CRI-O, or Docker runtime.
+- Permission to create cluster-scoped objects: CRDs, ClusterRoles, an APIService, and a PriorityClass for agent pods. In most clusters, that's the `cluster-admin` role. You need it only to install: the Operator itself runs with its own, narrower role (see [What can the Operator access in my cluster?](../managing-mirrord/security.md#what-can-the-operator-access-in-my-cluster)).
+- Nodes running `linux/amd64` or `linux/arm64`. Nodes where agents run need Linux kernel 5.4 or later and a containerd, CRI-O, or Docker runtime. Most features work with older kernels, but traffic stealing can be unreliable before 5.4. An agent for a target runs on the same node as the target pod. A targetless agent can run on any node.
 - The Kubernetes API server can reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke).
+- The Operator can send HTTPS requests to `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Whether telemetry is required depends on your license, see [What data does the mirrord Operator send to MetalBear cloud?](../managing-mirrord/security.md#what-data-does-the-mirrord-operator-send-to-metalbear-cloud).
 - Your nodes can pull the mirrord images from `ghcr.io/metalbear-co`. Some features pull other public images, such as the database images for DB branching. If your nodes can't reach these registries, see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional).
 
-For details on each requirement, see [Requirements](../managing-mirrord/operator.md#requirements) on the Operator page.
+The Operator runs as one pod by default, and agents run only while sessions use them. For the default CPU and memory values, see [Scalability](../managing-mirrord/scalability.md).
 
 {% hint style="warning" %}
 **Security:** the Operator runs inside your cluster and sends MetalBear only license checks and usage metrics. The metrics are anonymized unless identity sharing is on for your organization's API key. In a single cluster, developers can only use mirrord on workloads their own Kubernetes access already lets them see. Before you install, read [What can the Operator access in my cluster?](../managing-mirrord/security.md#what-can-the-operator-access-in-my-cluster), or share it with your security team.
