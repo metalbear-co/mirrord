@@ -62,13 +62,15 @@ A [MetalBear Cloud](beyond-kubernetes/metalbear-cloud.md) config selects Cloud w
 
 Profiles work as before: the Operator reads the `MirrordClusterProfile` or `MirrordProfile` your config names on your behalf, because only the Operator's own API is reachable through its URL. That needs an Operator of version `3.239.0` or later; with an older one, a profile fails with ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator <version>.``
 
+Database branches work the same way: the Operator creates, watches, lists and deletes the branches your session and `mirrord db-branches status` and `destroy` ask for, through its own API, once RBAC allows it for your SSO user. That needs mirrord `3.293.0` and an Operator of version `3.240.0` or later; with an older Operator, they fail with ``Feature `database branches served by the operator API` is not supported in mirrord operator <version>.`` `mirrord db-branches connections` reads local files only and works with any Operator.
+
 If the Operator's license drops below Enterprise while you are logged in, the next command fails with the same message every paid feature gives, naming SSO and the Enterprise plan. Log out, or wait for the admin to restore the license.
 
 Because only the Operator's API is reachable, mirrord does not read the target workload itself: the Operator resolves it, the way it does for a multi-cluster session. Two things follow from that. The `auto_mount` option is skipped with a warning, since it reads the pod spec locally, and Kafka branching is not available while logged in. A config without a namespace runs in the `default` namespace, not in the kubeconfig's.
 
 A running session keeps its connection when the login expires, but it cannot reconnect after a network cut once the login has expired: it stops with the expiry message, and you log in again before the next run.
 
-`mirrord db-branches status`, `mirrord db-branches destroy` and `mirrord vpn` are not served through the Operator's URL yet, whether or not you have a kubeconfig. While you are logged in, `status` and `destroy` end with `No active DB branch found` even when branches exist, because the branch resources are not reachable, and `vpn` fails with a not-found error. Log out of each Operator first, then run them with your kubeconfig. `mirrord db-branches connections` reads local files only and keeps working.
+`mirrord vpn` is not served through the Operator's URL yet, whether or not you have a kubeconfig: while you are logged in it fails with a not-found error. Log out of each Operator first, then run it with your kubeconfig.
 
 ### Picking a target
 
@@ -143,6 +145,7 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | `operator: false can't be used while logged in to ...` | Your config turns the Operator off while a login is in use. | Run `mirrord logout --url` with that URL, or drop `operator: false`. |
 | `Feature sso requires a mirrord Enterprise plan.` while running | The Operator's license dropped below Enterprise after you logged in. | Ask your admin about the license, or log out and use your kubeconfig. |
 | ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
+| ``Feature `database branches served by the operator API` is not supported in mirrord operator ...`` | Your config names `db_branches`, or you ran `mirrord db-branches`, and the Operator predates branch databases over its URL. | Ask your admin to upgrade the Operator to `3.240.0` or later, or log out and use your kubeconfig. |
 | The IDE's namespace picker offers only the current namespace | Your roles predate the chart version that grants `list` on `namespaces` in the Operator's API group. | Ask your admin to upgrade the chart release to `3.239.0` or later. Until then, set the namespace in the config or with `mirrord ls -n`. |
 | `the login token was not issued by this operator or has expired` before the time `mirrord whoami` shows | The Operator stopped accepting your token, for example after its client secret was rotated. `mirrord login --url` alone reuses the saved token while it has not expired. | Run `mirrord logout --url <operator-url>`, then `mirrord login --url <operator-url>`. |
 | A command fails with `403` after a login | You are logged in, but RBAC grants your user or groups nothing in that namespace. | Ask your admin to bind your group, see [Granting a group access](../managing-mirrord/sso.md#granting-a-group-access-to-a-namespace). |
