@@ -16,19 +16,20 @@ use mirrord_config::config::EnvKey;
 use mirrord_operator::{client::UpSession, crd::session::UpSessionInfo};
 use mirrord_up::{
     InitError, ReadyTracker, SERVICE_NAME_ENV, ServiceMode, UpConfig, UpError, UpListing,
-    load_up_config, run_wizard,
+    WorkloadSource, load_up_config, run_wizard,
 };
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
     config::{UI_DEFAULT_PORT, UiCommonArgs, UpArgs, UpListFormat, UpSubcommand},
-    data::{GlobalConfig, UserData},
+    data::{AuthStore, GlobalConfig, UserData},
     error::CliError,
     ui::ui_command,
 };
 
 pub(crate) mod checks;
+mod login;
 
 use checks::{NoOperator, Unservable};
 
@@ -174,6 +175,22 @@ pub enum UpCliError {
 
     #[error("failed to write the `mirrord up list` JSON output")]
     ListOutput(#[source] serde_json::Error),
+
+    /// The selected operator login can't be used (expired, or the login store is unreadable), or
+    /// its client can't be built. Shown as `mirrord exec` would show it, with the command to fix
+    /// it.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Login(Box<CliError>),
+
+    /// A service's config can't run under the selected operator login, e.g. it sets
+    /// `operator: false`. Found before any service starts, prefixed with the service.
+    #[error("{service}: {error}")]
+    #[diagnostic(forward(error))]
+    ServiceUnderLogin {
+        service: Arc<str>,
+        error: Box<CliError>,
+    },
 }
 
 /// The `mirrord up` command handler.
@@ -226,9 +243,10 @@ fn load_config(args: &UpArgs, key: &EnvKey) -> Result<UpConfig, UpCliError> {
 /// `mirrord up list`: prints every service as `mirrord up` would run it, for people or, with
 /// `--format json`, for IDE extensions.
 ///
-/// Stays offline: it reads the up file and the global config, and touches no cluster. The kube
-/// context falls back on the global config's, as a run's does, so each listed context is the one
-/// the run would use.
+/// Stays offline: it reads the up file, the global config and the login store, and touches no
+/// cluster. The kube context falls back on the global config's, as a run's does, so each listed
+/// context is the one the run would use. Under an operator login, the operator is listed instead,
+/// since a run uses no kube context then.
 async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliError> {
     let key = session_key(args.key.clone())?;
     let mut up_config = load_config(args, &key)?;
@@ -237,7 +255,12 @@ async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliE
         up_config.override_mode(mode).map_err(UpError::from)?;
     }
 
-    let listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
+    let mut listing = UpListing::new(&up_config, &args.config_file, &key, args.context.clone())?;
+    // An expired or unreadable login is reported by the run itself; the listing shows what it
+    // can rather than failing the IDE's refresh.
+    if let Ok(Some(login)) = AuthStore::active_operator_login().await {
+        listing = listing.through_operator_login(login.host());
+    }
     match format {
         UpListFormat::Pretty => print!("{}", listing.render()),
         UpListFormat::Json => {
@@ -251,10 +274,29 @@ async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliE
 async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
     let key = session_key(args.key.clone())?;
     let mut up_config = load_config(&args, &key)?;
-
-    up_config.default_context(GlobalConfig::load().await.kube_context().map(Arc::from));
-
+    // Before anything else can fail, so `common.telemetry: false` holds for every failure after
+    // the config is read.
     analytics.enabled = up_config.telemetry_enabled();
+
+    // Read once, before anything is looked up or started: an expired login stops the run here
+    // with one message, instead of once per service.
+    let login = AuthStore::active_operator_login()
+        .await
+        .map_err(|error| UpCliError::Login(Box::new(error.into())))?;
+    let (login, source) = match login {
+        Some(login) => match login::workload_source(&up_config, &login).await? {
+            Some(source) => (Some(login), source),
+            None => (None, WorkloadSource::Kubeconfig),
+        },
+        None => (None, WorkloadSource::Kubeconfig),
+    };
+
+    let global = GlobalConfig::load().await;
+    // A global `kube_context` is a default the login makes meaningless, as in `mirrord exec`, so
+    // it is not applied under a login and nothing warns about it.
+    if login.is_none() {
+        up_config.default_context(global.kube_context().map(Arc::from));
+    }
 
     (&up_config).collect_analytics(analytics.get_mut());
     analytics
@@ -286,8 +328,20 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
 
     let ready = ReadyTracker::default();
 
-    analytics.get_mut().add("ui_enabled", !args.no_ui);
-    if !args.no_ui {
+    let start_ui = match &login {
+        // The local UI reads the cluster through the kubeconfig, which the login replaces.
+        Some(login) if !args.no_ui => {
+            println!(
+                "The local UI is not started while logged in to {}, since it reads the \
+                 kubeconfig.",
+                login.host()
+            );
+            false
+        }
+        _ => !args.no_ui,
+    };
+    analytics.get_mut().add("ui_enabled", start_ui);
+    if start_ui {
         tokio::spawn(async move {
             match ui_command(
                 UiCommonArgs {
@@ -319,8 +373,14 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
         args.context,
         &key,
         interactive,
+        &source,
     )
     .await?;
+    if let Some(login) = &login {
+        for warning in login::fit_services_to_login(&mut services, login, global.operator())? {
+            println!("{warning}");
+        }
+    }
     let mut operators = checks::usable_operators(&services).await?;
     checks::check_queue_splits(&services, &operators)?;
     let requesting = checks::check_db_branches(&mut services, &mut operators).await?;
@@ -438,14 +498,17 @@ impl From<&UpCliError> for ErrorCategory {
             | UpCliError::ModeCopyModeUnsupported { .. }
             | UpCliError::BranchCopyModeConflict { .. }
             | UpCliError::ModeCopyModeNotAllowed { .. } => Self::DbBranching,
-            UpCliError::ModeQueuesNoOperator { .. } | UpCliError::ModeQueuesUnsupported { .. } => {
-                Self::ConfigValidation
-            }
+            UpCliError::ModeQueuesNoOperator { .. }
+            | UpCliError::ModeQueuesUnsupported { .. }
+            | UpCliError::Login(_)
+            | UpCliError::ServiceUnderLogin { .. } => Self::ConfigValidation,
             UpCliError::Up(UpError::PreCommandFailed { .. })
             | UpCliError::Up(UpError::PreCommandSpawn { .. }) => Self::PreCommandFailed,
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
             | UpCliError::Up(UpError::Kube(_))
+            | UpCliError::Up(UpError::OperatorTargets { .. })
+            | UpCliError::Up(UpError::OperatorTargetsForbidden { .. })
             | UpCliError::Up(UpError::Inquire(_))
             | UpCliError::Up(UpError::Exited)
             | UpCliError::Up(UpError::NoWorkloads(_))

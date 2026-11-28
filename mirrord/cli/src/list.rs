@@ -291,27 +291,26 @@ async fn targets_through_operator(
     let listed = Api::<TargetCrd>::namespaced(client.clone(), namespace)
         .list(&ListParams::default())
         .await;
-    let targets = tolerate_forbidden_namespace(listed, rich_output, namespace)
-        .map_err(list_failed)?
-        .into_iter()
-        .filter_map(|crd| crd.spec.target.as_known().ok().cloned())
-        .filter(|target| {
-            let wanted_type = match target_types {
-                Some(types) => types.contains(&TargetType::from(target)),
-                None => true,
-            };
-            // The rich listing is the IDE's picker, which offers these three kinds only.
-            let rich_kind = matches!(
-                target,
-                Target::Deployment(_) | Target::Rollout(_) | Target::Pod(_)
-            );
-            wanted_type && (rich_output.not() || rich_kind)
-        })
-        .map(|target| FoundTarget {
-            path: target.to_string(),
-            available: true,
-        })
-        .collect();
+    let targets = known_targets(
+        tolerate_forbidden_namespace(listed, rich_output, namespace).map_err(list_failed)?,
+    )
+    .filter(|target| {
+        let wanted_type = match target_types {
+            Some(types) => types.contains(&TargetType::from(target)),
+            None => true,
+        };
+        // The rich listing is the IDE's picker, which offers these three kinds only.
+        let rich_kind = matches!(
+            target,
+            Target::Deployment(_) | Target::Rollout(_) | Target::Pod(_)
+        );
+        wanted_type && (rich_output.not() || rich_kind)
+    })
+    .map(|target| FoundTarget {
+        path: target.to_string(),
+        available: true,
+    })
+    .collect();
 
     let namespaces = match namespace_source {
         None => Vec::new(),
@@ -326,6 +325,13 @@ async fn targets_through_operator(
     };
 
     Ok((targets, namespaces))
+}
+
+/// The targets of `crds`, the operator's listing, that this CLI knows how to target. A target kind
+/// added by a newer operator is left out rather than failing the listing.
+pub(crate) fn known_targets(crds: Vec<TargetCrd>) -> impl Iterator<Item = Target> {
+    crds.into_iter()
+        .filter_map(|crd| crd.spec.target.as_known().ok().cloned())
 }
 
 /// In the rich listing, a `403` on the current namespace yields no targets instead of failing the
@@ -354,7 +360,10 @@ fn tolerate_forbidden_namespace(
 /// The namespaces the operator says this user may list targets in. On failure, the current
 /// namespace alone: a `403` means the user's role lacks `list` on `namespaces` in the operator's
 /// API group, which the chart's user roles grant from the version that serves the route.
-async fn namespaces_through_operator_route(client: &kube::Client, namespace: &str) -> Vec<String> {
+pub(crate) async fn namespaces_through_operator_route(
+    client: &kube::Client,
+    namespace: &str,
+) -> Vec<String> {
     let request = http::Request::get(namespaces_api_path()).body(Vec::new());
     let listed = match request {
         Ok(request) => client

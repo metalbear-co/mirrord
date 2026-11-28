@@ -58,13 +58,16 @@ use uuid::Uuid;
 use yamlpatch::{Op, Patch, apply_yaml_patches};
 use yamlpath::{Document, route};
 
-use crate::kube_context::UpKubeContext;
+pub use workloads::{OperatorTargets, WorkloadSource};
+
+use crate::{kube_context::UpKubeContext, workloads::Lister};
 
 mod config;
 mod init;
 mod kube_context;
 mod list;
 mod process;
+mod workloads;
 
 /// Shared slot that [`launch`] fills with what the child sessions report while starting: the
 /// time it took for **all** of them to become ready, measured from process spawn, and the
@@ -242,6 +245,36 @@ pub enum UpError {
         service: Arc<str>,
         /// Namespace the workload was looked up in.
         namespace: String,
+    },
+
+    /// The operator login may not list targets in the namespace a service's workload is looked
+    /// up in.
+    #[error("your login to {host} may not list targets in namespace \"{namespace}\"")]
+    #[diagnostic(help(
+        "Ask your mirrord admin for `list` on `targets` in the `operator.metalbear.co` API group \
+         in namespace \"{namespace}\", or set `target.path` for the service in mirrord-up.yaml."
+    ))]
+    OperatorTargetsForbidden {
+        /// The operator the login is to.
+        host: String,
+        /// Namespace the targets were listed in.
+        namespace: String,
+    },
+
+    /// Listing targets through the operator login failed for another reason than permissions.
+    #[error("failed to list targets in namespace \"{namespace}\" through your login to {host}")]
+    #[diagnostic(help(
+        "The cause is shown above. To run the service without looking its workload up, set \
+         `target.path` for it in mirrord-up.yaml."
+    ))]
+    OperatorTargets {
+        /// The operator the login is to.
+        host: String,
+        /// Namespace the targets were listed in.
+        namespace: String,
+        /// The failed request.
+        #[source]
+        source: Box<kube::Error>,
     },
 
     /// The only namespace that the user can pick has no workload that the user can list.
@@ -512,13 +545,15 @@ enum Resolution {
 /// When no workload matches, [`Resolution::Prompt`] has a wizard let the user
 /// pick a different namespace and workload, or exit. Otherwise that fails.
 ///
-/// If the user has specified a kube context via `--context`, `config.services.*.context` or
-/// `config.common.context`, use this to resolve targets.
+/// With [`WorkloadSource::Kubeconfig`], the kube context the user specified via `--context`,
+/// `config.services.*.context` or `config.common.context` picks the cluster to look in. With
+/// [`WorkloadSource::Operator`], the operator lists the targets and contexts are not used.
 async fn resolve_unresolved_workloads(
     up_config: &UpConfig,
     config_path: &Path,
     up_context: UpKubeContext,
     resolution: Resolution,
+    source: &WorkloadSource,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -533,21 +568,28 @@ async fn resolve_unresolved_workloads(
 
     let mut map = HashMap::new();
     for unresolved_target in unresolved {
-        let kube_context = up_context
-            .clone()
-            .get_context(unresolved_target.kube_context.clone());
-        let client = match clients.entry(kube_context.clone()) {
-            Entry::Occupied(client) => client.into_mut(),
-            Entry::Vacant(vacant_entry) => {
-                // create the client we need and add it to the HashMap
-                let kube_config = create_kube_config(
-                    up_config.common.accept_invalid_certificates,
-                    None::<&str>,
-                    kube_context.as_deref().map(Into::into),
-                )
-                .await?;
-                let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
-                vacant_entry.insert(client)
+        let (lister, kube_context) = match source {
+            WorkloadSource::Operator(targets) => (Lister::Operator(targets.as_ref()), None),
+            WorkloadSource::Kubeconfig => {
+                let kube_context = up_context
+                    .clone()
+                    .get_context(unresolved_target.kube_context.clone());
+                let client = match clients.entry(kube_context.clone()) {
+                    Entry::Occupied(client) => client.into_mut(),
+                    Entry::Vacant(vacant_entry) => {
+                        // create the client we need and add it to the HashMap
+                        let kube_config = create_kube_config(
+                            up_config.common.accept_invalid_certificates,
+                            None::<&str>,
+                            kube_context.as_deref().map(Into::into),
+                        )
+                        .await?;
+                        let client =
+                            kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+                        vacant_entry.insert(client)
+                    }
+                };
+                (Lister::Kube(client), kube_context)
             }
         };
 
@@ -555,10 +597,20 @@ async fn resolve_unresolved_workloads(
         let namespace = unresolved_target
             .namespace
             .as_deref()
-            .unwrap_or(client.default_namespace());
+            .unwrap_or(lister.default_namespace());
 
-        let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
-        let resolved = match find_by_name(&workloads, name) {
+        let listing = lister.workloads(namespace, &INFERRED_TARGET_TYPES).await;
+        // In a terminal, a namespace the login may not list goes straight to the wizard, which
+        // offers the others; without one, the refusal ends the run with the permission it names.
+        let workloads = if resolution == Resolution::Prompt {
+            skip_forbidden_namespace(listing, true)?
+        } else {
+            Some(listing?)
+        };
+        let found = workloads
+            .as_deref()
+            .and_then(|workloads| find_by_name(workloads, name));
+        let resolved = match found {
             Some(path) => {
                 if resolution != Resolution::Quiet {
                     println!("{name}: using {path}");
@@ -577,13 +629,16 @@ async fn resolve_unresolved_workloads(
                 });
             }
             None => {
-                println!(
-                    "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
-                    kube_context
-                        .map(|context| format!(" using context \"{context}\""))
-                        .unwrap_or_default()
-                );
-                prompt_for_target(client, name, config_path).await?
+                // A skipped namespace has said why already.
+                if workloads.is_some() {
+                    println!(
+                        "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
+                        kube_context
+                            .map(|context| format!(" using context \"{context}\""))
+                            .unwrap_or_default()
+                    );
+                }
+                prompt_for_target(lister, name, config_path).await?
             }
         };
 
@@ -656,6 +711,23 @@ async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> 
     }
 }
 
+/// Skips a namespace the operator login may not list targets in when `another_namespace` can be
+/// picked: says why and returns `None`, so the wizard moves on, the way a kind the user may not
+/// list counts as empty through the kubeconfig ([`list_workloads`]). With no other namespace, the
+/// refusal stays the error, since it names the permission to ask for. Other failures stay errors.
+fn skip_forbidden_namespace(
+    listing: Result<Vec<String>, UpError>,
+    another_namespace: bool,
+) -> Result<Option<Vec<String>>, UpError> {
+    match listing {
+        Err(error @ UpError::OperatorTargetsForbidden { .. }) if another_namespace => {
+            println!("{error}.");
+            Ok(None)
+        }
+        listing => listing.map(Some),
+    }
+}
+
 /// First path in `workloads` whose workload name matches `name` (paths look
 /// like `kind/name[/container/c]`, so the name is the second segment).
 fn find_by_name<'w>(workloads: &'w [String], name: &str) -> Option<&'w str> {
@@ -687,7 +759,7 @@ async fn prompt<T: Send + 'static>(
 /// `config_path` (as `services.<service_name>.target`), so the next run uses it
 /// directly without asking again.
 async fn prompt_for_target(
-    client: &kube::Client,
+    lister: Lister<'_>,
     service_name: &str,
     config_path: &Path,
 ) -> Result<ResolvedTarget, UpError> {
@@ -701,9 +773,9 @@ async fn prompt_for_target(
         return Err(UpError::Exited);
     }
 
-    let namespaces = list_namespaces(client).await?;
+    let namespaces = lister.namespaces().await?;
     let PickedTarget::Workload { target, namespace } =
-        pick_workload(client, &namespaces, &INFERRED_TARGET_TYPES, false).await?
+        pick_workload(lister, &namespaces, &INFERRED_TARGET_TYPES, false).await?
     else {
         unreachable!("targetless is not offered");
     };
@@ -741,7 +813,7 @@ enum PickedTarget {
 /// target needs no workload, so the workload prompt still offers it, together
 /// with picking another namespace when there is one.
 async fn pick_workload(
-    client: &kube::Client,
+    lister: Lister<'_>,
     namespaces: &[String],
     kinds: &[TargetType],
     targetless: bool,
@@ -751,7 +823,7 @@ async fn pick_workload(
 
     let starting_cursor = namespaces
         .iter()
-        .position(|namespace| namespace == client.default_namespace())
+        .position(|namespace| namespace == lister.default_namespace())
         .unwrap_or_default();
     let can_pick_another = namespaces.len() > 1;
 
@@ -766,7 +838,9 @@ async fn pick_workload(
             .await?
         };
 
-        let mut options = list_workloads(client, &namespace, kinds).await?;
+        let mut options =
+            skip_forbidden_namespace(lister.workloads(&namespace, kinds).await, can_pick_another)?
+                .unwrap_or_default();
         if options.is_empty() {
             if targetless.not() && can_pick_another.not() {
                 return Err(UpError::NoWorkloads(namespace));
@@ -873,12 +947,14 @@ fn save_target(
 ///
 /// A service with no `target.path` and no workload named after it gets a wizard to pick its
 /// target when `interactive` is set, and fails with [`UpError::NoInferredTarget`] otherwise.
+/// `source` says where those workloads are looked up.
 pub async fn resolve_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
     interactive: bool,
+    source: &WorkloadSource,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
     let invocation_directory = std::env::current_dir()?;
     let config_directory = config_directory(config_path)?;
@@ -906,9 +982,14 @@ pub async fn resolve_services(
     } else {
         Resolution::Fail
     };
-    let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), resolution)
-            .await?;
+    let mut resolved_targets = resolve_unresolved_workloads(
+        &up_config,
+        config_path,
+        up_context.clone(),
+        resolution,
+        source,
+    )
+    .await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -944,6 +1025,8 @@ pub async fn resolve_preview_services(
         config_path,
         up_context.clone(),
         Resolution::Quiet,
+        // `mirrord preview` does not run through an operator login yet.
+        &WorkloadSource::Kubeconfig,
     )
     .await?;
 

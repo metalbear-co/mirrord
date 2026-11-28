@@ -38,6 +38,7 @@ use crate::{
     PickedTarget, UpError,
     config::{CommonConfig, ServiceConfig, ServiceMode, UpConfig},
     list_namespaces, list_workloads, pick_workload, prompt,
+    workloads::Lister,
 };
 
 mod modes;
@@ -229,7 +230,7 @@ async fn prompt_target(
     existing: &[PickedService],
 ) -> Result<(String, PickedTarget), InitError> {
     let picked = pick_workload(
-        &cluster.client,
+        Lister::Kube(&cluster.client),
         &cluster.namespaces,
         mode.target_kinds(),
         mode.allows_targetless(),
