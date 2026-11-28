@@ -4,7 +4,7 @@ use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::{
-    client::error::OperatorApiError,
+    client::error::{OperatorApiError, OperatorOperation},
     crd::{
         MirrordOperatorCrd, MirrordOperatorSpec, NewOperatorFeature, OPERATOR_STATUS_NAME,
         db_branching::{
@@ -320,23 +320,36 @@ fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
 
 /// Whether the commands read the unified `BranchDatabase` kind rather than the per-engine kinds
 /// of older operators, decided from the operator's status (see [`unified_kind`]).
+///
+/// Under a login an operator whose status cannot be read is an error: the listing would answer
+/// with a 404 too, which reads as "no branches".
 async fn reads_unified_kind(client: &kube::Client, through_login: bool) -> CliResult<bool> {
     let api: Api<MirrordOperatorCrd> = Api::all(client.clone());
-    let operator = api.get(OPERATOR_STATUS_NAME).await.ok();
+    let operator = match api.get(OPERATOR_STATUS_NAME).await {
+        Ok(operator) => Some(operator),
+        Err(error) if through_login => {
+            return Err(OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::FindingOperator,
+            }
+            .into());
+        }
+        Err(_) => None,
+    };
     Ok(unified_kind(
         through_login,
         operator.as_ref().map(|operator| &operator.spec),
     )?)
 }
 
-/// See [`reads_unified_kind`]. `operator` is `None` when its status could not be read.
+/// See [`reads_unified_kind`]. `operator` is `None` when its status could not be read, which
+/// under a login the caller has already reported.
 ///
 /// With a kubeconfig the unified kind is read when the operator advertises it, and an operator
 /// that cannot be read is taken for an older one. Under a login the branches are reachable only
 /// through the operator's `branchdatabases` route, which serves the unified kind: an operator
 /// that does not advertise the route is an error naming it, since its URL would answer every
-/// listing with a 404 that reads as "no branches". One whose status cannot be read is asked
-/// anyway, so the listing reports the refusal itself.
+/// listing with a 404 that reads as "no branches".
 fn unified_kind(
     through_login: bool,
     operator: Option<&MirrordOperatorSpec>,
@@ -695,7 +708,6 @@ mod tests {
             NewOperatorFeature::DbBranchRoutes,
         ]);
         assert!(unified_kind(true, Some(&with_route)).unwrap());
-        assert!(unified_kind(true, None).unwrap());
     }
 
     /// With a kubeconfig nothing changes: the unified kind when the operator advertises it, the

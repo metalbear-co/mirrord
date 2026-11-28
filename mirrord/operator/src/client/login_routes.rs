@@ -82,8 +82,9 @@ fn operator_route_uri(uri: &Uri) -> Option<Uri> {
     Uri::from_parts(parts).ok()
 }
 
-/// The operator route for a path of the stored [`BranchDatabase`] kind (collection, one object
-/// or a subresource, in a namespace or across every namespace), `None` for any other path.
+/// The operator route for a path of the stored [`BranchDatabase`] kind (the collection or one
+/// object, in a namespace or across every namespace), `None` for any other path. The operator
+/// serves no subresource there, so a subresource path is left alone.
 ///
 /// The stored group is resolved like the branch code resolves it, so a keyed copy of the operator
 /// on staging and its CLI agree on it.
@@ -97,20 +98,20 @@ pub fn operator_route_path(path: &str) -> Option<String> {
     let plural = BranchDatabase::plural(&());
 
     let segments = rest.split('/').collect::<Vec<_>>();
-    let (namespace, after_plural) = match segments.as_slice() {
-        [resource, after @ ..] if *resource == plural => (None, after),
-        ["namespaces", namespace, resource, after @ ..] if *resource == plural => {
-            (Some(*namespace), after)
+    let (namespace, name) = match segments.as_slice() {
+        [resource] if *resource == plural => (None, None),
+        ["namespaces", namespace, resource] if *resource == plural => (Some(*namespace), None),
+        ["namespaces", namespace, resource, name] if *resource == plural => {
+            (Some(*namespace), Some(*name))
         }
         _ => return None,
     };
 
-    let mut route = branch_databases_api_path(namespace);
-    for segment in after_plural {
-        route.push('/');
-        route.push_str(segment);
-    }
-    Some(route)
+    let collection = branch_databases_api_path(namespace);
+    Some(match name {
+        Some(name) => format!("{collection}/{name}"),
+        None => collection,
+    })
 }
 
 #[cfg(test)]
@@ -146,11 +147,13 @@ mod tests {
         );
     }
 
-    /// Only the branch kind moves: the per-engine kinds of older operators, other groups and the
-    /// operator's own routes are left as they are, so nothing else changes destination.
+    /// Only the branch kind's collections and objects move: subresources the operator does not
+    /// serve, the per-engine kinds of older operators, other groups and the operator's own routes
+    /// are left as they are, so nothing else changes destination.
     #[test]
     fn other_paths_are_left_alone() {
         for path in [
+            stored("namespaces/team/branchdatabases/pg-x7f3/status"),
             stored("namespaces/team/pgbranchdatabases"),
             stored("namespaces/team/branchdatabasesx"),
             "/apis/operator.metalbear.co/v1/namespaces/team/branchdatabases".to_owned(),
