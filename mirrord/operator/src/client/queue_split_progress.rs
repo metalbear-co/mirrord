@@ -192,6 +192,8 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
     /// Warns once per held task queue and task kind on this session's `splits`. The hold stops
     /// tasks for this session too, and the operator log is the only other place that says so.
     /// `listed` are all the splits the view returned, which name the queue the hold waits on.
+    /// Like every report here this runs only while the session starts; a hold that begins
+    /// later shows in `mirrord queues status` on demand.
     fn warn_held_queues(&mut self, listed: &[QueueSplit], splits: &[&QueueSplit]) {
         for (key, warning) in held_queue_warnings(&self.session, listed, splits) {
             if self.warned_held.insert(key) {
@@ -215,8 +217,9 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
 }
 
 /// Warnings due for the held queues of `splits`, keyed so the caller prints each hold once.
-/// A multi-cluster session has one split per cluster and each reports the same hold, so the
-/// key folds them into one warning.
+/// A multi-cluster session has one split per cluster, each holding its own buffers; when two
+/// clusters hold the same task queue and task kind, the key folds them into one warning, which
+/// names one cluster's full queue.
 fn held_queue_warnings(
     session: &str,
     listed: &[QueueSplit],

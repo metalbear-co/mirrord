@@ -89,10 +89,10 @@ pub struct QueueSplitStatus {
     /// Temporary broker resources mirrord created for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tmp_queues: Vec<QueueSplitTmpQueue>,
-    /// Original queues the operator has stopped reading for now, and what each waits on.
-    /// Only Temporal reports these: one entry per task queue and task kind whose polls are
-    /// paused because a virtual task queue's buffer is full. Older operators never send the
-    /// field.
+    /// Original queues the operator has stopped reading for now, and what each waits on: one
+    /// entry per Temporal task queue and task kind whose polls the operator paused because a
+    /// virtual task queue's buffer is full. Other brokers never have one, and an operator
+    /// that does not report holds never sends the field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub held_queues: Vec<QueueSplitHeldQueue>,
 }
@@ -190,8 +190,9 @@ mod held_queues_wire_format {
     use super::*;
 
     /// Released operators serve statuses without `heldQueues`, and released CLIs read statuses
-    /// that carry it: a status without the field parses to an empty list, the field round-trips
-    /// in camelCase, and an empty list is left out so an older CLI sees the status it knows.
+    /// that carry it (the view has no `deny_unknown_fields`): a status without the field parses
+    /// to an empty list, the field round-trips in camelCase, and an empty list is left out like
+    /// the other list fields.
     #[test]
     fn status_without_held_queues_parses_and_empty_list_is_not_sent() {
         let old = serde_json::json!({ "phase": "Ready" });
