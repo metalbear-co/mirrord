@@ -264,8 +264,8 @@ pub enum UpError {
     /// Listing targets through the operator login failed for another reason than permissions.
     #[error("failed to list targets in namespace \"{namespace}\" through your login to {host}")]
     #[diagnostic(help(
-        "Check that {host} is reachable and `mirrord whoami` shows a valid login, or set \
-         `target.path` for the service in mirrord-up.yaml."
+        "The cause is shown above. To run the service without looking its workload up, set \
+         `target.path` for it in mirrord-up.yaml."
     ))]
     OperatorTargets {
         /// The operator the login is to.
@@ -599,8 +599,18 @@ async fn resolve_unresolved_workloads(
             .as_deref()
             .unwrap_or(lister.default_namespace());
 
-        let workloads = lister.workloads(namespace, &INFERRED_TARGET_TYPES).await?;
-        let resolved = match find_by_name(&workloads, name) {
+        let listing = lister.workloads(namespace, &INFERRED_TARGET_TYPES).await;
+        // In a terminal, a namespace the login may not list goes straight to the wizard, which
+        // offers the others; without one, the refusal ends the run with the permission it names.
+        let workloads = if resolution == Resolution::Prompt {
+            skip_forbidden_namespace(listing, true)?
+        } else {
+            Some(listing?)
+        };
+        let found = workloads
+            .as_deref()
+            .and_then(|workloads| find_by_name(workloads, name));
+        let resolved = match found {
             Some(path) => {
                 if resolution != Resolution::Quiet {
                     println!("{name}: using {path}");
@@ -619,12 +629,15 @@ async fn resolve_unresolved_workloads(
                 });
             }
             None => {
-                println!(
-                    "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
-                    kube_context
-                        .map(|context| format!(" using context \"{context}\""))
-                        .unwrap_or_default()
-                );
+                // A skipped namespace has said why already.
+                if workloads.is_some() {
+                    println!(
+                        "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
+                        kube_context
+                            .map(|context| format!(" using context \"{context}\""))
+                            .unwrap_or_default()
+                    );
+                }
                 prompt_for_target(lister, name, config_path).await?
             }
         };
@@ -695,6 +708,23 @@ async fn list_namespaces(client: &kube::Client) -> Result<Vec<String>, UpError> 
             Ok(vec![namespace])
         }
         Err(error) => Err(KubeApiError::KubeError(error).into()),
+    }
+}
+
+/// Skips a namespace the operator login may not list targets in when `another_namespace` can be
+/// picked: says why and returns `None`, so the wizard moves on, the way a kind the user may not
+/// list counts as empty through the kubeconfig ([`list_workloads`]). With no other namespace, the
+/// refusal stays the error, since it names the permission to ask for. Other failures stay errors.
+fn skip_forbidden_namespace(
+    listing: Result<Vec<String>, UpError>,
+    another_namespace: bool,
+) -> Result<Option<Vec<String>>, UpError> {
+    match listing {
+        Err(error @ UpError::OperatorTargetsForbidden { .. }) if another_namespace => {
+            println!("{error}.");
+            Ok(None)
+        }
+        listing => listing.map(Some),
     }
 }
 
@@ -808,7 +838,9 @@ async fn pick_workload(
             .await?
         };
 
-        let mut options = lister.workloads(&namespace, kinds).await?;
+        let mut options =
+            skip_forbidden_namespace(lister.workloads(&namespace, kinds).await, can_pick_another)?
+                .unwrap_or_default();
         if options.is_empty() {
             if targetless.not() && can_pick_another.not() {
                 return Err(UpError::NoWorkloads(namespace));

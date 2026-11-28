@@ -9,7 +9,7 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use futures::future::BoxFuture;
 use kube::{Api, api::ListParams};
-use mirrord_config::target::Target;
+use mirrord_config::{config::ConfigContext, target::Target};
 use mirrord_operator::{
     client::{OperatorAccess, check_config_under_login, check_operator_enabled_under_login},
     crd::TargetCrd,
@@ -76,7 +76,9 @@ pub(super) async fn workload_source(
     login: &OperatorLogin,
 ) -> Result<Option<WorkloadSource>, UpCliError> {
     let config = up_config
-        .common_layer_config()
+        // The context the services' configs are assembled with, so the client reads the same
+        // environment they do.
+        .common_layer_config(&mut ConfigContext::default())
         .map_err(UpError::Validation)?;
     let (client, access) = kube_client_and_access_from_layer_config(&config)
         .await
@@ -163,10 +165,9 @@ mod tests {
         .expect("assemble the services")
     }
 
-    /// Before, every service's session printed its own `kube_context is ignored` line, once per
-    /// service: `mirrord up` copied the context into each config. Now the run prints each warning
-    /// once, the sessions get no context or kubeconfig to warn about, and the operator is required
-    /// so the checks before launch don't pass a service on without it.
+    /// Under a login, each ignored setting gets one warning for the whole run: the sessions get
+    /// no context or kubeconfig to warn about again, and the operator is required, so the checks
+    /// before launch don't pass a service on without it.
     #[tokio::test]
     async fn the_context_warning_is_returned_once_and_the_contexts_are_cleared() {
         let mut services = assemble(

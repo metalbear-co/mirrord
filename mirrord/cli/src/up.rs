@@ -274,6 +274,9 @@ async fn list_services(args: &UpArgs, format: UpListFormat) -> Result<(), UpCliE
 async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), UpCliError> {
     let key = session_key(args.key.clone())?;
     let mut up_config = load_config(&args, &key)?;
+    // Before anything else can fail, so `common.telemetry: false` holds for every failure after
+    // the config is read.
+    analytics.enabled = up_config.telemetry_enabled();
 
     // Read once, before anything is looked up or started: an expired login stops the run here
     // with one message, instead of once per service.
@@ -294,8 +297,6 @@ async fn run_up(args: UpArgs, analytics: &mut AnalyticsReporter) -> Result<(), U
     if login.is_none() {
         up_config.default_context(global.kube_context().map(Arc::from));
     }
-
-    analytics.enabled = up_config.telemetry_enabled();
 
     (&up_config).collect_analytics(analytics.get_mut());
     analytics

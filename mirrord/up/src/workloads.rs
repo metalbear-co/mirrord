@@ -103,10 +103,12 @@ mod tests {
         Target::from_str(path).expect("a valid target path")
     }
 
-    /// An operator that lists `targets` in every namespace and records which namespaces it was
-    /// asked about.
+    /// An operator that lists `targets` in every namespace, or refuses every listing when
+    /// `forbidden`, and records which namespaces it was asked about.
+    #[derive(Default)]
     struct FakeOperator {
         targets: Vec<Target>,
+        forbidden: bool,
         asked: Mutex<Vec<String>>,
     }
 
@@ -123,7 +125,15 @@ mod tests {
                 .lock()
                 .expect("not poisoned")
                 .push(namespace.to_owned());
-            futures::future::ready(Ok(self.targets.clone())).boxed()
+            let listing = if self.forbidden {
+                Err(UpError::OperatorTargetsForbidden {
+                    host: "mirrord.corp.example.com".to_owned(),
+                    namespace: namespace.to_owned(),
+                })
+            } else {
+                Ok(self.targets.clone())
+            };
+            futures::future::ready(listing).boxed()
         }
 
         fn namespaces(&self) -> BoxFuture<'_, Vec<String>> {
@@ -187,7 +197,7 @@ mod tests {
     fn a_service_without_a_target_gets_the_operator_listed_workload() {
         let operator = Arc::new(FakeOperator {
             targets: vec![target("pod/api-7d9f"), target("deployment/api")],
-            asked: Mutex::default(),
+            ..Default::default()
         });
 
         let services = resolve(
@@ -219,7 +229,7 @@ mod tests {
     fn a_missing_target_without_a_terminal_still_fails() {
         let operator = Arc::new(FakeOperator {
             targets: vec![target("deployment/other")],
-            asked: Mutex::default(),
+            ..Default::default()
         });
 
         let Err(error) = resolve(
@@ -241,5 +251,63 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    /// Without a terminal, as an IDE runs it, a namespace the login may not list targets in
+    /// fails the run with the permission to ask for, not as a missing workload, and the terminal's
+    /// skipping never applies.
+    #[test]
+    fn a_forbidden_listing_without_a_terminal_names_the_permission() {
+        let operator = Arc::new(FakeOperator {
+            forbidden: true,
+            ..Default::default()
+        });
+
+        let Err(error) = resolve(
+            r#"
+            services:
+              api:
+                run: { command: [echo] }
+            "#,
+            operator,
+        ) else {
+            panic!("the listing is forbidden, so the lookup fails");
+        };
+
+        assert!(
+            matches!(&error, UpError::OperatorTargetsForbidden { namespace, .. } if namespace == "default"),
+            "{error:?}"
+        );
+    }
+
+    /// The decision the terminal lookup and the wizard both use (their prompts need a terminal,
+    /// so this tests the decision alone): a forbidden namespace is skipped when another can be
+    /// picked, and stays the error naming the permission when it is the only one. Any other
+    /// failure stops the run either way.
+    #[test]
+    fn a_forbidden_namespace_is_skipped_only_when_another_can_be_picked() {
+        let forbidden = || {
+            Err(UpError::OperatorTargetsForbidden {
+                host: "mirrord.corp.example.com".to_owned(),
+                namespace: "payments".to_owned(),
+            })
+        };
+        assert_eq!(
+            crate::skip_forbidden_namespace(forbidden(), true).unwrap(),
+            None
+        );
+        assert!(matches!(
+            crate::skip_forbidden_namespace(forbidden(), false),
+            Err(UpError::OperatorTargetsForbidden { .. })
+        ));
+
+        let listed = Ok(vec!["deployment/api".to_owned()]);
+        assert_eq!(
+            crate::skip_forbidden_namespace(listed, true).unwrap(),
+            Some(vec!["deployment/api".to_owned()])
+        );
+
+        let other = Err(UpError::NoWorkloads("payments".to_owned()));
+        assert!(crate::skip_forbidden_namespace(other, true).is_err());
     }
 }

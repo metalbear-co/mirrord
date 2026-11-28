@@ -34,8 +34,19 @@ const TOKEN: &str = "e2e-login-token";
 /// login's client defaults to.
 const TARGETS_PATH: &str = "/apis/operator.metalbear.co/v1/namespaces/default/targets";
 
-/// Each request a fake operator got: its path and `Authorization` header.
-type Requests = Arc<Mutex<Vec<(String, Option<String>)>>>;
+/// The OpenTelemetry baggage every run sets through the `BAGGAGE` environment variable, which the
+/// services' sessions read and the operator login's client must read too.
+const BAGGAGE: &str = "mirrord-session=up-login-test";
+
+/// What a fake operator records of one request.
+#[derive(Debug)]
+struct Recorded {
+    path: String,
+    authorization: Option<String>,
+    baggage: Option<String>,
+}
+
+type Requests = Arc<Mutex<Vec<Recorded>>>;
 
 /// How a fake operator answers the target listing.
 #[derive(Clone, Copy)]
@@ -56,13 +67,19 @@ async fn fake_operator(targets: Targets) -> (String, Requests, tokio::task::Join
     let router = Router::new().fallback(move |request: Request| {
         let recorded = recorded.clone();
         async move {
-            let authorization = request
-                .headers()
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned);
+            let header = |name: &str| {
+                request
+                    .headers()
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned)
+            };
             let path = request.uri().path().to_owned();
-            recorded.lock().unwrap().push((path.clone(), authorization));
+            recorded.lock().unwrap().push(Recorded {
+                path: path.clone(),
+                authorization: header("authorization"),
+                baggage: header("baggage"),
+            });
             match targets {
                 Targets::Forbidden if path == TARGETS_PATH => forbidden(),
                 _ => Json(json!({"apiVersion": "v1", "kind": "List", "metadata": {}, "items": []}))
@@ -127,8 +144,8 @@ fn save_login(home: &Path, url: &str, expires_in: TimeDelta) {
 }
 
 /// Runs `mirrord up` on the missing-target up file with `home` as the home directory and a
-/// kubeconfig that does not exist, without a terminal, as an IDE runs it. The local UI is left on,
-/// so a run under a login shows that it skips it.
+/// kubeconfig that does not exist, without a terminal, as an IDE runs it, with [`BAGGAGE`] in its
+/// environment. The local UI is left on, so a run under a login shows that it skips it.
 async fn up_without_a_kubeconfig(home: &Path) -> Output {
     let mut command = resolve_tokio_command(env!("CARGO_BIN_EXE_mirrord"));
     command
@@ -139,6 +156,7 @@ async fn up_without_a_kubeconfig(home: &Path) -> Output {
         .env("USERPROFILE", home)
         .env("KUBECONFIG", home.join("no-such-kubeconfig"))
         .env("MIRRORD_PROGRESS_MODE", "off")
+        .env("BAGGAGE", BAGGAGE)
         .env_remove("MIRRORD_KUBECONFIG")
         .env_remove("MIRRORD_CI_API_KEY")
         .args(["up", "-f", MISSING_TARGET])
@@ -151,10 +169,10 @@ async fn up_without_a_kubeconfig(home: &Path) -> Output {
         .unwrap()
 }
 
-/// Before, `mirrord up` looked a service's workload up in the cluster through the kubeconfig,
-/// even under a login, so with no kubeconfig it failed with `failed to query the cluster`. Now it
-/// asks the login's operator for the targets the user may list, with the login's token, and
-/// reports the missing workload as it would through a kubeconfig.
+/// Under a login, `mirrord up` asks the login's operator for the targets the user may list, with
+/// the login's token and the settings it takes from the environment as the services do (here the
+/// `BAGGAGE` header), and never opens a kubeconfig: with none on the machine it reports the
+/// missing workload as it would through a kubeconfig, not `failed to query the cluster`.
 #[tokio::test]
 async fn up_under_a_login_looks_workloads_up_through_the_operator() {
     let home = tempfile::tempdir().unwrap();
@@ -185,16 +203,16 @@ async fn up_under_a_login_looks_workloads_up_through_the_operator() {
 
     let requests = requests.lock().unwrap();
     assert!(
-        requests
-            .iter()
-            .any(|(path, authorization)| path == TARGETS_PATH
-                && authorization.as_deref() == Some(&format!("Bearer {TOKEN}"))),
-        "the targets must be listed through the operator with the login's token: {requests:?}"
+        requests.iter().any(|request| request.path == TARGETS_PATH
+            && request.authorization.as_deref() == Some(&format!("Bearer {TOKEN}"))
+            && request.baggage.as_deref() == Some(BAGGAGE)),
+        "the targets must be listed through the operator with the login's token and the \
+         environment's baggage: {requests:?}"
     );
     assert!(
         requests
             .iter()
-            .all(|(path, _)| path.starts_with("/apis/operator.metalbear.co/")),
+            .all(|request| request.path.starts_with("/apis/operator.metalbear.co/")),
         "only the operator's API group answers a login: {requests:?}"
     );
 }
@@ -221,7 +239,7 @@ async fn up_under_an_expired_login_stops_before_any_request() {
         .lock()
         .unwrap()
         .iter()
-        .map(|(path, _)| Value::String(path.clone()))
+        .map(|request| Value::String(request.path.clone()))
         .collect();
     assert!(
         requests.is_empty(),

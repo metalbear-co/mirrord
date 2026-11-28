@@ -1601,10 +1601,14 @@ impl UpConfig {
 
     /// The mirrord config every service starts from, before its own settings: what a client
     /// shared by all services (e.g. the operator login's) is built from, so it honors
-    /// `common.accept_invalid_certificates` and `common.baggage`.
-    pub fn common_layer_config(&self) -> Result<LayerConfig, ConfigError> {
-        self.common
-            .base_config(&mut ConfigContext::default().strict_env(true))
+    /// `common.accept_invalid_certificates`, `common.baggage` and what `context` takes from the
+    /// environment (`MIRRORD_ACCEPT_INVALID_CERTIFICATES`, `BAGGAGE`), as the services' configs
+    /// do when [`crate::resolve_services`] assembles them.
+    pub fn common_layer_config(
+        &self,
+        context: &mut ConfigContext,
+    ) -> Result<LayerConfig, ConfigError> {
+        self.common.base_config(context)
     }
 
     /// Verifies the config without touching the cluster, similar to
