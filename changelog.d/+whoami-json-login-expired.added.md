@@ -1,1 +1,1 @@
-Added whoami JSON output and an expired-login error code.
+Added `mirrord whoami -o json` and an expired-login error code.
