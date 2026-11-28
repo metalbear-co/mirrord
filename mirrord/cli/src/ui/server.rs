@@ -31,11 +31,12 @@ use kube::{
 use mirrord_config::target::{Target, TargetDisplay};
 use mirrord_intproxy::session_monitor::MonitorEvent;
 use mirrord_operator::{
-    client::{add_baggage_header, operator_installed},
+    client::{active_operator_login, add_baggage_header, operator_installed},
     crd::{
         MirrordOperatorCrd, OPERATOR_STATUS_NAME, PreviewSessionInfo, Session, SessionHttpFilter,
         preview::PreviewSessionPhase,
     },
+    sso::OperatorLogin,
     types::MIRRORD_CLI_VERSION_HEADER,
 };
 use mirrord_session_monitor_client::{
@@ -748,6 +749,21 @@ async fn auth_token(State(state): State<AppState>) -> axum::Json<TokenResponse> 
 }
 
 async fn current_user() -> axum::Json<CurrentUserResponse> {
+    match daemon_login().await {
+        Ok(Some(login)) => {
+            return axum::Json(CurrentUserResponse {
+                k8s_username: Some(login.username),
+                error: None,
+            });
+        }
+        Ok(None) => {}
+        Err(err) => {
+            return axum::Json(CurrentUserResponse {
+                k8s_username: None,
+                error: Some(err.to_string()),
+            });
+        }
+    }
     let client = match client_for_context(None).await {
         Ok(client) => client,
         Err(err) => {
@@ -800,10 +816,49 @@ pub(super) async fn default_namespace(context: Option<&str>) -> UiResult<String>
     Ok(kube_config(context).await?.default_namespace)
 }
 
-/// The kube config of `context`, else of the global `kube_context`, else inferred.
+/// What the daemon calls the context of an operator login in its context list, so the picker shows
+/// which operator it reaches; `<prefix><host>`.
+pub(super) const LOGIN_CONTEXT_PREFIX: &str = "mirrord login: ";
+
+/// The context name of `login` (see [`LOGIN_CONTEXT_PREFIX`]).
+pub(super) fn login_context(login: &OperatorLogin) -> String {
+    format!("{LOGIN_CONTEXT_PREFIX}{}", login.host())
+}
+
+/// What tells two logins apart for the daemon's client cache and its operator watcher: the
+/// operator and the token's expiry, so a `mirrord login` again to the same operator, which mints a
+/// new token, gets a new client instead of the one holding the old token.
+pub(super) fn login_client_key(login: &OperatorLogin) -> String {
+    format!("{}#{}", login_context(login), login.expires_at.timestamp())
+}
+
+/// `context` as a kubeconfig context: a login context name (see [`login_context`]) is dropped,
+/// since the page keeps sending the one it loaded after a `mirrord logout`, and no kubeconfig
+/// holds it, so the request goes to the default context instead of failing.
+pub(super) fn kubeconfig_context(context: Option<&str>) -> Option<&str> {
+    context.filter(|context| !context.starts_with(LOGIN_CONTEXT_PREFIX))
+}
+
+/// The operator login the daemon reaches the cluster through, read again on every call, since
+/// the daemon outlives `mirrord login` and `mirrord logout`. Like the CLI, an active login wins
+/// over the kubeconfig and any context, and an expired one is an error naming the login command.
+pub(super) async fn daemon_login() -> UiResult<Option<OperatorLogin>> {
+    Ok(active_operator_login().await?)
+}
+
+/// The kube config of the active operator login, else of `context`, else of the global
+/// `kube_context`, else inferred.
 async fn kube_config(context: Option<&str>) -> UiResult<Config> {
+    if let Some(login) = daemon_login().await? {
+        return login
+            .kube_config()
+            .map_err(|error| ApiError::InvalidLoginUrl {
+                url: login.url.clone(),
+                error: error.to_string(),
+            });
+    }
     let global_context = GlobalConfig::fresh_kube_context().await;
-    let config = match context.or(global_context.as_deref()) {
+    let config = match kubeconfig_context(context).or(global_context.as_deref()) {
         Some(context) => {
             let options = KubeConfigOptions {
                 context: Some(context.to_owned()),
@@ -1089,9 +1144,22 @@ pub(crate) fn start_operator_watcher(state: AppState) {
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut client = None;
+        // The login the client was built for: a `mirrord login` or `logout` since then makes the
+        // daemon watch the operator it now reaches, not the one it started with.
+        let mut client_login = None;
 
         loop {
             interval.tick().await;
+
+            let login_now = daemon_login()
+                .await
+                .ok()
+                .flatten()
+                .map(|login| login_client_key(&login));
+            if login_now != client_login {
+                client = None;
+                client_login = login_now;
+            }
 
             if client.is_none() {
                 match client_for_context(None).await {

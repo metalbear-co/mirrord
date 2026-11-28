@@ -23,8 +23,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::{
     error::ApiError,
-    server::{AppState, client_for_context, default_namespace},
+    server::{AppState, client_for_context, daemon_login, default_namespace},
 };
+
+/// What the wizard pages show under an operator login: they read workloads and their pod specs
+/// with the `mirrord up init` code, straight from the cluster, which the login's URL does not
+/// reach. The rest of the wizard (rendering the file) needs no cluster and keeps working.
+async fn refuse_under_login() -> Result<(), ApiError> {
+    match daemon_login().await? {
+        None => Ok(()),
+        Some(login) => Err(ApiError::NotThroughLogin {
+            what: "The config wizard",
+            host: login.host().to_owned(),
+            url: login.url,
+        }),
+    }
+}
 
 /// Routes for `/api/v1/{...}` that back the config wizard page.
 ///
@@ -124,6 +138,7 @@ async fn up_workloads(
     Query(query): Query<WorkloadsQuery>,
 ) -> Result<Json<WorkloadsResponse>, ApiError> {
     mark_returning(&state).await;
+    refuse_under_login().await?;
     let client = client_for_context(None).await?;
     let workloads = list_workloads_for_mode(&client, &query.namespace, query.mode).await?;
     Ok(Json(WorkloadsResponse { workloads }))
@@ -147,6 +162,7 @@ struct PortsResponse {
 async fn up_ports(Query(query): Query<PortsQuery>) -> Result<Json<PortsResponse>, ApiError> {
     let target =
         Target::from_str(&query.path).map_err(|_| ApiError::InvalidTarget(query.path.clone()))?;
+    refuse_under_login().await?;
     let client = client_for_context(None).await?;
     let ports = detect_ports(&client, &target, &query.namespace).await?;
     Ok(Json(PortsResponse {

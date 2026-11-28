@@ -39,11 +39,13 @@ use mirrord_operator::{
     client::operator_installed,
     crd::{
         MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME, SessionHttpFilter,
+        namespaces::{OperatorNamespaceList, namespaces_api_path},
         preview::{
             PreviewPodLogs,
             view::{PreviewEnv, PreviewEnvStatus, PreviewMessageKind},
         },
     },
+    sso::OperatorLogin,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -52,7 +54,8 @@ use tracing::warn;
 use super::{
     AppState, OperatorLicense, OperatorLockedPort, OperatorPreviewSession, OperatorQueueSplits,
     OperatorSessionOwner, OperatorSessionSummary, OperatorSessionTarget, UiResult,
-    client_for_context, get_session, kill_session, list_sessions, session_events_sse,
+    client_for_context, daemon_login, get_session, kill_session, kubeconfig_context, list_sessions,
+    login_client_key, login_context, session_events_sse,
 };
 use crate::{data::GlobalConfig, ui::error::ApiError};
 
@@ -117,9 +120,14 @@ async fn evict_client(state: &AppState, context: Option<&str>) {
 }
 
 /// Keys the client cache by the context a request really uses, so changing the global default
-/// gives later requests a client for the new cluster.
+/// gives later requests a client for the new cluster, and a `mirrord login` or `logout` gives them
+/// a client for what the daemon reaches now. An active login is used whatever the context, as in
+/// the CLI.
 async fn client_key(context: Option<&str>) -> Option<String> {
-    match context {
+    if let Ok(Some(login)) = daemon_login().await {
+        return Some(login_client_key(&login));
+    }
+    match kubeconfig_context(context) {
         Some(context) => Some(context.to_owned()),
         None => GlobalConfig::fresh_kube_context().await,
     }
@@ -560,8 +568,12 @@ struct ContextEntry {
 }
 
 /// Lists kube contexts and each one's default namespace, straight from the merged kubeconfig — no
-/// cluster access, so it works even when no cluster is reachable.
+/// cluster access, so it works even when no cluster is reachable. Under an operator login the
+/// login is the only context, since the kubeconfig is not used then (see [`login_contexts`]).
 async fn kube_contexts() -> UiResult<axum::Json<ContextsResponse>> {
+    if let Some(login) = daemon_login().await? {
+        return Ok(axum::Json(login_contexts(&login)));
+    }
     let kubeconfig = Kubeconfig::read().map_err(ApiError::ReadKubeconfig)?;
     let contexts = kubeconfig
         .contexts
@@ -582,6 +594,19 @@ async fn kube_contexts() -> UiResult<axum::Json<ContextsResponse>> {
     }))
 }
 
+/// The context list under `login`: the login alone, current, starting in `default` like a
+/// session under a login does. Works on a machine with no kubeconfig at all.
+fn login_contexts(login: &OperatorLogin) -> ContextsResponse {
+    let name = login_context(login);
+    ContextsResponse {
+        current: Some(name.clone()),
+        contexts: vec![ContextEntry {
+            name,
+            namespace: Some("default".to_owned()),
+        }],
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NamespacesResponse {
@@ -590,12 +615,33 @@ struct NamespacesResponse {
 }
 
 /// Lists namespaces visible in a context. Queries the cluster API server, so the context must be
-/// reachable and the user authorized to list namespaces.
+/// reachable and the user authorized to list namespaces. Under an operator login the operator
+/// answers instead, with the namespaces RBAC lets the user list targets in, since its URL reaches
+/// no `Namespace` resources.
 async fn kube_namespaces(
     State(state): State<AppState>,
     Query(query): Query<ContextQuery>,
 ) -> UiResult<axum::Json<NamespacesResponse>> {
     let client = cached_client(&state, query.context.as_deref()).await?;
+    if let Some(login) = daemon_login().await? {
+        let request = http::Request::get(namespaces_api_path())
+            .body(Vec::new())
+            .map_err(|error| ApiError::InvalidLoginUrl {
+                url: login.url.clone(),
+                error: error.to_string(),
+            })?;
+        let listed: OperatorNamespaceList = match client.request(request).await {
+            Ok(listed) => listed,
+            Err(err) => {
+                evict_client(&state, query.context.as_deref()).await;
+                return Err(ApiError::KubeApi(err));
+            }
+        };
+        return Ok(axum::Json(NamespacesResponse {
+            context: Some(login_context(&login)),
+            namespaces: listed.names(),
+        }));
+    }
     let api: Api<Namespace> = Api::all(client);
     let namespaces = match api.list(&ListParams::default()).await {
         Ok(namespaces) => namespaces,
@@ -630,6 +676,10 @@ async fn kube_user(
 }
 
 async fn resolve_username(state: &AppState, context: Option<&str>) -> Option<String> {
+    // The login's own username: its URL reaches no `SelfSubjectReview`.
+    if let Ok(Some(login)) = daemon_login().await {
+        return Some(login.username);
+    }
     let client = cached_client(state, context).await.ok()?;
     let api: Api<SelfSubjectReview> = Api::all(client);
     let review = match api
@@ -670,6 +720,75 @@ mod tests {
     };
 
     use super::*;
+
+    fn login() -> OperatorLogin {
+        OperatorLogin {
+            url: "https://mirrord.corp.example.com".to_owned(),
+            token: "t".to_owned().into(),
+            username: "dev@corp.example.com".to_owned(),
+            account: "dev@corp.example.com".to_owned(),
+            expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+        }
+    }
+
+    /// Under a login the context picker offers the login alone, current, starting in `default`,
+    /// without reading a kubeconfig, which the machine may not have.
+    #[test]
+    fn a_login_is_the_only_context() {
+        let contexts = serde_json::to_value(login_contexts(&login())).unwrap();
+        assert_eq!(
+            contexts,
+            serde_json::json!({
+                "current": "mirrord login: mirrord.corp.example.com",
+                "contexts": [{
+                    "name": "mirrord login: mirrord.corp.example.com",
+                    "namespace": "default",
+                }],
+            })
+        );
+    }
+
+    /// After a `mirrord logout` the page still sends the login's context name it loaded; that is
+    /// no kubeconfig context, so it reads as the default one, while real context names pass.
+    #[test]
+    fn a_stale_login_context_falls_back_to_the_default() {
+        let stale = login_context(&login());
+        assert_eq!(kubeconfig_context(Some(&stale)), None);
+        assert_eq!(kubeconfig_context(Some("staging-eu")), Some("staging-eu"));
+        assert_eq!(kubeconfig_context(None), None);
+    }
+
+    /// Logging in again to the same operator mints a new token with a later expiry, which gets a
+    /// new client and a new watcher instead of the cached one holding the old token.
+    #[test]
+    fn a_new_login_to_the_same_operator_gets_a_new_client() {
+        let first = login();
+        let mut again = first.clone();
+        again.expires_at = first.expires_at + chrono::Duration::hours(24);
+        assert_ne!(login_client_key(&first), login_client_key(&again));
+        assert!(login_client_key(&first).starts_with(&login_context(&first)));
+    }
+
+    /// The wizard's workload pages tell the user why they are empty under a login and what to
+    /// run, instead of the 404 the login URL gives for workloads.
+    #[test]
+    fn the_wizard_names_the_logout_under_a_login() {
+        let login = login();
+        let error = ApiError::NotThroughLogin {
+            what: "The config wizard",
+            host: login.host().to_owned(),
+            url: login.url.clone(),
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("mirrord logout --url https://mirrord.corp.example.com"),
+            "{message}"
+        );
+        assert_eq!(
+            axum::response::IntoResponse::into_response(error).status(),
+            axum::http::StatusCode::BAD_REQUEST
+        );
+    }
 
     /// The v2 session shape is camelCase and omits `durationSecs` (age is derived from
     /// `createdAt`).
