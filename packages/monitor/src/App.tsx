@@ -332,7 +332,10 @@ export default function App({
           ...prev,
           joinedKey: result.joinedKey ?? key,
         }))
-        emitUserSucceeded('operator_session_joined', { key })
+        emitUserSucceeded('operator_session_joined', {
+          key,
+          ...(result.reconciled && { reconciled: true }),
+        })
       } else {
         emitUserBlocked('operator_session_join_failed', {
           key,

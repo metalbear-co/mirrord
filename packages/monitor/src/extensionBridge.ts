@@ -3,6 +3,8 @@ import { emitUserBlocked } from './analytics'
 
 const PING_TIMEOUT_MS = 250
 const REQUEST_TIMEOUT_MS = 1500
+const JOIN_RECONCILE_TIMEOUT_MS = 15000
+const JOIN_RECONCILE_INTERVAL_MS = 500
 
 export interface ExtensionState {
   installed: boolean
@@ -47,6 +49,22 @@ export async function pingExtension(): Promise<ExtensionState> {
   }
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+async function waitForJoinedKey(key: string): Promise<boolean> {
+  const deadline = Date.now() + JOIN_RECONCILE_TIMEOUT_MS
+  for (;;) {
+    const state = await pingExtension()
+    if (state.supportsBridge && state.joinedKey === key) return true
+    if (Date.now() >= deadline) return false
+    await wait(JOIN_RECONCILE_INTERVAL_MS)
+  }
+}
+
 export async function joinViaExtension(
   key: string,
   context: string | null,
@@ -54,6 +72,7 @@ export async function joinViaExtension(
   ok: boolean
   joinedKey?: string | null
   error?: string | undefined
+  reconciled?: boolean
 }> {
   const response = await send<{
     type?: string
@@ -66,9 +85,13 @@ export async function joinViaExtension(
     ...(context && { context }),
   })
   if (!response) {
+    if (await waitForJoinedKey(key)) {
+      return { ok: true, joinedKey: key, reconciled: true }
+    }
     emitUserBlocked('extension_bridge_failed', {
       action: 'join',
       error: 'No response from extension',
+      reconcile_timeout_ms: JOIN_RECONCILE_TIMEOUT_MS,
     })
     return { ok: false, error: 'No response from extension' }
   }
