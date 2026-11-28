@@ -3569,9 +3569,8 @@ impl OperatorApi<PreparedClientCert> {
 
         // A fresh copy's split is also visible to the connect that follows, under the same
         // session id, and every caller connects through `connect_reporting_split`, which reports
-        // it. Reporting it here too would name each Temporal queue twice.
-        self.wait_for_copy_ready(copied, BTreeSet::new(), progress)
-            .await
+        // it. Warning here too would name each Temporal queue and hold twice.
+        self.wait_for_copy_ready(copied, None, progress).await
     }
 
     async fn try_reuse_copy_target<P: Progress>(
@@ -3616,7 +3615,7 @@ impl OperatorApi<PreparedClientCert> {
         let mirror_requested = mirror_requested(&layer_config.feature.split_queues);
         let existing = match existing {
             Some(existing) => match self
-                .wait_for_copy_ready(existing, mirror_requested, progress)
+                .wait_for_copy_ready(existing, Some(mirror_requested), progress)
                 .await
             {
                 Ok(copied) => Some(copied),
@@ -3636,11 +3635,12 @@ impl OperatorApi<PreparedClientCert> {
     }
 
     /// Polls the given [`CopyTargetCrd`] for readiness, reporting its queue split meanwhile.
-    /// `mirror_requested` is what [`QueueSplitProgress`] warns about, see [`mirror_requested`].
+    /// `mirror_requested` is what [`QueueSplitProgress`] warns about, see [`mirror_requested`];
+    /// `None` leaves every Temporal warning to the connect that follows.
     async fn wait_for_copy_ready<P: Progress>(
         &self,
         mut copied: CopyTargetCrd,
-        mirror_requested: BTreeSet<String>,
+        mirror_requested: Option<BTreeSet<String>>,
         progress: &P,
     ) -> OperatorApiResult<CopyTargetCrd> {
         let namespace = copied
@@ -3817,7 +3817,7 @@ impl OperatorApi<PreparedClientCert> {
             self.client.clone(),
             namespace,
             format!("{:X}", session.id),
-            mirror_requested(&layer_config.feature.split_queues),
+            Some(mirror_requested(&layer_config.feature.split_queues)),
             progress,
         )
         .run(self.connect_to_session(session))

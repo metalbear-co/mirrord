@@ -919,6 +919,32 @@ fn details_lines(split: &QueueSplit, width: usize) -> Vec<Line<'static>> {
         }
     }
 
+    // Most splits are never held, so the section only appears when the operator has stopped
+    // reading one of this split's queues.
+    let held_queues = status
+        .map(|status| status.held_queues.as_slice())
+        .unwrap_or_default();
+    if !held_queues.is_empty() {
+        lines.extend([
+            Line::default(),
+            section(format!("HELD QUEUES ({})", held_queues.len())),
+        ]);
+    }
+    for held in held_queues {
+        lines.extend([
+            entry(&held.id, &held.queue_type),
+            field(4, "Task queue", held.queue.clone(), Style::default()),
+            field(
+                4,
+                "Held tasks",
+                held.task_kind.clone(),
+                Style::default().fg(theme::AMBER),
+            ),
+            field(4, "Full queue", held.full_queue.clone(), Style::default()),
+            field(4, "Since", held.since.0.to_string(), Style::default()),
+        ]);
+    }
+
     lines
 }
 

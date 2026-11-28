@@ -265,9 +265,10 @@ The details are laid out as a label column and a value column, in sections:
 | `TARGET` | `Kind`, `Name` and `API version` for a Kubernetes resource; `Kind` (`PodSet`) and `Label selector` for a set of pods. Then `Container`, or `-` when the session did not resolve one. |
 | `QUEUES (n)` | One entry per queue the operator resolved, headed by the queue id and its broker type. Below each, whichever of `Queue`, `Topic`, `Consumer group` and `Subscription` the broker type has. |
 | `FILTERS (n)` | One entry per filter from the user's mirrord config, headed by the filter id and its broker type. Below each, one line per message filter (attribute name as the label, regex as the value) and a `jq` line when the filter has a jq expression. |
+| `HELD QUEUES (n)` | Only while the operator has stopped reading one of the split's original queues (a Temporal task queue whose virtual queue's buffer is full). One entry per hold, headed by the queue id and its broker type. Below each, `Task queue`, `Held tasks` (the task kind, amber), `Full queue` (the virtual queue the hold waits on) and `Since`. |
 | `TARGET PODS (n/m)` | How many of the target pods are patched and ready, out of the total, then one line per pod: its name and `patched, ready` (green) or the failing combination (amber). A pod that is not ready is followed by what keeps it from being ready, in gray, indented and wrapped to the panel width. |
 
-Sections with nothing in them show `none`.
+Sections with nothing in them show `none`, except `HELD QUEUES`, which is left out.
 
 When the details do not fit the panel, they scroll, and a scrollbar is drawn on the right edge of the panel. The
 scroll offset is clamped to the end of the details, so the details shrinking never scrolls past their last line.

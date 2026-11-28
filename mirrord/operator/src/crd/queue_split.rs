@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,35 @@ pub struct QueueSplitStatus {
     /// Temporary broker resources mirrord created for this session.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tmp_queues: Vec<QueueSplitTmpQueue>,
+    /// Original queues the operator has stopped reading for now, and what each waits on: one
+    /// entry per Temporal task queue and task kind whose polls the operator paused because a
+    /// virtual task queue's buffer is full. Other brokers never have one, and an operator
+    /// that does not report holds never sends the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held_queues: Vec<QueueSplitHeldQueue>,
+}
+
+/// One original queue the operator is not reading right now because a buffer it fills is
+/// full. Every session on the same original queue reports the same entry: the hold stops
+/// tasks for all of them, not only for the session whose buffer is full.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueSplitHeldQueue {
+    /// Filter id the held queue was resolved for.
+    pub id: String,
+    /// Broker type, `Temporal`.
+    #[serde(rename = "type")]
+    pub queue_type: String,
+    /// The original task queue the operator is not polling.
+    pub queue: String,
+    /// Which tasks are held: `workflow` or `activity`.
+    pub task_kind: String,
+    /// The virtual task queue whose buffer is full. Matches the `name` of a `tmpQueues` entry
+    /// of this split or of another session's split on the same target, whose `scope` says
+    /// whether the deployed workload or a session reads it.
+    pub full_queue: String,
+    /// When the hold started.
+    pub since: Time,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -151,4 +181,60 @@ pub struct QueueSplitTargetPod {
     /// What keeps the pod from being ready.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+#[cfg(test)]
+mod held_queues_wire_format {
+    use k8s_openapi::jiff::Timestamp;
+
+    use super::*;
+
+    /// Released operators serve statuses without `heldQueues`, and released CLIs read statuses
+    /// that carry it (the view has no `deny_unknown_fields`): a status without the field parses
+    /// to an empty list, the field round-trips in camelCase, and an empty list is left out like
+    /// the other list fields.
+    #[test]
+    fn status_without_held_queues_parses_and_empty_list_is_not_sent() {
+        let old = serde_json::json!({ "phase": "Ready" });
+        let status: QueueSplitStatus = serde_json::from_value(old).expect("deserializes");
+        assert!(status.held_queues.is_empty());
+        assert!(
+            serde_json::to_value(&status)
+                .expect("serializes")
+                .get("heldQueues")
+                .is_none()
+        );
+
+        let status = QueueSplitStatus {
+            phase: "Ready".to_owned(),
+            held_queues: vec![QueueSplitHeldQueue {
+                id: "orders".to_owned(),
+                queue_type: "Temporal".to_owned(),
+                queue: "order-checkout".to_owned(),
+                task_kind: "workflow".to_owned(),
+                full_queue: "mirrord-tmp-a-main-order-checkout".to_owned(),
+                since: Time(Timestamp::from_second(1_795_860_902).expect("valid timestamp")),
+            }],
+            ..Default::default()
+        };
+        let wire = serde_json::to_value(&status).expect("serializes");
+        assert_eq!(
+            wire.get("heldQueues"),
+            Some(&serde_json::json!([{
+                "id": "orders",
+                "type": "Temporal",
+                "queue": "order-checkout",
+                "taskKind": "workflow",
+                "fullQueue": "mirrord-tmp-a-main-order-checkout",
+                "since": "2026-11-28T10:15:02Z",
+            }]))
+        );
+        let parsed: QueueSplitStatus = serde_json::from_value(wire).expect("deserializes");
+        let since = parsed.held_queues.first().map(|held| held.since.clone());
+        assert_eq!(
+            since,
+            status.held_queues.first().map(|held| held.since.clone())
+        );
+        assert!(since.is_some());
+    }
 }
