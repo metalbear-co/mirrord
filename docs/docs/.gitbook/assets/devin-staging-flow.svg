@@ -92,7 +92,6 @@
   <text x="440" y="467" font-size="12.5" fill="#4a44b8" text-anchor="middle">requests with KEY</text>
   <line x1="324" y1="493" x2="556" y2="493" fill="none" stroke="#756DF3" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
   <text x="440" y="511" font-size="12.5" fill="#4a44b8" text-anchor="middle">outgoing calls</text>
-  <text x="440" y="529" font-size="12.5" fill="#333344" text-anchor="middle">through the Kubernetes API</text>
 
   <!-- Kubernetes logos: what runs in the cluster -->
   <use href="#k8s" x="1132" y="115" width="36" height="36"/>
