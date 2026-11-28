@@ -46,7 +46,7 @@ Session ID  Target               Namespace  User                  Auth  Ports  S
 8f1c...     deployment/payments  payments   dev@corp.example.com  sso          5m
 ```
 
-Sessions opened through a kubeconfig show `kube` there, so an admin can tell the two apart. The local `mirrord ui` daemon is the exception to the rule above: it still watches the Operator through your kubeconfig.
+Sessions opened through a kubeconfig show `kube` there, so an admin can tell the two apart.
 
 A config that names a kubeconfig or a context is still accepted: mirrord warns that the setting is ignored while you are logged in and runs against the Operator. A config with `operator: false` cannot run, because without the Operator there is nothing to log in to:
 
@@ -69,6 +69,10 @@ If the Operator's license drops below Enterprise while you are logged in, the ne
 Because only the Operator's API is reachable, mirrord does not read the target workload itself: the Operator resolves it, the way it does for a multi-cluster session. Two things follow from that. The `auto_mount` option is skipped with a warning, since it reads the pod spec locally, and Kafka branching is not available while logged in. A config without a namespace runs in the `default` namespace, not in the kubeconfig's.
 
 A running session keeps its connection when the login expires, but it cannot reconnect after a network cut once the login has expired: it stops with the expiry message, and you log in again before the next run.
+
+`mirrord queues status` and `mirrord subscribe` work while you are logged in: the Operator serves the queue splits and the event stream from its own API, once RBAC allows your SSO user to list queue splits or watch events.
+
+`mirrord ui` uses the login too, from mirrord `3.293.0`: it shows the login as its only context, the namespaces and targets the Operator lists for you, and your sessions. A `mirrord login` or `mirrord logout` applies to a running `mirrord ui` without restarting it; reload the page to see the new context in its picker. Targets listed through the login come without detected ports. The config wizard's workload and port pages read workloads from the cluster, which your login does not reach: they say so and name the `mirrord logout` command that lets you use them with your kubeconfig.
 
 `mirrord vpn` is not served through the Operator's URL yet, whether or not you have a kubeconfig: while you are logged in it fails with a not-found error. Log out of each Operator first, then run it with your kubeconfig.
 
@@ -145,6 +149,7 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | `operator: false can't be used while logged in to ...` | Your config turns the Operator off while a login is in use. | Run `mirrord logout --url` with that URL, or drop `operator: false`. |
 | `Feature sso requires a mirrord Enterprise plan.` while running | The Operator's license dropped below Enterprise after you logged in. | Ask your admin about the license, or log out and use your kubeconfig. |
 | ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
+| The config wizard says it reads the cluster's workloads, which the login does not reach | The wizard's workload and port pages read the cluster directly. | Run the `mirrord logout --url` command it names, or write the config by hand. |
 | ``Feature `database branches served by the operator API` is not supported in mirrord operator ...`` | Your config names `db_branches`, or you ran `mirrord db-branches`, and the Operator predates branch databases over its URL. | Ask your admin to upgrade the Operator to `3.240.0` or later, or log out and use your kubeconfig. |
 | The IDE's namespace picker offers only the current namespace | Your roles predate the chart version that grants `list` on `namespaces` in the Operator's API group. | Ask your admin to upgrade the chart release to `3.239.0` or later. Until then, set the namespace in the config or with `mirrord ls -n`. |
 | `the login token was not issued by this operator or has expired` before the time `mirrord whoami` shows | The Operator stopped accepting your token, for example after its client secret was rotated. `mirrord login --url` alone reuses the saved token while it has not expired. | Run `mirrord logout --url <operator-url>`, then `mirrord login --url <operator-url>`. |
