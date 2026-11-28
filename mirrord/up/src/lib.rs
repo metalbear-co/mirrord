@@ -26,7 +26,7 @@ pub use config::{
     TargetValidationError, UnknownMode, UpConfig, WindowsSupportError, preview_image_env,
 };
 use config::{ResolvedTarget, SessionKind, SpecifiedTarget, UnresolvedTarget, validate_targets};
-use futures::TryStreamExt;
+use futures::{TryStreamExt, future::BoxFuture};
 pub use init::{
     InitError, PickedService, PickedWorkload, RenderError, SkeletonError, detect_ports,
     list_workloads_for_mode, render_skeleton, run_wizard, service_name_for,
@@ -167,6 +167,24 @@ pub enum UpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     UnknownMode(#[from] UnknownMode),
+
+    /// The operator could not list a namespace's workloads while a service's target was being
+    /// inferred through a [`WorkloadLister`].
+    #[error(
+        "could not list the workloads of namespace `{namespace}` through the operator to infer a \
+         service's target: {reason}"
+    )]
+    #[diagnostic(help(
+        "Set `target.path` for the service in the mirrord-up file to skip the lookup. A 403 in the \
+         reason means your login may not list targets in `{namespace}`, which your admin grants; \
+         any other reason is about reaching the operator, so check the URL and your network."
+    ))]
+    OperatorWorkloadListing {
+        /// The namespace that was being listed.
+        namespace: String,
+        /// Why the listing failed, as the operator said.
+        reason: String,
+    },
 
     /// One or more services cannot use their resolved targets.
     #[error("target validation failed")]
@@ -485,7 +503,7 @@ pub fn load_up_config(path: &Path, key: &EnvKey) -> Result<UpConfig, UpError> {
 /// Workload kinds considered when inferring a target from a service key, in
 /// match-priority order: when several kinds have a workload with the same
 /// name, the first kind here wins.
-const INFERRED_TARGET_TYPES: [TargetType; 4] = [
+pub const INFERRED_TARGET_TYPES: [TargetType; 4] = [
     TargetType::Deployment,
     TargetType::StatefulSet,
     TargetType::Rollout,
@@ -507,8 +525,21 @@ enum Resolution {
     Quiet,
 }
 
+/// Lists the workloads a service's target is inferred from, in place of reading the cluster with
+/// the kubeconfig: a CLI logged in to the operator through SSO reaches only the operator's API, so
+/// it lists the operator's targets instead.
+pub trait WorkloadLister: Send + Sync {
+    /// The namespace of a service whose config names none.
+    fn default_namespace(&self) -> &str;
+
+    /// Workload paths (`deployment/foo`, `pod/bar/container/baz`, ...) of the
+    /// [`INFERRED_TARGET_TYPES`] kinds in `namespace`, in that order.
+    fn list<'a>(&'a self, namespace: &'a str) -> BoxFuture<'a, Result<Vec<String>, UpError>>;
+}
+
 /// Resolve every service whose `target.path` is absent by looking the service
-/// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order).
+/// key up in the cluster (see [`INFERRED_TARGET_TYPES`] for the search order),
+/// through `lister` when there is one, and with each service's kube context otherwise.
 /// When no workload matches, [`Resolution::Prompt`] has a wizard let the user
 /// pick a different namespace and workload, or exit. Otherwise that fails.
 ///
@@ -519,6 +550,7 @@ async fn resolve_unresolved_workloads(
     config_path: &Path,
     up_context: UpKubeContext,
     resolution: Resolution,
+    lister: Option<&dyn WorkloadLister>,
 ) -> Result<HashMap<UnresolvedTarget, ResolvedTarget>, UpError> {
     let unresolved = up_config.unresolved_targets(up_context.clone());
 
@@ -536,30 +568,46 @@ async fn resolve_unresolved_workloads(
         let kube_context = up_context
             .clone()
             .get_context(unresolved_target.kube_context.clone());
-        let client = match clients.entry(kube_context.clone()) {
-            Entry::Occupied(client) => client.into_mut(),
-            Entry::Vacant(vacant_entry) => {
-                // create the client we need and add it to the HashMap
-                let kube_config = create_kube_config(
-                    up_config.common.accept_invalid_certificates,
-                    None::<&str>,
-                    kube_context.as_deref().map(Into::into),
-                )
-                .await?;
-                let client = kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
-                vacant_entry.insert(client)
+        let name = &unresolved_target.workload_name;
+
+        let (client, namespace, workloads) = match lister {
+            Some(lister) => {
+                let namespace = unresolved_target
+                    .namespace
+                    .as_deref()
+                    .unwrap_or(lister.default_namespace())
+                    .to_owned();
+                let workloads = lister.list(&namespace).await?;
+                (None, namespace, workloads)
+            }
+            None => {
+                let client = match clients.entry(kube_context.clone()) {
+                    Entry::Occupied(client) => client.into_mut(),
+                    Entry::Vacant(vacant_entry) => {
+                        // create the client we need and add it to the HashMap
+                        let kube_config = create_kube_config(
+                            up_config.common.accept_invalid_certificates,
+                            None::<&str>,
+                            kube_context.as_deref().map(Into::into),
+                        )
+                        .await?;
+                        let client =
+                            kube::Client::try_from(kube_config).map_err(KubeApiError::from)?;
+                        vacant_entry.insert(client)
+                    }
+                };
+                let namespace = unresolved_target
+                    .namespace
+                    .as_deref()
+                    .unwrap_or(client.default_namespace())
+                    .to_owned();
+                let workloads = list_workloads(client, &namespace, &INFERRED_TARGET_TYPES).await?;
+                (Some(&*client), namespace, workloads)
             }
         };
-
-        let name = &unresolved_target.workload_name;
-        let namespace = unresolved_target
-            .namespace
-            .as_deref()
-            .unwrap_or(client.default_namespace());
-
-        let workloads = list_workloads(client, namespace, &INFERRED_TARGET_TYPES).await?;
-        let resolved = match find_by_name(&workloads, name) {
-            Some(path) => {
+        let namespace = namespace.as_str();
+        let resolved = match (find_by_name(&workloads, name), client) {
+            (Some(path), _) => {
                 if resolution != Resolution::Quiet {
                     println!("{name}: using {path}");
                 }
@@ -570,13 +618,8 @@ async fn resolve_unresolved_workloads(
                     },
                 }
             }
-            None if resolution != Resolution::Prompt => {
-                return Err(UpError::NoInferredTarget {
-                    service: name.clone(),
-                    namespace: namespace.to_owned(),
-                });
-            }
-            None => {
+            // Only `mirrord up` in a terminal prompts, and it never lists through an operator.
+            (None, Some(client)) if resolution == Resolution::Prompt => {
                 println!(
                     "{name}: No workload named \"{name}\" found in namespace \"{namespace}\"{}.",
                     kube_context
@@ -584,6 +627,12 @@ async fn resolve_unresolved_workloads(
                         .unwrap_or_default()
                 );
                 prompt_for_target(client, name, config_path).await?
+            }
+            (None, _) => {
+                return Err(UpError::NoInferredTarget {
+                    service: name.clone(),
+                    namespace: namespace.to_owned(),
+                });
             }
         };
 
@@ -906,9 +955,14 @@ pub async fn resolve_services(
     } else {
         Resolution::Fail
     };
-    let mut resolved_targets =
-        resolve_unresolved_workloads(&up_config, config_path, up_context.clone(), resolution)
-            .await?;
+    let mut resolved_targets = resolve_unresolved_workloads(
+        &up_config,
+        config_path,
+        up_context.clone(),
+        resolution,
+        None,
+    )
+    .await?;
 
     let service_configs = up_config.service_configs(
         key,
@@ -928,11 +982,13 @@ pub async fn resolve_services(
 /// no preview with [`UpConfig::select_preview_images`] before calling this, and sets each
 /// config's `feature.preview.image` to the one it picked. A service without a target is
 /// assembled like any other; whether its preview can run is for the CLI's `prepare` to decide.
+/// With `lister`, targets are inferred from its listing instead of each service's kube context.
 pub async fn resolve_preview_services(
     up_config: UpConfig,
     config_path: &Path,
     kube_context_arg: Option<Arc<str>>,
     key: &EnvKey,
+    lister: Option<&dyn WorkloadLister>,
 ) -> Result<Vec<SubprocessCfg>, UpError> {
     let up_context = UpKubeContext {
         command_arg: kube_context_arg,
@@ -944,6 +1000,7 @@ pub async fn resolve_preview_services(
         config_path,
         up_context.clone(),
         Resolution::Quiet,
+        lister,
     )
     .await?;
 

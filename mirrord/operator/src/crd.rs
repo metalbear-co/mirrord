@@ -1109,6 +1109,13 @@ pub enum NewOperatorFeature {
     /// reports its default wake timeout in [`MirrordOperatorSpec::preview_wake_timeout`].
     PreviewWake,
 
+    /// Serves `previewsessions` under its own API group
+    /// ([`preview::PREVIEW_SESSIONS_ROUTE_GROUP_VERSION`]): a pass-through to the
+    /// `PreviewSession` resource that checks the caller's RBAC on it and records the creator in
+    /// [`preview::PreviewSessionSpec::owner`]. The CLI then manages preview sessions through the
+    /// operator, which is the only way a CLI logged in through SSO reaches them.
+    PreviewSessionRoutes,
+
     /// This variant is what a client sees when the operator includes a feature the client is not
     /// yet aware of, because it was introduced in a version newer than the client's.
     #[schemars(skip)]
@@ -1181,7 +1188,8 @@ impl NewOperatorFeature {
             | Self::PreviewAutoQueueSplitting
             | Self::PreviewCodeSync
             | Self::PreviewSpecResources
-            | Self::PreviewWake => Some("feature.preview"),
+            | Self::PreviewWake
+            | Self::PreviewSessionRoutes => Some("feature.preview"),
             Self::LabelTargeting | Self::ServerlessSessionsManager => Some("target.path"),
             Self::SsoLogin => Some("sso"),
             Self::MultiClusterPrimary
@@ -1283,6 +1291,9 @@ impl Display for NewOperatorFeature {
             }
             NewOperatorFeature::PreviewCodeSync => "code sync in preview environments",
             NewOperatorFeature::PreviewWake => "waking preview environments",
+            NewOperatorFeature::PreviewSessionRoutes => {
+                "preview sessions served by the operator API"
+            }
             NewOperatorFeature::MultiClusterQueueSplitRole => {
                 "one consumer cluster for multi-cluster queue splitting"
             }
@@ -1379,7 +1390,8 @@ impl NewOperatorFeature {
             | NewOperatorFeature::PreviewSpecResources
             | NewOperatorFeature::PreviewAutoQueueSplitting
             | NewOperatorFeature::PreviewCodeSync
-            | NewOperatorFeature::PreviewWake => &["operator.previewEnv"],
+            | NewOperatorFeature::PreviewWake
+            | NewOperatorFeature::PreviewSessionRoutes => &["operator.previewEnv"],
             NewOperatorFeature::SqsQueueSplitting
             | NewOperatorFeature::SqsQueueSplittingDirect
             | NewOperatorFeature::SqsQueueSplittingWithJqFilter => &["operator.sqsSplitting"],

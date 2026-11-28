@@ -351,6 +351,12 @@ pub struct PreviewUpConfig {
 }
 
 impl CommonConfig {
+    /// Whether invalid TLS certificates are accepted, `None` when the file leaves it to the
+    /// kubeconfig.
+    pub fn accept_invalid_certificates(&self) -> Option<bool> {
+        self.accept_invalid_certificates
+    }
+
     /// The mirrord config every service is assembled from: these settings plus whatever
     /// `context` takes from the environment.
     fn base_config(&self, context: &mut ConfigContext) -> Result<LayerConfig, ConfigError> {

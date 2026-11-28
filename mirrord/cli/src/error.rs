@@ -775,6 +775,23 @@ pub(crate) enum CliError {
     #[diagnostic(help("{GENERAL_HELP}"))]
     UnsupportedTargetConfig(String),
 
+    /// A `mirrord preview` feature that reads the cluster's own resources ran while logged in to
+    /// an operator through SSO, whose URL serves only the operator's API.
+    #[error(
+        "{feature} can't be used while logged in to {url}, which serves only the operator's API. \
+         Run mirrord logout --url {url} first."
+    )]
+    #[diagnostic(help(
+        "After the logout, mirrord uses your kubeconfig. `mirrord whoami` shows the operator \
+         logins in use."
+    ))]
+    PreviewNeedsKubeconfig {
+        /// What the run asked for, as the user wrote it.
+        feature: &'static str,
+        /// The URL of the operator login in use.
+        url: String,
+    },
+
     #[error("A null byte was found when trying to execute process: {0}")]
     ExecNulError(#[from] NulError),
 
