@@ -114,6 +114,10 @@ If your cluster is running on Bottlerocket or has SELinux enabled, please try en
 
 If private networking is enabled, it is likely due to firewall rules blocking the mirrord operator's API service from the API server. To fix this, add a firewall rule that allows your cluster's master nodes to access TCP port 443 in your cluster's pods. Please refer to the [GCP docs](https://cloud.google.com/kubernetes-engine/docs/how-to/private-clusters#add_firewall_rules) for information.
 
+## mirrord reports `operator was not found` or `service unavailable` on EKS with an overlay CNI
+
+mirrord reports `mirrord operator was not found in the cluster.`, or, when your configuration sets `operator: true`, `finding operator failed with ApiError: service unavailable`. If the cluster uses an overlay CNI such as Calico, the API server can't reach the IP addresses of pods, so it can't reach the Operator. To check, run `kubectl describe apiservice v1.operator.metalbear.co`. In this case, the APIService's `Available` condition is `False`, with the reason `FailedDiscoveryCheck` and a message that includes `Address is not allowed`. To fix this, run the Operator on the host network, as [EKS with an overlay CNI](../managing-mirrord/operator.md#eks-with-an-overlay-cni) describes.
+
 ## My local process encounters unexpected certificate validation errors
 
 When running processes locally versus in a container within Kubernetes, some languages handle certificate validation differently. For instance, a Go application on macOS will use the macOS Keychain for certificate validation, whereas the same application in a container will use different API calls. This discrepancy can lead to unexpected certificate validation errors when using tools like mirrord.

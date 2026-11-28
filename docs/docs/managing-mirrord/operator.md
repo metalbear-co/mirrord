@@ -45,7 +45,7 @@ Installing the Operator creates cluster-scoped objects: CRDs, ClusterRoles, an A
 
 **Network**
 
-- **API server to Operator:** The Kubernetes API server sends mirrord requests to the Operator through the APIService. The API server must be able to reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke).
+- **API server to Operator:** The Kubernetes API server sends mirrord requests to the Operator through the APIService. The API server must be able to reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke). If the API server can't reach the IP addresses of pods, as on EKS with an overlay CNI such as Calico, see [EKS with an overlay CNI](#eks-with-an-overlay-cni).
 - **Operator to MetalBear:** A cloud-connected Operator sends HTTPS requests to `app.metalbear.com` (license) and `analytics.metalbear.com` (telemetry). Team and Free licenses require telemetry. If the Operator cannot reach the telemetry endpoint for more than one hour, new sessions are blocked. For Enterprise licenses, telemetry is optional. For more details, see [Licensing](licensing.md). If your cluster cannot send outbound traffic, you need an Enterprise license certificate (`license.pem`). Give it to the Operator directly (see [Air-gapped / offline clusters](#air-gapped-offline-clusters-enterprise)), or install it in an [Enterprise License Server](license-server.md) that your Operators connect to.
 - **Image pulls:** Your nodes pull the mirrord images from `ghcr.io/metalbear-co`. Some features use other public images, for example the database images for DB branching. If your nodes cannot reach these registries, see [Using an Internal Registry](#using-an-internal-registry-optional).
 
@@ -256,3 +256,32 @@ agent:
   annotations:
     cloud.google.com/generate-allowlist: "true"
 ```
+
+### EKS with an overlay CNI
+
+`operator.hostNetwork` requires operator Helm chart `3.240.0` or later.
+
+On EKS with an overlay CNI such as Calico, the control plane can't reach the IP addresses of pods, so the API server can't reach the Operator. The `v1.operator.metalbear.co` APIService then reports `FailedDiscoveryCheck`, with a message that includes `Address is not allowed`. mirrord reports `mirrord operator was not found in the cluster.`, or, when your configuration sets `operator: true`, `finding operator failed with ApiError: service unavailable`. mirrord sets `operator: true` in the [Global Configuration](../installing-mirrord/global-configuration.md) after every session that uses the Operator.
+
+To fix this, run the Operator on the host network, so that the API server reaches it on the node's IP address. Leave `operator.hostNetwork` off when the control plane can reach the IP addresses of pods, for example on EKS with the Amazon VPC CNI, or on OpenShift, which also rejects a host-network Operator pod.
+
+`mirrord operator install` uses the chart defaults, so install with [Helm](../getting-started/install-the-operator.md#custom-install-with-helm), and set these values in your `values.yaml`:
+
+```yaml
+operator:
+  hostNetwork: true
+  port: 8443
+```
+
+Before you install or upgrade with these values:
+
+- Set `operator.port` to a port of 1024 or higher that no other process on the nodes uses, such as 8443 on EKS. With a lower port, `helm install` and `helm upgrade` fail. On EKS, avoid 10250 (the `kubelet`) and 9443 (the AWS Load Balancer Controller webhook).
+- Keep both values in the values file that you pass to every `helm upgrade`. An upgrade that passes values with `-f` or `--set` resets every value that it doesn't set to the chart default, unless it also passes `--reuse-values` or `--reset-then-reuse-values`. If the upgrade resets `operator.hostNetwork`, the Operator moves back to the pod network without an error.
+- The node security group must allow the control plane to reach the nodes on `operator.port`. If it doesn't, add an inbound TCP rule for the port from the cluster security group.
+- Make sure that the Operator's namespace allows host-network pods. The Pod Security `baseline` and `restricted` levels reject them.
+
+The API server reaches the Operator once `kubectl get apiservice v1.operator.metalbear.co` shows `True` in the `AVAILABLE` column.
+
+On the host network, every port that the Operator listens on is a port of its node, so it must be free on each node that runs an Operator pod. Anything that the node security group lets in can also reach most of them on the node's IP address. The Temporal proxy of `operator.temporalSplitting` (port 7233 by default) and the metrics endpoint of `operator.metrics` (port 9000) don't authenticate their clients, so allow their ports in the node security group only from the places that need them.
+
+The chart README's [Running the operator on the host network](https://github.com/metalbear-co/charts/blob/main/mirrord-operator/README.md#running-the-operator-on-the-host-network) lists these ports and what an upgrade needs.

@@ -15,7 +15,7 @@ If you install it for a trial, the Operator keeps working after the trial ends. 
 There are two ways to install it:
 
 - **[Default install](#default-install):** one command, `mirrord operator install`, with the chart's default settings. Use it unless one of the Helm cases below applies.
-- **[Custom install with Helm](#custom-install-with-helm):** if your platform team manages cluster software with Helm or GitOps, or you need to change a default. For example, your nodes can't pull images from `ghcr.io` (see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional)), you want a namespace other than `mirrord`, or you run OpenShift or GKE Autopilot.
+- **[Custom install with Helm](#custom-install-with-helm):** if your platform team manages cluster software with Helm or GitOps, or you need to change a default. For example, your nodes can't pull images from `ghcr.io` (see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional)), you want a namespace other than `mirrord`, or you run OpenShift, GKE Autopilot, or EKS with an overlay CNI such as Calico.
 
 If your cluster is isolated from the internet and external networks, for example for security or compliance, see [Air-gapped / offline clusters](../managing-mirrord/operator.md#air-gapped-offline-clusters-enterprise) (Enterprise only).
 
@@ -25,7 +25,7 @@ If your cluster is isolated from the internet and external networks, for example
 - Kubernetes `1.22` or later. Some features need a newer version, listed in [Which Kubernetes versions does mirrord support?](../faq/limitations.md#which-kubernetes-versions-does-mirrord-support)
 - Permission to create cluster-scoped objects, such as CRDs, ClusterRoles, and an APIService. In most clusters, that's the `cluster-admin` role. You need it only to install: the Operator itself runs with its own, narrower role (see [What can the Operator access in my cluster?](../managing-mirrord/security.md#what-can-the-operator-access-in-my-cluster)).
 - Nodes running `linux/amd64` or `linux/arm64`, with Linux kernel 5.4 or later and a containerd, CRI-O, or Docker runtime.
-- The Kubernetes API server can reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke).
+- The Kubernetes API server can reach the Operator pods over TCP, on the port in the `operator.port` Helm value (443 by default). Private clusters often need a firewall rule for this. For an example, see [this GKE issue](../troubleshooting/common-issues.md#mirrord-operator-status-fails-with-503-service-unavailable-on-gke). If the API server can't reach the IP addresses of pods, as on EKS with an overlay CNI such as Calico, see [EKS with an overlay CNI](../managing-mirrord/operator.md#eks-with-an-overlay-cni).
 - Your nodes can pull the mirrord images from `ghcr.io/metalbear-co`. Some features pull other public images, such as the database images for DB branching. If your nodes can't reach these registries, see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional).
 
 For details on each requirement, see [Requirements](../managing-mirrord/operator.md#requirements) on the Operator page.
@@ -107,7 +107,7 @@ Edit the values you need:
 
 - To install into a namespace other than `mirrord`, set `namespace`. Then use your namespace instead of `mirrord` in the commands on this page.
 - To pull images from your own registry, see [Using an Internal Registry](../managing-mirrord/operator.md#using-an-internal-registry-optional).
-- On OpenShift or GKE Autopilot, see [OpenShift](../managing-mirrord/operator.md#openshift) or [GKE Autopilot](../managing-mirrord/operator.md#gke-autopilot).
+- On OpenShift, GKE Autopilot, or EKS with an overlay CNI such as Calico, see [OpenShift](../managing-mirrord/operator.md#openshift), [GKE Autopilot](../managing-mirrord/operator.md#gke-autopilot), or [EKS with an overlay CNI](../managing-mirrord/operator.md#eks-with-an-overlay-cni).
 - To let developers target [workloads outside Kubernetes](../using-mirrord/beyond-kubernetes/README.md), such as Amazon ECS tasks, set `operator.sessionsManager: true`. This is an alpha feature, available on the Enterprise plan. See [Operator-Hosted Sessions-Manager](../using-mirrord/beyond-kubernetes/operator-hosted.md).
 
 ### Cloud API key
