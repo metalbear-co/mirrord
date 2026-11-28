@@ -12,7 +12,7 @@ use mirrord_config::feature::split_queues::{QueueKind, QueueMode, SplitQueuesCon
 use mirrord_progress::Progress;
 use tokio::time::Instant;
 
-use crate::crd::queue_split::{QueueSplit, QueueSplitHeldQueue, QueueSplitQueue};
+use crate::crd::queue_split::{QueueSplit, QueueSplitHeldQueue, QueueSplitQueue, QueueSplitSpec};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -35,18 +35,21 @@ pub(crate) struct QueueSplitProgress<'a, P: Progress> {
     message: Option<String>,
     waiting_since: Option<Instant>,
     warned: bool,
-    /// Temporal queue ids the user asked to mirror, see [`mirror_requested`].
-    mirror_requested: BTreeSet<String>,
+    /// Temporal queue ids the user asked to mirror, see [`mirror_requested`]. `None` turns
+    /// off every Temporal warning: a fresh copy's split is reported again by the connect that
+    /// follows, and warning in both stages would name each queue twice.
+    mirror_requested: Option<BTreeSet<String>>,
     /// Temporal task queues already warned about, so each is named once.
     warned_temporal: BTreeSet<String>,
-    /// Held queues already warned about, by task queue and task kind, so a hold that lasts
-    /// across polls is named once.
+    /// Held queues already warned about, so a hold that lasts across polls is named once.
     warned_held: BTreeSet<HeldQueueKey>,
     available: bool,
 }
 
-/// What tells two holds apart: the original task queue and the task kind it holds. The virtual
-/// queue a hold waits on can move while the hold lasts, so it is not part of the key.
+/// What tells two holds apart: the queue id from the user's config and the task kind it holds.
+/// Two ids can name the same task queue in different Temporal namespaces, so the queue name is
+/// not enough; the virtual queue a hold waits on can move while the hold lasts, so it is not
+/// part of the key.
 type HeldQueueKey = (String, String);
 
 impl<'a, P: Progress> QueueSplitProgress<'a, P> {
@@ -54,7 +57,7 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
         client: Client,
         namespace: &str,
         session: String,
-        mirror_requested: BTreeSet<String>,
+        mirror_requested: Option<BTreeSet<String>>,
         progress: &'a P,
     ) -> Self {
         Self {
@@ -182,7 +185,10 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
             .iter()
             .filter_map(|split| split.status.as_ref())
             .flat_map(|status| &status.queues);
-        for id in temporal_mirror_requests(&self.mirror_requested, queues) {
+        let Some(mirror_requested) = &self.mirror_requested else {
+            return;
+        };
+        for id in temporal_mirror_requests(mirror_requested, queues) {
             if self.warned_temporal.insert(id.to_owned()) {
                 self.progress.warning(&temporal_mirror_warning(id));
             }
@@ -195,7 +201,10 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
     /// Like every report here this runs only while the session starts; a hold that begins
     /// later shows in `mirrord queues status` on demand.
     fn warn_held_queues(&mut self, listed: &[QueueSplit], splits: &[&QueueSplit]) {
-        for (key, warning) in held_queue_warnings(&self.session, listed, splits) {
+        if self.mirror_requested.is_none() {
+            return;
+        }
+        for (key, warning) in held_queue_warnings(listed, splits) {
             if self.warned_held.insert(key) {
                 self.progress.warning(&warning);
             }
@@ -208,8 +217,11 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
     /// The caller finishes once the session is ready, which can happen before the first poll: a
     /// session joining a split that already runs is ready almost at once. Without this read it
     /// would miss the Temporal mirror warning and a held queue that was there from the start.
+    /// A stage that does not warn has nothing to gain from the read and skips it.
     pub(crate) async fn finish(mut self) {
-        self.poll().await;
+        if self.mirror_requested.is_some() {
+            self.poll().await;
+        }
         if let Some(mut task) = self.task.take() {
             task.success(None);
         }
@@ -218,21 +230,25 @@ impl<'a, P: Progress> QueueSplitProgress<'a, P> {
 
 /// Warnings due for the held queues of `splits`, keyed so the caller prints each hold once.
 /// A multi-cluster session has one split per cluster, each holding its own buffers; when two
-/// clusters hold the same task queue and task kind, the key folds them into one warning, which
-/// names one cluster's full queue.
+/// clusters hold the same queue for the same task kind, the key folds them into one warning,
+/// which names one cluster's full queue.
 fn held_queue_warnings(
-    session: &str,
     listed: &[QueueSplit],
     splits: &[&QueueSplit],
 ) -> BTreeMap<HeldQueueKey, String> {
     splits
         .iter()
-        .filter_map(|split| split.status.as_ref())
-        .flat_map(|status| &status.held_queues)
-        .map(|held| {
-            let key = (held.queue.clone(), held.task_kind.clone());
-            let warning = held_queue_warning(held, &full_queue_owner(held, session, listed));
-            (key, warning)
+        .flat_map(|split| {
+            split
+                .status
+                .iter()
+                .flat_map(|status| &status.held_queues)
+                .map(move |held| (split, held))
+        })
+        .map(|(split, held)| {
+            let key = (held.id.clone(), held.task_kind.clone());
+            let owner = full_queue_owner(held, &split.spec, listed);
+            (key, held_queue_warning(held, &owner))
         })
         .collect()
 }
@@ -253,11 +269,19 @@ fn held_queue_warning(held: &QueueSplitHeldQueue, owner: &str) -> String {
 
 /// Describes who reads the virtual queue `held` waits on, so the user knows whose worker has to
 /// take tasks: the deployed workload, their own session, or another session. The queue is one
-/// of the `tmpQueues` of a split on the same target, and its `scope` and the split's session
-/// say whose it is. A queue no listed split names (its session ended between the two reads) is
-/// described by name.
-fn full_queue_owner(held: &QueueSplitHeldQueue, session: &str, listed: &[QueueSplit]) -> String {
+/// of the `tmpQueues` of a split on the same target as `holder`, the split that reports the
+/// hold, and its `scope` and the split's session say whose it is. Splits on other targets are
+/// skipped, since a custom name template can give their queues the same name. A queue no listed
+/// split names (its session ended between the two reads) is described by name.
+fn full_queue_owner(
+    held: &QueueSplitHeldQueue,
+    holder: &QueueSplitSpec,
+    listed: &[QueueSplit],
+) -> String {
     let owner = listed.iter().find_map(|split| {
+        if split.spec.target != holder.target {
+            return None;
+        }
         let tmp = split
             .status
             .as_ref()?
@@ -269,7 +293,7 @@ fn full_queue_owner(held: &QueueSplitHeldQueue, session: &str, listed: &[QueueSp
 
     match owner {
         Some((_, "workload")) => "the queue the deployed workload reads from".to_owned(),
-        Some((split, _)) if split.spec.session.eq_ignore_ascii_case(session) => {
+        Some((split, _)) if split.spec.session.eq_ignore_ascii_case(&holder.session) => {
             "your own session's queue".to_owned()
         }
         Some((split, _)) => format!(
@@ -382,14 +406,23 @@ mod tests {
     };
 
     fn split_of(session: &str, username: &str, status: QueueSplitStatus) -> QueueSplit {
+        split_on("consumer", session, username, status)
+    }
+
+    fn split_on(
+        workload: &str,
+        session: &str,
+        username: &str,
+        status: QueueSplitStatus,
+    ) -> QueueSplit {
         let mut split = QueueSplit::new(
-            &format!("{}.consumer.deployment", session.to_lowercase()),
+            &format!("{}.{workload}.deployment", session.to_lowercase()),
             QueueSplitSpec {
                 session: session.to_owned(),
                 target: SessionTarget::KubeResource(KubeResourceTarget {
                     api_version: "apps/v1".to_owned(),
                     kind: "Deployment".to_owned(),
-                    name: "consumer".to_owned(),
+                    name: workload.to_owned(),
                     container: "app".to_owned(),
                 }),
                 owner: SessionOwner {
@@ -594,14 +627,14 @@ mod tests {
 
     fn warning<'a>(warnings: &'a BTreeMap<HeldQueueKey, String>, task_kind: &str) -> &'a str {
         warnings
-            .get(&("order-checkout".to_owned(), task_kind.to_owned()))
+            .get(&("orders".to_owned(), task_kind.to_owned()))
             .expect("the hold is warned about")
     }
 
-    /// A hold is one warning per task queue and task kind, however many polls and clusters
-    /// report it, and the warning says whose queue is full: the deployed workload's, resolved
-    /// from the workload-scoped `tmpQueues`, or another session's, resolved from that session's
-    /// own split, which only the full listing holds.
+    /// A hold is one warning per queue id and task kind, however many polls and clusters report
+    /// it, and the warning says whose queue is full: the deployed workload's, resolved from the
+    /// workload-scoped `tmpQueues`, or another session's, resolved from that session's own split,
+    /// which only the full listing holds.
     #[test]
     fn held_queue_is_warned_once_naming_whose_queue_is_full() {
         let mine = split_of(
@@ -633,13 +666,13 @@ mod tests {
         let listed = vec![mine.clone(), theirs];
 
         // Two clusters report the same split: the key folds them.
-        let warnings = held_queue_warnings("a1b2", &listed, &[&mine, &mine]);
+        let warnings = held_queue_warnings(&listed, &[&mine, &mine]);
         let keys = warnings.keys().cloned().collect::<Vec<_>>();
         assert_eq!(
             keys,
             [
-                ("order-checkout".to_owned(), "activity".to_owned()),
-                ("order-checkout".to_owned(), "workflow".to_owned()),
+                ("orders".to_owned(), "activity".to_owned()),
+                ("orders".to_owned(), "workflow".to_owned()),
             ]
         );
 
@@ -659,7 +692,8 @@ mod tests {
     }
 
     /// A hold on the session's own queue says so, and a queue no listed split names any more is
-    /// described by name rather than dropped.
+    /// described by name rather than dropped. A split on another workload whose custom name
+    /// template produced the same queue name does not pass for the owner.
     #[test]
     fn held_queue_owner_falls_back_to_the_queue_name() {
         let mine = split_of(
@@ -675,9 +709,19 @@ mod tests {
                 ..Default::default()
             },
         );
-        let listed = vec![mine.clone()];
+        let other_workload = split_on(
+            "billing",
+            "E5F6",
+            "colleague",
+            QueueSplitStatus {
+                phase: "Ready".to_owned(),
+                tmp_queues: vec![tmp_queue("workload", "mirrord-tmp-gone-order-checkout")],
+                ..Default::default()
+            },
+        );
+        let listed = vec![mine.clone(), other_workload];
 
-        let warnings = held_queue_warnings("A1B2", &listed, &[&mine]);
+        let warnings = held_queue_warnings(&listed, &[&mine]);
         let workflow = warning(&warnings, "workflow");
         assert!(workflow.contains("your own session's queue"), "{workflow}");
         let activity = warning(&warnings, "activity");
