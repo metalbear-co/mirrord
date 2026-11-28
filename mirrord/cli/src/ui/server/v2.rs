@@ -95,7 +95,16 @@ pub(super) fn v2_router() -> Router<AppState> {
 async fn cached_client(state: &AppState, context: Option<&str>) -> UiResult<Client> {
     // Read once, for both the key and the client: an expired or unreadable login is the
     // request's error, never a reason to hand out a kubeconfig client cached before the login.
-    let login = daemon_login().await?;
+    cached_client_for(state, daemon_login().await?, context).await
+}
+
+/// [`cached_client`] for a login the handler already read, so the handler's own branching on the
+/// login and its client agree even when `mirrord login` or `logout` runs in between.
+async fn cached_client_for(
+    state: &AppState,
+    login: Option<OperatorLogin>,
+    context: Option<&str>,
+) -> UiResult<Client> {
     let key = client_key(login.as_ref(), context).await;
     if let Some(client) = state.clients.read().await.get(&key).cloned() {
         return Ok(client);
@@ -623,8 +632,9 @@ async fn kube_namespaces(
     State(state): State<AppState>,
     Query(query): Query<ContextQuery>,
 ) -> UiResult<axum::Json<NamespacesResponse>> {
-    let client = cached_client(&state, query.context.as_deref()).await?;
-    if let Some(login) = daemon_login().await? {
+    let login = daemon_login().await?;
+    let client = cached_client_for(&state, login.clone(), query.context.as_deref()).await?;
+    if let Some(login) = login {
         let request = http::Request::get(namespaces_api_path())
             .body(Vec::new())
             .map_err(|error| ApiError::InvalidLoginUrl {
@@ -770,6 +780,11 @@ mod tests {
     fn a_new_login_to_the_same_operator_gets_a_new_client() {
         let mut first = login();
         first.token = "first-secret-token".to_owned().into();
+        // The same host under another scheme is another operator URL, with clients of its own.
+        let mut other_url = first.clone();
+        other_url.url = "http://mirrord.corp.example.com".to_owned();
+        assert_eq!(login_context(&first), login_context(&other_url));
+        assert_ne!(login_client_key(&first), login_client_key(&other_url));
         let mut again = first.clone();
         again.token = "second-secret-token".to_owned().into();
         assert_ne!(login_client_key(&first), login_client_key(&again));

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::{
     error::ApiError,
-    server::{client_for_context, daemon_login},
+    server::{client_for, daemon_login},
 };
 
 /// ### Response for `GET /api/v2/kube/target-types`
@@ -106,11 +106,13 @@ pub(crate) async fn list_targets(
     Query(query_params): Query<TargetsQuery>,
 ) -> Result<axum::Json<Vec<TargetInfo>>, ApiError> {
     let namespace = query_params.namespace.as_deref().unwrap_or("default");
-    let client = client_for_context(query_params.context.as_deref()).await?;
+    let login = daemon_login().await?;
+    let through_login = login.is_some();
+    let client = client_for(login, query_params.context.as_deref()).await?;
 
     // Only the operator's own API answers an operator login, so it lists what the operator sees,
     // as `mirrord ls` does under a login.
-    if daemon_login().await?.is_some() {
+    if through_login {
         let listed = Api::<TargetCrd>::namespaced(client, namespace)
             .list(&ListParams::default())
             .await
