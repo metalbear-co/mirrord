@@ -5,7 +5,8 @@ use kube::{Api, Resource};
 use mirrord_config::{LayerConfig, config::ConfigContext};
 use mirrord_operator::crd::{
     queue_split::{
-        QueueSplit, QueueSplitFilter, QueueSplitQueue, QueueSplitTargetPod, QueueSplitTmpQueue,
+        QueueSplit, QueueSplitFilter, QueueSplitHeldQueue, QueueSplitQueue, QueueSplitTargetPod,
+        QueueSplitTmpQueue,
     },
     session::SessionTarget,
 };
@@ -316,6 +317,30 @@ impl TmpQueueDetail {
     }
 }
 
+/// Fields of a held queue, shown together in the table's `DETAILS` cell. `queue`
+/// is the original task queue the operator is not polling, `tasks` which task
+/// kind is held, `full` the virtual queue whose buffer the hold waits on and
+/// `since` when the hold started.
+#[derive(Display, EnumIter, Clone, Copy)]
+#[strum(serialize_all = "lowercase")]
+enum HeldQueueDetail {
+    Queue,
+    Tasks,
+    Full,
+    Since,
+}
+
+impl HeldQueueDetail {
+    fn value(self, held: &QueueSplitHeldQueue) -> Option<String> {
+        match self {
+            Self::Queue => Some(held.queue.clone()),
+            Self::Tasks => Some(held.task_kind.clone()),
+            Self::Full => Some(held.full_queue.clone()),
+            Self::Since => Some(held.since.0.to_string()),
+        }
+    }
+}
+
 /// Columns of the target-pods table.
 #[derive(Display, EnumIter, Clone, Copy)]
 #[strum(serialize_all = "UPPERCASE")]
@@ -395,6 +420,29 @@ fn print_detail(split: &QueueSplit) {
         status.map(|s| s.target_pods.as_slice()).unwrap_or_default(),
         PodField::value,
     );
+    if let Some(table) = held_queues_table(split) {
+        println!("\nHeld queues:");
+        table.printstd();
+    }
+}
+
+/// The `ID | TYPE | DETAILS` table of the queues the operator has stopped reading, or `None`
+/// when nothing is held. Most splits are never held, so unlike the other sections this one is
+/// left out entirely rather than printed as `(none)`.
+fn held_queues_table(split: &QueueSplit) -> Option<Table> {
+    let held_queues = split
+        .status
+        .as_ref()
+        .map(|status| status.held_queues.as_slice())
+        .filter(|held_queues| !held_queues.is_empty())?;
+
+    Some(broker_table(held_queues, |held| {
+        (
+            &held.id,
+            &held.queue_type,
+            detail_cell::<HeldQueueDetail>(|d| d.value(held)),
+        )
+    }))
 }
 
 /// Prints a titled `ID | TYPE | DETAILS` table. Every broker shares the `ID` and
@@ -408,6 +456,11 @@ fn print_broker_table<T>(title: &str, items: &[T], row: impl Fn(&T) -> (&str, &s
         return;
     }
 
+    broker_table(items, row).printstd();
+}
+
+/// The `ID | TYPE | DETAILS` table [`print_broker_table`] prints, see there.
+fn broker_table<T>(items: &[T], row: impl Fn(&T) -> (&str, &str, String)) -> Table {
     let mut table = Table::new();
     table.add_row(Row::new(vec![
         Cell::new("ID"),
@@ -422,7 +475,7 @@ fn print_broker_table<T>(title: &str, items: &[T], row: impl Fn(&T) -> (&str, &s
             Cell::new(&details),
         ]));
     }
-    table.printstd();
+    table
 }
 
 /// Joins a detail enum's fields into one `key=value ...` cell, skipping any
@@ -494,6 +547,7 @@ fn dash() -> String {
 
 #[cfg(test)]
 mod tests {
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
     use mirrord_operator::crd::{
         queue_split::{QueueSplitSpec, QueueSplitStatus, QueueSplitTmpQueue},
         session::{KubeResourceTarget, SessionOwner},
@@ -570,5 +624,35 @@ mod tests {
         let cell = Column::TempQueues.value(&splits[0]);
 
         assert_eq!(cell, "mirrord-tmp-9f2-orders\nmirrord-tmp-9f2-billing");
+    }
+
+    /// The held queues section is for the rare split the operator has stopped reading, so a
+    /// split with nothing held gets no section at all, and a held one lists the task queue, the
+    /// task kind and the full virtual queue the hold waits on.
+    #[test]
+    fn held_queues_table_shows_only_when_something_is_held() {
+        let mut split = split_with_tmp_queues(Vec::new());
+        assert!(held_queues_table(&split).is_none());
+
+        split.status.as_mut().expect("status is set").held_queues = vec![QueueSplitHeldQueue {
+            id: "orders".to_owned(),
+            queue_type: "Temporal".to_owned(),
+            queue: "order-checkout".to_owned(),
+            task_kind: "workflow".to_owned(),
+            full_queue: "mirrord-tmp-a-main-order-checkout".to_owned(),
+            since: Time(Timestamp::from_second(1_795_860_902).expect("valid timestamp")),
+        }];
+
+        let table = held_queues_table(&split)
+            .expect("a held queue is listed")
+            .to_string();
+        assert!(table.contains("Temporal"), "{table}");
+        assert!(
+            table.contains(
+                "queue=order-checkout tasks=workflow full=mirrord-tmp-a-main-order-checkout \
+                 since=2026-11-28T10:15:02Z"
+            ),
+            "{table}"
+        );
     }
 }
