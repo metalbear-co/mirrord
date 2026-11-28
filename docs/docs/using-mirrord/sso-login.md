@@ -1,6 +1,6 @@
 ---
 title: Logging in with SSO
-description: Log in to the mirrord Operator through your company's identity provider with mirrord login, run mirrord sessions and the IDE through that login, see your logins with mirrord whoami, and remove one with mirrord logout.
+description: Log in to the mirrord Operator through your company's identity provider with mirrord login, run mirrord sessions and the IDE through that login, pick targets and namespaces without a kubeconfig, see your logins with mirrord whoami, and remove one with mirrord logout.
 tags:
   - enterprise
 ---
@@ -70,6 +70,18 @@ A running session keeps its connection when the login expires, but it cannot rec
 
 `mirrord db-branches status`, `mirrord db-branches destroy` and `mirrord vpn` are not served through the Operator's URL yet, whether or not you have a kubeconfig. While you are logged in, `status` and `destroy` end with `No active DB branch found` even when branches exist, because the branch resources are not reachable, and `vpn` fails with a not-found error. Log out of each Operator first, then run them with your kubeconfig. `mirrord db-branches connections` reads local files only and keeps working.
 
+### Picking a target
+
+`mirrord ls` and the target pickers of the IDE extensions work while you are logged in, with no kubeconfig on the machine. The Operator lists the targets of the namespace for you, already filtered to what RBAC lets your SSO user and groups list, so the pickers show the targets you may list. A target you may `get` but not `list` does not appear there; name it in the config and the session still runs.
+
+```bash
+mirrord ls -n payments
+```
+
+The namespace picker of the IDE asks the Operator which namespaces you may list targets in, and offers those: every namespace the Operator serves where RBAC grants you `list` on targets, nothing else. Without a namespace in the config or on the command line, the listing starts in the `default` namespace, like a session does. When RBAC does not let you list targets there, the picker shows no targets until you switch to one of the namespaces it offers.
+
+The namespace list needs an Operator of version `3.239.0` or later. With an older one, mirrord falls back to the namespaces that hold targets you may list cluster-wide, which is the current namespace alone when your roles grant you namespaces only. The pickers never fail because of the namespace list: when the Operator refuses it, for example because your user's roles predate the chart version that grants `list` on `namespaces` in the Operator's API group, the current namespace is the only one offered and the targets of that namespace are still listed.
+
 ## Seeing your logins
 
 ```bash
@@ -131,5 +143,6 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | `operator: false can't be used while logged in to ...` | Your config turns the Operator off while a login is in use. | Run `mirrord logout --url` with that URL, or drop `operator: false`. |
 | `Feature sso requires a mirrord Enterprise plan.` while running | The Operator's license dropped below Enterprise after you logged in. | Ask your admin about the license, or log out and use your kubeconfig. |
 | ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
+| The IDE's namespace picker offers only the current namespace | Your roles predate the chart version that grants `list` on `namespaces` in the Operator's API group. | Ask your admin to upgrade the chart release to `3.239.0` or later. Until then, set the namespace in the config or with `mirrord ls -n`. |
 | `the login token was not issued by this operator or has expired` before the time `mirrord whoami` shows | The Operator stopped accepting your token, for example after its client secret was rotated. `mirrord login --url` alone reuses the saved token while it has not expired. | Run `mirrord logout --url <operator-url>`, then `mirrord login --url <operator-url>`. |
 | A command fails with `403` after a login | You are logged in, but RBAC grants your user or groups nothing in that namespace. | Ask your admin to bind your group, see [Granting a group access](../managing-mirrord/sso.md#granting-a-group-access-to-a-namespace). |
