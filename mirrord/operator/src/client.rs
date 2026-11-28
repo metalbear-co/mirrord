@@ -19,6 +19,7 @@ use kube::{
     api::{ApiResource, DynamicObject, GroupVersionKind, ListParams, PostParams},
     client::ClientBuilder,
 };
+use login_routes::LoginRoutesLayer;
 use mirrord_analytics::{
     AnalyticsOperatorProperties, Reporter, SanitizedString, UP_DB_BRANCHES_REPORT_PREFIX,
     UpSessionDbBranch,
@@ -112,6 +113,7 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+pub mod login_routes;
 pub mod preview_sync;
 pub mod preview_wake;
 mod queue_split_progress;
@@ -493,6 +495,7 @@ impl OperatorApi<NoClientCert> {
             .with_layer(&RetryLayer::new(retry_policy_from_config(
                 &config.startup_retry,
             )?))
+            .with_layer(&LoginRoutesLayer::new(login_url.is_some()))
             .build();
 
         let operator: Result<MirrordOperatorCrd, _> =
@@ -610,12 +613,14 @@ impl OperatorApi<NoClientCert> {
         P: Progress,
     {
         let previous_client = self.client.clone();
+        let through_login = self.through_login();
 
         let result = Self::build_authenticated_client(
             progress,
             layer_config,
             certificate,
             self.client_cert.base_config,
+            through_login,
         );
 
         match result {
@@ -646,12 +651,14 @@ impl OperatorApi<NoClientCert> {
     }
 
     /// Builds a new [`Client`] with the given client certificate attached as a header,
-    /// and mirrord's retry/buffering layers applied.
+    /// and mirrord's retry/buffering layers applied. `through_login` reroutes branch database
+    /// requests to the operator's route for them (see [`login_routes`]).
     fn build_authenticated_client<P: Progress>(
         progress: &P,
         layer_config: &LayerConfig,
         certificate: &Certificate,
         mut config: Config,
+        through_login: bool,
     ) -> Result<Client, OperatorApiError> {
         let header = Self::make_client_cert_header(certificate)?;
 
@@ -668,6 +675,7 @@ impl OperatorApi<NoClientCert> {
                 retry_policy_from_config(&layer_config.startup_retry)
                     .map_err(OperatorApiError::from)?,
             ))
+            .with_layer(&LoginRoutesLayer::new(through_login))
             .build();
 
         Ok(client)
@@ -1234,6 +1242,15 @@ where
             if let Some(feature) = required_branching_feature(branch_config) {
                 self.operator.spec.require_feature(feature)?;
             }
+        }
+
+        // Under a login the branches are created and watched through the operator's
+        // `branchdatabases` route (see `login_routes`), which older operators do not serve: their
+        // URL answers a bare 404 for the stored kind, so name the missing feature instead.
+        if self.through_login() {
+            self.operator
+                .spec
+                .require_feature(NewOperatorFeature::DbBranchRoutes)?;
         }
 
         let target = layer_config

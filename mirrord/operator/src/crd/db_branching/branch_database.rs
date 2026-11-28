@@ -5,7 +5,7 @@ use std::{
 };
 
 use k8s_openapi::ByteString;
-use kube::CustomResource;
+use kube::{CustomResource, Resource};
 use mirrord_config::feature::database_branches::{
     BranchItemCopyConfig, ClickhouseBranchCopyConfig, CockroachdbBranchCopyConfig,
     DynamodbBranchCopyConfig, MariadbBranchCopyConfig, MongodbBranchCopyConfig,
@@ -24,7 +24,7 @@ pub use super::core::{
     BranchDatabasePhase, BranchDatabaseStatus, ConnectionSource, ConnectionSourceKind, SessionInfo,
 };
 use super::core::{ExtraParamSet, IamAuthConfig};
-use crate::crd::session::KubeResourceTarget;
+use crate::crd::{TargetCrd, session::KubeResourceTarget};
 
 #[derive(CustomResource, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[kube(
@@ -1477,6 +1477,18 @@ impl From<BranchItemCopyConfig> for ItemCopyConfig {
         ItemCopyConfig {
             filter: config.filter,
         }
+    }
+}
+
+/// Path under the operator API where [`BranchDatabase`]s are served, in `namespace` or across
+/// every namespace. The operator reads and writes the stored kind there on the caller's behalf,
+/// for CLIs logged in through SSO, whose URL reaches only the operator's own API group.
+pub fn branch_databases_api_path(namespace: Option<&str>) -> String {
+    let api_version = TargetCrd::api_version(&());
+    let plural = BranchDatabase::plural(&());
+    match namespace {
+        Some(namespace) => format!("/apis/{api_version}/namespaces/{namespace}/{plural}"),
+        None => format!("/apis/{api_version}/{plural}"),
     }
 }
 

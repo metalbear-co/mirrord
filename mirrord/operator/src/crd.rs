@@ -935,6 +935,11 @@ pub enum NewOperatorFeature {
     /// `mirrord ls` without reading the cluster's namespaces, which its URL does not reach.
     NamespaceRoutes,
 
+    /// This operator serves the branch databases of the `dbs.mirrord.metalbear.co` group under
+    /// its own API ([`db_branching::branch_database::branch_databases_api_path`]), so a CLI
+    /// logged in through SSO can create, watch, list and delete them without reaching that group.
+    DbBranchRoutes,
+
     /// This operator resolves `configmap` connection param sources for DB branching (values
     /// read out of a ConfigMap entry, optionally a field inside a mounted JSON/YAML file).
     /// Gated so the CLI fails fast on older operators: the branch CRD schema lets the new
@@ -1202,6 +1207,7 @@ impl NewOperatorFeature {
             | Self::LicenseGateReporting
             | Self::ProfileRoutes
             | Self::NamespaceRoutes
+            | Self::DbBranchRoutes
             | Self::Unknown => None,
         }
     }
@@ -1275,6 +1281,7 @@ impl Display for NewOperatorFeature {
             NewOperatorFeature::NatsPubSubQueueSplitting => "NATS pub/sub queue splitting",
             NewOperatorFeature::ProfileRoutes => "mirrord profiles served by the operator API",
             NewOperatorFeature::NamespaceRoutes => "namespace listing served by the operator API",
+            NewOperatorFeature::DbBranchRoutes => "database branches served by the operator API",
             NewOperatorFeature::PreviewAutoQueueSplitting => {
                 "default queue splitting in preview environments"
             }
@@ -1423,6 +1430,7 @@ impl NewOperatorFeature {
             NewOperatorFeature::ProxyApi
             | NewOperatorFeature::ProfileRoutes
             | NewOperatorFeature::NamespaceRoutes
+            | NewOperatorFeature::DbBranchRoutes
             | NewOperatorFeature::CopyTarget
             | NewOperatorFeature::CopyTargetExcludeContainers
             | NewOperatorFeature::SessionManagement
