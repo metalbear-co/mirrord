@@ -384,7 +384,7 @@ async fn namespaces_through_operator_route(client: &kube::Client, namespace: &st
 /// The namespaces of every target the operator lists cluster-wide, for an operator without the
 /// namespace route, with the current namespace always among them so the picker is never left
 /// without a choice. On failure, the current namespace alone.
-async fn namespaces_of_targets_across_cluster(
+pub(crate) async fn namespaces_of_targets_across_cluster(
     client: &kube::Client,
     namespace: &str,
 ) -> Vec<String> {

@@ -23,8 +23,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::{
     error::ApiError,
-    server::{AppState, client_for_context, default_namespace},
+    server::{AppState, client_for, daemon_login, default_namespace},
 };
+
+/// The kubeconfig client for the pages that read workloads and their pod specs with the
+/// `mirrord up init` code, straight from the cluster, decided from one read of the login. Under
+/// an operator login those pages get the refusal naming `mirrord logout`, since the login's URL
+/// does not reach workloads; the rest of the wizard (rendering the file) needs no cluster.
+async fn kubeconfig_client() -> Result<kube::Client, ApiError> {
+    match daemon_login().await? {
+        None => client_for(None, None).await,
+        Some(login) => Err(ApiError::NotThroughLogin {
+            what: "The config wizard",
+            host: login.host().to_owned(),
+            url: login.url,
+        }),
+    }
+}
 
 /// Routes for `/api/v1/{...}` that back the config wizard page.
 ///
@@ -124,7 +139,7 @@ async fn up_workloads(
     Query(query): Query<WorkloadsQuery>,
 ) -> Result<Json<WorkloadsResponse>, ApiError> {
     mark_returning(&state).await;
-    let client = client_for_context(None).await?;
+    let client = kubeconfig_client().await?;
     let workloads = list_workloads_for_mode(&client, &query.namespace, query.mode).await?;
     Ok(Json(WorkloadsResponse { workloads }))
 }
@@ -147,7 +162,7 @@ struct PortsResponse {
 async fn up_ports(Query(query): Query<PortsQuery>) -> Result<Json<PortsResponse>, ApiError> {
     let target =
         Target::from_str(&query.path).map_err(|_| ApiError::InvalidTarget(query.path.clone()))?;
-    let client = client_for_context(None).await?;
+    let client = kubeconfig_client().await?;
     let ports = detect_ports(&client, &target, &query.namespace).await?;
     Ok(Json(PortsResponse {
         ports: ports.into_iter().collect(),

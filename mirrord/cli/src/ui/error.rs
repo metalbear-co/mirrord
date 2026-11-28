@@ -6,6 +6,7 @@ use axum::{
 };
 use kube::config::KubeconfigError;
 use mirrord_kube::error::KubeApiError;
+use mirrord_operator::client::OperatorAccessError;
 use thiserror::Error;
 
 /// Errors returned by the `mirrord ui` API handlers that read the kubeconfig or reach the cluster.
@@ -64,6 +65,26 @@ pub(super) enum ApiError {
     /// Listing workloads or ports with the `mirrord up init` code failed.
     #[error(transparent)]
     Up(#[from] mirrord_up::UpError),
+
+    /// The saved operator login could not be read, or it expired. The message names the command
+    /// that fixes it.
+    #[error(transparent)]
+    Login(#[from] OperatorAccessError),
+
+    /// The saved operator login names a URL that is not one.
+    #[error("the operator login {url} does not hold a usable URL: {error}")]
+    InvalidLoginUrl { url: String, error: String },
+
+    /// The page reads the cluster's own resources, which an operator login does not reach.
+    #[error(
+        "{what} reads the cluster's workloads, which the login to {host} does not reach. Run \
+         `mirrord logout --url {url}` to use it with your kubeconfig."
+    )]
+    NotThroughLogin {
+        what: &'static str,
+        host: String,
+        url: String,
+    },
 }
 
 impl IntoResponse for ApiError {
@@ -73,7 +94,11 @@ impl IntoResponse for ApiError {
             | Self::InferKubeconfig(_)
             | Self::InvalidBaggage(_)
             | Self::KubeClient(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::LoadContext { .. } | Self::InvalidTarget(_) => StatusCode::BAD_REQUEST,
+            Self::LoadContext { .. } | Self::InvalidTarget(_) | Self::NotThroughLogin { .. } => {
+                StatusCode::BAD_REQUEST
+            }
+            Self::Login(_) => StatusCode::UNAUTHORIZED,
+            Self::InvalidLoginUrl { .. } => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::KubeApi(_) | Self::KubeResource(_) | Self::Up(_) => StatusCode::BAD_GATEWAY,
             Self::Timeout { .. } => StatusCode::GATEWAY_TIMEOUT,

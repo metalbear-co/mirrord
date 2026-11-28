@@ -9,12 +9,16 @@ use k8s_openapi::api::{
     batch::v1::{CronJob, Job},
     core::v1::{Container, Pod, Service},
 };
-use kube::{Client, runtime::reflector::Lookup};
-use mirrord_config::target::TargetType;
+use kube::{Api, Client, api::ListParams, runtime::reflector::Lookup};
+use mirrord_config::target::{Target, TargetDisplay, TargetType};
 use mirrord_kube::api::kubernetes::{rollout::Rollout, seeker::KubeResourceSeeker};
+use mirrord_operator::crd::TargetCrd;
 use serde::{Deserialize, Serialize};
 
-use crate::ui::{error::ApiError, server::client_for_context};
+use crate::ui::{
+    error::ApiError,
+    server::{client_for, daemon_login},
+};
 
 /// ### Response for `GET /api/v2/kube/target-types`
 ///
@@ -102,7 +106,27 @@ pub(crate) async fn list_targets(
     Query(query_params): Query<TargetsQuery>,
 ) -> Result<axum::Json<Vec<TargetInfo>>, ApiError> {
     let namespace = query_params.namespace.as_deref().unwrap_or("default");
-    let client = client_for_context(query_params.context.as_deref()).await?;
+    let login = daemon_login().await?;
+    let through_login = login.is_some();
+    let client = client_for(login, query_params.context.as_deref()).await?;
+
+    // Only the operator's own API answers an operator login, so it lists what the operator sees,
+    // as `mirrord ls` does under a login.
+    if through_login {
+        let listed = Api::<TargetCrd>::namespaced(client, namespace)
+            .list(&ListParams::default())
+            .await
+            .map_err(ApiError::KubeApi)?;
+        let targets = listed
+            .into_iter()
+            .filter_map(|crd| crd.spec.target.as_known().ok().cloned());
+        return Ok(axum::Json(infos_from_operator_targets(
+            targets,
+            namespace,
+            query_params.target_type,
+        )));
+    }
+
     let seeker = KubeResourceSeeker {
         client: &client,
         namespace,
@@ -184,6 +208,42 @@ pub(crate) async fn list_targets(
     }
 
     Ok(axum::Json(targets))
+}
+
+/// One entry per workload from the targets the operator lists, which name one container each, of
+/// `target_type` when given. The operator reports no ports, so `detected_ports` stays empty under
+/// a login.
+fn infos_from_operator_targets(
+    targets: impl IntoIterator<Item = Target>,
+    namespace: &str,
+    target_type: Option<TargetType>,
+) -> Vec<TargetInfo> {
+    let mut infos: Vec<TargetInfo> = Vec::new();
+    for target in targets {
+        let kind = TargetType::from(&target);
+        let unwanted = target_type.is_some_and(|wanted| wanted != kind);
+        if unwanted
+            || matches!(
+                kind,
+                TargetType::Targetless | TargetType::Label | TargetType::Serverless
+            )
+        {
+            continue;
+        }
+        let path = format!("{kind}/{}", target.name());
+        let container = target.container().cloned();
+        match infos.iter_mut().find(|info| info.target_path == path) {
+            Some(info) => info.containers.extend(container),
+            None => infos.push(TargetInfo::new(
+                kind,
+                target.name().to_owned(),
+                namespace.to_owned(),
+                container.into_iter().collect(),
+                Vec::new(),
+            )),
+        }
+    }
+    infos
 }
 
 /// A helper function that bridges the gap between the types in
@@ -474,5 +534,39 @@ impl IntoTargetInfo for ReplicaSet {
             ))
         }
         Ok(into_info_option(self))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod operator_target_tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    fn target(path: &str) -> Target {
+        Target::from_str(path).expect("valid test target")
+    }
+
+    /// The operator lists a workload once per container; the page gets it once, with every
+    /// container, and a type filter keeps only that type.
+    #[test]
+    fn one_entry_per_workload_with_its_containers() {
+        let targets = [
+            target("deployment/api/container/app"),
+            target("deployment/api/container/sidecar"),
+            target("pod/api-0/container/app"),
+        ];
+
+        let all = infos_from_operator_targets(targets.clone(), "team", None);
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].target_path, "deployment/api");
+        assert_eq!(all[0].containers, ["app", "sidecar"]);
+        assert_eq!(all[0].target_namespace, "team");
+        assert!(all[0].detected_ports.is_empty());
+
+        let pods = infos_from_operator_targets(targets, "team", Some(TargetType::Pod));
+        assert_eq!(pods.len(), 1);
+        assert_eq!(pods[0].target_path, "pod/api-0");
     }
 }
