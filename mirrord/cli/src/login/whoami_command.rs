@@ -176,7 +176,12 @@ fn render_json(
                 active: operators.active.as_deref() == Some(login.url.as_str()),
             })
             .collect(),
-        active_operator: operators.active.as_deref(),
+        // A selected URL with no saved login behind it is not used by any command, which fall back
+        // to the kubeconfig, so it is not reported as in use either.
+        active_operator: operators
+            .active
+            .as_deref()
+            .filter(|url| operators.logins.iter().any(|login| login.url == *url)),
         kube_context,
         cloud: cloud.map(|login| CloudLoginJson {
             email: &login.email,
@@ -358,6 +363,29 @@ mod tests {
                     "expiresIn": "in 12 hours",
                 },
             })
+        );
+    }
+
+    /// A store whose selected URL has no saved login behind it (left by an older CLI or a hand
+    /// edit) uses the kubeconfig, so the JSON reports no operator in use and every login inactive.
+    #[test]
+    fn json_ignores_a_selected_url_without_a_login() {
+        let now = Utc::now();
+        let operators = OperatorLogins {
+            logins: vec![login(
+                "https://staging.mirrord.corp.example.com",
+                now + TimeDelta::hours(6),
+            )],
+            active: Some("https://mirrord.corp.example.com".to_owned()),
+        };
+
+        let json: serde_json::Value =
+            serde_json::from_str(&render_json(&operators, None, Some("staging-eu"), now)).unwrap();
+
+        assert_eq!(json.get("activeOperator"), Some(&serde_json::Value::Null));
+        assert_eq!(
+            json.pointer("/operators/0/active"),
+            Some(&serde_json::Value::Bool(false))
         );
     }
 
