@@ -846,16 +846,29 @@ pub(super) async fn daemon_login() -> UiResult<Option<OperatorLogin>> {
     Ok(active_operator_login().await?)
 }
 
+/// The environment variable of the `accept_invalid_certificates` setting, which the daemon reads
+/// for its login client the way the CLI does: set directly, or by `mirrord ui -f <config>`.
+pub(super) const ACCEPT_INVALID_CERTIFICATES_ENV: &str = "MIRRORD_ACCEPT_INVALID_CERTIFICATES";
+
+/// Whether [`ACCEPT_INVALID_CERTIFICATES_ENV`] asks to accept an operator URL's certificate that
+/// does not verify. The kubeconfig path keeps the kubeconfig's own setting.
+fn accept_invalid_certificates_from_env() -> bool {
+    std::env::var(ACCEPT_INVALID_CERTIFICATES_ENV)
+        .is_ok_and(|value| value == "true" || value == "1")
+}
+
 /// The kube config of the active operator login, else of `context`, else of the global
 /// `kube_context`, else inferred.
 async fn kube_config(context: Option<&str>) -> UiResult<Config> {
     if let Some(login) = daemon_login().await? {
-        return login
+        let mut config = login
             .kube_config()
             .map_err(|error| ApiError::InvalidLoginUrl {
                 url: login.url.clone(),
                 error: error.to_string(),
-            });
+            })?;
+        config.accept_invalid_certs = accept_invalid_certificates_from_env();
+        return Ok(config);
     }
     let global_context = GlobalConfig::fresh_kube_context().await;
     let config = match kubeconfig_context(context).or(global_context.as_deref()) {

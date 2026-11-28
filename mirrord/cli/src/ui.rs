@@ -203,13 +203,19 @@ pub async fn ui_command(
     command: Option<UiSubcommand>,
     open_path: &str,
 ) -> Result<(), UiCliError> {
-    // Inherited by the daemon, which reads its baggage from the environment.
+    // Inherited by the daemon, which reads its baggage and certificate setting from the
+    // environment.
     if let Some(config_file) = &config_file {
         let mut context =
             ConfigContext::default().override_env(LayerConfig::FILE_PATH_ENV, config_file);
-        if let Some(baggage) = LayerConfig::resolve(&mut context)?.baggage {
+        let config = LayerConfig::resolve(&mut context)?;
+        if let Some(baggage) = config.baggage {
             // SAFETY: single-threaded at this point, before the daemon is spawned.
             unsafe { env::set_var("MIRRORD_BAGGAGE", baggage) };
+        }
+        if config.accept_invalid_certificates == Some(true) {
+            // SAFETY: as above.
+            unsafe { env::set_var(server::ACCEPT_INVALID_CERTIFICATES_ENV, "true") };
         }
     }
 
