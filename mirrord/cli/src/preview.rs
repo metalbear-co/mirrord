@@ -51,8 +51,9 @@ use mirrord_config::{
 use mirrord_kube::api::runtime::RuntimeDataProvider;
 use mirrord_operator::{
     client::{
-        MaybeClientCert, NoClientCert, OperatorApi, check_targetless_db_branches,
-        connect_params::BranchDbNames, error::OperatorApiError, temporal_mirror_warning,
+        MaybeClientCert, NoClientCert, OperatorApi, active_operator_login,
+        check_targetless_db_branches, connect_params::BranchDbNames, error::OperatorApiError,
+        temporal_mirror_warning,
     },
     crd::{
         MirrordOperatorSpec, NewOperatorFeature, TARGET_NAMESPACE_ANNOTATION, TargetCrd,
@@ -2260,15 +2261,16 @@ async fn preview_diff(
         Some(layer_config.key.as_str().to_owned()),
     );
 
-    let (operator_api, _) =
-        create_preview_api(&layer_config, false, &[], &progress, &mut analytics).await?;
-    // The comparison reads the live objects themselves, which an SSO login's URL does not serve.
-    if let Some(url) = operator_api.login_url() {
+    // The comparison reads the live objects themselves, which an SSO login's URL does not serve,
+    // so it is refused before anything asks the operator for features the command never uses.
+    if let Some(login) = active_operator_login().await? {
         return Err(CliError::PreviewNeedsKubeconfig {
             feature: "`mirrord preview diff`",
-            url: url.to_owned(),
+            url: login.url,
         });
     }
+    let (operator_api, _) =
+        create_preview_api(&layer_config, false, &[], &progress, &mut analytics).await?;
     // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
     // show what would change.
     reject_management_only(&operator_api.operator().spec)?;
@@ -2946,31 +2948,20 @@ fn refuse_under_login(
     layer_config: &LayerConfig,
     sources: &ManifestSources,
 ) -> CliResult<()> {
-    match login_refusal(
-        sources.is_empty().not(),
-        layer_config.feature.db_branches.is_empty().not(),
-    ) {
-        Some(feature) => match operator_api.login_url() {
-            Some(url) => Err(CliError::PreviewNeedsKubeconfig {
-                feature,
-                url: url.to_owned(),
-            }),
-            None => Ok(()),
-        },
-        None => Ok(()),
-    }
-}
-
-/// What a preview with `manifests` and `db_branches` uses that a login's URL does not serve, the
-/// first of them, or `None` when it uses none.
-fn login_refusal(manifests: bool, db_branches: bool) -> Option<&'static str> {
-    if manifests {
-        Some("manifest files (`--resource`, `--chart`)")
-    } else if db_branches {
-        Some("database branches (`feature.db_branches`)")
+    let Some(url) = operator_api.login_url() else {
+        return Ok(());
+    };
+    let feature = if sources.is_empty().not() {
+        "manifest files (`--resource`, `--chart`)"
+    } else if layer_config.feature.db_branches.is_empty().not() {
+        "database branches (`feature.db_branches`)"
     } else {
-        None
-    }
+        return Ok(());
+    };
+    Err(CliError::PreviewNeedsKubeconfig {
+        feature,
+        url: url.to_owned(),
+    })
 }
 
 /// Resolves the namespace a preview session and its resources live in.
@@ -3306,16 +3297,6 @@ mod tests {
                 .not()
             );
         }
-    }
-
-    /// Under a login, a preview with manifest files or database branches is refused before it
-    /// replaces a running one, naming what the login's URL does not serve; a plain preview is not.
-    #[test]
-    fn manifests_and_branches_are_refused_under_a_login() {
-        assert_eq!(login_refusal(false, false), None);
-        assert!(login_refusal(true, false).is_some_and(|feature| feature.contains("--resource")));
-        assert!(login_refusal(false, true).is_some_and(|feature| feature.contains("db_branches")));
-        assert!(login_refusal(true, true).is_some_and(|feature| feature.contains("--resource")));
     }
 
     /// The creation timeout of a session with `sync` measures time without progress: it doesn't

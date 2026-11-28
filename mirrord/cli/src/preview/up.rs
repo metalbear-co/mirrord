@@ -17,6 +17,7 @@ use itertools::Itertools;
 use kube::{Api, Client, api::ListParams};
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind, ReportTarget, Reporter};
+use mirrord_config::LayerConfig;
 use mirrord_config::{
     config::{ConfigContext, EnvKey},
     env_key::MIRRORD_ENV_KEY,
@@ -27,11 +28,10 @@ use mirrord_config::{
     target::{Target, TargetType},
     util::GIT_BRANCH,
 };
-use mirrord_kube::error::KubeApiError;
 use mirrord_operator::{
     client::{
-        OperatorAccessError, active_operator_login, error::OperatorApiError,
-        required_branching_feature, split_config_branches::entries_from_response,
+        OperatorAccess, active_operator_login, error::OperatorApiError, required_branching_feature,
+        split_config_branches::entries_from_response,
     },
     crd::{NewOperatorFeature, TargetCrd},
     sync::UnpairReason,
@@ -54,6 +54,7 @@ use crate::{
     },
     data::{GlobalConfig, UserData},
     error::{CliError, CliResult, GENERAL_HELP},
+    kube::kube_client_and_access_from_layer_config,
     up::checks::{DEFAULT_DB_BRANCHES_UNSUPPORTED, resolves_default_db_branches},
 };
 
@@ -465,6 +466,12 @@ async fn prepare_service(
             .lookup_split_config_db_branches(&config, &request)
             .await?;
         let resolved = entries_from_response(&response, config.key.as_str())?;
+        // A default `"*"` that matches nothing asks for no branches, which is what a preview
+        // without any needs to say: under an operator login, a request left in place would be
+        // refused as branches the login cannot reach.
+        if default_db_branches && response.entries.is_empty() {
+            config.feature.db_branches = DatabaseBranchesConfig::default();
+        }
         let supported = operator_api.operator().spec.supported_features();
         let (branchable, off): (Vec<_>, Vec<_>) = response
             .entries
@@ -602,25 +609,20 @@ struct OperatorWorkloads {
 }
 
 /// The lister for the active operator login, or `None` without one, when the services' kube
-/// contexts are read instead.
+/// contexts are read instead. Built like every other client of the run, so it carries the CLI's
+/// headers and honors `MIRRORD_ACCEPT_INVALID_CERTIFICATES`; `accept_invalid_certificates` from
+/// the mirrord-up file wins over that, as it does for the services.
 async fn operator_workloads(
     accept_invalid_certificates: Option<bool>,
 ) -> CliResult<Option<OperatorWorkloads>> {
-    let Some(login) = active_operator_login().await? else {
-        return Ok(None);
-    };
-    let mut config = login
-        .kube_config()
-        .map_err(|error| OperatorAccessError::InvalidUrl {
-            url: login.url.clone(),
-            error,
-        })?;
-    if let Some(accept_invalid_certificates) = accept_invalid_certificates {
-        config.accept_invalid_certs = accept_invalid_certificates;
+    let mut layer_config = LayerConfig::resolve(&mut ConfigContext::default())?;
+    if accept_invalid_certificates.is_some() {
+        layer_config.accept_invalid_certificates = accept_invalid_certificates;
     }
-    let client = Client::try_from(config)
-        .map_err(|error| CliError::CreateKubeApiFailed(KubeApiError::from(error)))?;
-    Ok(Some(OperatorWorkloads { client }))
+    match kube_client_and_access_from_layer_config(&layer_config).await? {
+        (client, OperatorAccess::Login(_)) => Ok(Some(OperatorWorkloads { client })),
+        (_, OperatorAccess::Kubeconfig { .. }) => Ok(None),
+    }
 }
 
 impl WorkloadLister for OperatorWorkloads {
@@ -644,9 +646,11 @@ impl WorkloadLister for OperatorWorkloads {
     }
 }
 
-/// The paths of the `targets` a service's target can be inferred from, ordered like
-/// [`INFERRED_TARGET_TYPES`], the order in which the kubeconfig listing finds them, so a name that
-/// two kinds share resolves to the same workload either way.
+/// The paths of the `targets` a service's target can be inferred from, as the kubeconfig listing
+/// names them: workloads without a container (the operator lists one target per container of a
+/// multi-container workload), pods with theirs. Ordered like [`INFERRED_TARGET_TYPES`], the order
+/// in which the kubeconfig listing finds them, so a name that two kinds share resolves to the
+/// same workload either way.
 fn inferable_paths(targets: impl IntoIterator<Item = Target>) -> Vec<String> {
     let mut ranked = targets
         .into_iter()
@@ -654,11 +658,24 @@ fn inferable_paths(targets: impl IntoIterator<Item = Target>) -> Vec<String> {
             let rank = INFERRED_TARGET_TYPES
                 .iter()
                 .position(|kind| *kind == TargetType::from(&target))?;
-            Some((rank, target.to_string()))
+            Some((rank, without_workload_container(target).to_string()))
         })
         .collect::<Vec<_>>();
     ranked.sort_by_key(|(rank, _)| *rank);
+    ranked.dedup();
     ranked.into_iter().map(|(_, path)| path).collect()
+}
+
+/// `target` without its container, unless it is a pod, which the kubeconfig listing names with
+/// one.
+fn without_workload_container(mut target: Target) -> Target {
+    match &mut target {
+        Target::Deployment(workload) => workload.container = None,
+        Target::Rollout(workload) => workload.container = None,
+        Target::StatefulSet(workload) => workload.container = None,
+        _ => {}
+    }
+    target
 }
 
 /// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A` in each scope that
@@ -774,16 +791,19 @@ mod tests {
 
     use super::*;
 
-    /// Through the operator, the targets come in the operator's order, so they are put in the
-    /// kubeconfig listing's kind order: a service named like both a Deployment and a Pod still
-    /// resolves to the Deployment. Kinds a service is never inferred from are left out.
+    /// Through the operator, the targets come in the operator's order, one per container of a
+    /// multi-container workload, so they are put in the kubeconfig listing's kind order and
+    /// named like it: a service named like both a Deployment and a Pod still resolves to the
+    /// Deployment, with no container picked for it. Kinds a service is never inferred from are
+    /// left out.
     #[test]
     fn operator_targets_are_ranked_like_the_kubeconfig_listing() {
         let targets = [
             "pod/app",
             "job/app",
             "rollout/app",
-            "deployment/app",
+            "deployment/app/container/app",
+            "deployment/app/container/sidecar",
             "statefulset/db",
         ]
         .map(|path| Target::from_str(path).expect("a test target parses"));

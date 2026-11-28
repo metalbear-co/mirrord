@@ -175,8 +175,9 @@ pub enum UpError {
          service's target: {reason}"
     )]
     #[diagnostic(help(
-        "Set `target.path` for the service in the mirrord-up file, or ask your admin to let your \
-         login list targets in `{namespace}`."
+        "Set `target.path` for the service in the mirrord-up file to skip the lookup. A 403 in the \
+         reason means your login may not list targets in `{namespace}`, which your admin grants; \
+         any other reason is about reaching the operator, so check the URL and your network."
     ))]
     OperatorWorkloadListing {
         /// The namespace that was being listed.
