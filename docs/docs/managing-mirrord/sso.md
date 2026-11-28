@@ -139,6 +139,27 @@ RBAC for SSO users is the same as for any Kubernetes user. See [How do I configu
 
 To grant a group every namespace instead, bind it to the `mirrord-operator-user` ClusterRole, as in the [RBAC examples](security.md#how-do-i-configure-role-based-access-control-for-mirrord-for-teams). Users still need `get` on the workloads they target, the same as without SSO.
 
+## Preview environments
+
+From Operator `3.240.0`, every `mirrord preview` command reaches preview sessions through the Operator's own API, whether the developer logs in through SSO or uses a kubeconfig. The chart's `mirrord-operator-user` roles grant it. A custom role that gives developers preview environments needs this rule next to its `previewsessions` rule in the `preview.mirrord.metalbear.co` group, because the Kubernetes API authorizes the Operator's API on its own:
+
+```yaml
+- apiGroups:
+  - operator.metalbear.co
+  resources:
+  - previewsessions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+```
+
+The Operator builds a preview's pods with its own permissions, from the target's pod template. For a developer logged in through SSO, it first checks every ConfigMap and Secret the template names, in env variables, `envFrom`, volumes and image pull Secrets, against the developer's RBAC, and fails the preview with the first one they may not `get`. To let a group preview a workload that reads a Secret, grant the group `get` on that Secret in its namespace. The pods run as the target's ServiceAccount, as every preview does, so they reach what that account may reach. Through SSO, a developer also needs `get` on the target workload, and `get` on `pods/log` for `mirrord preview logs`, and cannot use database branches or `--resource` manifests in a preview. Developers with a kubeconfig, and the `mirrord-operator-ci` role, are not checked this way.
+
+With multi-cluster previews, each workload cluster checks the ConfigMaps and Secrets against its own RBAC, so bind the developer's group on every cluster that runs the preview's pods. The `pods/log` check runs on the cluster the developer's login reaches.
+
 ## Sessions and seats
 
 From Operator `3.236.0`, an SSO login is the same person as a kubeconfig login with the same Kubernetes username, everywhere mirrord names or counts users:

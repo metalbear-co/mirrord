@@ -82,6 +82,29 @@ The namespace picker of the IDE asks the Operator which namespaces you may list 
 
 The namespace list needs an Operator of version `3.239.0` or later. With an older one, mirrord falls back to the namespaces that hold targets you may list cluster-wide, which is the current namespace alone when your roles grant you namespaces only. The pickers never fail because of the namespace list: when the Operator refuses it, for example because your user's roles predate the chart version that grants `list` on `namespaces` in the Operator's API group, the current namespace is the only one offered and the targets of that namespace are still listed.
 
+### Preview environments
+
+The `mirrord preview` commands work while you are logged in, with no kubeconfig on the machine: `start`, `up`, `sync`, `status`, `logs`, `wake`, `stop` and `down`. The Operator creates, lists and deletes the preview sessions for you, after RBAC checks that your SSO user or one of your groups may do the same on the `previewsessions` resource, and that you may `get` the target workload. The Operator records you as the preview's creator. `mirrord preview down` and `mirrord preview status -A` list every namespace, which needs a ClusterRoleBinding; with Roles in some namespaces only, pass `-n <namespace>` to `status` and `stop` instead. That needs an Operator of version `3.240.0` or later; with an older one, the commands fail with ``Feature `preview sessions served by the operator API` is not supported in mirrord operator <version>.``
+
+A preview you start through a login only uses the ConfigMaps and Secrets you may read yourself. Before it creates the preview's pods, the Operator checks every ConfigMap and Secret the target's pod template names, in env variables, `envFrom`, volumes and image pull Secrets, against your RBAC, and the preview fails with the first one you may not `get`. The preview's pods still run as the target's ServiceAccount, like every preview:
+
+```text
+`dev@corp.example.com` created this preview through an SSO login and may not get Secret `payments-db` in namespace `payments`, which the target's pods use.
+```
+
+Ask your admin for a Role that grants `get` on it, then start the preview again. `mirrord preview logs` also needs `get` on `pods/log` in the namespace the preview's pods run in, the permission `kubectl logs` needs.
+
+A few preview features read the cluster's own resources, which the Operator's URL does not serve. While you are logged in they stop with the logout command:
+
+- manifest files with `--resource` or `--chart`, and `mirrord preview diff`,
+- database branches in `feature.db_branches`.
+
+```text
+database branches (`feature.db_branches`) can't be used while logged in to https://mirrord.corp.example.com, which serves only the operator's API. Run mirrord logout --url https://mirrord.corp.example.com first.
+```
+
+For a service in `mirrord-up.yaml` without a `target`, `mirrord preview up` looks the workload up in the targets the Operator lists for you, in the service's namespace or in `default`. While you are logged in, every kube context in the file reaches the same Operator, so `mirrord preview down` and `mirrord preview wake` act on the key once.
+
 ## Seeing your logins
 
 ```bash
@@ -145,4 +168,8 @@ Logins are kept in `~/.mirrord/auth.json`, readable by your user only. Each entr
 | ``Feature `mirrord profiles served by the operator API` is not supported in mirrord operator ...`` | Your config names a profile, and the Operator predates profile reads over its URL. | Ask your admin to upgrade the Operator to `3.239.0` or later, or drop the profile. |
 | The IDE's namespace picker offers only the current namespace | Your roles predate the chart version that grants `list` on `namespaces` in the Operator's API group. | Ask your admin to upgrade the chart release to `3.239.0` or later. Until then, set the namespace in the config or with `mirrord ls -n`. |
 | `the login token was not issued by this operator or has expired` before the time `mirrord whoami` shows | The Operator stopped accepting your token, for example after its client secret was rotated. `mirrord login --url` alone reuses the saved token while it has not expired. | Run `mirrord logout --url <operator-url>`, then `mirrord login --url <operator-url>`. |
+| ``Feature `preview sessions served by the operator API` is not supported in mirrord operator ...`` | The Operator predates preview sessions over its URL. | Ask your admin to upgrade the Operator to `3.240.0` or later. |
+| `... created this preview through an SSO login and may not get Secret ...` | The target's pods use a Secret or ConfigMap your user and groups may not read. | Ask your admin for a Role that grants `get` on it in that namespace. |
+| `... may not get pods/log in namespace ...` from `mirrord preview logs` | You may not read pod logs in the preview's namespace. | Ask your admin for a Role that grants `get` on `pods/log` there. |
+| `... can't be used while logged in to ...` from `mirrord preview` | The preview uses manifest files, `mirrord preview diff` or database branches, which read the cluster directly. | Run `mirrord logout --url` with that URL and use your kubeconfig for this preview. |
 | A command fails with `403` after a login | You are logged in, but RBAC grants your user or groups nothing in that namespace. | Ask your admin to bind your group, see [Granting a group access](../managing-mirrord/sso.md#granting-a-group-access-to-a-namespace). |
