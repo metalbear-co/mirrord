@@ -496,6 +496,7 @@ mod tests {
                 share_host: None,
                 auto_queue_splitting: false,
                 sync: None,
+                owner: None,
             },
             status: None,
         };

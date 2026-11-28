@@ -112,6 +112,7 @@ mod credentials;
 pub mod database_branches;
 mod discovery;
 pub mod error;
+pub mod preview_sessions;
 pub mod preview_sync;
 pub mod preview_wake;
 mod queue_split_progress;
@@ -764,6 +765,12 @@ where
         self.kube_context.as_deref()
     }
 
+    /// The URL of the operator login this API reaches the operator with, `None` through the
+    /// kubeconfig.
+    pub fn login_url(&self) -> Option<&str> {
+        self.login_url.as_deref()
+    }
+
     /// Whether this API reaches the operator over its public URL with a saved login, where only
     /// the operator's own API group answers and the operator resolves the target itself.
     pub fn through_login(&self) -> bool {
@@ -975,6 +982,21 @@ where
                 operation: OperatorOperation::WebsocketConnection,
             })
             .map(PreviewSyncConnection::new)
+    }
+
+    /// The client to manage `PreviewSession`s with: through the operator's preview session route
+    /// when the operator serves it, which `operator-apiservice.mdc` asks of every CLI request for
+    /// mirrord's resources, and straight through the Kubernetes API otherwise.
+    ///
+    /// Under an SSO login only the operator's API group is reachable, so an operator without the
+    /// route is refused there with the error that names the version it lacks.
+    pub fn preview_session_client(&self) -> OperatorApiResult<Client> {
+        match preview_sessions::session_path(&self.operator.spec, self.through_login())? {
+            preview_sessions::SessionPath::OperatorRoute => {
+                Ok(preview_sessions::routed_through_operator(&self.client))
+            }
+            preview_sessions::SessionPath::KubernetesApi => Ok(self.client.clone()),
+        }
     }
 
     /// Opens the wake websocket of the preview session `name` in `namespace`, through which the

@@ -446,6 +446,7 @@ impl From<&UpCliError> for ErrorCategory {
             UpCliError::Up(UpError::Io(_))
             | UpCliError::Up(UpError::Panic(_))
             | UpCliError::Up(UpError::Kube(_))
+            | UpCliError::Up(UpError::OperatorWorkloadListing { .. })
             | UpCliError::Up(UpError::Inquire(_))
             | UpCliError::Up(UpError::Exited)
             | UpCliError::Up(UpError::NoWorkloads(_))

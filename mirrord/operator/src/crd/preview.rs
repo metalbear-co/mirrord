@@ -40,7 +40,7 @@ pub use sync_config::{
 };
 use uuid::Uuid;
 
-use super::{db_branching::core::ConnectionSource, session::SessionTarget};
+use super::{SessionAuthMethod, db_branching::core::ConnectionSource, session::SessionTarget};
 #[cfg(feature = "client")]
 use crate::client::connect_params::BranchDbNames;
 use crate::sync::{AppReport, PrepareReport, SidecarState};
@@ -186,6 +186,67 @@ pub struct PreviewSessionSpec {
     /// only to operators advertising `PreviewCodeSync`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync: Option<PreviewSyncConfig>,
+
+    /// Who created the session, written by the operator's `previewsessions` route
+    /// (`operator.metalbear.co/v1alpha1`) from the request's identity, never from the body.
+    ///
+    /// When the creator logged in through SSO, the operator checks the ConfigMaps and Secrets
+    /// the preview's pods use against this user's RBAC. Only this user may post the session's
+    /// secret mounts. Not set on sessions created straight through the Kubernetes API, as
+    /// older CLIs do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<PreviewSessionOwner>,
+}
+
+/// The `group/version` the operator serves `previewsessions` under: a pass-through to the
+/// [`PreviewSession`] resource that checks the caller's RBAC on it and writes
+/// [`PreviewSessionSpec::owner`]. A CLI logged in through SSO reaches only this API group, and
+/// every CLI uses it when the operator advertises `PreviewSessionRoutes`.
+pub const PREVIEW_SESSIONS_ROUTE_GROUP_VERSION: &str = "operator.metalbear.co/v1alpha1";
+
+/// Rewrites a request path of the [`PreviewSession`] resource to the same request on the
+/// operator's preview session route, or returns `None` for any other path.
+///
+/// `/apis/<preview group>/<version>[/namespaces/<ns>]/previewsessions[/<name>]` becomes
+/// `/apis/operator.metalbear.co/v1alpha1[/namespaces/<ns>]/previewsessions[/<name>]`. The query
+/// string is not part of `path` and is kept by the caller.
+pub fn preview_sessions_route_path(path: &str) -> Option<String> {
+    let resource_prefix = format!(
+        "/apis/{}/{}/",
+        <PreviewSession as kube::Resource>::group(&()),
+        <PreviewSession as kube::Resource>::version(&())
+    );
+    let rest = path.strip_prefix(&resource_prefix)?;
+    let plural = <PreviewSession as kube::Resource>::plural(&());
+    let names_the_resource = rest
+        .split('/')
+        .enumerate()
+        .any(|(index, part)| part == plural && (index == 0 || index == 2));
+    names_the_resource.then(|| format!("/apis/{PREVIEW_SESSIONS_ROUTE_GROUP_VERSION}/{rest}"))
+}
+
+/// The user a [`PreviewSession`] was created by, as the operator's preview session route saw it.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewSessionOwner {
+    /// The Kubernetes username RBAC knows the creator by.
+    pub username: String,
+
+    /// The creator's Kubernetes groups, which RBAC bindings can name too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
+
+    /// How the creator proved who they are. `None` when the operator could not tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_method: Option<SessionAuthMethod>,
+}
+
+impl PreviewSessionOwner {
+    /// Whether the creator logged in through SSO, the only kind of owner whose mounted
+    /// ConfigMaps and Secrets the operator checks.
+    pub fn logged_in_through_sso(&self) -> bool {
+        self.auth_method == Some(SessionAuthMethod::Sso)
+    }
 }
 
 /// The user's versions of the target and the ConfigMaps and Secrets its pod uses.
@@ -1005,6 +1066,62 @@ mod tests {
 
     use super::*;
     use crate::crd::session::KubeResourceTarget;
+
+    /// A session stored before `owner` existed, as older CLIs and operators write it, still
+    /// parses, with no owner, and a session the route stamped keeps its owner on the way back.
+    #[test]
+    fn sessions_without_an_owner_still_parse() {
+        let stored = serde_json::json!({
+            "image": "app:v2",
+            "key": "pr-7",
+            "target": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "app",
+                "container": "app",
+            },
+            "ttlSecs": 3600,
+            "replicas": 1,
+        });
+        let spec: PreviewSessionSpec = serde_json::from_value(stored.clone()).unwrap();
+        assert_eq!(spec.owner, None);
+        assert_eq!(
+            serde_json::to_value(&spec).unwrap().get("owner"),
+            None,
+            "a session without an owner is written back without the field"
+        );
+
+        let mut stamped = stored;
+        stamped
+            .as_object_mut()
+            .expect("the stored spec is an object")
+            .insert(
+                "owner".to_owned(),
+                serde_json::json!({
+                    "username": "dev@example.com",
+                    "groups": ["developers"],
+                    "authMethod": "sso",
+                    "addedLater": true,
+                }),
+            );
+        let spec: PreviewSessionSpec = serde_json::from_value(stamped).unwrap();
+        let owner = spec.owner.expect("the stamped owner parses");
+        assert!(owner.logged_in_through_sso());
+        assert_eq!(owner.groups, vec!["developers".to_owned()]);
+    }
+
+    /// An auth method a newer operator writes reads as unknown, never as SSO, so the access check
+    /// never runs on a guess.
+    #[test]
+    fn an_unknown_auth_method_is_not_sso() {
+        let owner: PreviewSessionOwner = serde_json::from_value(serde_json::json!({
+            "username": "dev@example.com",
+            "authMethod": "workload-identity",
+        }))
+        .unwrap();
+        assert_eq!(owner.auth_method, Some(SessionAuthMethod::Unknown));
+        assert!(owner.logged_in_through_sso().not());
+    }
 
     /// The operator writes the status with a merge patch, which keeps a field that the patch
     /// leaves out, so a sync status without the supervisor's report writes `prepare` and `app` as

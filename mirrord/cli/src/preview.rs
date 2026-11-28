@@ -448,6 +448,8 @@ impl PreparedPreview {
                 )));
             }
 
+            refuse_under_login(&operator_api, &layer_config, sources)?;
+
             if !sources.is_empty() {
                 require_spec_resources_support(&operator_api.operator().spec)?;
             }
@@ -762,6 +764,8 @@ impl PreparedPreview {
             share_host: None,
             auto_queue_splitting,
             sync: sync_config,
+            // The operator's preview session route writes the creator; a body never names one.
+            owner: None,
         };
 
         // The sync websocket claims a developer seat, as a target connection does, so the
@@ -1493,7 +1497,7 @@ const MIN_REUSED_TTL: SignedDuration = SignedDuration::from_mins(5);
 /// `sessions` holds the sessions under the same key and target. A failed session or one that is
 /// being deleted isn't live. `share_host` doesn't count: a session that replaced another one asks for its host,
 /// and one that didn't has its host only in its status, so the field differs between two runs
-/// with the same settings.
+/// with the same settings. `owner` doesn't count either: the operator writes it, never the CLI.
 ///
 /// A session without an image of its own runs the image that the target named when the operator
 /// built its pod, so it must still be `target_image`, the image that the target names now. A
@@ -1527,6 +1531,7 @@ fn reusable_session<'a>(
 
     let same_spec = PreviewSessionSpec {
         share_host: session.spec.share_host.clone(),
+        owner: session.spec.owner.clone(),
         ..spec.clone()
     } == session.spec;
 
@@ -2182,8 +2187,9 @@ async fn preview_stop(
             .namespace
             .as_deref()
             .expect("preview session should have a namespace");
+        // The same client as the listing, so the deletion takes the same route to the operator.
         let namespaced_api =
-            Api::<PreviewSession>::namespaced(operator_api.client().clone(), namespace);
+            Api::<PreviewSession>::namespaced(api.clone().into_client(), namespace);
 
         async move {
             delete::delete_and_finalize(namespaced_api, name, &DeleteParams::default())
@@ -2256,6 +2262,13 @@ async fn preview_diff(
 
     let (operator_api, _) =
         create_preview_api(&layer_config, false, &[], &progress, &mut analytics).await?;
+    // The comparison reads the live objects themselves, which an SSO login's URL does not serve.
+    if let Some(url) = operator_api.login_url() {
+        return Err(CliError::PreviewNeedsKubeconfig {
+            feature: "`mirrord preview diff`",
+            url: url.to_owned(),
+        });
+    }
     // Nothing is sent to the operator, so an operator without `PreviewSpecResources` can still
     // show what would change.
     reject_management_only(&operator_api.operator().spec)?;
@@ -2909,9 +2922,11 @@ async fn create_preview_api(
         return Err(error.into());
     }
 
-    subtask.success(Some("connected to operator"));
+    let client = operator_api
+        .preview_session_client()
+        .inspect_err(|_| subtask.failure(None))?;
 
-    let client = operator_api.client().clone();
+    subtask.success(Some("connected to operator"));
 
     let api = if all_namespaces {
         Api::all(client)
@@ -2920,6 +2935,42 @@ async fn create_preview_api(
     };
 
     Ok((operator_api, api))
+}
+
+/// Refuses what a preview reads from the cluster itself while `operator_api` reaches the operator
+/// through an SSO login, whose URL serves only the operator's API: the live objects that
+/// manifest files are compared with, and the branch databases, whose resources the operator does
+/// not serve yet. Runs before an existing session is replaced, so the running preview stays.
+fn refuse_under_login(
+    operator_api: &OperatorApi<NoClientCert>,
+    layer_config: &LayerConfig,
+    sources: &ManifestSources,
+) -> CliResult<()> {
+    match login_refusal(
+        sources.is_empty().not(),
+        layer_config.feature.db_branches.is_empty().not(),
+    ) {
+        Some(feature) => match operator_api.login_url() {
+            Some(url) => Err(CliError::PreviewNeedsKubeconfig {
+                feature,
+                url: url.to_owned(),
+            }),
+            None => Ok(()),
+        },
+        None => Ok(()),
+    }
+}
+
+/// What a preview with `manifests` and `db_branches` uses that a login's URL does not serve, the
+/// first of them, or `None` when it uses none.
+fn login_refusal(manifests: bool, db_branches: bool) -> Option<&'static str> {
+    if manifests {
+        Some("manifest files (`--resource`, `--chart`)")
+    } else if db_branches {
+        Some("database branches (`feature.db_branches`)")
+    } else {
+        None
+    }
 }
 
 /// Resolves the namespace a preview session and its resources live in.
@@ -2995,7 +3046,10 @@ mod tests {
         feature::network::incoming::tls_delivery::LocalClientIdentity,
         target::deployment::DeploymentTarget,
     };
-    use mirrord_operator::crd::preview::{PreviewSyncConfig, PreviewSyncEntry};
+    use mirrord_operator::crd::{
+        SessionAuthMethod,
+        preview::{PreviewSessionOwner, PreviewSyncConfig, PreviewSyncEntry},
+    };
 
     use super::*;
 
@@ -3223,6 +3277,16 @@ mod tests {
         shared.spec.share_host = Some("pr-123-abc.preview.example.com".to_owned());
         assert!(reusable(&[shared], false));
 
+        // The operator's preview session route records who created the session; the CLI's spec
+        // never names an owner, so the record keeps no rerun from reusing the session.
+        let mut owned = ready.clone();
+        owned.spec.owner = Some(PreviewSessionOwner {
+            username: "dev@example.com".to_owned(),
+            groups: vec!["developers".to_owned()],
+            auth_method: Some(SessionAuthMethod::Sso),
+        });
+        assert!(reusable(&[owned], false));
+
         let mut changed = sync_spec();
         changed.ttl_secs = 7200;
         assert!(
@@ -3242,6 +3306,16 @@ mod tests {
                 .not()
             );
         }
+    }
+
+    /// Under a login, a preview with manifest files or database branches is refused before it
+    /// replaces a running one, naming what the login's URL does not serve; a plain preview is not.
+    #[test]
+    fn manifests_and_branches_are_refused_under_a_login() {
+        assert_eq!(login_refusal(false, false), None);
+        assert!(login_refusal(true, false).is_some_and(|feature| feature.contains("--resource")));
+        assert!(login_refusal(false, true).is_some_and(|feature| feature.contains("db_branches")));
+        assert!(login_refusal(true, true).is_some_and(|feature| feature.contains("--resource")));
     }
 
     /// The creation timeout of a session with `sync` measures time without progress: it doesn't

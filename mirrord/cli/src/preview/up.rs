@@ -12,8 +12,9 @@
 
 use std::{io::ErrorKind, ops::Not, path::Path, sync::Arc};
 
-use futures::future::{join_all, try_join_all};
+use futures::future::{BoxFuture, join_all, try_join_all};
 use itertools::Itertools;
+use kube::{Api, Client, api::ListParams};
 use miette::Diagnostic;
 use mirrord_analytics::{AnalyticsReporter, ExecutionKind, ReportTarget, Reporter};
 use mirrord_config::{
@@ -23,20 +24,22 @@ use mirrord_config::{
         database_branches::{DatabaseBranchesConfig, SplitConfigDbBranches, SplitConfigRequest},
         split_queues::SplitQueuesConfig,
     },
+    target::{Target, TargetType},
     util::GIT_BRANCH,
 };
+use mirrord_kube::error::KubeApiError;
 use mirrord_operator::{
     client::{
-        error::OperatorApiError, required_branching_feature,
-        split_config_branches::entries_from_response,
+        OperatorAccessError, active_operator_login, error::OperatorApiError,
+        required_branching_feature, split_config_branches::entries_from_response,
     },
-    crd::NewOperatorFeature,
+    crd::{NewOperatorFeature, TargetCrd},
     sync::UnpairReason,
 };
 use mirrord_progress::{Progress, ProgressTracker};
 use mirrord_up::{
-    AutoscaleOrigin, PreviewImageSource, PreviewRun, RequestOrigin, SkipReason, SubprocessCfg,
-    UpError, load_preview_up_config, preview_image_env,
+    AutoscaleOrigin, INFERRED_TARGET_TYPES, PreviewImageSource, PreviewRun, RequestOrigin,
+    SkipReason, SubprocessCfg, UpError, WorkloadLister, load_preview_up_config, preview_image_env,
 };
 
 use super::{
@@ -175,11 +178,13 @@ async fn run_preview_up(
         progress.info(&format!("{service}: {reason}, skipped"));
     }
 
+    let lister = operator_workloads(up_config.common.accept_invalid_certificates()).await?;
     let mut services = mirrord_up::resolve_preview_services(
         up_config,
         path,
         common.context.as_deref().map(Arc::from),
         &key,
+        lister.as_ref().map(|lister| lister as &dyn WorkloadLister),
     )
     .await?;
     for service in &mut services {
@@ -590,6 +595,72 @@ fn up_file_path(config_file: Option<&Path>) -> &Path {
     }
 }
 
+/// Lists the targets a service's target is inferred from through the operator, for a CLI logged
+/// in to it through SSO, whose URL serves only the operator's API.
+struct OperatorWorkloads {
+    client: Client,
+}
+
+/// The lister for the active operator login, or `None` without one, when the services' kube
+/// contexts are read instead.
+async fn operator_workloads(
+    accept_invalid_certificates: Option<bool>,
+) -> CliResult<Option<OperatorWorkloads>> {
+    let Some(login) = active_operator_login().await? else {
+        return Ok(None);
+    };
+    let mut config = login
+        .kube_config()
+        .map_err(|error| OperatorAccessError::InvalidUrl {
+            url: login.url.clone(),
+            error,
+        })?;
+    if let Some(accept_invalid_certificates) = accept_invalid_certificates {
+        config.accept_invalid_certs = accept_invalid_certificates;
+    }
+    let client = Client::try_from(config)
+        .map_err(|error| CliError::CreateKubeApiFailed(KubeApiError::from(error)))?;
+    Ok(Some(OperatorWorkloads { client }))
+}
+
+impl WorkloadLister for OperatorWorkloads {
+    fn default_namespace(&self) -> &str {
+        self.client.default_namespace()
+    }
+
+    fn list<'a>(&'a self, namespace: &'a str) -> BoxFuture<'a, Result<Vec<String>, UpError>> {
+        Box::pin(async move {
+            let listed = Api::<TargetCrd>::namespaced(self.client.clone(), namespace)
+                .list(&ListParams::default())
+                .await
+                .map_err(|error| UpError::OperatorWorkloadListing {
+                    namespace: namespace.to_owned(),
+                    reason: error.to_string(),
+                })?;
+            Ok(inferable_paths(listed.items.into_iter().filter_map(
+                |crd| crd.spec.target.as_known().ok().cloned(),
+            )))
+        })
+    }
+}
+
+/// The paths of the `targets` a service's target can be inferred from, ordered like
+/// [`INFERRED_TARGET_TYPES`], the order in which the kubeconfig listing finds them, so a name that
+/// two kinds share resolves to the same workload either way.
+fn inferable_paths(targets: impl IntoIterator<Item = Target>) -> Vec<String> {
+    let mut ranked = targets
+        .into_iter()
+        .filter_map(|target| {
+            let rank = INFERRED_TARGET_TYPES
+                .iter()
+                .position(|kind| *kind == TargetType::from(&target))?;
+            Some((rank, target.to_string()))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(rank, _)| *rank);
+    ranked.into_iter().map(|(_, path)| path).collect()
+}
+
 /// Handle `mirrord preview down`: `mirrord preview stop -k <key> -A` in each scope that
 /// [`key_scopes`] finds.
 pub(super) async fn preview_down(
@@ -644,6 +715,11 @@ pub(super) async fn key_scopes(common: &PreviewCommonArgs) -> CliResult<Vec<Prev
         }
         Err(error) => return Err(error.into()),
     };
+    // While logged in to an operator, every context reaches that one operator, so one scope
+    // covers the key and no preview is listed or woken twice.
+    if active_operator_login().await?.is_some() {
+        contexts.clear();
+    }
     if contexts.is_empty() {
         contexts.insert(context_arg);
     }
@@ -690,4 +766,36 @@ fn findable_key_from_env(arg: Option<&str>) -> Option<String> {
         std::env::var("GITHUB_HEAD_REF").ok(),
         GIT_BRANCH.clone(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    /// Through the operator, the targets come in the operator's order, so they are put in the
+    /// kubeconfig listing's kind order: a service named like both a Deployment and a Pod still
+    /// resolves to the Deployment. Kinds a service is never inferred from are left out.
+    #[test]
+    fn operator_targets_are_ranked_like_the_kubeconfig_listing() {
+        let targets = [
+            "pod/app",
+            "job/app",
+            "rollout/app",
+            "deployment/app",
+            "statefulset/db",
+        ]
+        .map(|path| Target::from_str(path).expect("a test target parses"));
+
+        assert_eq!(
+            inferable_paths(targets),
+            vec![
+                "deployment/app".to_owned(),
+                "statefulset/db".to_owned(),
+                "rollout/app".to_owned(),
+                "pod/app".to_owned(),
+            ]
+        );
+    }
 }
