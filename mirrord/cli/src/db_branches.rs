@@ -3,13 +3,16 @@ use std::{collections::HashSet, env::home_dir, fmt::Debug, ops::Not, path::PathB
 use k8s_openapi::NamespaceResourceScope;
 use kube::{Api, Resource, api::DeleteParams};
 use mirrord_config::{LayerConfig, config::ConfigContext};
-use mirrord_operator::crd::{
-    MirrordOperatorCrd, NewOperatorFeature, OPERATOR_STATUS_NAME,
-    db_branching::{
-        branch_database::{BranchDatabase, DialectConfig},
-        mongodb::MongodbBranchDatabase,
-        mysql::MysqlBranchDatabase,
-        pg::PgBranchDatabase,
+use mirrord_operator::{
+    client::error::{OperatorApiError, OperatorOperation},
+    crd::{
+        MirrordOperatorCrd, MirrordOperatorSpec, NewOperatorFeature, OPERATOR_STATUS_NAME,
+        db_branching::{
+            branch_database::{BranchDatabase, DialectConfig},
+            mongodb::MongodbBranchDatabase,
+            mysql::MysqlBranchDatabase,
+            pg::PgBranchDatabase,
+        },
     },
 };
 use mirrord_progress::{Progress, ProgressTracker};
@@ -20,7 +23,7 @@ use strum::IntoDiscriminant;
 use crate::{
     CliResult,
     config::{DbBranchesArgs, DbBranchesCommand, DbBranchesConnectionsFormat},
-    kube::{kube_client_from_layer_config, list_resource_if_defined},
+    kube::{kube_client_and_access_from_layer_config, list_resource_if_defined},
     util::is_pid_alive,
 };
 
@@ -315,16 +318,51 @@ fn get_api<T: Resource<DynamicType = (), Scope = NamespaceResourceScope>>(
     }
 }
 
-/// Check if the operator supports the unified BranchDatabase CRD by fetching its status
-/// and looking for the UnifiedBranchDbCrd feature flag.
-async fn operator_supports_unified_crd(client: &kube::Client) -> bool {
+/// Whether the commands read the unified `BranchDatabase` kind rather than the per-engine kinds
+/// of older operators, decided from the operator's status (see [`unified_kind`]).
+///
+/// Under a login an operator whose status cannot be read is an error: the listing would answer
+/// with a 404 too, which reads as "no branches".
+async fn reads_unified_kind(client: &kube::Client, through_login: bool) -> CliResult<bool> {
     let api: Api<MirrordOperatorCrd> = Api::all(client.clone());
-    match api.get(OPERATOR_STATUS_NAME).await {
-        Ok(crd) => crd
-            .spec
+    let operator = match api.get(OPERATOR_STATUS_NAME).await {
+        Ok(operator) => Some(operator),
+        Err(error) if through_login => {
+            return Err(OperatorApiError::KubeError {
+                error,
+                operation: OperatorOperation::FindingOperator,
+            }
+            .into());
+        }
+        Err(_) => None,
+    };
+    Ok(unified_kind(
+        through_login,
+        operator.as_ref().map(|operator| &operator.spec),
+    )?)
+}
+
+/// See [`reads_unified_kind`]. `operator` is `None` when its status could not be read, which
+/// under a login the caller has already reported.
+///
+/// With a kubeconfig the unified kind is read when the operator advertises it, and an operator
+/// that cannot be read is taken for an older one. Under a login the branches are reachable only
+/// through the operator's `branchdatabases` route, which serves the unified kind: an operator
+/// that does not advertise the route is an error naming it, since its URL would answer every
+/// listing with a 404 that reads as "no branches".
+fn unified_kind(
+    through_login: bool,
+    operator: Option<&MirrordOperatorSpec>,
+) -> Result<bool, OperatorApiError> {
+    match operator {
+        Some(operator) if through_login => operator
+            .require_feature(NewOperatorFeature::DbBranchRoutes)
+            .map(|()| true),
+        None if through_login => Ok(true),
+        Some(operator) => Ok(operator
             .supported_features()
-            .contains(&NewOperatorFeature::UnifiedBranchDbCrd),
-        Err(_) => false,
+            .contains(&NewOperatorFeature::UnifiedBranchDbCrd)),
+        None => Ok(false),
     }
 }
 
@@ -366,9 +404,9 @@ async fn status_command(args: &DbBranchesArgs, names: &[String]) -> CliResult<()
 
     let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
-    let client = kube_client_from_layer_config(&layer_config).await?;
+    let (client, access) = kube_client_and_access_from_layer_config(&layer_config).await?;
 
-    let use_unified = operator_supports_unified_crd(&client).await;
+    let use_unified = reads_unified_kind(&client, access.login().is_some()).await?;
 
     let all_infos: Vec<BranchInfo> = if use_unified {
         let branch_api: Api<BranchDatabase> = get_api(args, &client, &layer_config);
@@ -474,14 +512,14 @@ async fn destroy_command(args: &DbBranchesArgs, all: bool, names: &[String]) -> 
 
     let layer_config = crate::util::resolve_layer_config(&mut cfg_context).await?;
 
-    let client = kube_client_from_layer_config(&layer_config).await?;
+    let (client, access) = kube_client_and_access_from_layer_config(&layer_config).await?;
     let default_ns = layer_config
         .target
         .namespace
         .as_deref()
         .unwrap_or_else(|| client.default_namespace());
 
-    let use_unified = operator_supports_unified_crd(&client).await;
+    let use_unified = reads_unified_kind(&client, access.login().is_some()).await?;
     let d_params = DeleteParams::default();
 
     if use_unified {
@@ -630,10 +668,59 @@ mod tests {
     use prettytable::Row;
     use serde_json::json;
 
+    use mirrord_operator::{
+        client::error::OperatorApiError,
+        crd::{MirrordOperatorSpec, NewOperatorFeature},
+    };
+
     use super::{
         BranchInfo, HashSet, PortforwardConnection, Table, build_connections_table,
-        build_status_table, row,
+        build_status_table, row, unified_kind,
     };
+
+    /// An operator advertising `features`.
+    fn operator(features: &[NewOperatorFeature]) -> MirrordOperatorSpec {
+        serde_json::from_value(json!({
+            "operator_version": "3.236.0",
+            "default_namespace": "default",
+            "supported_features": features,
+            "license": {"name": "test", "organization": "test", "expire_at": "2099-01-01"}
+        }))
+        .unwrap()
+    }
+
+    /// Under a login the branches are reachable only through the operator's route, so an
+    /// operator without it is refused by name. Before the route existed, the 404 its URL gave
+    /// for the stored kind printed "No active DB branch found" over branches that existed.
+    #[test]
+    fn a_login_needs_the_operators_branch_route() {
+        let without_route = operator(&[NewOperatorFeature::UnifiedBranchDbCrd]);
+        assert!(matches!(
+            unified_kind(true, Some(&without_route)),
+            Err(OperatorApiError::UnsupportedFeature {
+                feature: NewOperatorFeature::DbBranchRoutes,
+                ..
+            })
+        ));
+
+        let with_route = operator(&[
+            NewOperatorFeature::UnifiedBranchDbCrd,
+            NewOperatorFeature::DbBranchRoutes,
+        ]);
+        assert!(unified_kind(true, Some(&with_route)).unwrap());
+    }
+
+    /// With a kubeconfig nothing changes: the unified kind when the operator advertises it, the
+    /// per-engine kinds for an older or unreadable one, whatever the route.
+    #[test]
+    fn a_kubeconfig_keeps_reading_the_stored_kinds() {
+        let unified = operator(&[NewOperatorFeature::UnifiedBranchDbCrd]);
+        assert!(unified_kind(false, Some(&unified)).unwrap());
+
+        let route_only = operator(&[NewOperatorFeature::DbBranchRoutes]);
+        assert!(!unified_kind(false, Some(&route_only)).unwrap());
+        assert!(!unified_kind(false, None).unwrap());
+    }
 
     fn branch_info(name: &str, db_type: &'static str) -> BranchInfo {
         BranchInfo {

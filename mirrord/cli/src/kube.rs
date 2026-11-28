@@ -12,7 +12,7 @@ use mirrord_kube::{
     retry::retry_policy_from_config,
 };
 use mirrord_operator::{
-    client::{NoClientCert, OperatorAccess, OperatorApi},
+    client::{NoClientCert, OperatorAccess, OperatorApi, login_routes::LoginRoutesLayer},
     sso::OperatorLogin,
 };
 use mirrord_progress::Progress;
@@ -50,6 +50,7 @@ pub(crate) async fn kube_client_and_access_from_layer_config(
                 .with_layer(&RetryLayer::new(retry_policy_from_config(
                     &layer_config.startup_retry,
                 )?))
+                .with_layer(&LoginRoutesLayer::new(access.login().is_some()))
                 .build())
         })
         .map_err(|error| {
