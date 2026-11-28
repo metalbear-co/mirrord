@@ -293,7 +293,7 @@ pub(super) enum Commands {
     Logout(Box<LogoutArgs>),
 
     /// Show which operator mirrord uses, your other operator logins and your mirrord Cloud login.
-    Whoami,
+    Whoami(WhoamiArgs),
 
     /// Attach mirrord layer to an already-running process by PID.
     ///
@@ -1595,6 +1595,14 @@ pub(super) struct LogoutArgs {
     /// URL to log out of: an operator's URL as passed to `mirrord login --url`, or mirrord Cloud.
     #[arg(long)]
     pub url: Url,
+}
+
+/// Arguments for the `mirrord whoami` command.
+#[derive(Args, Debug)]
+pub(super) struct WhoamiArgs {
+    /// Print the logins as JSON instead of a table, for the IDE extensions and scripts.
+    #[arg(short = 'o', long = "output", value_name = "FORMAT", value_enum)]
+    pub output: Option<Format>,
 }
 
 /// Arguments for the `mirrord subscribe` command.
