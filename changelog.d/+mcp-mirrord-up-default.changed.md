@@ -1,0 +1,1 @@
+`mirrord mcp` now tells the agent to write a new config as a `mirrord-up.yaml`, even for one service, and a `mirrord.json` only for the VS Code or IntelliJ extension, `mirrord exec`, or an existing `mirrord.json`.

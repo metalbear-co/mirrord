@@ -90,6 +90,8 @@ mirrord exec --target pod/backend-abc123 -- python main.py
 
 If `mirrord ls` returns no targets, check that the kubeconfig context points at the right cluster (`kubectl config current-context`) and list pods in the expected namespace (`kubectl get pods -n <namespace>`).
 
+To keep the session's settings in a file, write a `mirrord-up.yaml` with the **mirrord-up** skill and run it with `mirrord up`, even for one service. If the user wants to keep running `mirrord exec`, write a `mirrord.json` with the **mirrord-config** skill instead and pass it with `mirrord exec -f`. The IDE extensions below don't run `mirrord up`, so they take a `mirrord.json` too.
+
 ### IDE approach
 
 1. Enable mirrord (click status bar icon / toolbar button)
@@ -118,7 +120,7 @@ curl http://<remote-service-url>
 
 Once the first session works, point users to:
 - **`mirrord ui`** — launches a local dashboard showing every active session on the machine, with a live event stream (HTTP requests, file operations, DNS, outgoing connections). See [Local UI](https://metalbear.com/mirrord/docs/using-mirrord/local-ui).
-- **`mirrord up`** — for debugging several microservices together from one `mirrord-up.yaml` (compose-style). Point to the **mirrord-up** skill.
+- **`mirrord up`**: runs the services listed in a `mirrord-up.yaml` together, one or several, to debug related microservices side by side. Point to the **mirrord-up** skill.
 - **Browser extension** — routes requests made from Chrome to the local process, for testing an HTTP-filtered session from a browser instead of `curl`. See [Debugging from Browser](https://metalbear.com/mirrord/docs/using-mirrord/incoming-traffic/filter-incoming-traffic/debug-from-browser).
 - **mirrord for Teams features** (DB branching, queue splitting, preview environments, concurrent steal on one target) need the Operator. On a cluster with no license, an AI agent can offer the user a seven-day Enterprise trial and start it once they agree: point to the **mirrord-operator** skill, "Agent-started trial".
 

@@ -1,10 +1,14 @@
 ---
 name: mirrord-up
 description: >
-  Helps users run multiple concurrent mirrord sessions from a single mirrord-up.yaml
-  (compose-style multi-service local debugging). Use when the user mentions mirrord up,
-  mirrord-up.yaml, mirrord up init, debugging several related microservices together,
-  or managing multiple mirrord sessions' lifecycle in one command.
+  Helps users write and run a mirrord-up.yaml, the config `mirrord up` reads to run one
+  or more local services against a Kubernetes cluster. This is the default for any new
+  mirrord config, for one service or several. Use when the user wants to run or debug a
+  local process against the cluster from the CLI, set up mirrord for a project, or mentions
+  mirrord up, mirrord-up.yaml, mirrord up init, debugging several related microservices
+  together, or managing multiple mirrord sessions' lifecycle in one command. When the user
+  runs mirrord from the VS Code or IntelliJ extension or with `mirrord exec`, or already has
+  a mirrord.json, use mirrord-config instead.
 metadata:
   author: MetalBear
   version: "1.13"
@@ -14,15 +18,17 @@ metadata:
 
 ## Purpose
 
-Help users create and run **multiple concurrent mirrord sessions** from one config file — think docker compose, but for mirrord — as documented in [Multiple concurrent sessions (mirrord up)](https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions).
+Help users create and run mirrord sessions from one config file, one session per service (think docker compose, but for mirrord), as documented in [Multiple concurrent sessions (mirrord up)](https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions).
 
-Useful when they need to debug **several related microservices** and manage those sessions' lifecycle together.
+Use it for **any new mirrord config**, for one service or several: a single service is a `mirrord-up.yaml` with one `services` entry. Write a `mirrord.json` with the **mirrord-config** skill instead only when the user runs mirrord from the VS Code or IntelliJ extension, which don't run `mirrord up`, runs `mirrord exec`, or already has a `mirrord.json`.
 
 Each `services` entry is typically a **different** application with its own target, command, and configuration — `mirrord up` is for running several distinct applications together, not for targeting multiple pods of the *same* application. For that (label-based targeting), point users to the **mirrord-operator** or **mirrord-config** skill instead of trying to model it with `mirrord-up.yaml`.
 
 ## When to Use This Skill
 
 Trigger on questions like:
+- "Run my service against the cluster with mirrord"
+- "Set up mirrord for this project"
 - "How do I run multiple mirrord sessions at once?"
 - "What is mirrord up / mirrord-up.yaml?"
 - "Debug two microservices together with mirrord"
@@ -339,7 +345,7 @@ Workload inference and cluster prompts happen later when running `mirrord up`, n
 2. Stay within documented fields only — do not invent keys beyond the official page.
 3. Default to **`split`** mode in examples; only suggest `replace` (or `--mode replace`) when the user explicitly wants full local takeover of a service, and pair it with the shared-cluster warning. Suggest `mirror` when they want to observe traffic without affecting the deployed service.
 4. Queue splitting (including RabbitMQ) works automatically for supported brokers in `split`/`mirror` mode, no `mirrord-up.yaml` field required — note that RabbitMQ splitting needs an operator version that supports it, and that `replace` mode doesn't use queue splitting at all.
-5. For single-process or `mirrord.json`-only work, point them to **mirrord-config** / **mirrord-quickstart**; this skill is multi-service compose via `mirrord up`.
+5. Write a `mirrord-up.yaml` for a single service too. Point them to **mirrord-config** only when they run mirrord from the VS Code or IntelliJ extension or with `mirrord exec`, or already have a `mirrord.json`.
 6. For operator / Teams concurrent use on the cluster side, use **mirrord-operator** when relevant (`common.operator`).
 
 ## Example Interaction
@@ -355,5 +361,5 @@ Workload inference and cluster prompts happen later when running `mirrord up`, n
 ## Learn More
 
 - [Multiple concurrent sessions (mirrord up)](https://metalbear.com/mirrord/docs/using-mirrord/multiple-concurrent-sessions)
-- For single-session `mirrord.json`: **mirrord-config** skill
+- For a `mirrord.json` (IDE extensions, `mirrord exec`): **mirrord-config** skill
 - For first-time install: **mirrord-quickstart** skill

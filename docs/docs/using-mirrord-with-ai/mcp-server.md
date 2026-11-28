@@ -88,7 +88,7 @@ Add the entry under `"mcp"` in `~/.config/opencode/opencode.json`:
 
 Restart the client after you register the server.
 
-To check the connection, ask the agent to validate your `.mirrord/mirrord.json` with the `validate_config` tool. If the client lists no `mirrord` tools, check the path in the entry with `/absolute/path/to/mirrord mcp --help`.
+To check the connection, ask the agent to validate your `mirrord-up.yaml` or `.mirrord/mirrord.json` with the `validate_config` tool. If the client lists no `mirrord` tools, check the path in the entry with `/absolute/path/to/mirrord mcp --help`.
 
 ## Tools
 
@@ -111,6 +111,7 @@ To check the connection, ask the agent to validate your `.mirrord/mirrord.json` 
 The server sends the agent instructions when it connects. They tell the agent to:
 
 - Get the matching skill with `get_skill` before it starts a mirrord task.
+- Write a new config as a `mirrord-up.yaml`, even for one service, and a `mirrord.json` only for the VS Code or IntelliJ extension, `mirrord exec`, or a `mirrord.json` you already have.
 - Validate every config with `validate_config` before it writes the file, and fix issues until none remain.
 - Look up options with `explain_config_option` instead of guessing.
 - When mirrord fails, validate every config involved before it proposes a fix, and propose one fix at a time.
