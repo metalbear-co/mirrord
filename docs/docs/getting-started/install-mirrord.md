@@ -1,6 +1,6 @@
 ---
 title: Install mirrord
-description: "Install the mirrord CLI or the IDE extension on your machine, and check that your cluster meets the requirements."
+description: "Install the mirrord CLI on your machine, and check that your cluster meets the requirements."
 tags:
   - oss
   - team
@@ -9,7 +9,7 @@ tags:
 
 # Install mirrord
 
-Install the CLI, the extension for your IDE, or both.
+To run mirrord from VS Code or a JetBrains IDE, see [Use mirrord in your IDE](use-mirrord-in-your-ide.md).
 
 For every IDE, coding agent and tool that mirrord works with, see [mirrord integrations](https://metalbear.com/mirrord/integrations/).
 
@@ -53,32 +53,11 @@ choco install mirrord
 
 {% endtab %}
 
-{% tab title="VS Code / Cursor / Windsurf" %}
-
-Extensions → search **mirrord** → Install.
-
-Works with all VS Code forks (Cursor, Windsurf, Antigravity, PearAI, Trae).
-
-You can also download it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord). For settings and usage, see [VS Code](../installing-mirrord/vscode.md).
-
-{% endtab %}
-
-{% tab title="JetBrains" %}
-
-Preferences → Plugins → search **mirrord** → Install.
-
-Works with IntelliJ, GoLand, PyCharm, and other JetBrains IDEs.
-
-You can also download it from the [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/19772-mirrord). For settings and usage, see [JetBrains IDEs](../installing-mirrord/intellij.md).
-
-{% endtab %}
 {% endtabs %}
 
 ## Check the install
 
-- **CLI:** run `mirrord --version`. It prints the installed version.
-- **VS Code:** a **mirrord** button with a circle appears in the status bar at the bottom of the window.
-- **JetBrains:** the mirrord icon appears in the navigation toolbar, top right.
+Run `mirrord --version`. It prints the installed version.
 
 ## Cluster Requirements
 
@@ -88,5 +67,5 @@ mirrord supports Kubernetes `1.22` or later. This applies to the open-source ver
 
 - [mirrord MCP Server](../using-mirrord-with-ai/mcp-server.md): your AI agent generates mirrord configs, validates them deterministically, explains each option, and follows mirrord's skills and safe defaults, all offline.
 - [Onboarding Wizard](onboarding-wizard.md): generate a `mirrord-up.yaml` for your services.
-- [Starting your first session](first-session.md): run your local code in the context of the cluster.
+- [Starting your first session](first-session.md): run your local code in the context of your cluster or Amazon ECS.
 - [Install the Operator](install-the-operator.md): for teams sharing a cluster, the platform team installs it once per cluster.

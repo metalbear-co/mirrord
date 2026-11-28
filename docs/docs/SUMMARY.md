@@ -6,6 +6,7 @@
 
 * [What is mirrord?](getting-started/what-is-mirrord.md)
 * [Quick Start](getting-started/quick-start.md)
+  * [Use mirrord in your IDE](getting-started/use-mirrord-in-your-ide.md)
   * [Install mirrord](getting-started/install-mirrord.md)
   * [Onboarding Wizard](getting-started/onboarding-wizard.md)
   * [Starting your first session](getting-started/first-session.md)

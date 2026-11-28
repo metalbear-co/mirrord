@@ -1,19 +1,17 @@
 ---
 title: JetBrains IDEs
-description: "How to install and use the mirrord plugin in IntelliJ IDEA and other JetBrains IDEs."
+description: "Settings of the mirrord plugin for IntelliJ IDEA and other JetBrains IDEs: run configurations, target selection, config files, and the mirrord binary."
 ---
 
 # JetBrains IDEs
 
-If you develop your application in one of the JetBrains' IDEs (e.g PyCharm, IntelliJ or GoLand), you can debug it with mirrord using our JetBrains Marketplace [plugin](https://plugins.jetbrains.com/plugin/19772-mirrord). Simply:
-
-1. Download the plugin
-2. Enable mirrord using the toolbar button (next to "mirrord" popup menu) ![Select Active Config action](../.gitbook/assets/enabler.png)
-3. Run or debug your application as you usually do
+To install the plugin and run your first session, see [Use mirrord in your IDE](../getting-started/use-mirrord-in-your-ide.md).
 
 {% hint style="info" %}
 The plugin runs natively on Windows since mirrord-intellij `3.73.0` for these scenarios: Rider Run + Debug, IntelliJ IDEA Build-System Run + Debug, and IDEA Gradle/Maven Build-System Run + Debug. Other run configurations on Windows still require [WSL](wsl.md#using-mirrord-in-intellij).
 {% endhint %}
+
+## Enabling mirrord
 
 When you start a debugging session with mirrord enabled, you'll be prompted with a target selection dialog. This dialog will allow you to select the target in your Kubernetes cluster that you want to impersonate.
 
@@ -77,7 +75,7 @@ The default config is the lexicographically first file in `<PROJECT ROOT>/.mirro
 
 The plugin relies on the standard mirrord CLI binary.
 
-By default, the plugin checks the latest release version and downloads the most up-to-date binary in the background. You can disable this behavior in the plugin settings (`Settings -> Tools -> mirrord -> Auto update mirrord binary`).
+By default, the plugin checks the latest release version. It uses the mirrord binary on your `PATH` if it's that version, and otherwise downloads it in the background. You can disable this behavior in the plugin settings (`Settings -> Tools -> mirrord -> Auto update mirrord binary`).
 
 You can also pin the binary version in the plugin settings (`Settings -> Tools -> mirrord -> mirrord binary version`).
 

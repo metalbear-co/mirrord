@@ -1,13 +1,11 @@
 ---
 title: VS Code
-description: "How to install the mirrord extension in Visual Studio Code and run your app with it."
+description: "Settings of the mirrord extension for VS Code: launch configurations, target selection, config files, and the mirrord binary."
 ---
 
 # VS Code
 
-If you develop your application in Visual Studio Code, you can debug it with mirrord using our Visual Studio Marketplace [extension](https://marketplace.visualstudio.com/items?itemName=MetalBear.mirrord). Simply:
-
-1. Download the extension
+To install the extension and run your first session, see [Use mirrord in your IDE](../getting-started/use-mirrord-in-your-ide.md).
 
 {% hint style="info" %}
 The mirrord extension is also available for all VS Code forks like Cursor, Windsurf, Antigravity, PearAI, and Trae.
@@ -17,11 +15,7 @@ The mirrord extension is also available for all VS Code forks like Cursor, Winds
 The extension runs natively on Windows since mirrord-vscode `3.69.0`. WSL is still supported as an alternative — see [WSL](wsl.md#using-mirrord-in-vs-code).
 {% endhint %}
 
-2. Enable mirrord using the "mirrord" button on the bottom toolbar
-
-![mirrord button](<../.gitbook/assets/enabler (1).png>)
-
-3. Run or debug your application as you usually do
+## Enabling mirrord
 
 When you start a debugging session with mirrord enabled, you'll be prompted with a target selection quick pick. This quick pick will allow you to select the target in your Kubernetes cluster that you want to impersonate.
 
@@ -93,7 +87,7 @@ The default config is the lexicographically first file in `<PROJECT ROOT>/.mirro
 
 The extension relies on the standard mirrord CLI binary.
 
-By default, the extension checks the latest release version and downloads the most up-to-date binary in the background. You can disable this behavior in the VSCode settings:
+By default, the extension checks the latest release version. It uses the mirrord binary on your `PATH` if it's that version, and otherwise downloads it in the background. You can disable this behavior in the VSCode settings:
 
 ```json
 {
