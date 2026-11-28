@@ -31,6 +31,16 @@
       "rule": "Every fenced json or yaml code block in a markdown file must carry a tag in the fence info string from the set documented in skills/CONTRIBUTING.md. Flag any block with no tag or a tag outside the set. For blocks tagged mirrord, mirrord=<path>, mirrord-up or mirrord-up=<path>: flag the block if it is not valid JSON or YAML (placeholders like ..., inline comments, trailing commas), for a mirrord=<path> fragment flag it if <path> does not exist in mirrord-schema.json at the repository root or the block's top-level keys are not properties of the object at that path, and for a mirrord-up=<path> fragment flag it if <path> does not exist in mirrord-up-schema.json at the repository root or the block's top-level keys are not properties of the object at that path. Skip the files listed under \"Exempt files\" in skills/CONTRIBUTING.md.",
       "scope": ["skills/**/*.md"],
       "severity": "high"
+    },
+    {
+      "id": "no-duplicate-tests",
+      "rule": "Before you accept a new test, find the existing tests of the same function, handler, or flow. Flag a new test when an existing test already runs the same code path and checks the same behavior. This includes other new tests in the same PR. Do not ask the PR author to add tests for code paths that existing tests already cover completely. Accept a new test on a covered path when it checks behavior that no existing test checks, or when it reproduces a bug that the PR fixes.",
+      "severity": "medium"
+    },
+    {
+      "id": "explicit-state-machine",
+      "rule": "Flag implicit state machines. In such code, no single value holds the current phase of a process. Two patterns signal one. First, several separate fields or loop variables, such as bools, Options, or counters, together decide what the code does next. Second, an input must have no effect in some phases, but a method or function acts on that input without a check of the current phase. Accept separate fields when each one changes independently of the others.",
+      "severity": "medium"
     }
   ]
 }
