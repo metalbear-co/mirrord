@@ -1599,6 +1599,14 @@ impl UpConfig {
         }
     }
 
+    /// The mirrord config every service starts from, before its own settings: what a client
+    /// shared by all services (e.g. the operator login's) is built from, so it honors
+    /// `common.accept_invalid_certificates` and `common.baggage`.
+    pub fn common_layer_config(&self) -> Result<LayerConfig, ConfigError> {
+        self.common
+            .base_config(&mut ConfigContext::default().strict_env(true))
+    }
+
     /// Verifies the config without touching the cluster, similar to
     /// what `verify_config` does for [`LayerConfig`].
     ///

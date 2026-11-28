@@ -57,7 +57,12 @@ struct ListedService {
     mode_name: Arc<str>,
     target: ListedTarget,
     /// The kube context `mirrord up` would use for this service, its `config_patch` included.
+    /// `None` under an operator login, where no kube context is used.
     context: Option<Arc<str>>,
+    /// The host of the operator login the service runs through, when one is selected. Left out
+    /// otherwise, so a listing without a login is unchanged for older extensions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operator: Option<Arc<str>>,
     run: ListedRun,
 }
 
@@ -125,6 +130,7 @@ impl UpListing {
                     target: ListedTarget::of(&service.target, service.config_patch.as_ref()),
                     context: patched_context(service.config_patch.as_ref())
                         .unwrap_or_else(|| up_context.get_context(service.context.clone())),
+                    operator: None,
                     run: ListedRun {
                         r#type: service.run.r#type.clone(),
                         command: service.run.command.clone(),
@@ -141,6 +147,17 @@ impl UpListing {
             key: key.as_str().to_owned(),
             services,
         })
+    }
+
+    /// The listing as `mirrord up` runs it under the operator login to `host`: every service goes
+    /// through that operator, and no kube context is used.
+    pub fn through_operator_login(mut self, host: &str) -> Self {
+        let host = Arc::<str>::from(host);
+        for service in &mut self.services {
+            service.context = None;
+            service.operator = Some(host.clone());
+        }
+        self
     }
 
     /// The listing for people to read, as `mirrord up list` prints it: the up file and key, then
@@ -195,13 +212,16 @@ impl ListedService {
         if self.run.pre_command.is_empty().not() {
             rows.push(("before", shown_words(&self.run.pre_command)));
         }
-        rows.push((
-            "context",
-            self.context
-                .as_deref()
-                .unwrap_or("current kubeconfig context")
-                .to_owned(),
-        ));
+        rows.push(match &self.operator {
+            Some(host) => ("operator", host.to_string()),
+            None => (
+                "context",
+                self.context
+                    .as_deref()
+                    .unwrap_or("current kubeconfig context")
+                    .to_owned(),
+            ),
+        });
         rows
     }
 }
@@ -441,6 +461,37 @@ mod tests {
         assert_eq!(
             serde_json::to_value(listing).expect("the listing is JSON")["services"][0]["context"],
             expected
+        );
+    }
+
+    /// Under an operator login, each service names the login's operator and no kube context:
+    /// the run uses none. The `operator` field is new and only there under a login, so older
+    /// extensions reading a listing without a login see the shape they know.
+    #[test]
+    fn under_an_operator_login_services_list_the_operator_and_no_context() {
+        let (_directory, config_path) = up_file(include_str!("testdata/list-context.yaml"));
+        let key = EnvKey::Provided("gabriela".to_owned());
+        let config = load_up_config(&config_path, &key).expect("load the up file");
+        let listing = UpListing::new(&config, &config_path, &key, Some(Arc::from("flag")))
+            .expect("list the up file");
+
+        let plain = serde_json::to_value(&listing).expect("the listing is JSON");
+        assert_eq!(plain["services"][0]["context"], "flag");
+        assert!(plain["services"][0].get("operator").is_none(), "{plain}");
+
+        let listing = listing.through_operator_login("mirrord.corp.example.com");
+        let logged_in = serde_json::to_value(&listing).expect("the listing is JSON");
+        assert_eq!(logged_in["services"][0]["context"], serde_json::Value::Null);
+        assert_eq!(
+            logged_in["services"][0]["operator"],
+            "mirrord.corp.example.com"
+        );
+        assert!(
+            listing
+                .render()
+                .contains("operator  mirrord.corp.example.com"),
+            "{}",
+            listing.render()
         );
     }
 

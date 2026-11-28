@@ -145,6 +145,11 @@ impl GlobalConfig {
             .or_else(|| self.config.kube_context.clone());
     }
 
+    /// The global `operator` setting, which a project config that sets none takes.
+    pub(crate) fn operator(&self) -> Option<bool> {
+        self.config.operator
+    }
+
     pub(crate) fn kube_context(&self) -> Option<&str> {
         self.config.kube_context.as_deref()
     }
