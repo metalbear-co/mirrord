@@ -3,12 +3,16 @@
 
 use chrono::{DateTime, Utc};
 use mirrord_kube::api::kubernetes::resolve_kube_context;
+use serde::Serialize;
 
 use super::{LoginError, expiry::expires_in, issuer};
-use crate::data::{AuthStore, OperatorLogins, StoredLogin};
+use crate::{
+    config::{Format, WhoamiArgs},
+    data::{AuthStore, OperatorLogins, StoredLogin},
+};
 
 /// Implementation of the `mirrord whoami` command.
-pub(crate) async fn whoami_command() -> Result<(), LoginError> {
+pub(crate) async fn whoami_command(args: WhoamiArgs) -> Result<(), LoginError> {
     let operators = AuthStore::operator_logins()
         .await
         .map_err(LoginError::Store)?;
@@ -29,15 +33,12 @@ pub(crate) async fn whoami_command() -> Result<(), LoginError> {
     // kubeconfig is a fact to report, not an error of this command.
     let kube_context = resolve_kube_context(None, None).ok().flatten();
 
-    println!(
-        "{}",
-        render(
-            &operators,
-            cloud.as_ref(),
-            kube_context.as_deref(),
-            Utc::now()
-        )
-    );
+    let now = Utc::now();
+    let output = match args.output {
+        None => render(&operators, cloud.as_ref(), kube_context.as_deref(), now),
+        Some(Format::Json) => render_json(&operators, cloud.as_ref(), kube_context.as_deref(), now),
+    };
+    println!("{output}");
     Ok(())
 }
 
@@ -117,6 +118,76 @@ fn operator_table(operators: &OperatorLogins, now: DateTime<Utc>) -> Vec<String>
         .collect()
 }
 
+/// `mirrord whoami -o json`: the facts of the table, for the IDE extensions. Every field is always
+/// present, `null` when there is nothing to show, so a reader never has to tell a missing field
+/// from an older CLI.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WhoamiJson<'a> {
+    /// Active login first, then the others from the most recent login to the oldest.
+    operators: Vec<OperatorLoginJson<'a>>,
+    /// URL of the operator login mirrord uses, kept when that login expired: it is the URL to log
+    /// in to again. `null` when mirrord uses the kubeconfig.
+    active_operator: Option<&'a str>,
+    /// The kubeconfig context mirrord uses when no operator login is in use, `null` when no
+    /// kubeconfig was found.
+    kube_context: Option<&'a str>,
+    cloud: Option<CloudLoginJson<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OperatorLoginJson<'a> {
+    /// What `mirrord login --url` and `mirrord logout --url` take.
+    url: &'a str,
+    /// How the table and the messages name the operator.
+    host: &'a str,
+    account: &'a str,
+    expires_at: DateTime<Utc>,
+    /// The table's EXPIRES column: `in 6 hours`, or `expired`.
+    expires_in: String,
+    active: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloudLoginJson<'a> {
+    email: &'a str,
+    expires_at: DateTime<Utc>,
+    expires_in: String,
+}
+
+fn render_json(
+    operators: &OperatorLogins,
+    cloud: Option<&CloudLogin>,
+    kube_context: Option<&str>,
+    now: DateTime<Utc>,
+) -> String {
+    let output = WhoamiJson {
+        operators: operators
+            .logins
+            .iter()
+            .map(|login| OperatorLoginJson {
+                url: &login.url,
+                host: login.host(),
+                account: &login.account,
+                expires_at: login.expires_at,
+                expires_in: expires_in(login.expires_at, now),
+                active: operators.active.as_deref() == Some(login.url.as_str()),
+            })
+            .collect(),
+        active_operator: operators.active.as_deref(),
+        kube_context,
+        cloud: cloud.map(|login| CloudLoginJson {
+            email: &login.email,
+            expires_at: login.expires_at,
+            expires_in: expires_in(login.expires_at, now),
+        }),
+    };
+    serde_json::to_string(&output)
+        .expect("strings, booleans and timestamps always serialize to JSON")
+}
+
 fn cloud_line(cloud: Option<&CloudLogin>, now: DateTime<Utc>) -> String {
     match cloud {
         Some(login) if login.expires_at > now => format!(
@@ -132,9 +203,11 @@ fn cloud_line(cloud: Option<&CloudLogin>, now: DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use chrono::TimeDelta;
+    use clap::Parser;
     use mirrord_operator::sso::{OperatorLogin, OperatorLoginToken};
 
     use super::*;
+    use crate::config::{Cli, Commands};
 
     fn login(url: &str, expires_at: DateTime<Utc>) -> OperatorLogin {
         OperatorLogin {
@@ -203,6 +276,111 @@ mod tests {
             "No operator login in use, and no kubeconfig was found.\n\
              \n\
              mirrord Cloud: not logged in"
+        );
+    }
+
+    /// The IDE extensions run `mirrord whoami -o json`; without the flag the table is printed.
+    #[test]
+    fn dash_o_json_selects_the_json_output() {
+        let json = Cli::try_parse_from(["mirrord", "whoami", "-o", "json"]).unwrap();
+        assert!(matches!(
+            json.commands,
+            Commands::Whoami(WhoamiArgs {
+                output: Some(Format::Json)
+            })
+        ));
+
+        let table = Cli::try_parse_from(["mirrord", "whoami"]).unwrap();
+        assert!(matches!(
+            table.commands,
+            Commands::Whoami(WhoamiArgs { output: None })
+        ));
+    }
+
+    /// The JSON the IDE extensions read holds what the table shows, with the URL each login is
+    /// logged in and out with, and the active URL kept for an expired login so the IDE can offer
+    /// to log in to it again.
+    #[test]
+    fn renders_the_same_logins_as_json() {
+        let now = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+        let operators = OperatorLogins {
+            logins: vec![
+                login(
+                    "https://mirrord.corp.example.com",
+                    now - TimeDelta::hours(1),
+                ),
+                login(
+                    "https://staging.mirrord.corp.example.com",
+                    now + TimeDelta::hours(6),
+                ),
+            ],
+            active: Some("https://mirrord.corp.example.com".to_owned()),
+        };
+        let cloud = CloudLogin {
+            email: "dev@corp.example.com".to_owned(),
+            expires_at: now + TimeDelta::hours(12),
+        };
+
+        let json: serde_json::Value = serde_json::from_str(&render_json(
+            &operators,
+            Some(&cloud),
+            Some("staging-eu"),
+            now,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "operators": [
+                    {
+                        "url": "https://mirrord.corp.example.com",
+                        "host": "mirrord.corp.example.com",
+                        "account": "dev@corp.example.com",
+                        "expiresAt": "2027-01-15T07:00:00Z",
+                        "expiresIn": "expired",
+                        "active": true,
+                    },
+                    {
+                        "url": "https://staging.mirrord.corp.example.com",
+                        "host": "staging.mirrord.corp.example.com",
+                        "account": "dev@corp.example.com",
+                        "expiresAt": "2027-01-15T14:00:00Z",
+                        "expiresIn": "in 6 hours",
+                        "active": false,
+                    },
+                ],
+                "activeOperator": "https://mirrord.corp.example.com",
+                "kubeContext": "staging-eu",
+                "cloud": {
+                    "email": "dev@corp.example.com",
+                    "expiresAt": "2027-01-15T20:00:00Z",
+                    "expiresIn": "in 12 hours",
+                },
+            })
+        );
+    }
+
+    /// No logins at all: every field is still there, so a reader tells "nothing saved" from an
+    /// older CLI that prints no JSON.
+    #[test]
+    fn renders_json_without_logins() {
+        let json: serde_json::Value = serde_json::from_str(&render_json(
+            &OperatorLogins::default(),
+            None,
+            None,
+            Utc::now(),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "operators": [],
+                "activeOperator": null,
+                "kubeContext": null,
+                "cloud": null,
+            })
         );
     }
 

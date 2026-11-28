@@ -16,11 +16,12 @@ use mirrord_config::{
         stateful_set::StatefulSetTarget,
     },
 };
+use mirrord_operator::sso::LoginExpired;
 use mirrord_progress::NullProgress;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{config::VerifyConfigArgs, error};
+use crate::{config::VerifyConfigArgs, error, error::CliError};
 
 /// Practically the same as [`Target`], but differs in the way the `targetless` option is
 /// serialized. [`Target::Targetless`] serializes as `null`, [`VerifiedTarget::Targetless`]
@@ -140,7 +141,46 @@ enum VerifiedConfig {
     /// Invalid config was detected, mirrord cannot run.
     ///
     /// May be triggered by extra/lacking `,`, or invalid fields, etc.
-    Fail { errors: Vec<String> },
+    Fail {
+        errors: Vec<String>,
+        /// Set when the failure is the expired operator login, so the IDEs can offer a Log in
+        /// action for it without matching the error text. Left out otherwise, which is also what
+        /// older CLIs print.
+        #[serde(rename = "loginExpired", skip_serializing_if = "Option::is_none")]
+        login_expired: Option<ExpiredLogin>,
+    },
+}
+
+/// The operator login whose expiry failed the config check.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct ExpiredLogin {
+    /// How the error message names the operator.
+    host: String,
+    /// What `mirrord login --url` takes to log in again.
+    url: String,
+}
+
+impl From<&LoginExpired> for ExpiredLogin {
+    fn from(expired: &LoginExpired) -> Self {
+        Self {
+            host: expired.host.clone(),
+            url: expired.url.clone(),
+        }
+    }
+}
+
+impl From<&CliError> for VerifiedConfig {
+    /// The failure as the IDEs read it: the message, and the login to renew when it is an expiry.
+    fn from(fail: &CliError) -> Self {
+        let login_expired = match fail {
+            CliError::OperatorLoginExpired(expired) => Some(expired.into()),
+            _ => None,
+        };
+        Self::Fail {
+            errors: vec![fail.to_string()],
+            login_expired,
+        }
+    }
 }
 
 /// Verifies a config file specified by `path`.
@@ -208,12 +248,52 @@ pub(super) async fn verify_config(
                 .collect(),
             resolved_config: resolved.then(|| config.as_file_config()).transpose()?,
         },
-        Err(fail) => VerifiedConfig::Fail {
-            errors: vec![fail.to_string()],
-        },
+        Err(fail) => VerifiedConfig::from(&fail),
     };
 
     println!("{}", serde_json::to_string_pretty(&verified)?);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With a config file, the IDEs run `verify-config` before anything else, so an expired login
+    /// shows up here first: the failure names the login to renew, next to the sentence the
+    /// developer reads.
+    #[test]
+    fn failure_names_the_expired_login() {
+        let fail = CliError::OperatorLoginExpired(LoginExpired {
+            host: "mirrord.corp.example.com".to_owned(),
+            url: "https://mirrord.corp.example.com".to_owned(),
+        });
+
+        let json = serde_json::to_value(VerifiedConfig::from(&fail)).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "Fail",
+                "errors": [
+                    "Your login to mirrord.corp.example.com expired. Run mirrord login --url \
+                     https://mirrord.corp.example.com."
+                ],
+                "loginExpired": {
+                    "host": "mirrord.corp.example.com",
+                    "url": "https://mirrord.corp.example.com",
+                },
+            })
+        );
+    }
+
+    /// Any other failure prints the shape older CLIs print, which the released IDEs parse.
+    #[test]
+    fn other_failures_keep_the_old_shape() {
+        let json = serde_json::to_value(VerifiedConfig::from(&CliError::NestedExec)).unwrap();
+
+        assert_eq!(json.get("type").and_then(Value::as_str), Some("Fail"));
+        assert!(json.get("loginExpired").is_none(), "{json}");
+    }
 }

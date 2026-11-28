@@ -23,6 +23,7 @@ use mirrord_operator::{
         preview::{PreviewPodLogs, PreviewSyncConfigError},
     },
     share::LOCAL_SHARE_REJECTED_REASON,
+    sso::LoginExpired,
     types::PaidFeatureGate,
 };
 use mirrord_progress::messages::AGENT_OPERATOR_HINT;
@@ -718,14 +719,26 @@ pub(crate) enum CliError {
     ))]
     OperatorNotInstalled,
 
-    /// The operator login `mirrord login --url` selected cannot be used for this run: it expired,
-    /// the config turns the operator off, or the store could not be read. The message names the
-    /// command to run.
+    /// The operator login `mirrord login --url` selected cannot be used for this run: the config
+    /// turns the operator off, or the store could not be read. The message names the command to
+    /// run. An expired login is [`Self::OperatorLoginExpired`].
     #[error(transparent)]
     #[diagnostic(help(
         "`mirrord whoami` shows the operator login in use. Log out of it with `mirrord logout --url <url>` to go back to your kubeconfig."
     ))]
-    OperatorAccess(#[from] OperatorAccessError),
+    OperatorAccess(OperatorAccessError),
+
+    /// The operator login in use expired. The IDE extensions read the code from the JSON error
+    /// and offer a Log in action for the login `mirrord whoami -o json` names as active, so the
+    /// code stays the same when the message is reworded.
+    #[error(transparent)]
+    #[diagnostic(
+        code(mirrord::login_expired),
+        help(
+            "`mirrord whoami` shows the operator login in use. Log out of it with `mirrord logout --url <url>` to go back to your kubeconfig."
+        )
+    )]
+    OperatorLoginExpired(LoginExpired),
 
     #[error("mirrord returned a target resource of unknown type: {0}")]
     #[diagnostic(help("{GENERAL_BUG}"))]
@@ -1450,7 +1463,7 @@ impl From<OperatorApiError> for CliError {
             OperatorApiError::CreateKubeClient(e) => {
                 Self::friendlier_error_or_else(e, Self::CreateKubeApiFailed)
             }
-            OperatorApiError::Access(error) => Self::OperatorAccess(error),
+            OperatorApiError::Access(error) => error.into(),
             OperatorApiError::ConnectRequestBuildError(e) => Self::ConnectRequestBuildError(e),
             OperatorApiError::InvalidBaggageHeader(error) => Self::InvalidBaggageHeader(error),
             OperatorApiError::KubeError {
@@ -2026,8 +2039,18 @@ impl From<ActiveLoginError> for CliError {
     /// the config check and the client; a store that cannot be read is a login store error.
     fn from(error: ActiveLoginError) -> Self {
         match error {
-            ActiveLoginError::Expired(expired) => Self::OperatorAccess(expired.into()),
+            ActiveLoginError::Expired(expired) => Self::OperatorLoginExpired(expired),
             ActiveLoginError::Store(error) => Self::Login(LoginError::Store(error)),
+        }
+    }
+}
+
+impl From<OperatorAccessError> for CliError {
+    /// An expired login gets its own variant, which carries the code the IDE extensions match on.
+    fn from(error: OperatorAccessError) -> Self {
+        match error {
+            OperatorAccessError::Expired(expired) => Self::OperatorLoginExpired(expired),
+            other => Self::OperatorAccess(other),
         }
     }
 }
@@ -2040,5 +2063,67 @@ impl From<LoginError> for CliError {
             LoginError::NotLicensed(gate) => Self::PaidFeatureRequiresPlan { gate },
             error => Self::Login(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod login_expired_tests {
+    use miette::JSONReportHandler;
+    use mirrord_operator::{client::access::OperatorAccessError, sso::LoginExpired};
+
+    use super::*;
+
+    fn expired() -> LoginExpired {
+        LoginExpired {
+            host: "mirrord.corp.example.com".to_owned(),
+            url: "https://mirrord.corp.example.com".to_owned(),
+        }
+    }
+
+    /// The error as the IDE extensions read it: the JSON miette prints on stderr for `ls`, `ext`
+    /// and `container-ext`.
+    fn ide_json(error: &CliError) -> serde_json::Value {
+        let mut rendered = String::new();
+        JSONReportHandler::new()
+            .render_report(&mut rendered, error)
+            .unwrap();
+        serde_json::from_str(&rendered).unwrap()
+    }
+
+    /// The IDE extensions offer a Log in action when the JSON error carries this code, whichever
+    /// way the expiry reached the CLI: the config check reading the store, or the operator client.
+    /// The message stays the sentence the developer reads.
+    #[test]
+    fn expired_login_reports_its_code_to_the_ides() {
+        for error in [
+            CliError::from(ActiveLoginError::Expired(expired())),
+            CliError::from(OperatorAccessError::Expired(expired())),
+            CliError::from(OperatorApiError::Access(OperatorAccessError::Expired(
+                expired(),
+            ))),
+        ] {
+            let json = ide_json(&error);
+            assert_eq!(
+                json.get("code").and_then(serde_json::Value::as_str),
+                Some("mirrord::login_expired")
+            );
+            assert_eq!(
+                json.get("message").and_then(serde_json::Value::as_str),
+                Some(
+                    "Your login to mirrord.corp.example.com expired. Run mirrord login --url \
+                     https://mirrord.corp.example.com."
+                )
+            );
+        }
+    }
+
+    /// Only an expiry gets the code: a Log in action does not fix `operator: false`.
+    #[test]
+    fn other_login_refusals_carry_no_code() {
+        let json = ide_json(&CliError::from(OperatorAccessError::OperatorDisabled {
+            host: "mirrord.corp.example.com".to_owned(),
+            url: "https://mirrord.corp.example.com".to_owned(),
+        }));
+        assert!(json.get("code").is_none(), "{json}");
     }
 }
